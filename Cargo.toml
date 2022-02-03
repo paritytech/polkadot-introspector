@@ -1,0 +1,14 @@
+[package]
+name = "polkadot-introspector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+env_logger = "0.9.0"
+codec = { package = "parity-scale-codec", version = "2", default-features = false, features = ["derive", "full", "bit-vec"] }
+color-eyre = "0.5.11"
+sp-core = { package = "sp-core", git = "https://github.com/paritytech/substrate/", branch = "master" }
+sp-keyring = { package = "sp-keyring", git = "https://github.com/paritytech/substrate/", branch = "master" }
+structopt = "0.3.25"
+subxt = { git = "https://github.com/paritytech/subxt", branch = "master" }
+tokio = { version = "1.14.0", features = ["macros", "rt-multi-thread"] }
