@@ -86,7 +86,48 @@ where
 	}
 }
 
-//pub type EventDecoder<E> = dyn Fn(&RawEvent) -> Result<E, Box<dyn Error>> + 'static;
+impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateBacked
+where
+	T: std::hash::Hash,
+{
+	type Event = polkadot::para_inclusion::events::CandidateBacked;
+	type HashType = H256;
+	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		Ok(())
+	}
+	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
+		Ok(BlakeTwo256::hash_of(&event.0))
+	}
+}
+
+impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateIncluded
+where
+	T: std::hash::Hash,
+{
+	type Event = polkadot::para_inclusion::events::CandidateIncluded;
+	type HashType = H256;
+	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		Ok(())
+	}
+	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
+		Ok(BlakeTwo256::hash_of(&event.0))
+	}
+}
+
+impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateTimedOut
+where
+	T: std::hash::Hash,
+{
+	type Event = polkadot::para_inclusion::events::CandidateTimedOut;
+	type HashType = H256;
+	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		Ok(())
+	}
+	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
+		Ok(BlakeTwo256::hash_of(&event.0))
+	}
+}
+
 pub type EventDecoderFunctor<T> =
 	Box<dyn Fn(&RawEvent, &T, Arc<StorageType<T>>) -> Result<(), Box<dyn Error>> + 'static>;
 
@@ -123,6 +164,7 @@ impl Default for EventRouteMap {
 		type EventRoutesMap = HashMap<&'static str, EventDecoderFunctor<H256>>;
 		let mut events_by_pallet: HashMap<&'static str, EventRoutesMap> = HashMap::new();
 
+		// TODO: convert this boilerplate to a macro
 		let mut disputes_routes: EventRoutesMap = HashMap::new();
 
 		disputes_routes.insert(
@@ -157,6 +199,40 @@ impl Default for EventRouteMap {
 		);
 
 		events_by_pallet.insert("ParasDisputes", disputes_routes);
+
+		let mut para_inclusion_routes: EventRoutesMap = HashMap::new();
+		para_inclusion_routes.insert(
+			"CandidateBacked",
+			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+				polkadot::para_inclusion::events::CandidateBacked,
+				Box<dyn Error>,
+			> {
+				<polkadot::para_inclusion::events::CandidateBacked as codec::Decode>::decode(&mut &ev.data[..])
+					.map_err(|e| e.into())
+			}),
+		);
+		para_inclusion_routes.insert(
+			"CandidateIncluded",
+			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+				polkadot::para_inclusion::events::CandidateIncluded,
+				Box<dyn Error>,
+			> {
+				<polkadot::para_inclusion::events::CandidateIncluded as codec::Decode>::decode(&mut &ev.data[..])
+					.map_err(|e| e.into())
+			}),
+		);
+		para_inclusion_routes.insert(
+			"CandidateTimedOut",
+			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+				polkadot::para_inclusion::events::CandidateTimedOut,
+				Box<dyn Error>,
+			> {
+				<polkadot::para_inclusion::events::CandidateTimedOut as codec::Decode>::decode(&mut &ev.data[..])
+					.map_err(|e| e.into())
+			}),
+		);
+
+		events_by_pallet.insert("ParaInclusion", para_inclusion_routes);
 
 		Self(events_by_pallet)
 	}
