@@ -5,10 +5,11 @@ edition = "2021"
 
 [dependencies]
 env_logger = "0.9.0"
-codec = { package = "parity-scale-codec", version = "2", default-features = false, features = ["derive", "full", "bit-vec"] }
+codec = { package = "parity-scale-codec", version = "2", default-features = false, features = ["derive", "full", "bit-vec", "std"] }
 color-eyre = "0.5.11"
-sp-core = { package = "sp-core", git = "https://github.com/paritytech/substrate/", branch = "master" }
-sp-keyring = { package = "sp-keyring", git = "https://github.com/paritytech/substrate/", branch = "master" }
 structopt = "0.3.25"
-subxt = { git = "https://github.com/paritytech/subxt", branch = "master" }
+subxt = { git = "https://github.com/paritytech/subxt", rev = "9f88761e4655efb575a04336dddf17059609a219" }
 tokio = { version = "1.14.0", features = ["macros", "rt-multi-thread"] }
+sp-runtime = {package = "sp-runtime", git = "https://github.com/paritytech/substrate/", branch = "master"}
+sp-core = {package = "sp-core", git = "https://github.com/paritytech/substrate/", branch = "master"}
+typed-builder = "0.9"
