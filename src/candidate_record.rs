@@ -20,7 +20,7 @@ use std::hash::Hash;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Tracks candidate inclusion as seen by a node(s)
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CandidateInclusion<T: Hash> {
 	/// Time when a candidate has been baked
 	pub baked: Option<Duration>,
@@ -32,6 +32,12 @@ pub struct CandidateInclusion<T: Hash> {
 	pub core_idx: Option<u32>,
 	/// Relay parent
 	pub relay_parent: Option<T>,
+}
+
+impl<T: Hash> Default for CandidateInclusion<T> {
+	fn default() -> Self {
+		Self { baked: None, included: None, timedout: None, core_idx: None, relay_parent: None }
+	}
 }
 
 /// Outcome of the dispute
@@ -91,7 +97,8 @@ impl<T: Hash> Default for CandidateRecord<T> {
 			candidate_first_seen: SystemTime::now()
 				.duration_since(UNIX_EPOCH)
 				.expect("Clock skewed before unix epoch"),
-			..Default::default()
+			candidate_inclusion: Default::default(),
+			candidate_disputed: None,
 		}
 	}
 }

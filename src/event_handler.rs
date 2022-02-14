@@ -295,19 +295,21 @@ pub struct EventsHandler {
 
 impl EventsHandler {
 	pub fn handle_runtime_event(&mut self, ev: &RawEvent, block_hash: &H256) -> Result<(), Box<dyn Error>> {
-		debug!("Got raw event: {:?}", ev);
-		let pallet = self
-			.pallets
-			.0
-			.get_mut(ev.pallet.as_str())
-			.ok_or(eyre!("Unknown pallet: {}", ev.pallet.as_str()))?;
-		let event_handler = pallet.get_mut(ev.variant.as_str()).ok_or(eyre!(
-			"Unknown event {} in pallet {}",
-			ev.variant.as_str(),
-			ev.pallet.as_str()
-		))?;
-
-		event_handler(ev, block_hash, self.storage.clone())
+		match self.pallets.0.get_mut(ev.pallet.as_str()) {
+			Some(ref mut pallet_handler) => {
+				let event_handler = pallet_handler.get_mut(ev.variant.as_str()).ok_or(eyre!(
+					"Unknown event {} in pallet {}",
+					ev.variant.as_str(),
+					ev.pallet.as_str()
+				))?;
+				debug!("Got known raw event: {:?}", ev);
+				event_handler(ev, block_hash, self.storage.clone())
+			},
+			None => {
+				debug!("Events for the pallet {} are not handled by introspector", ev.variant.as_str());
+				Ok(())
+			},
+		}
 	}
 }
 
