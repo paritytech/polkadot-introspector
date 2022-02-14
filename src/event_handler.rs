@@ -16,7 +16,7 @@
 
 //! Subxt events handlers implementation
 
-use crate::candidate_record::CandidateRecord;
+use crate::candidate_record::*;
 use crate::polkadot::{self};
 use crate::records_storage::RecordsStorage;
 
@@ -53,7 +53,15 @@ where
 	type Event = polkadot::paras_disputes::events::DisputeInitiated;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
-		Ok(())
+		match record.candidate_disputed {
+			None => {
+				// Good to go, a new dispute
+				record.candidate_disputed =
+					Some(CandidateDisputed { disputed: check_unix_time()?, ..Default::default() });
+				Ok(())
+			},
+			Some(_) => Err(format!("duplicate dispute initiated for: {:?}", event.0).into()),
+		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
 		Ok(event.0 .0.clone())
@@ -67,7 +75,23 @@ where
 	type Event = polkadot::paras_disputes::events::DisputeConcluded;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
-		Ok(())
+		match record.candidate_disputed {
+			None => Err(format!("dispute concluded but not initiated: {:?}", event.0).into()),
+			Some(ref mut disputed) => match disputed.concluded {
+				None => {
+					let dispute_result = match event.1 {
+						polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult::Valid => {
+							DisputeOutcome::DisputeAgreed
+						},
+						_ => DisputeOutcome::DisputeInvalid,
+					};
+					disputed.concluded =
+						Some(DisputeResult { concluded_timestamp: check_unix_time()?, outcome: dispute_result });
+					Ok(())
+				},
+				Some(_) => Err(format!("multiple conclusions for a dispute: {:?}", event.0).into()),
+			},
+		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
 		Ok(event.0 .0.clone())
@@ -81,7 +105,19 @@ where
 	type Event = polkadot::paras_disputes::events::DisputeTimedOut;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
-		Ok(())
+		match record.candidate_disputed {
+			None => Err(format!("dispute concluded but not initiated: {:?}", event.0).into()),
+			Some(ref mut disputed) => match disputed.concluded {
+				None => {
+					disputed.concluded = Some(DisputeResult {
+						concluded_timestamp: check_unix_time()?,
+						outcome: DisputeOutcome::DisputeTimedOut,
+					});
+					Ok(())
+				},
+				Some(_) => Err(format!("multiple conclusions for a dispute: {:?}", event.0).into()),
+			},
+		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
 		Ok(event.0 .0.clone())
@@ -95,6 +131,8 @@ where
 	type Event = polkadot::para_inclusion::events::CandidateBacked;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		record.candidate_inclusion.baked = Some(check_unix_time()?);
+		record.candidate_inclusion.core_idx = Some(event.2 .0);
 		Ok(())
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
@@ -109,6 +147,8 @@ where
 	type Event = polkadot::para_inclusion::events::CandidateIncluded;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		record.candidate_inclusion.included = Some(check_unix_time()?);
+		record.candidate_inclusion.core_idx = Some(event.2 .0);
 		Ok(())
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
@@ -123,6 +163,8 @@ where
 	type Event = polkadot::para_inclusion::events::CandidateTimedOut;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		record.candidate_inclusion.timedout = Some(check_unix_time()?);
+		record.candidate_inclusion.core_idx = Some(event.2 .0);
 		Ok(())
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
@@ -161,6 +203,7 @@ where
 /// Struct handler for routes to implement default trait
 pub struct EventRouteMap(HashMap<&'static str, HashMap<&'static str, EventDecoderFunctor<H256>>>);
 
+/// Default implementation sets all the routes as expected
 impl Default for EventRouteMap {
 	fn default() -> Self {
 		type EventRoutesMap = HashMap<&'static str, EventDecoderFunctor<H256>>;
@@ -266,4 +309,10 @@ impl EventsHandler {
 
 		event_handler(ev, block_hash, self.storage.clone())
 	}
+}
+
+fn check_unix_time() -> Result<Duration, Box<dyn Error>> {
+	SystemTime::now()
+		.duration_since(UNIX_EPOCH)
+		.map_err(|e| eyre!("Clock skewed: {:?}", e).into())
 }

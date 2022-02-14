@@ -19,13 +19,69 @@ use crate::records_storage::StorageEntry;
 use std::hash::Hash;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// Tracks candidate inclusion as seen by a node(s)
+#[derive(Debug, Default)]
+pub struct CandidateInclusion<T: Hash> {
+	/// Time when a candidate has been baked
+	pub baked: Option<Duration>,
+	/// Time when a candidate has been included
+	pub included: Option<Duration>,
+	/// Time when a candidate has been timed out
+	pub timedout: Option<Duration>,
+	/// Observed core index
+	pub core_idx: Option<u32>,
+	/// Relay parent
+	pub relay_parent: Option<T>,
+}
+
+/// Outcome of the dispute
+#[derive(Debug, Copy, Clone)]
+pub enum DisputeOutcome {
+	/// Dispute has not been concluded yet
+	DisputeInProgress,
+	/// Dispute has been concluded as invalid
+	DisputeInvalid,
+	/// Dispute has beed concluded as valid
+	DisputeAgreed,
+	/// Dispute resolution has timed out
+	DisputeTimedOut,
+}
+
+impl Default for DisputeOutcome {
+	fn default() -> Self {
+		DisputeOutcome::DisputeInProgress
+	}
+}
+
+/// Outcome of the dispute + timestamp
+#[derive(Debug, Default, Clone)]
+pub struct DisputeResult {
+	/// The current outcome
+	pub outcome: DisputeOutcome,
+	/// Timestamp of a conclusion
+	pub concluded_timestamp: Duration,
+}
+
+/// Tracks candidate disputes as seen by a node(s)
+#[derive(Debug, Default, Clone)]
+pub struct CandidateDisputed {
+	/// When do we observe this dispute
+	pub disputed: Duration,
+	/// Result of a dispute
+	pub concluded: Option<DisputeResult>,
+}
+
 /// Stores tracking data for a candidate
 #[derive(Debug)]
 pub struct CandidateRecord<T: Hash> {
 	/// Candidate receipt (if observed)
-	candidate_receipt: Option<polkadot::runtime_types::polkadot_primitives::v1::CandidateReceipt<T>>,
+	pub candidate_receipt: Option<polkadot::runtime_types::polkadot_primitives::v1::CandidateReceipt<T>>,
 	/// The time we first observed a candidate since UnixEpoch
-	candidate_first_seen: Duration,
+	pub candidate_first_seen: Duration,
+	/// Inclusion data
+	pub candidate_inclusion: CandidateInclusion<T>,
+	/// Dispute data
+	pub candidate_disputed: Option<CandidateDisputed>,
 }
 
 impl<T: Hash> Default for CandidateRecord<T> {
@@ -35,6 +91,7 @@ impl<T: Hash> Default for CandidateRecord<T> {
 			candidate_first_seen: SystemTime::now()
 				.duration_since(UNIX_EPOCH)
 				.expect("Clock skewed before unix epoch"),
+			..Default::default()
 		}
 	}
 }
