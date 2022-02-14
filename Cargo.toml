@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 env_logger = "0.9.0"
+log = "0.4"
 codec = { package = "parity-scale-codec", version = "2", default-features = false, features = ["derive", "full", "bit-vec", "std"] }
 color-eyre = "0.5.11"
 structopt = "0.3.25"

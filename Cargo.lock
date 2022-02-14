@@ -1612,6 +1612,7 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "env_logger",
+ "log",
  "parity-scale-codec",
  "sp-core 5.0.0",
  "sp-runtime 5.0.0",

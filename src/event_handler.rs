@@ -21,6 +21,7 @@ use crate::polkadot::{self};
 use crate::records_storage::RecordsStorage;
 
 use crate::{eyre, H256};
+use log::debug;
 use sp_runtime::traits::{BlakeTwo256, Hash};
 use std::collections::HashMap;
 use std::error::Error;
@@ -29,6 +30,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subxt::RawEvent;
+
 use typed_builder::TypedBuilder;
 
 // TODO: Convert to a trait as it is a good thing to have a more generic storage
@@ -250,6 +252,7 @@ pub struct EventsHandler {
 
 impl EventsHandler {
 	pub fn handle_runtime_event(&mut self, ev: &RawEvent, block_hash: &H256) -> Result<(), Box<dyn Error>> {
+		debug!("Got raw event: {:?}", ev);
 		let pallet = self
 			.pallets
 			.0

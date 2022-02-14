@@ -15,6 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use color_eyre::eyre::{eyre, WrapErr};
+use log::LevelFilter;
+use log::{info, warn};
 use sp_core::H256;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -41,9 +43,12 @@ pub(crate) struct Opts {
 	/// Maximum candidates to store
 	#[structopt(name = "max-candidates", long)]
 	max_candidates: Option<usize>,
-	/// Maxiumum age of candidates to preserve (default: 1 day)
+	/// Maximum age of candidates to preserve (default: 1 day)
 	#[structopt(name = "max-ttl", long, default_value = "86400")]
 	max_ttl: usize,
+	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
+	#[structopt(short = "v", long, parse(from_occurrences))]
+	verbose: i8,
 }
 
 impl From<&Opts> for RecordsStorageConfig {
@@ -54,19 +59,29 @@ impl From<&Opts> for RecordsStorageConfig {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	env_logger::init();
 	color_eyre::install()?;
 
 	let opts = Opts::from_args();
+	let log_level = match opts.verbose {
+		0 => LevelFilter::Warn,
+		1 => LevelFilter::Info,
+		2 => LevelFilter::Debug,
+		_ => LevelFilter::Trace,
+	};
+	env_logger::Builder::from_default_env()
+		.filter(None, log_level)
+		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
+		.try_init()?;
 	let records_storage = Arc::new(Mutex::new(RecordsStorage::<H256, CandidateRecord<H256>>::new((&opts).into())));
 
 	// TODO: might be useful to process multiple nodes in different tasks
 	let api = ClientBuilder::new()
-		.set_url(opts.url)
+		.set_url(opts.url.clone())
 		.build()
 		.await
 		.context("Error connecting to substrate node")?
 		.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
+	info!("Connected to a substrate node {}", &opts.url);
 	let mut events_handler = EventsHandler::builder().storage(records_storage.clone()).build();
 
 	let sub = api.client.rpc().subscribe_events().await?;
@@ -76,7 +91,7 @@ async fn main() -> color_eyre::Result<()> {
 		let ev_ctx = ev_ctx?;
 		events_handler
 			.handle_runtime_event(&ev_ctx.event, &ev_ctx.block_hash)
-			.map_err(|e| println!("cannot handle event: {:?}", e));
+			.map_err(|e| warn!("cannot handle event: {:?}", e));
 	}
 	Ok(())
 }
