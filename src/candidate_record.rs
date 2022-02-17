@@ -16,11 +16,15 @@
 
 use crate::polkadot;
 use crate::records_storage::StorageEntry;
+use serde::ser::{SerializeStruct, Serializer};
+use serde::Serialize;
+use serde_bytes::Bytes;
+
 use std::hash::Hash;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Tracks candidate inclusion as seen by a node(s)
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct CandidateInclusion<T: Hash> {
 	/// Time when a candidate has been baked
 	pub baked: Option<Duration>,
@@ -41,7 +45,7 @@ impl<T: Hash> Default for CandidateInclusion<T> {
 }
 
 /// Outcome of the dispute
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize)]
 pub enum DisputeOutcome {
 	/// Dispute has not been concluded yet
 	DisputeInProgress,
@@ -60,7 +64,7 @@ impl Default for DisputeOutcome {
 }
 
 /// Outcome of the dispute + timestamp
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct DisputeResult {
 	/// The current outcome
 	pub outcome: DisputeOutcome,
@@ -69,7 +73,7 @@ pub struct DisputeResult {
 }
 
 /// Tracks candidate disputes as seen by a node(s)
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct CandidateDisputed {
 	/// When do we observe this dispute
 	pub disputed: Duration,
@@ -77,9 +81,46 @@ pub struct CandidateDisputed {
 	pub concluded: Option<DisputeResult>,
 }
 
+impl<T> Serialize for polkadot::runtime_types::polkadot_primitives::v1::CandidateDescriptor<T>
+where
+	T: Hash + Serialize,
+{
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		let mut state = serializer.serialize_struct("CandidateDescriptor", 9)?;
+		state.serialize_field("para_id", &self.para_id.0)?;
+		state.serialize_field("relay_parent", &self.relay_parent)?;
+		state.serialize_field("collator", &self.collator.0 .0)?;
+		state.serialize_field("persisted_validation_data_hash", &self.persisted_validation_data_hash)?;
+		state.serialize_field("pov_hash", &self.pov_hash)?;
+		state.serialize_field("erasure_root", &self.erasure_root)?;
+		state.serialize_field("signature", Bytes::new(&self.signature.0 .0))?;
+		state.serialize_field("para_head", &self.para_head)?;
+		state.serialize_field("validation_code_hash", &self.validation_code_hash.0)?;
+		state.end()
+	}
+}
+
+impl<T> Serialize for polkadot::runtime_types::polkadot_primitives::v1::CandidateReceipt<T>
+where
+	T: Hash + Serialize,
+{
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		let mut state = serializer.serialize_struct("CandidateReceipt", 2)?;
+		state.serialize_field("descriptor", &self.descriptor)?;
+		state.serialize_field("commitments_hash", &self.commitments_hash)?;
+		state.end()
+	}
+}
+
 /// Stores tracking data for a candidate
-#[derive(Debug)]
-pub struct CandidateRecord<T: Hash> {
+#[derive(Debug, Serialize)]
+pub struct CandidateRecord<T: Hash + Serialize> {
 	/// Candidate receipt (if observed)
 	pub candidate_receipt: Option<polkadot::runtime_types::polkadot_primitives::v1::CandidateReceipt<T>>,
 	/// The time we first observed a candidate since UnixEpoch
@@ -90,7 +131,7 @@ pub struct CandidateRecord<T: Hash> {
 	pub candidate_disputed: Option<CandidateDisputed>,
 }
 
-impl<T: Hash> Default for CandidateRecord<T> {
+impl<T: Hash + Serialize> Default for CandidateRecord<T> {
 	fn default() -> Self {
 		Self {
 			candidate_receipt: None,
@@ -105,9 +146,42 @@ impl<T: Hash> Default for CandidateRecord<T> {
 
 impl<T> StorageEntry for CandidateRecord<T>
 where
-	T: Hash,
+	T: Hash + Serialize,
 {
 	fn get_time(&self) -> Duration {
 		self.candidate_first_seen
+	}
+}
+
+impl<T> CandidateRecord<T>
+where
+	T: Hash + Serialize,
+{
+	/// Returns if a candidate has been disputed
+	pub fn is_disputed(&self) -> bool {
+		self.candidate_disputed.is_some()
+	}
+
+	/// Returns inclusion time for a candidate
+	pub fn inclusion_time(&self) -> Option<Duration> {
+		match (self.candidate_inclusion.baked, self.candidate_inclusion.included) {
+			(Some(baked), Some(included)) => included.checked_sub(baked),
+			_ => None,
+		}
+	}
+
+	/// Returns dispute resolution time
+	pub fn dispute_resolution_time(&self) -> Option<Duration> {
+		self.candidate_disputed.as_ref().map_or(None, |disp| {
+			let concluded = disp.concluded.as_ref()?;
+			concluded.concluded_timestamp.checked_sub(disp.disputed)
+		})
+	}
+
+	/// Returns a relay parent for a specific candidate
+	pub fn relay_parent(&self) -> Option<&T> {
+		let receipt = &self.candidate_receipt.as_ref()?;
+		let descriptor = &receipt.descriptor;
+		Some(&descriptor.relay_parent)
 	}
 }

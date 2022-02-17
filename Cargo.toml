@@ -14,3 +14,8 @@ tokio = { version = "1.14.0", features = ["macros", "rt-multi-thread"] }
 sp-runtime = {package = "sp-runtime", git = "https://github.com/paritytech/substrate/", branch = "master"}
 sp-core = {package = "sp-core", git = "https://github.com/paritytech/substrate/", branch = "master"}
 typed-builder = "0.9"
+warp = { version = "0.3", features = ["tls"] }
+serde = "1.0"
+serde_json = "1.0"
+serde_derive = "1.0"
+serde_bytes = "0.11"

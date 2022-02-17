@@ -22,10 +22,12 @@ use crate::records_storage::RecordsStorage;
 
 use crate::{eyre, H256};
 use log::debug;
-use sp_runtime::traits::{BlakeTwo256, Hash};
+use serde::Serialize;
+use sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -37,7 +39,10 @@ use typed_builder::TypedBuilder;
 type StorageType<T> = Mutex<RecordsStorage<T, CandidateRecord<T>>>;
 
 /// Trait used to update records according to various events
-trait CandidateRecordEvent<T: std::hash::Hash> {
+trait CandidateRecordEvent<T>
+where
+	T: Hash + Serialize,
+{
 	type Event;
 	type HashType;
 	/// Update a record according to a specific event
@@ -48,7 +53,7 @@ trait CandidateRecordEvent<T: std::hash::Hash> {
 
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeInitiated
 where
-	T: std::hash::Hash,
+	T: Hash + Serialize,
 {
 	type Event = polkadot::paras_disputes::events::DisputeInitiated;
 	type HashType = H256;
@@ -70,7 +75,7 @@ where
 
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeConcluded
 where
-	T: std::hash::Hash,
+	T: Hash + Serialize,
 {
 	type Event = polkadot::paras_disputes::events::DisputeConcluded;
 	type HashType = H256;
@@ -100,7 +105,7 @@ where
 
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeTimedOut
 where
-	T: std::hash::Hash,
+	T: Hash + Serialize,
 {
 	type Event = polkadot::paras_disputes::events::DisputeTimedOut;
 	type HashType = H256;
@@ -126,7 +131,7 @@ where
 
 impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateBacked
 where
-	T: std::hash::Hash,
+	T: Hash + Serialize,
 {
 	type Event = polkadot::para_inclusion::events::CandidateBacked;
 	type HashType = H256;
@@ -142,7 +147,7 @@ where
 
 impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateIncluded
 where
-	T: std::hash::Hash,
+	T: Hash + Serialize,
 {
 	type Event = polkadot::para_inclusion::events::CandidateIncluded;
 	type HashType = H256;
@@ -158,7 +163,7 @@ where
 
 impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateTimedOut
 where
-	T: std::hash::Hash,
+	T: Hash + Serialize,
 {
 	type Event = polkadot::para_inclusion::events::CandidateTimedOut;
 	type HashType = H256;
@@ -177,7 +182,7 @@ pub type EventDecoderFunctor<T> =
 
 fn gen_handle_event_functor<T, E, F>(decoder: &'static F) -> EventDecoderFunctor<T>
 where
-	T: Debug + std::hash::Hash + Clone + Eq + 'static,
+	T: Debug + Hash + Serialize + Clone + Eq + 'static,
 	E: CandidateRecordEvent<T, Event = E, HashType = T>,
 	F: Fn(&RawEvent) -> Result<E, Box<dyn Error>>,
 {
