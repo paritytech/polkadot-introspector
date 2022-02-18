@@ -31,3 +31,10 @@ One example could be a pipeline where one handler analyses per-block finalise la
 moving average (or a moving median) of latency for all blocks in general. It should also be possible to extract and
 query state for each handler via a websocket/wasm API. The only limitation here is the problem of a consistency, so a
 state must not be queried and updated at the same time (where applicable).
+
+### Block time monitor
+
+Monitor block production time via different RPC nodes. The tool runs in either CLI or Prometheus mode. CLI mode outputs
+live ASCII charts on the terminal while Prometheus mode exposes an endpoint for scraping the observed block times.
+
+`cargo run --release -- block-time-monitor --ws==wss://westmint-rpc.polkadot.io:443,wss://wss.moonriver.moonbeam.network:443,wss://statemine-rpc.polkadot.io:443,wss://ws.calamari.systems:443,wss://rpc.polkadot.io:443,wss://kusama-rpc.polkadot.io:443,wss://api.westend.encointer.org:443 cli`

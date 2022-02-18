@@ -21,8 +21,8 @@ use log::{info, warn, LevelFilter};
 #[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
 pub mod polkadot {}
 
+mod block_time;
 mod collector;
-
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct CollectorOptions {
@@ -37,10 +37,48 @@ pub(crate) struct CollectorOptions {
 	max_ttl: usize,
 }
 
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) enum BlockTimeMode {
+	/// CLI chart mode.
+	Cli(BlockTimeCliOptions),
+	/// Prometheus endpoint mode.
+	Prometheus(BlockTimePrometheusOptions),
+}
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct BlockTimeOptions {
+	/// Websockets url of a substrate nodes.
+	#[clap(name = "ws", long, default_value = "wss://westmint-rpc.polkadot.io:443")]
+	nodes: String,
+	/// Mode of running - cli/prometheus.
+	#[clap(subcommand)]
+	mode: BlockTimeMode,
+}
+
+#[derive(Clone, Debug, Parser, Default)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct BlockTimeCliOptions {
+	/// Chart width.
+	#[clap(long, default_value = "80")]
+	chart_width: usize,
+	/// Chart height.
+	#[clap(long, default_value = "6")]
+	chart_height: usize,
+}
+
+#[derive(Clone, Debug, Parser, Default)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct BlockTimePrometheusOptions {
+	/// Prometheus endpoint port.
+	#[clap(long, default_value = "65432")]
+	port: u16,
+}
+
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 enum Command {
-	// BlockTimeMonitor(BlockTimeMonitorOptions),
+	BlockTimeMonitor(BlockTimeOptions),
 	Collector(CollectorOptions),
 }
 
@@ -74,6 +112,9 @@ async fn main() -> color_eyre::Result<()> {
 	match opts.command {
 		Command::Collector(opts) => {
 			collector::run(opts).await?;
+		},
+		Command::BlockTimeMonitor(opts) => {
+			block_time::BlockTimeMonitor::new(opts)?.run().await?;
 		},
 	}
 

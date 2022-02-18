@@ -1,4 +1,4 @@
-use log::{info, warn, LevelFilter};
+use log::{info, warn};
 use sp_core::H256;
 use std::sync::{Arc, Mutex};
 use subxt::{ClientBuilder, DefaultConfig, DefaultExtra, EventSubscription};
