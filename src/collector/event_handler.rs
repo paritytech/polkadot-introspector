@@ -16,21 +16,20 @@
 
 //! Subxt events handlers implementation
 
-use crate::candidate_record::*;
-use crate::polkadot::{self};
-use crate::records_storage::RecordsStorage;
-
-use crate::{eyre, H256};
+use super::{candidate_record::*, records_storage::RecordsStorage};
+use crate::{eyre, polkadot};
 use log::debug;
 use serde::Serialize;
+use sp_core::H256;
 use sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash};
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::Debug;
-use std::hash::Hash;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+	collections::HashMap,
+	error::Error,
+	fmt::Debug,
+	hash::Hash,
+	sync::{Arc, Mutex},
+	time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use subxt::RawEvent;
 
 use typed_builder::TypedBuilder;
@@ -85,9 +84,8 @@ where
 			Some(ref mut disputed) => match disputed.concluded {
 				None => {
 					let dispute_result = match event.1 {
-						polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult::Valid => {
-							DisputeOutcome::DisputeAgreed
-						},
+						polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult::Valid =>
+							DisputeOutcome::DisputeAgreed,
 						_ => DisputeOutcome::DisputeInvalid,
 					};
 					disputed.concluded =
