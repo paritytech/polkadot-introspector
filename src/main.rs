@@ -15,27 +15,11 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use color_eyre::eyre::{eyre, WrapErr};
-use log::{info, warn, LevelFilter};
-
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
-pub mod polkadot {}
-
+use color_eyre::eyre::eyre;
+use log::LevelFilter;
 mod collector;
 
-#[derive(Clone, Debug, Parser, Default)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct CollectorOptions {
-	/// Websockets url of a substrate node
-	#[clap(name = "url", long, default_value = "ws://localhost:9944")]
-	url: String,
-	/// Maximum candidates to store
-	#[clap(name = "max-candidates", long)]
-	max_candidates: Option<usize>,
-	/// Maximum age of candidates to preserve (default: 1 day)
-	#[clap(name = "max-ttl", long, default_value = "86400")]
-	max_ttl: usize,
-}
+use collector::CollectorOptions;
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]

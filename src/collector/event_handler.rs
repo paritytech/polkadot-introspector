@@ -16,8 +16,8 @@
 
 //! Subxt events handlers implementation
 
-use super::{candidate_record::*, records_storage::RecordsStorage};
-use crate::{eyre, polkadot};
+use super::{candidate_record::*, polkadot, records_storage::RecordsStorage};
+use crate::eyre;
 use log::debug;
 use serde::Serialize;
 use sp_core::H256;
@@ -35,7 +35,7 @@ use subxt::RawEvent;
 use typed_builder::TypedBuilder;
 
 // TODO: Convert to a trait as it is a good thing to have a more generic storage
-type StorageType<T> = Mutex<RecordsStorage<T, CandidateRecord<T>>>;
+pub type StorageType<T> = Mutex<RecordsStorage<T, CandidateRecord<T>>>;
 
 /// Trait used to update records according to various events
 trait CandidateRecordEvent<T>
@@ -84,8 +84,9 @@ where
 			Some(ref mut disputed) => match disputed.concluded {
 				None => {
 					let dispute_result = match event.1 {
-						polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult::Valid =>
-							DisputeOutcome::DisputeAgreed,
+						polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult::Valid => {
+							DisputeOutcome::DisputeAgreed
+						},
 						_ => DisputeOutcome::DisputeInvalid,
 					};
 					disputed.concluded =
