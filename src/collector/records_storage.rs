@@ -16,11 +16,12 @@
 
 //! Stores candidates records in a buffer allowing to prune old candidates
 //! and optionally maintain the persistent config
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::hash::Hash;
-use std::time::Duration;
+use std::{
+	borrow::Borrow,
+	collections::{HashMap, VecDeque},
+	hash::Hash,
+	time::Duration,
+};
 use typed_builder::TypedBuilder;
 
 /// Storage configuration
@@ -80,7 +81,7 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 
 		self.maybe_expire_elements();
 
-		return existing;
+		return existing
 	}
 
 	/// Gets a value with a specific key
@@ -145,7 +146,7 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 								expired = expired + 1;
 							} else {
 								// Last known found
-								break;
+								break
 							}
 						},
 						// No elements left
