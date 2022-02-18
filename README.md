@@ -5,6 +5,12 @@ A tool for monitoring and introspection of the Polkadot or other substrate based
 **IMPORTANT NOTE: WORK IN PROGRESS!** Do not expect this to be working (or supported).
 
 ## Proposed architecture
+The introspector is a collection of tools that connect to RPC nodes to inspect or monitor the chain state.
+Depending on the tool, the data source and output might differ.
+
+### Collector tool
+
+`cargo run --release --  -vvv collector --url wss://rpc.polkadot.io:443`
 
 Introspector uses `subxt` to subscribe for a node (or multiple nodes) events.
 
@@ -25,4 +31,3 @@ One example could be a pipeline where one handler analyses per-block finalise la
 moving average (or a moving median) of latency for all blocks in general. It should also be possible to extract and
 query state for each handler via a websocket/wasm API. The only limitation here is the problem of a consistency, so a
 state must not be queried and updated at the same time (where applicable).
-
