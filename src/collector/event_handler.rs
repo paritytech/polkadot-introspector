@@ -35,7 +35,7 @@ use subxt::RawEvent;
 use typed_builder::TypedBuilder;
 
 // TODO: Convert to a trait as it is a good thing to have a more generic storage
-type StorageType<T> = Mutex<RecordsStorage<T, CandidateRecord<T>>>;
+pub type StorageType<T> = Mutex<RecordsStorage<T, CandidateRecord<T>>>;
 
 /// Trait used to update records according to various events
 trait CandidateRecordEvent<T>
@@ -79,13 +79,14 @@ where
 	type Event = polkadot::paras_disputes::events::DisputeConcluded;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
+
 		match record.candidate_disputed {
 			None => Err(format!("dispute concluded but not initiated: {:?}", event.0).into()),
 			Some(ref mut disputed) => match disputed.concluded {
 				None => {
 					let dispute_result = match event.1 {
-						polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult::Valid =>
-							DisputeOutcome::DisputeAgreed,
+						RuntimeDisputeResult::Valid => DisputeOutcome::DisputeAgreed,
 						_ => DisputeOutcome::DisputeInvalid,
 					};
 					disputed.concluded =
