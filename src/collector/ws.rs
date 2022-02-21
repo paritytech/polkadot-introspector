@@ -17,8 +17,9 @@
 use super::{candidate_record::*, event_handler::StorageType, RecordsStorage};
 
 use log::warn;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sp_core::H256;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{convert::Infallible, error::Error, fs, marker::Send, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::oneshot::Receiver;
 use typed_builder::TypedBuilder;
@@ -45,6 +46,12 @@ pub struct WebSocketListener {
 	storage: Arc<StorageType<H256>>,
 }
 
+/// Used to handle requests with ping reply
+#[derive(Deserialize, Serialize)]
+struct HealthQuery {
+	ts: u64,
+}
+
 /// Common functions for a listener
 impl WebSocketListener {
 	/// Creates a new socket listener with the specific config
@@ -58,8 +65,12 @@ impl WebSocketListener {
 		T: Send + 'static,
 	{
 		let has_sane_tls = self.config.privkey.is_some() && self.config.cert.is_some();
+		let opt_ping = warp::query::<HealthQuery>()
+			.map(Some)
+			.or_else(|_| async { Ok::<(Option<HealthQuery>,), std::convert::Infallible>((None,)) });
 		let health_route = warp::path!("v1" / "health")
 			.and(with_storage(self.storage))
+			.and(opt_ping)
 			.and_then(health_handler);
 		let routes = health_route.with(warp::cors().allow_any_origin()).recover(handle_rejection);
 		let server = warp::serve(routes);
@@ -96,11 +107,17 @@ fn with_storage(
 pub struct HealthReply {
 	/// How many candidates have we processed
 	pub candidates_stored: usize,
+	/// Timestamp from a request or our local timestamp
+	pub ts: u64,
 }
 
-async fn health_handler(storage: Arc<StorageType<H256>>) -> Result<impl Reply, Rejection> {
+async fn health_handler(storage: Arc<StorageType<H256>>, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
 	let storage_locked = storage.lock().unwrap();
-	Ok(warp::reply::json(&HealthReply { candidates_stored: storage_locked.len() }))
+	let ts = match ping {
+		Some(h) => h.ts,
+		None => SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+	};
+	Ok(warp::reply::json(&HealthReply { candidates_stored: storage_locked.len(), ts }))
 }
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
