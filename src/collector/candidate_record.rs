@@ -14,7 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::{polkadot, records_storage::StorageEntry};
+use super::records_storage::StorageEntry;
+use crate::polkadot;
 use serde::{
 	ser::{SerializeStruct, Serializer},
 	Serialize,

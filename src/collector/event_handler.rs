@@ -16,8 +16,8 @@
 
 //! Subxt events handlers implementation
 
-use super::{candidate_record::*, polkadot, records_storage::RecordsStorage};
-use crate::eyre;
+use super::{candidate_record::*, records_storage::RecordsStorage};
+use crate::{eyre, polkadot};
 use log::debug;
 use serde::Serialize;
 use sp_core::H256;
@@ -79,14 +79,14 @@ where
 	type Event = polkadot::paras_disputes::events::DisputeConcluded;
 	type HashType = H256;
 	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+		use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
+
 		match record.candidate_disputed {
 			None => Err(format!("dispute concluded but not initiated: {:?}", event.0).into()),
 			Some(ref mut disputed) => match disputed.concluded {
 				None => {
 					let dispute_result = match event.1 {
-						polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult::Valid => {
-							DisputeOutcome::DisputeAgreed
-						},
+						RuntimeDisputeResult::Valid => DisputeOutcome::DisputeAgreed,
 						_ => DisputeOutcome::DisputeInvalid,
 					};
 					disputed.concluded =

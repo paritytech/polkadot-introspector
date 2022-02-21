@@ -104,24 +104,16 @@ async fn health_handler(storage: Arc<StorageType<H256>>) -> Result<impl Reply, R
 }
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
-	let code;
-	let message;
-	let message_str: String;
-
-	if err.is_not_found() {
-		code = StatusCode::NOT_FOUND;
-		message = "Not Found";
+	let (code, message) = if err.is_not_found() {
+		(StatusCode::NOT_FOUND, "Not Found")
 	} else if err.find::<warp::filters::body::BodyDeserializeError>().is_some() {
-		code = StatusCode::BAD_REQUEST;
-		message = "Invalid Body";
+		(StatusCode::BAD_REQUEST, "Invalid Body")
 	} else if err.find::<warp::reject::MethodNotAllowed>().is_some() {
-		code = StatusCode::METHOD_NOT_ALLOWED;
-		message = "Method Not Allowed";
+		(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
 	} else {
 		warn!("unhandled error: {:?}", err);
-		code = StatusCode::INTERNAL_SERVER_ERROR;
-		message = "Internal Server Error";
-	}
+		(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
+	};
 
 	Ok(warp::reply::with_status(message, code))
 }

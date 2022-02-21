@@ -21,6 +21,9 @@ mod collector;
 
 use collector::CollectorOptions;
 
+#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
+pub mod polkadot {}
+
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 enum Command {

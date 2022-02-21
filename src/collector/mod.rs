@@ -24,14 +24,13 @@ use std::{
 use tokio::sync::oneshot;
 
 use subxt::{ClientBuilder, DefaultConfig, DefaultExtra, EventSubscription};
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
-pub mod polkadot {}
 
 mod candidate_record;
 mod event_handler;
 mod records_storage;
 mod ws;
 
+use crate::polkadot;
 use candidate_record::*;
 use color_eyre::eyre::{eyre, WrapErr};
 use event_handler::*;
