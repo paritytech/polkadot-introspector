@@ -228,6 +228,8 @@ async fn populate_view(values: Arc<Mutex<VecDeque<u64>>>, uri: &str, cli_opts: B
 	let mut header;
 	let mut prev_ts = 0u64;
 	let mut prev_block = 0u32;
+	let mut prev_block_hash = None;
+
 	// Get last `term_width` blocks.
 	let mut blocks_to_fetch = cli_opts.chart_width;
 	// Loop for ws connection retry.
@@ -240,7 +242,7 @@ async fn populate_view(values: Arc<Mutex<VecDeque<u64>>>, uri: &str, cli_opts: B
 		{
 			Ok(api) => {
 				let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
-				header = api.client.rpc().header(None).await.unwrap().unwrap();
+				header = api.client.rpc().header(prev_block_hash).await.unwrap().unwrap();
 				while blocks_to_fetch > 0 {
 					let ts = match api.storage().timestamp().now(Some(header.hash())).await {
 						Ok(ts) => ts,
@@ -255,6 +257,7 @@ async fn populate_view(values: Arc<Mutex<VecDeque<u64>>>, uri: &str, cli_opts: B
 
 					prev_ts = ts;
 					prev_block = header.number;
+					prev_block_hash = Some(header.hash());
 
 					header = match api.client.rpc().header(Some(header.parent_hash)).await {
 						Ok(maybe_header) => maybe_header.unwrap(),
