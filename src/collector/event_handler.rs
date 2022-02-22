@@ -38,6 +38,8 @@ use typed_builder::TypedBuilder;
 pub type StorageType<T> = Mutex<RecordsStorage<T, CandidateRecord<T>>>;
 
 /// Trait used to update records according to various events
+/// Each subxt event is mapped to a corresponding specific CandidateRecordEvent allowing
+/// to update candidate state using different subxt events
 trait CandidateRecordEvent<T>
 where
 	T: Hash + Serialize,
@@ -50,6 +52,7 @@ where
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>>;
 }
 
+/// Candidate event for a dispute being initiated
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeInitiated
 where
 	T: Hash + Serialize,
@@ -72,6 +75,7 @@ where
 	}
 }
 
+/// Candidate event for a dispute being concluded
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeConcluded
 where
 	T: Hash + Serialize,
@@ -102,6 +106,7 @@ where
 	}
 }
 
+/// Candidate event for a dispute being timed out
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeTimedOut
 where
 	T: Hash + Serialize,
@@ -128,6 +133,7 @@ where
 	}
 }
 
+/// Candidate event for candidate being baked for a parachain
 impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateBacked
 where
 	T: Hash + Serialize,

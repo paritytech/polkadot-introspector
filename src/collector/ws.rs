@@ -46,9 +46,21 @@ pub struct WebSocketListener {
 	storage: Arc<StorageType<H256>>,
 }
 
-/// Used to handle requests with ping reply
+/// Used to handle requests to obtain candidates
+#[derive(Deserialize, Serialize)]
+struct CandidatesQuery {
+	/// Filter candidates by parachain
+	parachain_id: Option<u32>,
+	/// Filter candidates by time
+	not_before: Option<u64>,
+	/// Limit number of candidates returned
+	max_elts: Option<u32>,
+}
+
+/// Used to handle requests with a health query
 #[derive(Deserialize, Serialize)]
 struct HealthQuery {
+	/// Ping like field (optional)
 	ts: u64,
 }
 
@@ -65,14 +77,28 @@ impl WebSocketListener {
 		T: Send + 'static,
 	{
 		let has_sane_tls = self.config.privkey.is_some() && self.config.cert.is_some();
+
+		// Setup routes
 		let opt_ping = warp::query::<HealthQuery>()
 			.map(Some)
 			.or_else(|_| async { Ok::<(Option<HealthQuery>,), std::convert::Infallible>((None,)) });
 		let health_route = warp::path!("v1" / "health")
-			.and(with_storage(self.storage))
+			.and(with_storage(self.storage.clone()))
 			.and(opt_ping)
 			.and_then(health_handler);
-		let routes = health_route.with(warp::cors().allow_any_origin()).recover(handle_rejection);
+
+		let opt_candidates = warp::query::<CandidatesQuery>()
+			.map(Some)
+			.or_else(|_| async { Ok::<(Option<CandidatesQuery>,), std::convert::Infallible>((None,)) });
+		let candidates_route = warp::path!("v1" / "candidates")
+			.and(with_storage(self.storage.clone()))
+			.and(opt_candidates)
+			.and_then(candidates_handler);
+
+		let routes = health_route
+			.or(candidates_route)
+			.with(warp::cors().allow_any_origin())
+			.recover(handle_rejection);
 		let server = warp::serve(routes);
 
 		if has_sane_tls {
@@ -118,6 +144,22 @@ async fn health_handler(storage: Arc<StorageType<H256>>, ping: Option<HealthQuer
 		None => SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
 	};
 	Ok(warp::reply::json(&HealthReply { candidates_stored: storage_locked.len(), ts }))
+}
+
+#[derive(Serialize, Clone, PartialEq, Debug)]
+pub struct CandidatesReply {
+	/// How many candidates have we processed
+	pub candidates: Vec<H256>,
+}
+
+async fn candidates_handler(
+	storage: Arc<StorageType<H256>>,
+	filter: Option<CandidatesQuery>,
+) -> Result<impl Reply, Rejection> {
+	let storage_locked = storage.lock().unwrap();
+	let records = storage_locked.records();
+
+	Ok(warp::reply::json(&CandidatesReply { candidates: records.keys().cloned().collect::<Vec<_>>() }))
 }
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
