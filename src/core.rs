@@ -245,13 +245,21 @@ impl SubxtWrapper {
 				Ok(api) => {
 					let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
 					info!("[{}] Connected", url);
-					let mut sub = api.client.rpc().subscribe_blocks().await.unwrap();
-
-					while let Some(ev_ctx) = sub.next().await {
-						let header = ev_ctx.unwrap();
-						info!("[{}] Block #{} imported ({:?})", url, header.number, header.hash());
-
-						update_channel.send(SubxtEvent::NewHead(header.clone())).await.unwrap();
+					match api.client.rpc().subscribe_blocks().await {
+						Ok(mut sub) => {
+							while let Some(ev_ctx) = sub.next().await {
+								let header = ev_ctx.unwrap();
+								info!("[{}] Block #{} imported ({:?})", url, header.number, header.hash());
+		
+								update_channel.send(SubxtEvent::NewHead(header.clone())).await.unwrap();
+							}
+						},
+						Err(err) => {
+							error!("[{}] Disconnected ({:?}) ", url, err);
+							// TODO (sometime): Add exponential backoff.
+							tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+							info!("[{}] retrying connection ... ", url);
+						}
 					}
 				},
 				Err(err) => {
