@@ -16,6 +16,7 @@
 
 use super::{candidate_record::*, event_handler::StorageType, RecordsStorage};
 
+use crate::collector::records_storage::StorageEntry;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use sp_core::H256;
@@ -53,8 +54,6 @@ struct CandidatesQuery {
 	parachain_id: Option<u32>,
 	/// Filter candidates by time
 	not_before: Option<u64>,
-	/// Limit number of candidates returned
-	max_elts: Option<u32>,
 }
 
 /// Used to handle requests with a health query
@@ -158,8 +157,31 @@ async fn candidates_handler(
 ) -> Result<impl Reply, Rejection> {
 	let storage_locked = storage.lock().unwrap();
 	let records = storage_locked.records();
+	let candidates = if let Some(filter_query) = filter {
+		records
+			.iter()
+			.filter(|(_, value)| {
+				if let Some(parachain_id) = filter_query.parachain_id {
+					parachain_id == value.parachain_id().unwrap_or(0)
+				} else {
+					true
+				}
+			})
+			.filter(|(_, value)| {
+				if let Some(not_before) = filter_query.not_before {
+					not_before <= value.get_time().as_secs()
+				} else {
+					true
+				}
+			})
+			.map(|(key, _)| key)
+			.cloned()
+			.collect::<Vec<_>>()
+	} else {
+		records.keys().cloned().collect::<Vec<_>>()
+	};
 
-	Ok(warp::reply::json(&CandidatesReply { candidates: records.keys().cloned().collect::<Vec<_>>() }))
+	Ok(warp::reply::json(&CandidatesReply { candidates }))
 }
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
