@@ -269,7 +269,6 @@ async fn populate_view(
 	cli_opts: BlockTimeCliOptions,
 	to_api: Sender<Request>,
 ) {
-	let mut header;
 	let mut prev_ts = 0u64;
 	let mut prev_block = 0u32;
 	let blocks_to_fetch = cli_opts.chart_width;
@@ -281,13 +280,18 @@ async fn populate_view(
 		.await
 		.unwrap();
 
-	header = match receiver.await.expect("Failed to fetch head.") {
+	let mut maybe_header = match receiver.await.expect("Failed to fetch head.") {
 		Response::GetHeadResponse(maybe_header) => maybe_header,
 		_ => None,
-	}
-	.unwrap();
+	};
 
 	for _ in 0..blocks_to_fetch {
+		if maybe_header.is_none() {
+			error!("[{}] Faield to get head, aborting.", url);
+			return
+		}
+		let header = maybe_header.unwrap();
+
 		let (sender, receiver) = oneshot::channel::<Response>();
 		to_api
 			.send(Request {
@@ -323,11 +327,10 @@ async fn populate_view(
 			.await
 			.unwrap();
 
-		header = match receiver.await.expect("Failed to fetch head.") {
+		maybe_header = match receiver.await.expect("Failed to fetch head.") {
 			Response::GetHeadResponse(maybe_header) => maybe_header,
 			_ => None,
-		}
-		.unwrap();
+		};
 	}
 }
 
