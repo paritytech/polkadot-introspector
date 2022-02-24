@@ -273,7 +273,7 @@ async fn populate_view(
 				},
 			};
 
-			if prev_block != 0 {
+			if prev_ts != 0 {
 				// We are walking backwards.
 				let block_time_ms = prev_ts.saturating_sub(ts);
 				values.lock().expect("Bad lock").insert(0, block_time_ms);
