@@ -14,115 +14,24 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-//! Provides subxt connection, data source, output interfaces and abstractions.
-//! 
-//! Implements two interfaces: event subscription and a subxt wrapper. Both of these
-//! build on the simplifying assumption that all errors are hidden away from callers.
-//! This trades off control of behavior of errors in favor of simplicity and readability.
-//! 
-//! TODO(ASAP): create issues for all below:
-//! TODO: retry logic needs to be improved - exponential backoff, cli options
-//! TODO: integration tests for polkadot/parachains.
-//! TODO: move prometheus into a module.
-//! TODO: expose storage via event/api. Build a new event source such that new tools
-//! can be built by combining existing ones by listening to storage update events.
+
 use color_eyre::eyre::WrapErr;
 
 use async_trait::async_trait;
 use futures::future;
-use log::{debug, error, info, warn};
+use log::{error, info};
 use sp_core::H256;
-use sp_runtime::traits::Lazy;
 use subxt::{ClientBuilder, DefaultConfig, DefaultExtra};
 
-use tokio::sync::{
-	mpsc::{channel, Receiver, Sender},
-	oneshot,
-};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+use super::{
+	Error, EventConsumerInit, EventStream, Request, RequestType, Response, Result, MAX_MSG_QUEUE_SIZE, RETRY_COUNT,
+	RETRY_DELAY_MS,
+};
 use crate::polkadot;
 use std::collections::hash_map::{Entry, HashMap};
 
-const MAX_MSG_QUEUE_SIZE: usize = 1024;
-const RETRY_COUNT: usize = 3;
-const RETRY_DELAY_MS: u64 = 100;
-
-/// Abstracts all types of events that are processed by the system.
-#[async_trait]
-pub trait Event {
-	type EventSource;
-
-	fn source(&self) -> Self::EventSource;
-}
-
-#[async_trait]
-pub trait EventStream {
-	type Event;
-
-	fn create_consumer(&mut self) -> EventConsumerInit<Self::Event>;
-	/// Run the main event loop.
-	async fn run(self, tasks: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()>;
-}
-
-#[derive(Debug)]
-pub struct Request {
-	pub url: String,
-	pub request_type: RequestType,
-	pub response_sender: oneshot::Sender<Result>,
-}
-
-pub struct RequestExecutor {
-	to_api: Sender<Request>,
-}
-
-impl RequestExecutor {
-	pub fn new(to_api: Sender<Request>) -> Self {
-		RequestExecutor { to_api }
-	}
-
-	pub async fn get_block_timestamp(
-		&self,
-		url: String,
-		hash: Option<<DefaultConfig as subxt::Config>::Hash>,
-	) -> Result {
-		let (sender, receiver) = oneshot::channel::<crate::core::Result>();
-		let request = Request { url, request_type: RequestType::GetBlockTimestamp(hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		receiver.await.expect("Failed to fetch timestamp.")
-	}
-
-	pub async fn get_block_head(&self, url: String, hash: Option<<DefaultConfig as subxt::Config>::Hash>) -> Result {
-		let (sender, receiver) = oneshot::channel::<crate::core::Result>();
-		let request = Request { url, request_type: RequestType::GetHead(hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		receiver.await.expect("Failed to fetch timestamp.")
-	}
-}
-
-#[derive(Clone, Debug)]
-pub enum RequestType {
-	GetBlockTimestamp(Option<<DefaultConfig as subxt::Config>::Hash>),
-	GetHead(Option<<DefaultConfig as subxt::Config>::Hash>),
-}
-
-#[derive(Debug)]
-pub enum Response {
-	GetBlockTimestampResponse(u64),
-	GetHeadResponse(Option<<DefaultConfig as subxt::Config>::Header>),
-}
-
-#[derive(Debug)]
-pub enum Error {
-	SubxtError(subxt::BasicError),
-	InternalError,
-}
-
-pub type Result = std::result::Result<Response, Error>;
-
-/// Implementing the above for `subxt` connectivity wrappers.
-/// Also provides an message based interface for subxt APIs.
 pub struct SubxtWrapper {
 	urls: Vec<String>,
 	/// One sender per consumer per url.
@@ -133,27 +42,6 @@ pub struct SubxtWrapper {
 #[derive(Clone, Debug)]
 pub enum SubxtEvent {
 	NewHead(<DefaultConfig as subxt::Config>::Header),
-}
-
-impl Event for SubxtEvent {
-	type EventSource = &'static str;
-
-	fn source(&self) -> Self::EventSource {
-		"subxt"
-	}
-}
-
-#[derive(Debug)]
-pub struct EventConsumerInit<Event> {
-	// One per ws connection.
-	update_channels: Vec<Receiver<Event>>,
-	to_api: Sender<Request>,
-}
-
-impl<Event> Into<(Vec<Receiver<Event>>, Sender<Request>)> for EventConsumerInit<Event> {
-	fn into(self) -> (Vec<Receiver<Event>>, Sender<Request>) {
-		(self.update_channels, self.to_api)
-	}
 }
 
 #[async_trait]
@@ -178,7 +66,7 @@ impl EventStream for SubxtWrapper {
 		self.consumers.push(update_tx);
 		self.api.push(api_rx);
 
-		EventConsumerInit { update_channels, to_api }
+		EventConsumerInit::new(update_channels, to_api)
 	}
 
 	async fn run(self, tasks: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()> {
@@ -246,37 +134,57 @@ impl SubxtWrapper {
 		None
 	}
 
-	// Per consumer API thread.
+	// Per consumer API task.
 	async fn api_handler_task(mut api: Receiver<Request>) {
 		let mut connection_pool = HashMap::new();
 
 		loop {
 			if let Some(request) = api.recv().await {
-				match connection_pool.entry(request.url.clone()) {
-					Entry::Occupied(_) => (),
-					Entry::Vacant(entry) => {
-						let maybe_api = Self::new_client_fn(request.url.clone()).await;
-						if let Some(api) = maybe_api {
-							entry.insert(api);
+				// Yes, this is an infinite loop if shit happens.
+				// TODO: add a self destruct timeout(exit/panic?) to the loop.
+				loop {
+					match connection_pool.entry(request.url.clone()) {
+						Entry::Occupied(_) => (),
+						Entry::Vacant(entry) => {
+							let maybe_api = Self::new_client_fn(request.url.clone()).await;
+							if let Some(api) = maybe_api {
+								entry.insert(api);
+							}
+						},
+					};
+
+					let api = connection_pool.get(&request.url.clone());
+
+					let result = if let Some(api) = api {
+						match request.request_type {
+							RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
+							RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
 						}
-					},
-				};
+					} else {
+						// Remove the faulty websocket from connection pool.
+						let _ = connection_pool.remove(&request.url);
+						tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+						continue
+					};
 
-				let api = connection_pool.get(&request.url.clone());
+					let response = match result {
+						Ok(response) => response,
+						Err(Error::SubxtError(err)) => {
+							error!("subxt call error: {:?}", err);
+							// Always retry for subxt errors (most of them are transient).
+							let _ = connection_pool.remove(&request.url);
+							tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+							continue
+						},
+					};
 
-				let response = if let Some(api) = api {
-					match request.request_type {
-						RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
-						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
-					}
-				} else {
-					Err(Error::InternalError)
-				};
-
-				let _ = request.response_sender.send(response);
+					// We only break in the happy case.
+					let _ = request.response_sender.send(response);
+					break
+				}
 			} else {
 				// channel closed, exit loop.
-				break
+				panic!("Channel closed. Cascade failure ?")
 			}
 		}
 	}
@@ -304,7 +212,7 @@ impl SubxtWrapper {
 						Err(err) => {
 							error!("[{}] Disconnected ({:?}) ", url, err);
 							// TODO (sometime): Add exponential backoff.
-							tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+							tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
 							info!("[{}] retrying connection ... ", url);
 						},
 					}
@@ -312,7 +220,7 @@ impl SubxtWrapper {
 				Err(err) => {
 					error!("[{}] Disconnected ({:?}) ", url, err);
 					// TODO (sometime): Add exponential backoff.
-					tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+					tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
 					info!("[{}] retrying connection ... ", url);
 				},
 			}

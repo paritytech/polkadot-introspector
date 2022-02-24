@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::{candidate_record::*, event_handler::StorageType, RecordsStorage};
+use super::event_handler::StorageType;
 
 use log::warn;
 use serde::{Deserialize, Serialize};

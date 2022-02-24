@@ -15,8 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::{
-	core::{EventConsumerInit, Request, RequestExecutor, Response, SubxtEvent},
-	BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions, BlockTimePrometheusOptions,
+	core::{EventConsumerInit, Request, RequestExecutor, SubxtEvent},
+	BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions,
 };
 use colored::Colorize;
 use crossterm::{
@@ -24,7 +24,6 @@ use crossterm::{
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use futures::FutureExt;
 use log::{debug, error, info, warn};
 use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
@@ -32,11 +31,7 @@ use std::{
 	io::{stdout, Write},
 	sync::{Arc, Mutex},
 };
-use subxt::{ClientBuilder, DefaultConfig, DefaultExtra};
-use tokio::sync::{
-	mpsc::{channel, Receiver, Sender},
-	oneshot,
-};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 pub(crate) struct BlockTimeMonitor {
 	values: Vec<Arc<Mutex<VecDeque<u64>>>>,
@@ -187,18 +182,7 @@ impl BlockTimeMonitor {
 				debug!("New event: {:?}", event);
 				match event {
 					SubxtEvent::NewHead(header) => {
-						let ts = match executor
-							.get_block_timestamp(url.into(), Some(header.hash()))
-							.await
-							.expect("TS fetch failed")
-						{
-							Response::GetBlockTimestampResponse(ts) => ts,
-							_ => {
-								// Skip block.
-								warn!("Skipping block {}, invalid API response ", prev_block);
-								continue
-							},
-						};
+						let ts = executor.get_block_timestamp(url.into(), Some(header.hash())).await;
 
 						if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
 							// We know a prev block and this is it's child
@@ -246,32 +230,13 @@ async fn populate_view(
 	to_api: Sender<Request>,
 ) {
 	let mut prev_ts = 0u64;
-	let mut prev_block = 0u32;
 	let blocks_to_fetch = cli_opts.chart_width;
 	let executor = RequestExecutor::new(to_api);
 	let mut parent_hash = None;
 
 	for _ in 0..blocks_to_fetch {
-		let header = executor
-			.get_block_head(url.into(), parent_hash)
-			.await
-			.expect("Head fetch failed");
-
-		if let Response::GetHeadResponse(Some(header)) = header {
-			prev_block = header.number;
-
-			let ts = match executor
-				.get_block_timestamp(url.into(), Some(header.hash()))
-				.await
-				.expect("TS fetch failed")
-			{
-				Response::GetBlockTimestampResponse(ts) => ts,
-				_ => {
-					// Skip block.
-					warn!("Skipping block {}, invalid API response ", prev_block);
-					continue
-				},
-			};
+		if let Some(header) = executor.get_block_head(url.into(), parent_hash).await {
+			let ts = executor.get_block_timestamp(url.into(), Some(header.hash())).await;
 
 			if prev_ts != 0 {
 				// We are walking backwards.

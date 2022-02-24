@@ -27,7 +27,7 @@ pub mod polkadot {}
 mod block_time;
 mod core;
 
-use crate::core::{EventStream, SubxtWrapper};
+use crate::core::EventStream;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
