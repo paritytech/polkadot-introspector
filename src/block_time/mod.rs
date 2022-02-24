@@ -15,10 +15,9 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::{
-	core::{EventConsumerInit, Request, RequestType, Response, SubxtEvent},
-	polkadot, BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions, BlockTimePrometheusOptions,
+	core::{EventConsumerInit, Request, RequestExecutor, Response, SubxtEvent},
+	BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions, BlockTimePrometheusOptions,
 };
-use color_eyre::eyre::WrapErr;
 use colored::Colorize;
 use crossterm::{
 	cursor,
@@ -96,22 +95,13 @@ impl BlockTimeMonitor {
 			})
 			.collect::<Vec<_>>();
 
-		futures.push(tokio::spawn(Self::display_charts(
-			self.values.clone(),
-			self.endpoints.clone(),
-			to_api.clone(),
-			self.opts,
-		)));
+		futures.push(tokio::spawn(Self::display_charts(self.values.clone(), self.endpoints.clone(), self.opts)));
 
 		Ok(futures)
 	}
 
-	async fn display_charts(
-		values: Vec<Arc<Mutex<VecDeque<u64>>>>,
-		endpoints: Vec<String>,
-		to_api: Sender<Request>,
-		opts: BlockTimeOptions,
-	) {
+	// TODO: get rid of arc mutex and use channels.
+	async fn display_charts(values: Vec<Arc<Mutex<VecDeque<u64>>>>, endpoints: Vec<String>, opts: BlockTimeOptions) {
 		match opts.mode {
 			BlockTimeMode::Cli(opts) => loop {
 				let _ = stdout().queue(Clear(ClearType::All)).unwrap();
@@ -174,6 +164,7 @@ impl BlockTimeMonitor {
 		url: String,
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
+		// TODO: make this a struct.
 		mut consumer_config: (Receiver<SubxtEvent>, Sender<Request>),
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
@@ -184,77 +175,62 @@ impl BlockTimeMonitor {
 				populate_view(values.clone(), url, cli_opts, consumer_config.1.clone()).await;
 			},
 		}
+		let executor = RequestExecutor::new(consumer_config.1);
 
 		let mut prev_ts = 0;
 		let mut prev_block = 0u32;
+		// tokio::time::sleep(std::time::Duration::from_secs(3000)).await;
 
 		loop {
 			debug!("[{}] New loop - waiting for events", url);
 			if let Some(event) = consumer_config.0.recv().await {
 				debug!("New event: {:?}", event);
-				let maybe_ts = match event {
-					SubxtEvent::NewHead(head) => {
-						let (sender, receiver) = oneshot::channel::<Response>();
-
-						match consumer_config
-							.1
-							.send(Request {
-								url: url.to_owned(),
-								request_type: RequestType::GetBlockTimestamp(Some(head.hash())),
-								response_sender: sender,
-							})
+				match event {
+					SubxtEvent::NewHead(header) => {
+						let ts = match executor
+							.get_block_timestamp(url.into(), Some(header.hash()))
 							.await
+							.expect("TS fetch failed")
 						{
-							Ok(_) =>
-								receiver
-									.map(|result| {
-										if let Ok(Response::GetBlockTimestampResponse(ts)) = result {
-											debug!("[{}] Block #{} timestamp: {}", url, head.number, ts);
-											Some((head, ts))
-										} else {
-											None
-										}
-									})
-									.await,
-							Err(err) => {
-								error!("GetBlockTimestamp failed {:?}", err);
-								None
+							Response::GetBlockTimestampResponse(ts) => ts,
+							_ => {
+								// Skip block.
+								warn!("Skipping block {}, invalid API response ", prev_block);
+								continue
 							},
+						};
+
+						if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
+							// We know a prev block and this is it's child
+							let block_time_ms = ts.saturating_sub(prev_ts);
+							info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
+
+							match opts.mode {
+								BlockTimeMode::Cli(_) => {
+									values.lock().expect("Bad lock").push_back(block_time_ms);
+								},
+								BlockTimeMode::Prometheus(_) => {
+									metric
+										.clone()
+										.map(|metric| metric.with_label_values(&[url]).observe(block_time_ms as f64));
+								},
+							}
+						} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
+							// We know a prev block, but the diff is > 1. We lost blocks.
+							// TODO(later): fetch the gap and publish the stats.
+							// TODO(later later): Metrics tracking the missed blocks.
+							warn!(
+								"[{}] Missed {} blocks, likely because of WS connectivity issues",
+								url,
+								header.number.saturating_sub(prev_block).saturating_sub(1)
+							);
+						} else if prev_block == 0 {
+							// Just starting up - init metric.
+							metric.clone().map(|metric| metric.with_label_values(&[url]).observe(0f64));
 						}
+						prev_ts = ts;
+						prev_block = header.number;
 					},
-				};
-
-				if let Some((header, ts)) = maybe_ts {
-					if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
-						// We know a prev block and this is it's child
-						let block_time_ms = ts.saturating_sub(prev_ts);
-						info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
-
-						match opts.mode {
-							BlockTimeMode::Cli(_) => {
-								values.lock().expect("Bad lock").push_back(block_time_ms);
-							},
-							BlockTimeMode::Prometheus(_) => {
-								metric
-									.clone()
-									.map(|metric| metric.with_label_values(&[url]).observe(block_time_ms as f64));
-							},
-						}
-					} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
-						// We know a prev block, but the diff is > 1. We lost blocks.
-						// TODO(later): fetch the gap and publish the stats.
-						// TODO(later later): Metrics tracking the missed blocks.
-						warn!(
-							"[{}] Missed {} blocks, likely because of WS connectivity issues",
-							url,
-							header.number.saturating_sub(prev_block).saturating_sub(1)
-						);
-					} else if prev_block == 0 {
-						// Just starting up - init metric.
-						metric.clone().map(|metric| metric.with_label_values(&[url]).observe(0f64));
-					}
-					prev_ts = ts;
-					prev_block = header.number;
 				}
 			} else {
 				error!("[{}] Update channel disconnected", url);
@@ -272,47 +248,27 @@ async fn populate_view(
 	let mut prev_ts = 0u64;
 	let mut prev_block = 0u32;
 	let blocks_to_fetch = cli_opts.chart_width;
-
+	let executor = RequestExecutor::new(to_api);
 	let mut parent_hash = None;
+
 	for _ in 0..blocks_to_fetch {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		to_api
-			.send(Request {
-				url: url.to_owned(),
-				request_type: RequestType::GetHead(parent_hash),
-				response_sender: sender,
-			})
+		let header = executor
+			.get_block_head(url.into(), parent_hash)
 			.await
-			.unwrap();
+			.expect("Head fetch failed");
 
-		let mut maybe_header = match receiver.await.expect("Failed to fetch head.") {
-			Response::GetHeadResponse(maybe_header) => maybe_header,
-			_ => None,
-		};
-
-		if let Some(header) = maybe_header {
-			let (sender, receiver) = oneshot::channel::<Response>();
-			to_api
-				.send(Request {
-					url: url.to_owned(),
-					request_type: RequestType::GetBlockTimestamp(Some(header.hash())),
-					response_sender: sender,
-				})
-				.await
-				.unwrap();
-
+		if let Response::GetHeadResponse(Some(header)) = header {
 			prev_block = header.number;
 
-			let ts = match receiver.await.expect("Failed to fetch timestamp.") {
+			let ts = match executor
+				.get_block_timestamp(url.into(), Some(header.hash()))
+				.await
+				.expect("TS fetch failed")
+			{
 				Response::GetBlockTimestampResponse(ts) => ts,
-				Response::SubxtError(err) => {
-					// Skip block.
-					warn!("Skipping block {} error: {:?}", prev_block, err);
-					continue
-				},
 				_ => {
 					// Skip block.
-					warn!("Skipping block {} ", prev_block);
+					warn!("Skipping block {}, invalid API response ", prev_block);
 					continue
 				},
 			};

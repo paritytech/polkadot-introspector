@@ -15,7 +15,17 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 //! Provides subxt connection, data source, output interfaces and abstractions.
-
+//! 
+//! Implements two interfaces: event subscription and a subxt wrapper. Both of these
+//! build on the simplifying assumption that all errors are hidden away from callers.
+//! This trades off control of behavior of errors in favor of simplicity and readability.
+//! 
+//! TODO(ASAP): create issues for all below:
+//! TODO: retry logic needs to be improved - exponential backoff, cli options
+//! TODO: integration tests for polkadot/parachains.
+//! TODO: move prometheus into a module.
+//! TODO: expose storage via event/api. Build a new event source such that new tools
+//! can be built by combining existing ones by listening to storage update events.
 use color_eyre::eyre::WrapErr;
 
 use async_trait::async_trait;
@@ -58,7 +68,37 @@ pub trait EventStream {
 pub struct Request {
 	pub url: String,
 	pub request_type: RequestType,
-	pub response_sender: oneshot::Sender<Response>,
+	pub response_sender: oneshot::Sender<Result>,
+}
+
+pub struct RequestExecutor {
+	to_api: Sender<Request>,
+}
+
+impl RequestExecutor {
+	pub fn new(to_api: Sender<Request>) -> Self {
+		RequestExecutor { to_api }
+	}
+
+	pub async fn get_block_timestamp(
+		&self,
+		url: String,
+		hash: Option<<DefaultConfig as subxt::Config>::Hash>,
+	) -> Result {
+		let (sender, receiver) = oneshot::channel::<crate::core::Result>();
+		let request = Request { url, request_type: RequestType::GetBlockTimestamp(hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		receiver.await.expect("Failed to fetch timestamp.")
+	}
+
+	pub async fn get_block_head(&self, url: String, hash: Option<<DefaultConfig as subxt::Config>::Hash>) -> Result {
+		let (sender, receiver) = oneshot::channel::<crate::core::Result>();
+		let request = Request { url, request_type: RequestType::GetHead(hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		receiver.await.expect("Failed to fetch timestamp.")
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -71,9 +111,15 @@ pub enum RequestType {
 pub enum Response {
 	GetBlockTimestampResponse(u64),
 	GetHeadResponse(Option<<DefaultConfig as subxt::Config>::Header>),
+}
+
+#[derive(Debug)]
+pub enum Error {
 	SubxtError(subxt::BasicError),
 	InternalError,
 }
+
+pub type Result = std::result::Result<Response, Error>;
 
 /// Implementing the above for `subxt` connectivity wrappers.
 /// Also provides an message based interface for subxt APIs.
@@ -105,12 +151,6 @@ pub struct EventConsumerInit<Event> {
 }
 
 impl<Event> Into<(Vec<Receiver<Event>>, Sender<Request>)> for EventConsumerInit<Event> {
-	// fn from(channel_tuple: (Vec<Receiver<Event>>, Sender<Request>)) -> Self {
-	// 	EventConsumerInit {
-	// 		update_channels: channel_tuple.0,
-	// 		to_api: channel_tuple.1
-	// 	}
-	// }
 	fn into(self) -> (Vec<Receiver<Event>>, Sender<Request>) {
 		(self.update_channels, self.to_api)
 	}
@@ -160,15 +200,15 @@ impl EventStream for SubxtWrapper {
 async fn subxt_get_head(
 	api: &polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>,
 	maybe_hash: Option<H256>,
-) -> Result<Response, subxt::BasicError> {
-	Ok(Response::GetHeadResponse(api.client.rpc().header(maybe_hash).await?))
+) -> Result {
+	Ok(Response::GetHeadResponse(api.client.rpc().header(maybe_hash).await.map_err(Error::SubxtError)?))
 }
 
 async fn subxt_get_block_ts(
 	api: &polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>,
 	maybe_hash: Option<H256>,
-) -> Result<Response, subxt::BasicError> {
-	Ok(Response::GetBlockTimestampResponse(api.storage().timestamp().now(maybe_hash).await?))
+) -> Result {
+	Ok(Response::GetBlockTimestampResponse(api.storage().timestamp().now(maybe_hash).await.map_err(Error::SubxtError)?))
 }
 
 impl SubxtWrapper {
@@ -185,7 +225,7 @@ impl SubxtWrapper {
 
 	// Attempts to connect to websocket and returns an RuntimeApi instance if successful.
 	async fn new_client_fn(url: String) -> Option<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>> {
-		for i in 0..RETRY_COUNT {
+		for _ in 0..RETRY_COUNT {
 			match ClientBuilder::new()
 				.set_url(url.clone())
 				.build()
@@ -226,13 +266,13 @@ impl SubxtWrapper {
 
 				let response = if let Some(api) = api {
 					match request.request_type {
-						RequestType::GetBlockTimestamp(maybe_hash) =>
-							subxt_get_block_ts(api, maybe_hash).await.unwrap(),
-						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await.unwrap(),
+						RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
+						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
 					}
 				} else {
-					Response::InternalError
+					Err(Error::InternalError)
 				};
+
 				let _ = request.response_sender.send(response);
 			} else {
 				// channel closed, exit loop.
