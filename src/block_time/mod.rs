@@ -208,7 +208,7 @@ impl BlockTimeMonitor {
 							Ok(_) =>
 								receiver
 									.map(|result| {
-										if let Ok(Response::GetBlockTimestampResponse(Some(ts))) = result {
+										if let Ok(Response::GetBlockTimestampResponse(ts)) = result {
 											debug!("[{}] Block #{} timestamp: {}", url, head.number, ts);
 											Some((head, ts))
 										} else {
@@ -273,64 +273,59 @@ async fn populate_view(
 	let mut prev_block = 0u32;
 	let blocks_to_fetch = cli_opts.chart_width;
 
-	// Start from latest head.
-	let (sender, receiver) = oneshot::channel::<Response>();
-	to_api
-		.send(Request { url: url.to_owned(), request_type: RequestType::GetHead(None), response_sender: sender })
-		.await
-		.unwrap();
-
-	let mut maybe_header = match receiver.await.expect("Failed to fetch head.") {
-		Response::GetHeadResponse(maybe_header) => maybe_header,
-		_ => None,
-	};
-
+	let mut parent_hash = None;
 	for _ in 0..blocks_to_fetch {
-		if maybe_header.is_none() {
-			error!("[{}] Faield to get head, aborting.", url);
-			return
-		}
-		let header = maybe_header.unwrap();
-
 		let (sender, receiver) = oneshot::channel::<Response>();
 		to_api
 			.send(Request {
 				url: url.to_owned(),
-				request_type: RequestType::GetBlockTimestamp(Some(header.hash())),
+				request_type: RequestType::GetHead(parent_hash),
 				response_sender: sender,
 			})
 			.await
 			.unwrap();
 
-		let ts = match receiver.await.expect("Failed to fetch timestamp.") {
-			Response::GetBlockTimestampResponse(maybe_ts) => maybe_ts,
-			_ => None,
-		}
-		.unwrap();
-
-		if prev_block != 0 {
-			// We are walking backwards.
-			let block_time_ms = prev_ts.saturating_sub(ts);
-			values.lock().expect("Bad lock").insert(0, block_time_ms);
-		}
-
-		prev_ts = ts;
-		prev_block = header.number;
-
-		let (sender, receiver) = oneshot::channel::<Response>();
-		to_api
-			.send(Request {
-				url: url.to_owned(),
-				request_type: RequestType::GetHead(Some(header.parent_hash)),
-				response_sender: sender,
-			})
-			.await
-			.unwrap();
-
-		maybe_header = match receiver.await.expect("Failed to fetch head.") {
+		let mut maybe_header = match receiver.await.expect("Failed to fetch head.") {
 			Response::GetHeadResponse(maybe_header) => maybe_header,
 			_ => None,
 		};
+
+		if let Some(header) = maybe_header {
+			let (sender, receiver) = oneshot::channel::<Response>();
+			to_api
+				.send(Request {
+					url: url.to_owned(),
+					request_type: RequestType::GetBlockTimestamp(Some(header.hash())),
+					response_sender: sender,
+				})
+				.await
+				.unwrap();
+
+			prev_block = header.number;
+
+			let ts = match receiver.await.expect("Failed to fetch timestamp.") {
+				Response::GetBlockTimestampResponse(ts) => ts,
+				Response::SubxtError(err) => {
+					// Skip block.
+					warn!("Skipping block {} error: {:?}", prev_block, err);
+					continue
+				},
+				_ => {
+					// Skip block.
+					warn!("Skipping block {} ", prev_block);
+					continue
+				},
+			};
+
+			if prev_block != 0 {
+				// We are walking backwards.
+				let block_time_ms = prev_ts.saturating_sub(ts);
+				values.lock().expect("Bad lock").insert(0, block_time_ms);
+			}
+
+			prev_ts = ts;
+			parent_hash = Some(header.parent_hash);
+		}
 	}
 }
 

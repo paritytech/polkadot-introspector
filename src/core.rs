@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use futures::future;
 use log::{debug, error, info, warn};
 use sp_core::H256;
+use sp_runtime::traits::Lazy;
 use subxt::{ClientBuilder, DefaultConfig, DefaultExtra};
 
 use tokio::sync::{
@@ -30,6 +31,7 @@ use tokio::sync::{
 };
 
 use crate::polkadot;
+use std::collections::hash_map::{Entry, HashMap};
 
 const MAX_MSG_QUEUE_SIZE: usize = 1024;
 const RETRY_COUNT: usize = 3;
@@ -59,7 +61,7 @@ pub struct Request {
 	pub response_sender: oneshot::Sender<Response>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum RequestType {
 	GetBlockTimestamp(Option<<DefaultConfig as subxt::Config>::Hash>),
 	GetHead(Option<<DefaultConfig as subxt::Config>::Hash>),
@@ -67,8 +69,10 @@ pub enum RequestType {
 
 #[derive(Debug)]
 pub enum Response {
-	GetBlockTimestampResponse(Option<u64>),
+	GetBlockTimestampResponse(u64),
 	GetHeadResponse(Option<<DefaultConfig as subxt::Config>::Header>),
+	SubxtError(subxt::BasicError),
+	InternalError,
 }
 
 /// Implementing the above for `subxt` connectivity wrappers.
@@ -153,55 +157,18 @@ impl EventStream for SubxtWrapper {
 	}
 }
 
-async fn subxt_get_head(url: &str, maybe_hash: Option<H256>) -> Response {
-	for _ in 0..RETRY_COUNT {
-		match ClientBuilder::new()
-			.set_url(url)
-			.build()
-			.await
-			.context("Error connecting to substrate node")
-		{
-			Ok(api) => {
-				let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
-				match api.client.rpc().header(maybe_hash).await {
-					Ok(maybe_header) => return Response::GetHeadResponse(maybe_header),
-					Err(err) => {
-						error!("[{}] Failed to fetch head: {:?}", url, err);
-					},
-				}
-			},
-			Err(err) => {
-				error!("[{}] Client error: {:?}", url, err);
-			},
-		};
-		tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-	}
-	Response::GetHeadResponse(None)
+async fn subxt_get_head(
+	api: &polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>,
+	maybe_hash: Option<H256>,
+) -> Result<Response, subxt::BasicError> {
+	Ok(Response::GetHeadResponse(api.client.rpc().header(maybe_hash).await?))
 }
 
-async fn subxt_get_block_ts(url: &str, maybe_hash: Option<H256>) -> Response {
-	// TODO: move this up one level to dedup.
-	for _ in 0..RETRY_COUNT {
-		match ClientBuilder::new()
-			.set_url(url)
-			.build()
-			.await
-			.context("Error connecting to substrate node")
-		{
-			Ok(api) => {
-				let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
-				if let Ok(ts) = api.storage().timestamp().now(maybe_hash).await {
-					debug!("[{}] Get block {:?} timestamp: {}", url, maybe_hash, ts);
-					return Response::GetBlockTimestampResponse(Some(ts))
-				}
-			},
-			Err(err) => {
-				error!("[{}] Client error: {:?}", url, err);
-			},
-		};
-		tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-	}
-	Response::GetBlockTimestampResponse(None)
+async fn subxt_get_block_ts(
+	api: &polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>,
+	maybe_hash: Option<H256>,
+) -> Result<Response, subxt::BasicError> {
+	Ok(Response::GetBlockTimestampResponse(api.storage().timestamp().now(maybe_hash).await?))
 }
 
 impl SubxtWrapper {
@@ -216,15 +183,56 @@ impl SubxtWrapper {
 		});
 	}
 
+	// Attempts to connect to websocket and returns an RuntimeApi instance if successful.
+	async fn new_client_fn(url: String) -> Option<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>> {
+		for i in 0..RETRY_COUNT {
+			match ClientBuilder::new()
+				.set_url(url.clone())
+				.build()
+				.await
+				.context("Error connecting to substrate node")
+			{
+				Ok(api) =>
+					return Some(
+						api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>(),
+					),
+				Err(err) => {
+					error!("[{}] Client error: {:?}", url, err);
+					tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+					continue
+				},
+			};
+		}
+		None
+	}
+
 	// Per consumer API thread.
 	async fn api_handler_task(mut api: Receiver<Request>) {
+		let mut connection_pool = HashMap::new();
+
 		loop {
 			if let Some(request) = api.recv().await {
-				let response = match request.request_type {
-					RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(&request.url, maybe_hash).await,
-					RequestType::GetHead(maybe_hash) => subxt_get_head(&request.url, maybe_hash).await,
+				match connection_pool.entry(request.url.clone()) {
+					Entry::Occupied(_) => (),
+					Entry::Vacant(entry) => {
+						let maybe_api = Self::new_client_fn(request.url.clone()).await;
+						if let Some(api) = maybe_api {
+							entry.insert(api);
+						}
+					},
 				};
 
+				let api = connection_pool.get(&request.url.clone());
+
+				let response = if let Some(api) = api {
+					match request.request_type {
+						RequestType::GetBlockTimestamp(maybe_hash) =>
+							subxt_get_block_ts(api, maybe_hash).await.unwrap(),
+						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await.unwrap(),
+					}
+				} else {
+					Response::InternalError
+				};
 				let _ = request.response_sender.send(response);
 			} else {
 				// channel closed, exit loop.
