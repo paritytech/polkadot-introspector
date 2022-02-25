@@ -71,7 +71,7 @@ where
 		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
-		Ok(event.0 .0.clone())
+		Ok(event.0 .0)
 	}
 }
 
@@ -102,7 +102,7 @@ where
 		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
-		Ok(event.0 .0.clone())
+		Ok(event.0 .0)
 	}
 }
 
@@ -129,7 +129,7 @@ where
 		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
-		Ok(event.0 .0.clone())
+		Ok(event.0 .0)
 	}
 }
 

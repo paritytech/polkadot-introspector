@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions, BlockTimePrometheusOptions};
+use crate::{BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions};
 use color_eyre::eyre::WrapErr;
 use colored::Colorize;
 use crossterm::{
@@ -43,7 +43,7 @@ pub(crate) struct BlockTimeMonitor {
 
 impl BlockTimeMonitor {
 	pub(crate) fn new(opts: BlockTimeOptions) -> color_eyre::Result<Self> {
-		let endpoints: Vec<String> = opts.nodes.split(",").map(|s| s.to_owned()).collect();
+		let endpoints: Vec<String> = opts.nodes.split(',').map(|s| s.to_owned()).collect();
 		let mut values = Vec::new();
 		for _ in 0..endpoints.len() {
 			values.push(Default::default());
@@ -84,8 +84,8 @@ impl BlockTimeMonitor {
 	}
 
 	async fn display_charts(self) {
-		match self.opts.clone().mode {
-			BlockTimeMode::Cli(opts) => loop {
+		if let BlockTimeMode::Cli(opts) = self.opts.clone().mode {
+			loop {
 				let _ = stdout().queue(Clear(ClearType::All)).unwrap();
 				self.endpoints
 					.iter()
@@ -96,9 +96,8 @@ impl BlockTimeMonitor {
 					});
 				let _ = stdout().flush();
 				tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-			},
-			_ => {},
-		};
+			}
+		}
 	}
 
 	fn display_chart(uri: &str, row: u32, values: Arc<Mutex<VecDeque<u64>>>, opts: BlockTimeCliOptions) {
@@ -107,7 +106,7 @@ impl BlockTimeMonitor {
 		let _ = stdout().queue(cursor::MoveTo(0, row as u16));
 
 		if values.lock().expect("Bad lock").is_empty() {
-			return
+			return;
 		}
 
 		// Get last `term_width` blocks.
@@ -126,20 +125,17 @@ impl BlockTimeMonitor {
 		let max: f64 = scaled_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 		let last = *scaled_values.back().unwrap_or(&0.0);
 		let _ = stdout().write(
-			format!(
-				"{}",
-				plot(
-					scaled_values.into(),
-					Config::default().with_height(opts.chart_height as u32).with_caption(format!(
-						"[DATA: {}] [LAST: {}] [AVG: {}] [MIN: {}] [MAX: {}] [ {} ]",
-						format!("{}", blocks_to_show).bold(),
-						format!("{:.2}", last).bright_purple().underline(),
-						format!("{:.2}", avg).white().bold(),
-						format!("{:.2}", min).green().bold(),
-						format!("{:.2}", max).red().bold(),
-						format!("Block production latency via '{}'", uri).yellow(),
-					))
-				)
+			plot(
+				scaled_values.into(),
+				Config::default().with_height(opts.chart_height as u32).with_caption(format!(
+					"[DATA: {}] [LAST: {}] [AVG: {}] [MIN: {}] [MAX: {}] [ {} ]",
+					blocks_to_show.to_string().bold(),
+					format!("{:.2}", last).bright_purple().underline(),
+					format!("{:.2}", avg).white().bold(),
+					format!("{:.2}", min).green().bold(),
+					format!("{:.2}", max).red().bold(),
+					format!("Block production latency via '{}'", uri).yellow(),
+				)),
 			)
 			.as_bytes(),
 		);
@@ -192,9 +188,9 @@ impl BlockTimeMonitor {
 									values.lock().expect("Bad lock").push_back(block_time_ms);
 								},
 								BlockTimeMode::Prometheus(_) => {
-									metric
-										.clone()
-										.map(|metric| metric.with_label_values(&[uri]).observe(block_time_ms as f64));
+									if let Some(metric) = metric.clone() {
+										metric.with_label_values(&[uri]).observe(block_time_ms as f64)
+									}
 								},
 							}
 						} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
@@ -208,7 +204,9 @@ impl BlockTimeMonitor {
 							);
 						} else if prev_block == 0 {
 							// Just starting up - init metric.
-							metric.clone().map(|metric| metric.with_label_values(&[uri]).observe(0f64));
+							if let Some(metric) = metric.clone() {
+								metric.with_label_values(&[uri]).observe(0f64)
+							}
 						}
 						prev_ts = ts;
 						prev_block = header.number;
@@ -260,7 +258,7 @@ async fn populate_view(values: Arc<Mutex<VecDeque<u64>>>, uri: &str, cli_opts: B
 						Ok(maybe_header) => maybe_header.unwrap(),
 						Err(_) => break,
 					};
-					blocks_to_fetch = blocks_to_fetch - 1;
+					blocks_to_fetch -= 1;
 				}
 			},
 			Err(_) => {
@@ -268,7 +266,7 @@ async fn populate_view(values: Arc<Mutex<VecDeque<u64>>>, uri: &str, cli_opts: B
 			},
 		}
 		if blocks_to_fetch == 0 {
-			break
+			break;
 		}
 	}
 }
@@ -285,7 +283,7 @@ fn register_metric(registry: &Registry) -> HistogramVec {
 			&["node"],
 		)
 		.unwrap(),
-		&registry,
+		registry,
 	)
 	.expect("Failed to register metric")
 }

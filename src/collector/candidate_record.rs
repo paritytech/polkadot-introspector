@@ -164,11 +164,13 @@ where
 	T: Hash + Serialize,
 {
 	/// Returns if a candidate has been disputed
+	#[allow(dead_code)]
 	pub fn is_disputed(&self) -> bool {
 		self.candidate_disputed.is_some()
 	}
 
 	/// Returns inclusion time for a candidate
+	#[allow(dead_code)]
 	pub fn inclusion_time(&self) -> Option<Duration> {
 		match (self.candidate_inclusion.baked, self.candidate_inclusion.included) {
 			(Some(baked), Some(included)) => included.checked_sub(baked),
@@ -177,6 +179,7 @@ where
 	}
 
 	/// Returns dispute resolution time
+	#[allow(dead_code)]
 	pub fn dispute_resolution_time(&self) -> Option<Duration> {
 		self.candidate_disputed.as_ref().and_then(|disp| {
 			let concluded = disp.concluded.as_ref()?;
@@ -185,6 +188,7 @@ where
 	}
 
 	/// Returns a relay parent for a specific candidate
+	#[allow(dead_code)]
 	pub fn relay_parent(&self) -> Option<&T> {
 		let receipt = &self.candidate_receipt.as_ref()?;
 		let descriptor = &receipt.descriptor;
