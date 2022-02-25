@@ -146,7 +146,7 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 								expired += 1;
 							} else {
 								// Last known found
-								break;
+								break
 							}
 						},
 						// No elements left
