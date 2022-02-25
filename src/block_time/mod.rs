@@ -163,7 +163,7 @@ impl BlockTimeMonitor {
 		mut consumer_config: (Receiver<SubxtEvent>, Sender<Request>),
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
-		let url = as_static_str(url);
+		let url = leak_static_str(url);
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(_) => {},
 			BlockTimeMode::Cli(cli_opts) => {
@@ -250,7 +250,7 @@ async fn populate_view(
 	}
 }
 
-fn as_static_str(string: String) -> &'static str {
+fn leak_static_str(string: String) -> &'static str {
 	Box::leak(string.into_boxed_str())
 }
 
