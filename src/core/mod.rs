@@ -24,6 +24,7 @@
 //! TODO: retry logic needs to be improved - exponential backoff, cli options
 //! TODO: integration tests for polkadot/parachains.
 //! TODO: move prometheus into a module.
+//! TODO: decouple the Request/Responses from the subxt definitions.
 //! TODO: expose storage via event/api. Build a new event source such that new tools
 //! can be built by combining existing ones by listening to storage update events.
 

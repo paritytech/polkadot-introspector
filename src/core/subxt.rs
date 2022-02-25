@@ -15,19 +15,21 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use color_eyre::eyre::WrapErr;
-
 use async_trait::async_trait;
 use futures::future;
 use log::{error, info};
 use sp_core::H256;
 use subxt::{ClientBuilder, DefaultConfig, DefaultExtra};
 
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{
+	mpsc::{channel, Receiver, Sender},
+	oneshot,
+	oneshot::error::TryRecvError,
+};
 
 use super::{
-	Error, EventConsumerInit, EventStream, Request, RequestType, Response, Result, MAX_MSG_QUEUE_SIZE, RETRY_COUNT,
-	RETRY_DELAY_MS,
+	Error, EventConsumerInit, EventStream, Request, RequestType, Response, Result, API_RETRY_TIMEOUT_MS,
+	MAX_MSG_QUEUE_SIZE, RETRY_COUNT, RETRY_DELAY_MS,
 };
 use crate::polkadot;
 use std::collections::hash_map::{Entry, HashMap};
@@ -39,9 +41,10 @@ pub struct SubxtWrapper {
 	api: Vec<Receiver<Request>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum SubxtEvent {
 	NewHead(<DefaultConfig as subxt::Config>::Header),
+	// Event(subxt::Event EventContext<H256>)
 }
 
 #[async_trait]
@@ -114,12 +117,7 @@ impl SubxtWrapper {
 	// Attempts to connect to websocket and returns an RuntimeApi instance if successful.
 	async fn new_client_fn(url: String) -> Option<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>> {
 		for _ in 0..RETRY_COUNT {
-			match ClientBuilder::new()
-				.set_url(url.clone())
-				.build()
-				.await
-				.context("Error connecting to substrate node")
-			{
+			match ClientBuilder::new().set_url(url.clone()).build().await {
 				Ok(api) =>
 					return Some(
 						api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>(),
@@ -137,12 +135,29 @@ impl SubxtWrapper {
 	// Per consumer API task.
 	async fn api_handler_task(mut api: Receiver<Request>) {
 		let mut connection_pool = HashMap::new();
-
 		loop {
 			if let Some(request) = api.recv().await {
-				// Yes, this is an infinite loop if shit happens.
-				// TODO: add a self destruct timeout(exit/panic?) to the loop.
+				let (timeout_sender, mut timeout_receiver) = oneshot::channel::<bool>();
+
+				// Start API retry timeout task.
+				let timeout_task = tokio::spawn(async move {
+					tokio::time::sleep(std::time::Duration::from_millis(API_RETRY_TIMEOUT_MS)).await;
+					timeout_sender.send(true).expect("Sending timeout signal never fails.");
+				});
+
+				// Loop while the timeout task doesn't fire. Other errors will cancel this loop
 				loop {
+					match timeout_receiver.try_recv() {
+						Err(TryRecvError::Empty) => {},
+						Err(TryRecvError::Closed) => {
+							// Timeout task has exit unexpectedely. this shuld never happen.
+							panic!("API timeout task closed channel: {:?}", request);
+						},
+						Ok(_) => {
+							// Panic on timeout.
+							panic!("Request timed out: {:?}", request);
+						},
+					}
 					match connection_pool.entry(request.url.clone()) {
 						Entry::Occupied(_) => (),
 						Entry::Vacant(entry) => {
@@ -180,6 +195,7 @@ impl SubxtWrapper {
 
 					// We only break in the happy case.
 					let _ = request.response_sender.send(response);
+					timeout_task.abort();
 					break
 				}
 			} else {
@@ -192,12 +208,7 @@ impl SubxtWrapper {
 	// Per consumer
 	async fn run_per_node(update_channel: Sender<SubxtEvent>, url: String) {
 		loop {
-			match ClientBuilder::new()
-				.set_url(url.clone())
-				.build()
-				.await
-				.context("Error connecting to substrate node")
-			{
+			match ClientBuilder::new().set_url(url.clone()).build().await {
 				Ok(api) => {
 					let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
 					info!("[{}] Connected", url);
