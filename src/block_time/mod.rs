@@ -14,15 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions};
-use color_eyre::eyre::WrapErr;
+use crate::{
+	core::{EventConsumerInit, Request, RequestExecutor, SubxtEvent},
+	BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions,
+};
 use colored::Colorize;
 use crossterm::{
 	cursor,
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use futures::future;
 use log::{debug, error, info, warn};
 use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
@@ -30,20 +31,22 @@ use std::{
 	io::{stdout, Write},
 	sync::{Arc, Mutex},
 };
-use subxt::{ClientBuilder, DefaultConfig, DefaultExtra};
-
-use crate::polkadot;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 pub(crate) struct BlockTimeMonitor {
 	values: Vec<Arc<Mutex<VecDeque<u64>>>>,
 	opts: BlockTimeOptions,
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
+	consumer_config: EventConsumerInit<SubxtEvent>,
 }
 
 impl BlockTimeMonitor {
-	pub(crate) fn new(opts: BlockTimeOptions) -> color_eyre::Result<Self> {
-		let endpoints: Vec<String> = opts.nodes.split(',').map(|s| s.to_owned()).collect();
+	pub(crate) fn new(
+		opts: BlockTimeOptions,
+		consumer_config: EventConsumerInit<SubxtEvent>,
+	) -> color_eyre::Result<Self> {
+		let endpoints: Vec<String> = opts.nodes.split(",").map(|s| s.to_owned()).collect();
 		let mut values = Vec::new();
 		for _ in 0..endpoints.len() {
 			values.push(Default::default());
@@ -60,40 +63,47 @@ impl BlockTimeMonitor {
 				);
 				tokio::spawn(prometheus_endpoint::init_prometheus(socket_addr, prometheus_registry));
 
-				Ok(BlockTimeMonitor { values, opts, block_time_metric, endpoints })
+				Ok(BlockTimeMonitor { values, opts, block_time_metric, endpoints, consumer_config })
 			},
-			BlockTimeMode::Cli(_) => Ok(BlockTimeMonitor { values, opts, block_time_metric: None, endpoints }),
+			BlockTimeMode::Cli(_) => {
+				Ok(BlockTimeMonitor { values, opts, block_time_metric: None, endpoints, consumer_config })
+			},
 		}
 	}
 
-	pub(crate) async fn run(self) -> color_eyre::Result<()> {
+	pub(crate) async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+		let (consumer_channels, to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = self.consumer_config.into();
+
 		let mut futures = self
 			.endpoints
 			.clone()
 			.into_iter()
 			.zip(self.values.clone().into_iter())
-			.map(|(endpoint, values)| {
-				tokio::spawn(Self::watch_node(self.opts.clone(), endpoint, self.block_time_metric.clone(), values))
+			.zip(consumer_channels.into_iter())
+			.map(|((endpoint, values), update_channel)| {
+				tokio::spawn(Self::watch_node(
+					self.opts.clone(),
+					endpoint,
+					self.block_time_metric.clone(),
+					values,
+					(update_channel, to_api.clone()),
+				))
 			})
 			.collect::<Vec<_>>();
 
-		futures.push(tokio::spawn(self.display_charts()));
-		future::try_join_all(futures).await?;
+		futures.push(tokio::spawn(Self::display_charts(self.values.clone(), self.endpoints.clone(), self.opts)));
 
-		Ok(())
+		Ok(futures)
 	}
 
-	async fn display_charts(self) {
-		if let BlockTimeMode::Cli(opts) = self.opts.clone().mode {
+	// TODO: get rid of arc mutex and use channels.
+	async fn display_charts(values: Vec<Arc<Mutex<VecDeque<u64>>>>, endpoints: Vec<String>, opts: BlockTimeOptions) {
+		if let BlockTimeMode::Cli(opts) = opts.mode {
 			loop {
 				let _ = stdout().queue(Clear(ClearType::All)).unwrap();
-				self.endpoints
-					.iter()
-					.zip(self.values.iter())
-					.enumerate()
-					.for_each(|(i, (uri, values))| {
-						Self::display_chart(uri, (i * (opts.chart_height + 3)) as u32, values.clone(), opts.clone());
-					});
+				endpoints.iter().zip(values.iter()).enumerate().for_each(|(i, (uri, values))| {
+					Self::display_chart(uri, (i * (opts.chart_height + 3)) as u32, values.clone(), opts.clone());
+				});
 				let _ = stdout().flush();
 				tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 			}
@@ -143,45 +153,38 @@ impl BlockTimeMonitor {
 
 	async fn watch_node(
 		opts: BlockTimeOptions,
-		uri: String,
+		url: String,
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
+		// TODO: make this a struct.
+		mut consumer_config: (Receiver<SubxtEvent>, Sender<Request>),
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
-		let uri = as_static_str(uri);
+		let url = leak_static_str(url);
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(_) => {},
 			BlockTimeMode::Cli(cli_opts) => {
-				populate_view(values.clone(), uri, cli_opts).await;
+				populate_view(values.clone(), url, cli_opts, consumer_config.1.clone()).await;
 			},
 		}
+		let executor = RequestExecutor::new(consumer_config.1);
 
 		let mut prev_ts = 0;
 		let mut prev_block = 0u32;
+		// tokio::time::sleep(std::time::Duration::from_secs(3000)).await;
 
-		// Loop forever and retry WS connections.
 		loop {
-			match ClientBuilder::new()
-				.set_url(uri)
-				.build()
-				.await
-				.context("Error connecting to substrate node")
-			{
-				Ok(api) => {
-					let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
-					info!("[{}] Connected", uri);
-					let mut sub = api.client.rpc().subscribe_blocks().await.unwrap();
-
-					while let Some(ev_ctx) = sub.next().await {
-						let header = ev_ctx.unwrap();
-						debug!("[{}] Block #{} imported ({:?})", uri, header.number, header.hash());
-						let ts = api.storage().timestamp().now(Some(header.hash())).await.unwrap();
-						debug!("[{}] Block #{} timestamp: {}", uri, header.number, ts);
+			debug!("[{}] New loop - waiting for events", url);
+			if let Some(event) = consumer_config.0.recv().await {
+				debug!("New event: {:?}", event);
+				match event {
+					SubxtEvent::NewHead(header) => {
+						let ts = executor.get_block_timestamp(url.into(), Some(header.hash())).await;
 
 						if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
 							// We know a prev block and this is it's child
 							let block_time_ms = ts.saturating_sub(prev_ts);
-							info!("[{}] Block time of #{}: {} ms", uri, header.number, block_time_ms);
+							info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
 
 							match opts.mode {
 								BlockTimeMode::Cli(_) => {
@@ -189,7 +192,7 @@ impl BlockTimeMonitor {
 								},
 								BlockTimeMode::Prometheus(_) => {
 									if let Some(metric) = metric.clone() {
-										metric.with_label_values(&[uri]).observe(block_time_ms as f64)
+										metric.with_label_values(&[url]).observe(block_time_ms as f64)
 									}
 								},
 							}
@@ -199,79 +202,54 @@ impl BlockTimeMonitor {
 							// TODO(later later): Metrics tracking the missed blocks.
 							warn!(
 								"[{}] Missed {} blocks, likely because of WS connectivity issues",
-								uri,
+								url,
 								header.number.saturating_sub(prev_block).saturating_sub(1)
 							);
 						} else if prev_block == 0 {
 							// Just starting up - init metric.
 							if let Some(metric) = metric.clone() {
-								metric.with_label_values(&[uri]).observe(0f64)
+								metric.with_label_values(&[url]).observe(0f64)
 							}
 						}
 						prev_ts = ts;
 						prev_block = header.number;
-					}
-				},
-				Err(err) => {
-					error!("[{}] Disconnected ({:?}) ", uri, err);
-					tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-					info!("[{}] retrying connection ... ", uri);
-				},
+					},
+				}
+			} else {
+				error!("[{}] Update channel disconnected", url);
 			}
 		}
 	}
 }
 
-async fn populate_view(values: Arc<Mutex<VecDeque<u64>>>, uri: &str, cli_opts: BlockTimeCliOptions) {
-	let mut header;
+async fn populate_view(
+	values: Arc<Mutex<VecDeque<u64>>>,
+	url: &str,
+	cli_opts: BlockTimeCliOptions,
+	to_api: Sender<Request>,
+) {
 	let mut prev_ts = 0u64;
-	let mut prev_block = 0u32;
-	// Get last `term_width` blocks.
-	let mut blocks_to_fetch = cli_opts.chart_width;
-	// Loop for ws connection retry.
-	loop {
-		match ClientBuilder::new()
-			.set_url(uri)
-			.build()
-			.await
-			.context("Error connecting to substrate node")
-		{
-			Ok(api) => {
-				let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
-				header = api.client.rpc().header(None).await.unwrap().unwrap();
-				while blocks_to_fetch > 0 {
-					let ts = match api.storage().timestamp().now(Some(header.hash())).await {
-						Ok(ts) => ts,
-						Err(_) => break,
-					};
+	let blocks_to_fetch = cli_opts.chart_width;
+	let executor = RequestExecutor::new(to_api);
+	let mut parent_hash = None;
 
-					if prev_block != 0 {
-						// We are walking backwards.
-						let block_time_ms = prev_ts.saturating_sub(ts);
-						values.lock().expect("Bad lock").push_back(block_time_ms);
-					}
+	for _ in 0..blocks_to_fetch {
+		if let Some(header) = executor.get_block_head(url.into(), parent_hash).await {
+			let ts = executor.get_block_timestamp(url.into(), Some(header.hash())).await;
 
-					prev_ts = ts;
-					prev_block = header.number;
+			if prev_ts != 0 {
+				// We are walking backwards.
+				let block_time_ms = prev_ts.saturating_sub(ts);
+				values.lock().expect("Bad lock").insert(0, block_time_ms);
+			}
 
-					header = match api.client.rpc().header(Some(header.parent_hash)).await {
-						Ok(maybe_header) => maybe_header.unwrap(),
-						Err(_) => break,
-					};
-					blocks_to_fetch -= 1;
-				}
-			},
-			Err(_) => {
-				tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-			},
-		}
-		if blocks_to_fetch == 0 {
-			break;
+			prev_ts = ts;
+			parent_hash = Some(header.parent_hash);
 		}
 	}
 }
 
-fn as_static_str(string: String) -> &'static str {
+fn leak_static_str(string: String) -> &'static str {
 	Box::leak(string.into_boxed_str())
 }
 

@@ -16,7 +16,7 @@
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
-use log::LevelFilter;
+use log::{error, LevelFilter};
 mod collector;
 
 use collector::CollectorOptions;
@@ -25,6 +25,9 @@ use collector::CollectorOptions;
 pub mod polkadot {}
 
 mod block_time;
+mod core;
+
+use crate::core::EventStream;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -103,7 +106,13 @@ async fn main() -> color_eyre::Result<()> {
 			collector::run(opts).await?;
 		},
 		Command::BlockTimeMonitor(opts) => {
-			block_time::BlockTimeMonitor::new(opts)?.run().await?;
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(",").map(|s| s.to_owned()).collect());
+			let block_time_consumer_init = core.create_consumer();
+
+			match block_time::BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
+				Ok(futures) => core.run(futures).await?,
+				Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
+			}
 		},
 	}
 
