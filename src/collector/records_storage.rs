@@ -81,7 +81,7 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 
 		self.maybe_expire_elements();
 
-		return existing
+		existing
 	}
 
 	/// Gets a value with a specific key
@@ -115,7 +115,7 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 	// Internal expiration method
 	fn maybe_expire_elements(&mut self) -> usize {
 		let mut expired = 0;
-		self.cfg.max_records.map(|max_records| {
+		if let Some(max_records) = self.cfg.max_records {
 			while self.records_expiry_trace.len() > max_records {
 				let elt = self.records_expiry_trace.pop_back();
 
@@ -123,11 +123,11 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 					Some(elt) => self.records.remove(&elt.hash),
 					_ => break, // No more entries
 				};
-				expired = expired + 1;
+				expired += 1;
 			}
-		});
+		}
 
-		self.cfg.max_ttl.map(|max_ttl| {
+		if let Some(max_ttl) = self.cfg.max_ttl {
 			// We assume that elements on the back of the vector are the most old
 			let last_known: Duration = self
 				.records_expiry_trace
@@ -143,7 +143,7 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 							if threshold < last_known {
 								self.records.remove(&elt.hash);
 								self.records_expiry_trace.pop_back();
-								expired = expired + 1;
+								expired += 1;
 							} else {
 								// Last known found
 								break
@@ -154,7 +154,7 @@ impl<K: Hash + Clone + Eq, V: StorageEntry> RecordsStorage<K, V> {
 					}
 				}
 			}
-		});
+		}
 
 		expired
 	}

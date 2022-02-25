@@ -38,6 +38,8 @@ use typed_builder::TypedBuilder;
 pub type StorageType<T> = Mutex<RecordsStorage<T, CandidateRecord<T>>>;
 
 /// Trait used to update records according to various events
+/// Each subxt event is mapped to a corresponding specific CandidateRecordEvent allowing
+/// to update candidate state using different subxt events
 trait CandidateRecordEvent<T>
 where
 	T: Hash + Serialize,
@@ -50,6 +52,7 @@ where
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>>;
 }
 
+/// Candidate event for a dispute being initiated
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeInitiated
 where
 	T: Hash + Serialize,
@@ -68,10 +71,11 @@ where
 		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
-		Ok(event.0 .0.clone())
+		Ok(event.0 .0)
 	}
 }
 
+/// Candidate event for a dispute being concluded
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeConcluded
 where
 	T: Hash + Serialize,
@@ -86,8 +90,8 @@ where
 			Some(ref mut disputed) => match disputed.concluded {
 				None => {
 					let dispute_result = match event.1 {
-						RuntimeDisputeResult::Valid => DisputeOutcome::DisputeAgreed,
-						_ => DisputeOutcome::DisputeInvalid,
+						RuntimeDisputeResult::Valid => DisputeOutcome::Agreed,
+						_ => DisputeOutcome::Invalid,
 					};
 					disputed.concluded =
 						Some(DisputeResult { concluded_timestamp: check_unix_time()?, outcome: dispute_result });
@@ -98,10 +102,11 @@ where
 		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
-		Ok(event.0 .0.clone())
+		Ok(event.0 .0)
 	}
 }
 
+/// Candidate event for a dispute being timed out
 impl<T> CandidateRecordEvent<T> for polkadot::paras_disputes::events::DisputeTimedOut
 where
 	T: Hash + Serialize,
@@ -115,7 +120,7 @@ where
 				None => {
 					disputed.concluded = Some(DisputeResult {
 						concluded_timestamp: check_unix_time()?,
-						outcome: DisputeOutcome::DisputeTimedOut,
+						outcome: DisputeOutcome::TimedOut,
 					});
 					Ok(())
 				},
@@ -124,10 +129,11 @@ where
 		}
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
-		Ok(event.0 .0.clone())
+		Ok(event.0 .0)
 	}
 }
 
+/// Candidate event for candidate being baked for a parachain
 impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateBacked
 where
 	T: Hash + Serialize,
@@ -185,7 +191,7 @@ where
 	E: CandidateRecordEvent<T, Event = E, HashType = T>,
 	F: Fn(&RawEvent) -> Result<E, Box<dyn Error>>,
 {
-	Box::new(move |event, block, storage| {
+	Box::new(move |event, _block, storage| {
 		let decoded = decoder(event)?;
 		let hash = <E as CandidateRecordEvent<T>>::candidate_hash(&decoded)?;
 		let mut unlocked_storage = storage.lock().unwrap();
@@ -301,11 +307,9 @@ impl EventsHandler {
 	pub fn handle_runtime_event(&mut self, ev: &RawEvent, block_hash: &H256) -> Result<(), Box<dyn Error>> {
 		match self.pallets.0.get_mut(ev.pallet.as_str()) {
 			Some(ref mut pallet_handler) => {
-				let event_handler = pallet_handler.get_mut(ev.variant.as_str()).ok_or(eyre!(
-					"Unknown event {} in pallet {}",
-					ev.variant.as_str(),
-					ev.pallet.as_str()
-				))?;
+				let event_handler = pallet_handler
+					.get_mut(ev.variant.as_str())
+					.ok_or_else(|| eyre!("Unknown event {} in pallet {}", ev.variant.as_str(), ev.pallet.as_str()))?;
 				debug!("Got known raw event: {:?}", ev);
 				event_handler(ev, block_hash, self.storage.clone())
 			},

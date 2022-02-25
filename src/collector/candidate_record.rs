@@ -15,10 +15,10 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use super::records_storage::StorageEntry;
-use crate::polkadot;
+use crate::polkadot::runtime_types::polkadot_primitives::v1 as polkadot_rt_primitives;
 use serde::{
 	ser::{SerializeStruct, Serializer},
-	Serialize,
+	Deserialize, Serialize,
 };
 use serde_bytes::Bytes;
 
@@ -28,8 +28,10 @@ use std::{
 };
 
 /// Tracks candidate inclusion as seen by a node(s)
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CandidateInclusion<T: Hash> {
+	/// Parachain id (must be known if we have observed a candidate receipt)
+	pub parachain_id: Option<u32>,
 	/// Time when a candidate has been baked
 	pub baked: Option<Duration>,
 	/// Time when a candidate has been included
@@ -44,7 +46,7 @@ pub struct CandidateInclusion<T: Hash> {
 
 impl<T: Hash> Default for CandidateInclusion<T> {
 	fn default() -> Self {
-		Self { baked: None, included: None, timedout: None, core_idx: None, relay_parent: None }
+		Self { parachain_id: None, baked: None, included: None, timedout: None, core_idx: None, relay_parent: None }
 	}
 }
 
@@ -52,18 +54,18 @@ impl<T: Hash> Default for CandidateInclusion<T> {
 #[derive(Debug, Copy, Clone, Serialize)]
 pub enum DisputeOutcome {
 	/// Dispute has not been concluded yet
-	DisputeInProgress,
+	InProgress,
 	/// Dispute has been concluded as invalid
-	DisputeInvalid,
+	Invalid,
 	/// Dispute has beed concluded as valid
-	DisputeAgreed,
+	Agreed,
 	/// Dispute resolution has timed out
-	DisputeTimedOut,
+	TimedOut,
 }
 
 impl Default for DisputeOutcome {
 	fn default() -> Self {
-		DisputeOutcome::DisputeInProgress
+		DisputeOutcome::InProgress
 	}
 }
 
@@ -85,7 +87,7 @@ pub struct CandidateDisputed {
 	pub concluded: Option<DisputeResult>,
 }
 
-impl<T> Serialize for polkadot::runtime_types::polkadot_primitives::v1::CandidateDescriptor<T>
+impl<T> Serialize for polkadot_rt_primitives::CandidateDescriptor<T>
 where
 	T: Hash + Serialize,
 {
@@ -107,7 +109,7 @@ where
 	}
 }
 
-impl<T> Serialize for polkadot::runtime_types::polkadot_primitives::v1::CandidateReceipt<T>
+impl<T> Serialize for polkadot_rt_primitives::CandidateReceipt<T>
 where
 	T: Hash + Serialize,
 {
@@ -126,7 +128,7 @@ where
 #[derive(Debug, Serialize)]
 pub struct CandidateRecord<T: Hash + Serialize> {
 	/// Candidate receipt (if observed)
-	pub candidate_receipt: Option<polkadot::runtime_types::polkadot_primitives::v1::CandidateReceipt<T>>,
+	pub candidate_receipt: Option<polkadot_rt_primitives::CandidateReceipt<T>>,
 	/// The time we first observed a candidate since UnixEpoch
 	pub candidate_first_seen: Duration,
 	/// Inclusion data
@@ -162,11 +164,13 @@ where
 	T: Hash + Serialize,
 {
 	/// Returns if a candidate has been disputed
+	#[allow(dead_code)]
 	pub fn is_disputed(&self) -> bool {
 		self.candidate_disputed.is_some()
 	}
 
 	/// Returns inclusion time for a candidate
+	#[allow(dead_code)]
 	pub fn inclusion_time(&self) -> Option<Duration> {
 		match (self.candidate_inclusion.baked, self.candidate_inclusion.included) {
 			(Some(baked), Some(included)) => included.checked_sub(baked),
@@ -175,17 +179,23 @@ where
 	}
 
 	/// Returns dispute resolution time
+	#[allow(dead_code)]
 	pub fn dispute_resolution_time(&self) -> Option<Duration> {
-		self.candidate_disputed.as_ref().map_or(None, |disp| {
+		self.candidate_disputed.as_ref().and_then(|disp| {
 			let concluded = disp.concluded.as_ref()?;
 			concluded.concluded_timestamp.checked_sub(disp.disputed)
 		})
 	}
 
 	/// Returns a relay parent for a specific candidate
+	#[allow(dead_code)]
 	pub fn relay_parent(&self) -> Option<&T> {
 		let receipt = &self.candidate_receipt.as_ref()?;
 		let descriptor = &receipt.descriptor;
 		Some(&descriptor.relay_parent)
+	}
+
+	pub fn parachain_id(&self) -> Option<u32> {
+		self.candidate_inclusion.parachain_id
 	}
 }
