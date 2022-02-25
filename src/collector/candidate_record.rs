@@ -54,18 +54,18 @@ impl<T: Hash> Default for CandidateInclusion<T> {
 #[derive(Debug, Copy, Clone, Serialize)]
 pub enum DisputeOutcome {
 	/// Dispute has not been concluded yet
-	DisputeInProgress,
+	InProgress,
 	/// Dispute has been concluded as invalid
-	DisputeInvalid,
+	Invalid,
 	/// Dispute has beed concluded as valid
-	DisputeAgreed,
+	Agreed,
 	/// Dispute resolution has timed out
-	DisputeTimedOut,
+	TimedOut,
 }
 
 impl Default for DisputeOutcome {
 	fn default() -> Self {
-		DisputeOutcome::DisputeInProgress
+		DisputeOutcome::InProgress
 	}
 }
 
@@ -178,7 +178,7 @@ where
 
 	/// Returns dispute resolution time
 	pub fn dispute_resolution_time(&self) -> Option<Duration> {
-		self.candidate_disputed.as_ref().map_or(None, |disp| {
+		self.candidate_disputed.as_ref().and_then(|disp| {
 			let concluded = disp.concluded.as_ref()?;
 			concluded.concluded_timestamp.checked_sub(disp.disputed)
 		})

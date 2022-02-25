@@ -14,9 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::{candidate_record::*, event_handler::StorageType, RecordsStorage};
+use super::{event_handler::StorageType, records_storage::StorageEntry};
 
-use crate::collector::records_storage::StorageEntry;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use sp_core::H256;
@@ -54,6 +53,13 @@ struct CandidatesQuery {
 	parachain_id: Option<u32>,
 	/// Filter candidates by time
 	not_before: Option<u64>,
+}
+
+/// Used to handle requests to get a specific candidate info
+#[derive(Deserialize, Serialize)]
+struct CandidateGetQuery {
+	/// Candidate hash
+	hash: H256,
 }
 
 /// Used to handle requests with a health query
@@ -94,8 +100,14 @@ impl WebSocketListener {
 			.and(opt_candidates)
 			.and_then(candidates_handler);
 
+		let get_candidate_route = warp::path!("v1" / "candidate")
+			.and(with_storage(self.storage.clone()))
+			.and(warp::query::<CandidateGetQuery>())
+			.and_then(candidate_get_handler);
+
 		let routes = health_route
 			.or(candidates_route)
+			.or(get_candidate_route)
 			.with(warp::cors().allow_any_origin())
 			.recover(handle_rejection);
 		let server = warp::serve(routes);
@@ -182,6 +194,19 @@ async fn candidates_handler(
 	};
 
 	Ok(warp::reply::json(&CandidatesReply { candidates }))
+}
+
+async fn candidate_get_handler(
+	storage: Arc<StorageType<H256>>,
+	candidate_hash: CandidateGetQuery,
+) -> Result<impl Reply, Rejection> {
+	let storage_locked = storage.lock().unwrap();
+	let candidate_record = storage_locked.get(&candidate_hash.hash);
+
+	match candidate_record {
+		Some(rec) => Ok(warp::reply::json(rec).into_response()),
+		None => Ok(warp::reply::with_status("No such candidate", StatusCode::NOT_FOUND).into_response()),
+	}
 }
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
