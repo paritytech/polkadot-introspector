@@ -9,7 +9,7 @@ log = "0.4"
 codec = { package = "parity-scale-codec", version = "2", default-features = false, features = ["derive", "full", "bit-vec", "std"] }
 color-eyre = "0.6.0"
 clap = {version = "3.1.0", features = ["derive"]}
-subxt = { git = "https://github.com/paritytech/subxt", rev = "9f88761e4655efb575a04336dddf17059609a219" }
+subxt = { git = "https://github.com/paritytech/subxt", branch = "master" }
 tokio = { version = "1.14.0", features = ["macros", "rt-multi-thread"] }
 sp-runtime = {package = "sp-runtime", git = "https://github.com/paritytech/substrate/", branch = "master"}
 sp-core = {package = "sp-core", git = "https://github.com/paritytech/substrate/", branch = "master"}

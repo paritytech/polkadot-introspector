@@ -15,6 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
+use futures::StreamExt;
 use log::{info, warn};
 use sp_core::H256;
 use std::{
@@ -23,7 +24,7 @@ use std::{
 };
 use tokio::sync::oneshot;
 
-use subxt::{ClientBuilder, DefaultConfig, DefaultExtra, EventSubscription};
+use subxt::{ClientBuilder, DefaultConfig, DefaultExtra};
 
 mod candidate_record;
 mod event_handler;
@@ -85,14 +86,16 @@ pub(crate) async fn run(opts: CollectorOptions) -> color_eyre::Result<()> {
 		.spawn(rx)
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
-	let sub = api.client.rpc().subscribe_events().await?;
-	let decoder = api.client.events_decoder();
-	let mut sub = EventSubscription::<DefaultConfig>::new(sub, decoder);
-	while let Some(ev_ctx) = sub.next_context().await {
-		let ev_ctx = ev_ctx?;
-		let _ = events_handler
-			.handle_runtime_event(&ev_ctx.event, &ev_ctx.block_hash)
-			.map_err(|e| warn!("cannot handle event: {:?}", e));
+	let mut event_sub = api.events().subscribe().await?;
+	while let Some(events) = event_sub.next().await {
+		let events = events?;
+		let block_hash = events.block_hash();
+		for event in events.iter_raw() {
+			let event = event?;
+			let _ = events_handler
+				.handle_runtime_event(&event, &block_hash)
+				.map_err(|e| warn!("cannot handle event: {:?}", e));
+		}
 	}
 
 	let _ = tx.send(());

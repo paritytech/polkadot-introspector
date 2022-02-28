@@ -30,7 +30,7 @@ use std::{
 	sync::{Arc, Mutex},
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::RawEvent;
+use subxt::RawEventDetails;
 
 use typed_builder::TypedBuilder;
 
@@ -183,13 +183,13 @@ where
 }
 
 pub type EventDecoderFunctor<T> =
-	Box<dyn Fn(&RawEvent, &T, Arc<StorageType<T>>) -> Result<(), Box<dyn Error>> + 'static>;
+	Box<dyn Fn(&RawEventDetails, &T, Arc<StorageType<T>>) -> Result<(), Box<dyn Error>> + 'static>;
 
 fn gen_handle_event_functor<T, E, F>(decoder: &'static F) -> EventDecoderFunctor<T>
 where
 	T: Debug + Hash + Serialize + Clone + Eq + 'static,
 	E: CandidateRecordEvent<T, Event = E, HashType = T>,
-	F: Fn(&RawEvent) -> Result<E, Box<dyn Error>>,
+	F: Fn(&RawEventDetails) -> Result<E, Box<dyn Error>>,
 {
 	Box::new(move |event, _block, storage| {
 		let decoded = decoder(event)?;
@@ -224,7 +224,7 @@ impl Default for EventRouteMap {
 
 		disputes_routes.insert(
 			"DisputeInitiated",
-			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+			gen_handle_event_functor(&|ev: &RawEventDetails| -> Result<
 				polkadot::paras_disputes::events::DisputeInitiated,
 				Box<dyn Error>,
 			> {
@@ -234,7 +234,7 @@ impl Default for EventRouteMap {
 		);
 		disputes_routes.insert(
 			"DisputeConcluded",
-			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+			gen_handle_event_functor(&|ev: &RawEventDetails| -> Result<
 				polkadot::paras_disputes::events::DisputeConcluded,
 				Box<dyn Error>,
 			> {
@@ -244,7 +244,7 @@ impl Default for EventRouteMap {
 		);
 		disputes_routes.insert(
 			"DisputeTimedOut",
-			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+			gen_handle_event_functor(&|ev: &RawEventDetails| -> Result<
 				polkadot::paras_disputes::events::DisputeTimedOut,
 				Box<dyn Error>,
 			> {
@@ -258,7 +258,7 @@ impl Default for EventRouteMap {
 		let mut para_inclusion_routes: EventRoutesMap = HashMap::new();
 		para_inclusion_routes.insert(
 			"CandidateBacked",
-			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+			gen_handle_event_functor(&|ev: &RawEventDetails| -> Result<
 				polkadot::para_inclusion::events::CandidateBacked,
 				Box<dyn Error>,
 			> {
@@ -268,7 +268,7 @@ impl Default for EventRouteMap {
 		);
 		para_inclusion_routes.insert(
 			"CandidateIncluded",
-			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+			gen_handle_event_functor(&|ev: &RawEventDetails| -> Result<
 				polkadot::para_inclusion::events::CandidateIncluded,
 				Box<dyn Error>,
 			> {
@@ -278,7 +278,7 @@ impl Default for EventRouteMap {
 		);
 		para_inclusion_routes.insert(
 			"CandidateTimedOut",
-			gen_handle_event_functor(&|ev: &RawEvent| -> Result<
+			gen_handle_event_functor(&|ev: &RawEventDetails| -> Result<
 				polkadot::para_inclusion::events::CandidateTimedOut,
 				Box<dyn Error>,
 			> {
@@ -304,7 +304,7 @@ pub struct EventsHandler {
 }
 
 impl EventsHandler {
-	pub fn handle_runtime_event(&mut self, ev: &RawEvent, block_hash: &H256) -> Result<(), Box<dyn Error>> {
+	pub fn handle_runtime_event(&mut self, ev: &RawEventDetails, block_hash: &H256) -> Result<(), Box<dyn Error>> {
 		match self.pallets.0.get_mut(ev.pallet.as_str()) {
 			Some(ref mut pallet_handler) => {
 				let event_handler = pallet_handler
