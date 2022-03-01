@@ -212,6 +212,7 @@ impl BlockTimeMonitor {
 						prev_ts = ts;
 						prev_block = header.number;
 					},
+					_ => continue,
 				}
 			} else {
 				error!("[{}] Update channel disconnected", url);

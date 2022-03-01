@@ -44,7 +44,7 @@ pub struct SubxtWrapper {
 #[derive(Debug)]
 pub enum SubxtEvent {
 	NewHead(<DefaultConfig as subxt::Config>::Header),
-	// Event(subxt::Event EventContext<H256>)
+	// TODO: RawEvent(subxt::RawEventDetails),
 }
 
 #[async_trait]
@@ -62,8 +62,7 @@ impl EventStream for SubxtWrapper {
 			update_channels.push(channel(MAX_MSG_QUEUE_SIZE));
 		}
 
-		let (update_tx, update_channels): (Vec<Sender<Self::Event>>, Vec<Receiver<Self::Event>>) =
-			update_channels.into_iter().unzip();
+		let (update_tx, update_channels) = update_channels.into_iter().unzip();
 
 		// Keep per url update senders for this consumer.
 		self.consumers.push(update_tx);
@@ -76,10 +75,9 @@ impl EventStream for SubxtWrapper {
 		let futures = self
 			.consumers
 			.into_iter()
-			.map(|update_channels| Self::run_per_consumer(update_channels, self.urls.clone()))
-			.collect::<Vec<_>>();
+			.map(|update_channels| Self::run_per_consumer(update_channels, self.urls.clone()));
 
-		let mut flat_futures = futures.into_iter().flat_map(|e| e).collect::<Vec<_>>();
+		let mut flat_futures = futures.flatten().collect::<Vec<_>>();
 		flat_futures.push(tokio::spawn(Self::setup_api_handler(self.api)));
 		flat_futures.extend(tasks);
 		future::try_join_all(flat_futures).await?;
