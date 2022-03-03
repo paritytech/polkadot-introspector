@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use super::records_storage::StorageEntry;
-use crate::polkadot::runtime_types::polkadot_primitives::v1 as polkadot_rt_primitives;
+use crate::core::polkadot::runtime_types::polkadot_primitives::v1 as polkadot_rt_primitives;
 use serde::{
 	ser::{SerializeStruct, Serializer},
 	Deserialize, Serialize,

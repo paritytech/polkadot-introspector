@@ -17,21 +17,19 @@
 use clap::Parser;
 use futures::StreamExt;
 use log::{info, warn};
-use sp_core::H256;
 use std::{
 	net::SocketAddr,
 	sync::{Arc, Mutex},
 };
+use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, DefaultExtra};
 use tokio::sync::oneshot;
-
-use subxt::{ClientBuilder, DefaultConfig, DefaultExtra};
 
 mod candidate_record;
 mod event_handler;
 mod records_storage;
 mod ws;
 
-use crate::polkadot;
+use crate::core::polkadot;
 use candidate_record::*;
 use color_eyre::eyre::{eyre, WrapErr};
 use event_handler::*;

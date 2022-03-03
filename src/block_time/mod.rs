@@ -65,8 +65,9 @@ impl BlockTimeMonitor {
 
 				Ok(BlockTimeMonitor { values, opts, block_time_metric, endpoints, consumer_config })
 			},
-			BlockTimeMode::Cli(_) =>
-				Ok(BlockTimeMonitor { values, opts, block_time_metric: None, endpoints, consumer_config }),
+			BlockTimeMode::Cli(_) => {
+				Ok(BlockTimeMonitor { values, opts, block_time_metric: None, endpoints, consumer_config })
+			},
 		}
 	}
 
@@ -115,7 +116,7 @@ impl BlockTimeMonitor {
 		let _ = stdout().queue(cursor::MoveTo(0, row as u16));
 
 		if values.lock().expect("Bad lock").is_empty() {
-			return
+			return;
 		}
 
 		// Get last `term_width` blocks.
@@ -189,10 +190,11 @@ impl BlockTimeMonitor {
 								BlockTimeMode::Cli(_) => {
 									values.lock().expect("Bad lock").push_back(block_time_ms);
 								},
-								BlockTimeMode::Prometheus(_) =>
+								BlockTimeMode::Prometheus(_) => {
 									if let Some(metric) = metric.clone() {
 										metric.with_label_values(&[url]).observe(block_time_ms as f64)
-									},
+									}
+								},
 							}
 						} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
 							// We know a prev block, but the diff is > 1. We lost blocks.
@@ -212,7 +214,6 @@ impl BlockTimeMonitor {
 						prev_ts = ts;
 						prev_block = header.number;
 					},
-					_ => continue,
 				}
 			} else {
 				error!("[{}] Update channel disconnected", url);

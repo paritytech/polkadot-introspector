@@ -17,11 +17,9 @@
 //! Subxt events handlers implementation
 
 use super::{candidate_record::*, records_storage::RecordsStorage};
-use crate::{eyre, polkadot};
+use crate::{core::polkadot, eyre};
 use log::debug;
 use serde::Serialize;
-use sp_core::H256;
-use sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash};
 use std::{
 	collections::HashMap,
 	error::Error,
@@ -30,7 +28,11 @@ use std::{
 	sync::{Arc, Mutex},
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::RawEventDetails;
+use subxt::{
+	sp_core::H256,
+	sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
+	RawEventDetails,
+};
 
 use typed_builder::TypedBuilder;
 

@@ -21,9 +21,6 @@ mod collector;
 
 use collector::CollectorOptions;
 
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
-pub mod polkadot {}
-
 mod block_time;
 mod core;
 
