@@ -72,7 +72,7 @@ fmt:
   <<:                              *common-refs
   script:
     - time cargo +nightly fmt --all -- --check
-  # Remove me
+  # Remove me when pipeline stabilizes
   allow_failure:                   true
 
 clippy:
@@ -81,7 +81,7 @@ clippy:
   <<:                              *common-refs
   script:
     - time cargo +nightly clippy --all-targets -- -D warnings
-  # Remove me
+  # Remove me when pipeline stabilizes
   allow_failure:                   true
 
 check:
