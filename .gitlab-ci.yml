@@ -71,7 +71,7 @@ fmt:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - cargo +nightly fmt --all -- --check
+    - time cargo +nightly fmt --all -- --check
   # Remove me
   allow_failure:                   true
 
@@ -80,7 +80,7 @@ clippy:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - cargo +nightly clippy --all-targets -- -D warnings
+    - time cargo +nightly clippy --all-targets -- -D warnings
   # Remove me
   allow_failure:                   true
 
@@ -89,7 +89,7 @@ check:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - cargo +nightly check --all-targets --all-features --workspace
+    - time cargo +nightly check --all-targets --all-features --workspace
 
 #### stage:                       test
 
@@ -98,7 +98,7 @@ test:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - cargo test --all-targets --workspace
+    - time cargo test --all-targets --workspace
 
 #### stage:                       build
 
@@ -107,4 +107,4 @@ build:
   <<:                              *common-refs
   <<:                              *docker-env
   script:
-    - cargo build --release
+    - time cargo build --release
