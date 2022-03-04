@@ -72,6 +72,7 @@ enum Command {
 }
 
 #[derive(Debug, Parser)]
+#[clap(author, version)]
 pub(crate) struct IntrospectorCli {
 	#[clap(subcommand)]
 	pub command: Command,
