@@ -22,7 +22,7 @@ use std::{
 	sync::{Arc, Mutex},
 };
 use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, DefaultExtra};
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 
 mod candidate_record;
 mod event_handler;
@@ -67,7 +67,8 @@ impl From<CollectorOptions> for RecordsStorageConfig {
 
 pub(crate) async fn run(opts: CollectorOptions) -> color_eyre::Result<()> {
 	let records_storage = Arc::new(Mutex::new(RecordsStorage::<H256, CandidateRecord<H256>>::new(opts.clone().into())));
-	let (tx, rx) = oneshot::channel();
+	let (shutdown_tx, shutdown_rx) = oneshot::channel();
+	let (updates_tx, mut updates_rx) = broadcast::channel(32);
 
 	// TODO: might be useful to process multiple nodes in different tasks
 	let api = ClientBuilder::new()
@@ -77,11 +78,14 @@ pub(crate) async fn run(opts: CollectorOptions) -> color_eyre::Result<()> {
 		.context("Error connecting to substrate node")?
 		.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
 	info!("Connected to a substrate node {}", &opts.url);
-	let mut events_handler = EventsHandler::builder().storage(records_storage.clone()).build();
+	let mut events_handler = EventsHandler::builder()
+		.storage(records_storage.clone())
+		.broadcast_tx(updates_tx)
+		.build();
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
 
 	let _ = ws_listener
-		.spawn(rx)
+		.spawn(shutdown_rx)
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
 	let mut event_sub = api.events().subscribe().await?;
@@ -96,7 +100,7 @@ pub(crate) async fn run(opts: CollectorOptions) -> color_eyre::Result<()> {
 		}
 	}
 
-	let _ = tx.send(());
+	let _ = shutdown_tx.send(());
 
 	Ok(())
 }

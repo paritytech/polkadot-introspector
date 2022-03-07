@@ -199,3 +199,17 @@ where
 		self.candidate_inclusion.parachain_id
 	}
 }
+
+/// A type for updates propagation
+#[derive(Clone, Debug, Serialize)]
+pub enum CandidateRecordUpdate<T>
+where
+	T: Hash + Serialize,
+{
+	/// A candidate has been baked
+	Baked(T),
+	/// A candidate has been included
+	Included(T),
+	/// A candidate has been disputed
+	Disputed(T, DisputeOutcome),
+}
