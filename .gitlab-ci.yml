@@ -14,7 +14,7 @@ stages:
   - tag
   - publish
 
-variables:                         &default-vars
+variables:
   GIT_STRATEGY:                    fetch
   GIT_DEPTH:                       100
   CARGO_INCREMENTAL:               0
