@@ -22,10 +22,9 @@ RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /usr/bin /usr/sbin && \
     # Sanity Check
-    # To be replaced by --version
-	/usr/local/bin/polkadot-introspector --help
+	/usr/local/bin/polkadot-introspector --version
 
 USER polkadot-introspector
-EXPOSE 9615
+
 
 ENTRYPOINT ["/usr/local/bin/polkadot-introspector"]
