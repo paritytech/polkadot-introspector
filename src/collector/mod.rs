@@ -85,7 +85,7 @@ pub(crate) async fn run(opts: CollectorOptions) -> color_eyre::Result<()> {
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
 
 	let _ = ws_listener
-		.spawn(shutdown_rx)
+		.spawn(shutdown_rx, updates_rx)
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
 	let mut event_sub = api.events().subscribe().await?;
