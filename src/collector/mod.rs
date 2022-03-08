@@ -15,23 +15,27 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use futures::StreamExt;
-use log::{info, warn};
-use std::{
-	net::SocketAddr,
-	sync::{Arc, Mutex},
+use futures::TryFutureExt;
+use log::{debug, error, warn};
+use std::ops::DerefMut;
+use std::{net::SocketAddr, sync::Arc};
+use subxt::sp_core::H256;
+use tokio::{
+	signal,
+	sync::{
+		mpsc::{Receiver, Sender},
+		oneshot, Mutex,
+	},
 };
-use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, DefaultExtra};
-use tokio::sync::oneshot;
 
 mod candidate_record;
 mod event_handler;
 mod records_storage;
 mod ws;
 
-use crate::core::polkadot;
+use crate::core::{EventConsumerInit, Request, SubxtEvent};
 use candidate_record::*;
-use color_eyre::eyre::{eyre, WrapErr};
+use color_eyre::eyre::eyre;
 use event_handler::*;
 use records_storage::*;
 use ws::*;
@@ -39,9 +43,8 @@ use ws::*;
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct CollectorOptions {
-	/// Websockets url of a substrate node
-	#[clap(name = "url", long, default_value = "ws://localhost:9944")]
-	url: String,
+	#[clap(name = "ws", long, default_value = "wss://westmint-rpc.polkadot.io:443")]
+	pub nodes: String,
 	/// Maximum candidates to store
 	#[clap(name = "max-candidates", long)]
 	max_candidates: Option<usize>,
@@ -65,38 +68,57 @@ impl From<CollectorOptions> for RecordsStorageConfig {
 	}
 }
 
-pub(crate) async fn run(opts: CollectorOptions) -> color_eyre::Result<()> {
+pub(crate) async fn run(
+	opts: CollectorOptions,
+	consumer_config: EventConsumerInit<SubxtEvent>,
+) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 	let records_storage = Arc::new(Mutex::new(RecordsStorage::<H256, CandidateRecord<H256>>::new(opts.clone().into())));
 	let (tx, rx) = oneshot::channel();
 
-	// TODO: might be useful to process multiple nodes in different tasks
-	let api = ClientBuilder::new()
-		.set_url(opts.url.clone())
-		.build()
-		.await
-		.context("Error connecting to substrate node")?
-		.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
-	info!("Connected to a substrate node {}", &opts.url);
-	let mut events_handler = EventsHandler::builder().storage(records_storage.clone()).build();
-	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
+	let endpoints: Vec<String> = opts.nodes.split(",").map(|s| s.to_owned()).collect();
 
+	let (consumer_channels, _to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = consumer_config.into();
+
+	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
 	let _ = ws_listener
 		.spawn(rx)
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
-	let mut event_sub = api.events().subscribe().await?;
-	while let Some(events) = event_sub.next().await {
-		let events = events?;
-		let block_hash = events.block_hash();
-		for event in events.iter_raw() {
-			let event = event?;
-			let _ = events_handler
-				.handle_runtime_event(&event, &block_hash)
-				.map_err(|e| warn!("cannot handle event: {:?}", e));
-		}
-	}
 
-	let _ = tx.send(());
+	let events_handler = Arc::new(Mutex::new(EventsHandler::builder().storage(records_storage.clone()).build()));
 
-	Ok(())
+	let mut futures = endpoints
+		.into_iter()
+		.zip(consumer_channels.into_iter())
+		.map(|(endpoint, mut update_channel)| {
+			let events_handler = events_handler.clone();
+			tokio::spawn(async move {
+				loop {
+					debug!("[{}] New loop - waiting for events", endpoint);
+					if let Some(event) = update_channel.recv().await {
+						debug!("New event: {:?}", event);
+						match event {
+							SubxtEvent::RawEvent(hash, raw_ev) => {
+								let _ = events_handler
+									.lock()
+									.await
+									.deref_mut()
+									.handle_runtime_event(&raw_ev, &hash)
+									.map_err(|e| warn!("cannot handle event: {:?}", e));
+							},
+							_ => continue,
+						}
+					} else {
+						error!("[{}] Update channel disconnected", endpoint);
+					}
+				}
+			})
+		})
+		.collect::<Vec<_>>();
+
+	futures.push(tokio::spawn(async move {
+		signal::ctrl_c().await.unwrap();
+		let _ = tx.send(());
+	}));
+	Ok(futures)
 }

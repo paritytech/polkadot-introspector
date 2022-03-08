@@ -101,7 +101,10 @@ async fn main() -> color_eyre::Result<()> {
 
 	match opts.command {
 		Command::Collector(opts) => {
-			collector::run(opts).await?;
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(",").map(|s| s.to_owned()).collect());
+			let collector_consumer_init = core.create_consumer();
+
+			collector::run(opts, collector_consumer_init).await?;
 		},
 		Command::BlockTimeMonitor(opts) => {
 			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(",").map(|s| s.to_owned()).collect());
