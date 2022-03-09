@@ -16,15 +16,16 @@
 
 use clap::Parser;
 use futures::TryFutureExt;
-use log::{debug, error, warn};
+use log::{debug, info, warn};
 use std::ops::DerefMut;
 use std::{net::SocketAddr, sync::Arc};
 use subxt::sp_core::H256;
 use tokio::{
 	signal,
 	sync::{
+		broadcast,
 		mpsc::{Receiver, Sender},
-		oneshot, Mutex,
+		Mutex,
 	},
 };
 
@@ -73,7 +74,7 @@ pub(crate) async fn run(
 	consumer_config: EventConsumerInit<SubxtEvent>,
 ) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 	let records_storage = Arc::new(Mutex::new(RecordsStorage::<H256, CandidateRecord<H256>>::new(opts.clone().into())));
-	let (tx, rx) = oneshot::channel();
+	let (tx, rx) = broadcast::channel(1);
 
 	let endpoints: Vec<String> = opts.nodes.split(",").map(|s| s.to_owned()).collect();
 
@@ -92,24 +93,29 @@ pub(crate) async fn run(
 		.zip(consumer_channels.into_iter())
 		.map(|(endpoint, mut update_channel)| {
 			let events_handler = events_handler.clone();
+			let mut shutdown_rx = tx.subscribe();
 			tokio::spawn(async move {
 				loop {
 					debug!("[{}] New loop - waiting for events", endpoint);
-					if let Some(event) = update_channel.recv().await {
-						debug!("New event: {:?}", event);
-						match event {
-							SubxtEvent::RawEvent(hash, raw_ev) => {
-								let _ = events_handler
-									.lock()
-									.await
-									.deref_mut()
-									.handle_runtime_event(&raw_ev, &hash)
-									.map_err(|e| warn!("cannot handle event: {:?}", e));
-							},
-							_ => continue,
+					tokio::select! {
+						Some(event) = update_channel.recv() => {
+							debug!("New event: {:?}", event);
+							match event {
+								SubxtEvent::RawEvent(hash, raw_ev) => {
+									let _ = events_handler
+										.lock()
+										.await
+										.deref_mut()
+										.handle_runtime_event(&raw_ev, &hash)
+										.map_err(|e| warn!("cannot handle event: {:?}", e));
+								},
+								_ => continue,
+							};
+						},
+						_ = shutdown_rx.recv() => {
+							info!("shutting down");
+							break;
 						}
-					} else {
-						error!("[{}] Update channel disconnected", endpoint);
 					}
 				}
 			})

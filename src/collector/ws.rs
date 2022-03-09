@@ -29,7 +29,7 @@ use std::{
 	time::{SystemTime, UNIX_EPOCH},
 };
 use subxt::sp_core::H256;
-use tokio::sync::oneshot::Receiver;
+use tokio::sync::broadcast::Receiver;
 use typed_builder::TypedBuilder;
 use warp::{http::StatusCode, Filter, Rejection, Reply};
 
@@ -85,9 +85,9 @@ impl WebSocketListener {
 	}
 
 	/// Spawn an async HTTP server
-	pub async fn spawn<T>(self, shutdown_recv: Receiver<T>) -> Result<(), Box<dyn Error + Sync + Send>>
+	pub async fn spawn<T>(self, mut shutdown_recv: Receiver<T>) -> Result<(), Box<dyn Error + Sync + Send>>
 	where
-		T: Send + 'static,
+		T: Send + 'static + Clone,
 	{
 		let has_sane_tls = self.config.privkey.is_some() && self.config.cert.is_some();
 
@@ -125,14 +125,14 @@ impl WebSocketListener {
 			let cert = fs::read(self.config.cert.unwrap()).expect("cannot read privkey file");
 			let tls_server = server.tls().cert(cert).key(privkey);
 			// TODO: understand why there is no `try_bind_with_graceful_shutdown` for TLSServer in Warp
-			let (_, server_fut) = tls_server.bind_with_graceful_shutdown(self.config.listen_addr, async {
-				shutdown_recv.await.ok();
+			let (_, server_fut) = tls_server.bind_with_graceful_shutdown(self.config.listen_addr, async move {
+				shutdown_recv.recv().await.ok();
 			});
 
 			tokio::task::spawn(server_fut);
 		} else {
-			let (_, server_fut) = server.try_bind_with_graceful_shutdown(self.config.listen_addr, async {
-				shutdown_recv.await.ok();
+			let (_, server_fut) = server.try_bind_with_graceful_shutdown(self.config.listen_addr, async move {
+				shutdown_recv.recv().await.ok();
 			})?;
 
 			tokio::task::spawn(server_fut);

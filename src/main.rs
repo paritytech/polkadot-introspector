@@ -104,7 +104,10 @@ async fn main() -> color_eyre::Result<()> {
 			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(",").map(|s| s.to_owned()).collect());
 			let collector_consumer_init = core.create_consumer();
 
-			collector::run(opts, collector_consumer_init).await?;
+			match collector::run(opts, collector_consumer_init).await {
+				Ok(futures) => core.run(futures).await?,
+				Err(err) => error!("FATAL: cannot start collector: {}", err),
+			}
 		},
 		Command::BlockTimeMonitor(opts) => {
 			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(",").map(|s| s.to_owned()).collect());
