@@ -20,12 +20,13 @@ use super::{candidate_record::*, records_storage::RecordsStorage};
 use crate::{core::polkadot, eyre};
 use log::debug;
 use serde::Serialize;
+use std::ops::DerefMut;
 use std::{
 	collections::HashMap,
 	error::Error,
 	fmt::Debug,
 	hash::Hash,
-	sync::{Arc, Mutex},
+	sync::Arc,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::{
@@ -33,6 +34,7 @@ use subxt::{
 	sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
 	RawEventDetails,
 };
+use tokio::sync::Mutex;
 
 use tokio::sync::broadcast::Sender;
 
@@ -211,31 +213,34 @@ where
 }
 
 pub type EventDecoderFunctor<T> = Box<
-	dyn Fn(&RawEventDetails, &T, Arc<StorageType<T>>) -> Result<Option<CandidateRecordUpdate<T>>, Box<dyn Error>>
-		+ 'static,
+	dyn Fn(
+			&RawEventDetails,
+			&T,
+			&mut RecordsStorage<T, CandidateRecord<T>>,
+		) -> Result<Option<CandidateRecordUpdate<T>>, Box<dyn Error>>
+		+ 'static
+		+ Send,
 >;
 
 fn gen_handle_event_functor<T, E, F>(decoder: &'static F) -> EventDecoderFunctor<T>
 where
 	T: Debug + Hash + Serialize + Clone + Eq + 'static,
 	E: CandidateRecordEvent<T, Event = E, HashType = T>,
-	F: Fn(&RawEventDetails) -> Result<E, Box<dyn Error>>,
+	F: Fn(&RawEventDetails) -> Result<E, Box<dyn Error>> + Sync,
 {
 	Box::new(move |event, _block, storage| {
 		let decoded = decoder(event)?;
 		let hash = <E as CandidateRecordEvent<T>>::candidate_hash(&decoded)?;
-		let mut unlocked_storage = storage.lock().unwrap();
-		let maybe_record = unlocked_storage.get_mut(&hash);
-		let res = match maybe_record {
+		let maybe_record = storage.get_mut(&hash);
+		match maybe_record {
 			Some(record) => <E as CandidateRecordEvent<T>>::update_candidate(record, &decoded),
 			None => {
 				let mut record: CandidateRecord<T> = Default::default();
 				let res = <E as CandidateRecordEvent<T>>::update_candidate(&mut record, &decoded);
-				unlocked_storage.insert(hash, record);
+				storage.insert(hash, record);
 				res
 			},
-		};
-		res
+		}
 	})
 }
 
@@ -327,7 +332,7 @@ impl Default for EventRouteMap {
 pub struct EventsHandler {
 	/// Event handlers by pallet
 	#[builder(default)]
-	pallets: EventRouteMap,
+	pallets: Arc<Mutex<EventRouteMap>>,
 	/// Non generic storage as we are really limited to H256 by subxt so far
 	storage: Arc<StorageType<H256>>,
 	/// Broadcast channel
@@ -335,14 +340,18 @@ pub struct EventsHandler {
 }
 
 impl EventsHandler {
-	pub fn handle_runtime_event(&mut self, ev: &RawEventDetails, block_hash: &H256) -> Result<(), Box<dyn Error>> {
-		match self.pallets.0.get_mut(ev.pallet.as_str()) {
+	pub async fn handle_runtime_event(
+		&mut self,
+		ev: &RawEventDetails,
+		block_hash: &H256,
+	) -> Result<(), Box<dyn Error>> {
+		match self.pallets.lock().await.0.get_mut(ev.pallet.as_str()) {
 			Some(ref mut pallet_handler) => {
 				let event_handler = pallet_handler
 					.get_mut(ev.variant.as_str())
 					.ok_or_else(|| eyre!("Unknown event {} in pallet {}", ev.variant.as_str(), ev.pallet.as_str()))?;
 				debug!("Got known raw event: {:?}", ev);
-				let update_ev = event_handler(ev, block_hash, self.storage.clone())?;
+				let update_ev = event_handler(ev, block_hash, &mut self.storage.clone().lock().await.deref_mut())?;
 
 				match update_ev {
 					Some(update_ev) => {

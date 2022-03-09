@@ -18,7 +18,7 @@ runtime events. The primary goal of this mode is to provide a backend for parach
 * (WIP) Availability distribution
 * (WIP) Approval votes
 
-`cargo run --release --  -vvv collector --url wss://rpc.polkadot.io:443 --listen-addr 127.0.0.1:3030`
+`cargo run --release --  -vvv collector --url wss://rpc.polkadot.io:443 --listen 127.0.0.1:3030`
 
 The collector provides both websocket API for subscription to the runtime events filtered and the
 historical data API to obtain and query the existing state.
