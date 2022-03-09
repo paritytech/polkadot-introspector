@@ -213,7 +213,7 @@ impl SubxtWrapper {
 					let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
 					info!("[{}] Connected", url);
 					match api.events().subscribe().await {
-						Ok(mut sub) => {
+						Ok(mut sub) => loop {
 							tokio::select! {
 								Some(events) = sub.next() => {
 									let events = events.unwrap();
