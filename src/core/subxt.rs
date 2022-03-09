@@ -214,22 +214,30 @@ impl SubxtWrapper {
 					info!("[{}] Connected", url);
 					match api.events().subscribe().await {
 						Ok(mut sub) => {
-							while let Some(events) = sub.next().await {
-								let events = events.unwrap();
-								let hash = events.block_hash();
-								info!("[{}] Block imported ({:?})", url, &hash);
+							tokio::select! {
+								Some(events) = sub.next() => {
+									let events = events.unwrap();
+									let hash = events.block_hash();
+									info!("[{}] Block imported ({:?})", url, &hash);
 
-								update_channel.send(SubxtEvent::NewHead(hash.clone())).await.unwrap();
+									if let Err(e) = update_channel.send(SubxtEvent::NewHead(hash.clone())).await {
+										info!("Event consumer has terminated: {:?}, shutting down", e);
+										return;
+									}
 
-								for event in events.iter_raw() {
-									let event = event.unwrap();
+									for event in events.iter_raw() {
+										let event = event.unwrap();
 
-									update_channel
-										.send(SubxtEvent::RawEvent(hash.clone(), event.clone()))
-										.await
-										.unwrap();
+										update_channel
+											.send(SubxtEvent::RawEvent(hash.clone(), event.clone()))
+											.await
+											.unwrap();
+									}
+								},
+								_ = tokio::signal::ctrl_c() => {
+									return;
 								}
-							}
+							};
 						},
 						Err(err) => {
 							error!("[{}] Disconnected ({:?}) ", url, err);
