@@ -72,7 +72,7 @@ variables:
 
 #### stage:                        lint
 
-.fmt:
+fmt:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
@@ -81,7 +81,7 @@ variables:
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
-.clippy:
+clippy:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
@@ -90,7 +90,7 @@ variables:
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
-.check:
+check:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
@@ -99,7 +99,7 @@ variables:
 
 #### stage:                       test
 
-.test:
+test:
   stage:                           test
   <<:                              *docker-env
   <<:                              *common-refs
@@ -125,12 +125,10 @@ publish-docker:
   variables:
     DOCKERFILE:                    scripts/dockerfiles/Dockerfile
     IMAGE_NAME:                    docker.io/paritytech/polkadot-introspector
-  # uncomment after finish setting up
-  # <<:                              *publish-refs
   needs:
     - job:                         build
       artifacts:                   true
-  <<:                              *common-refs
+  <<:                              *publish-refs
   <<:                              *kubernetes-env
   image:                           quay.io/buildah/stable
   before_script:
