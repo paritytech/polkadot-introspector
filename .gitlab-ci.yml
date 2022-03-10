@@ -72,7 +72,7 @@ variables:
 
 #### stage:                        lint
 
-fmt:
+.fmt:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
@@ -81,7 +81,7 @@ fmt:
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
-clippy:
+.clippy:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
@@ -90,7 +90,7 @@ clippy:
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
-check:
+.check:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
@@ -99,7 +99,7 @@ check:
 
 #### stage:                       test
 
-test:
+.test:
   stage:                           test
   <<:                              *docker-env
   <<:                              *common-refs
@@ -116,7 +116,7 @@ build:
   script:
     - time cargo build --release
     - mkdir artifacts || echo "dir exists"
-    - cp target/release/polkadot-introspector artifacts/
+    - cp $CARGO_TARGET_DIR/release/polkadot-introspector artifacts/
 
 #### stage:                       publish
 
