@@ -128,8 +128,7 @@ publish-docker:
   needs:
     - job:                         build
       artifacts:                   true
-  <<: *common-refs
-  # <<:                              *publish-refs
+  <<:                              *publish-refs
   <<:                              *kubernetes-env
   image:                           quay.io/buildah/stable
   before_script:
