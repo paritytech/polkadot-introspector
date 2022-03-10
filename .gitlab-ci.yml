@@ -123,12 +123,13 @@ build:
 publish-docker:
   stage:                           publish
   variables:
-    DOCKERFILE:                    scripts/dockerfiles/Dockerfile
+    DOCKERFILE:                    scripts/dockerfiles/polkadot-introspector_injected.Dockerfile
     IMAGE_NAME:                    docker.io/paritytech/polkadot-introspector
   needs:
     - job:                         build
       artifacts:                   true
-  <<:                              *publish-refs
+  <<: *common-refs
+  # <<:                              *publish-refs
   <<:                              *kubernetes-env
   image:                           quay.io/buildah/stable
   before_script:
