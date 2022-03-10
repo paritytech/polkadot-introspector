@@ -115,6 +115,8 @@ build:
   <<:                              *collect-artifacts
   script:
     - time cargo build --release
+    - mkdir artifacts || echo "dir exists"
+    - cp target/release/polkadot-introspector artifacts/
 
 #### stage:                       publish
 
