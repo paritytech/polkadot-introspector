@@ -118,10 +118,9 @@ build:
 
 #### stage:                       publish
 
-build:
+publish-docker:
   stage:                           publish
   variables:
-    <<:                            *image-variables
     DOCKERFILE:                    scripts/dockerfiles/Dockerfile
     IMAGE_NAME:                    docker.io/paritytech/polkadot-introspector
   # uncomment after finish setting up
