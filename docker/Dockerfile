@@ -18,9 +18,7 @@ COPY --from=builder /polkadot-introspector/target/release/polkadot-introspector 
 # Temporary installation of certificates
 RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && \
     useradd -m -u 1000 -U -s /bin/sh -d /polkadot-introspector polkadot-introspector && \
-    # unclutter and minimize the attack surface
     rm -rf /var/lib/apt/lists/* && \
-    rm -rf /usr/bin /usr/sbin && \
     # Sanity Check
 	/usr/local/bin/polkadot-introspector --version
 
