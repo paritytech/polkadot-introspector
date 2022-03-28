@@ -82,14 +82,14 @@ pub(crate) async fn run(
 	let (consumer_channels, _to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = consumer_config.into();
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
 	let _ = ws_listener
-		.spawn(shutdown_rx, updates_rx)
+		.spawn(shutdown_rx, updates_tx.clone())
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
 
 	let events_handler = Arc::new(Mutex::new(
 		EventsHandler::builder()
 			.storage(records_storage.clone())
-			.broadcast_tx(updates_tx)
+			.broadcast_tx(updates_tx.clone())
 			.build(),
 	));
 

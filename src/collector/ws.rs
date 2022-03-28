@@ -16,10 +16,12 @@
 
 use super::{event_handler::StorageType, records_storage::StorageEntry};
 
-use log::warn;
-use serde::{Deserialize, Serialize};
+use dashmap::{mapref::entry::Entry, DashMap};
+use log::{debug, warn};
+use serde::{ser::Serializer, Deserialize, Serialize};
 use std::{
 	convert::Infallible,
+	default::Default,
 	error::Error,
 	fs,
 	marker::Send,
@@ -28,8 +30,9 @@ use std::{
 	sync::Arc,
 	time::{SystemTime, UNIX_EPOCH},
 };
+
 use subxt::sp_core::H256;
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::{Receiver, Sender};
 use typed_builder::TypedBuilder;
 use warp::{http::StatusCode, Filter, Rejection, Reply};
 
@@ -44,6 +47,36 @@ pub struct WebSocketListenerConfig {
 	/// X509 certificate for HTTP server
 	#[builder(default)]
 	cert: Option<PathBuf>,
+}
+
+type SubscriptionSharedMap<T> = Arc<DashMap<String, T>>;
+
+/// Used to track client subscriptions
+#[derive(Clone, Debug, Default)]
+struct WebSocketSubscription {
+	/// Unique user ID
+	id: String,
+	/// Filter events by parachain
+	para_id: Option<u32>,
+	/// Clients storage link
+	clients: SubscriptionSharedMap<WebSocketSubscription>,
+}
+
+impl Serialize for WebSocketSubscription {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		serializer.serialize_str(&self.id.as_str())
+	}
+}
+
+impl WebSocketSubscription {
+	fn new(clients: SubscriptionSharedMap<WebSocketSubscription>) -> Self {
+		use uuid::Uuid;
+		let uuid = Uuid::new_v4().to_string();
+		Self { id: uuid, clients: clients.clone(), ..Default::default() }
+	}
 }
 
 /// Starts a ws listener given the config
@@ -61,6 +94,14 @@ struct CandidatesQuery {
 	parachain_id: Option<u32>,
 	/// Filter candidates by time
 	not_before: Option<u64>,
+}
+
+/// Used to handle subscription requests
+#[derive(Deserialize, Serialize)]
+struct SubscriptionQuery {
+	/// Filter candidates by parachain
+	parachain_id: Option<u32>,
+	// TODO: add events filter if needed
 }
 
 /// Used to handle requests to get a specific candidate info
@@ -88,13 +129,14 @@ impl WebSocketListener {
 	pub async fn spawn<T, U>(
 		self,
 		mut shutdown_rx: Receiver<T>,
-		updates_rx: Receiver<U>,
+		mut updates_rx: Sender<U>,
 	) -> Result<(), Box<dyn Error + Sync + Send>>
 	where
 		T: Send + 'static + Clone,
-		U: Send + Clone,
+		U: Send + 'static + Clone,
 	{
 		let has_sane_tls = self.config.privkey.is_some() && self.config.cert.is_some();
+		let clients_subscription: SubscriptionSharedMap<WebSocketSubscription> = Arc::new(DashMap::new());
 
 		// Setup routes
 		let opt_ping = warp::query::<HealthQuery>()
@@ -118,9 +160,23 @@ impl WebSocketListener {
 			.and(warp::query::<CandidateGetQuery>())
 			.and_then(candidate_get_handler);
 
+		// Both registration and unregistration
+		let subscribe_path = warp::path!("v1" / "subscribe");
+		let subscribe_route = subscribe_path
+			.and(with_clients_subscriptions(clients_subscription.clone()))
+			.and(warp::query::<SubscriptionQuery>())
+			.and_then(subscribe_handler)
+			.or(subscribe_path.and(
+				warp::delete()
+					.and(with_clients_subscriptions(clients_subscription.clone()))
+					.and(warp::query::<String>())
+					.and_then(unsubscribe_handler),
+			));
+
 		let routes = health_route
 			.or(candidates_route)
 			.or(get_candidate_route)
+			.or(subscribe_route)
 			.with(warp::cors().allow_any_origin())
 			.recover(handle_rejection);
 		let server = warp::serve(routes);
@@ -147,10 +203,17 @@ impl WebSocketListener {
 	}
 }
 
+// Helper to share storage state
 fn with_storage(
 	storage: Arc<StorageType<H256>>,
 ) -> impl Filter<Extract = (Arc<StorageType<H256>>,), Error = Infallible> + Clone {
 	warp::any().map(move || storage.clone())
+}
+
+fn with_clients_subscriptions<T: Send + Sync>(
+	clients: SubscriptionSharedMap<T>,
+) -> impl Filter<Extract = (SubscriptionSharedMap<T>,), Error = Infallible> + Clone {
+	warp::any().map(move || clients.clone())
 }
 
 #[derive(Serialize, Clone, PartialEq, Debug)]
@@ -206,7 +269,7 @@ async fn candidates_handler(
 		records.keys().cloned().collect::<Vec<_>>()
 	};
 
-	Ok(warp::reply::json(&CandidatesReply { candidates }))
+	Ok(warp::reply::json(&candidates.as_slice()))
 }
 
 async fn candidate_get_handler(
@@ -219,6 +282,39 @@ async fn candidate_get_handler(
 	match candidate_record {
 		Some(rec) => Ok(warp::reply::json(rec).into_response()),
 		None => Ok(warp::reply::with_status("No such candidate", StatusCode::NOT_FOUND).into_response()),
+	}
+}
+
+async fn subscribe_handler(
+	clients: SubscriptionSharedMap<WebSocketSubscription>,
+	query: SubscriptionQuery,
+) -> Result<impl Reply, Rejection> {
+	let mut new_sub = WebSocketSubscription::new(clients.clone());
+	new_sub.para_id = query.parachain_id;
+
+	let reply = warp::reply::json(&new_sub);
+	let hash_key = new_sub.id.clone();
+
+	match clients.entry(hash_key) {
+		Entry::Occupied(_) => {
+			Ok(warp::reply::with_status("Collision on insertion... qed", StatusCode::INTERNAL_SERVER_ERROR)
+				.into_response())
+		},
+		Entry::Vacant(entry) => {
+			entry.insert(new_sub);
+			Ok(reply.into_response())
+		},
+	}
+}
+
+async fn unsubscribe_handler(
+	clients: SubscriptionSharedMap<WebSocketSubscription>,
+	unsubscribe_id: String,
+) -> Result<impl Reply, Rejection> {
+	if let Some((_, _)) = clients.remove(unsubscribe_id.as_str()) {
+		Ok(warp::reply::with_status("Subscription removed", StatusCode::OK).into_response())
+	} else {
+		Ok(warp::reply::with_status("No such candidate", StatusCode::NOT_FOUND).into_response())
 	}
 }
 
