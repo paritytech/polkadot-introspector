@@ -20,12 +20,12 @@ use super::{candidate_record::*, records_storage::RecordsStorage};
 use crate::{core::polkadot, eyre};
 use log::debug;
 use serde::Serialize;
-use std::ops::DerefMut;
 use std::{
 	collections::HashMap,
 	error::Error,
 	fmt::Debug,
 	hash::Hash,
+	ops::DerefMut,
 	sync::Arc,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };

@@ -17,8 +17,7 @@
 use clap::Parser;
 use futures::TryFutureExt;
 use log::{debug, info, warn};
-use std::ops::DerefMut;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, ops::DerefMut, sync::Arc};
 use subxt::sp_core::H256;
 use tokio::{
 	signal,

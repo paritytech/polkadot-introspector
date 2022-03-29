@@ -19,10 +19,10 @@ use super::{event_handler::StorageType, records_storage::StorageEntry};
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 use std::{
 	convert::Infallible,
 	error::Error,
+	fmt::Debug,
 	fs,
 	marker::Send,
 	net::SocketAddr,
@@ -275,14 +275,14 @@ where
 						},
 						Err(err) => {
 							warn!("{:?} cannot send data: {:?}", remote.as_ref(), err);
-							return;
+							return
 						},
 					}
 				},
 				Err(err) => {
 					warn!("{:?} update channel error = {:?}", remote.as_ref(), err);
 
-					return;
+					return
 				},
 			}
 		}
