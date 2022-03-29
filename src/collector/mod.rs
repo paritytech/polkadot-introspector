@@ -75,9 +75,9 @@ pub(crate) async fn run(
 ) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 	let records_storage = Arc::new(Mutex::new(RecordsStorage::<H256, CandidateRecord<H256>>::new(opts.clone().into())));
 	let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-	let (updates_tx, updates_rx) = broadcast::channel(32);
+	let (updates_tx, _updates_rx) = broadcast::channel(32);
 
-	let endpoints: Vec<String> = opts.nodes.split(",").map(|s| s.to_owned()).collect();
+	let endpoints = opts.nodes.split(',').map(|s| s.to_owned());
 
 	let (consumer_channels, _to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = consumer_config.into();
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
@@ -94,7 +94,6 @@ pub(crate) async fn run(
 	));
 
 	let mut futures = endpoints
-		.into_iter()
 		.zip(consumer_channels.into_iter())
 		.map(|(endpoint, mut update_channel)| {
 			let events_handler = events_handler.clone();

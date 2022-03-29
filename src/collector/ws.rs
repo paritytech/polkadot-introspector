@@ -16,12 +16,12 @@
 
 use super::{event_handler::StorageType, records_storage::StorageEntry};
 
-use dashmap::{mapref::entry::Entry, DashMap};
+use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
-use serde::{ser::Serializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::{
 	convert::Infallible,
-	default::Default,
 	error::Error,
 	fs,
 	marker::Send,
@@ -30,11 +30,14 @@ use std::{
 	sync::Arc,
 	time::{SystemTime, UNIX_EPOCH},
 };
-
 use subxt::sp_core::H256;
 use tokio::sync::broadcast::{Receiver, Sender};
 use typed_builder::TypedBuilder;
-use warp::{http::StatusCode, Filter, Rejection, Reply};
+use warp::{
+	http::StatusCode,
+	ws::{Message, WebSocket},
+	Filter, Rejection, Reply,
+};
 
 /// Structure for a WebSocket builder
 #[derive(TypedBuilder, Clone, Debug)]
@@ -47,36 +50,6 @@ pub struct WebSocketListenerConfig {
 	/// X509 certificate for HTTP server
 	#[builder(default)]
 	cert: Option<PathBuf>,
-}
-
-type SubscriptionSharedMap<T> = Arc<DashMap<String, T>>;
-
-/// Used to track client subscriptions
-#[derive(Clone, Debug, Default)]
-struct WebSocketSubscription {
-	/// Unique user ID
-	id: String,
-	/// Filter events by parachain
-	para_id: Option<u32>,
-	/// Clients storage link
-	clients: SubscriptionSharedMap<WebSocketSubscription>,
-}
-
-impl Serialize for WebSocketSubscription {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		serializer.serialize_str(&self.id.as_str())
-	}
-}
-
-impl WebSocketSubscription {
-	fn new(clients: SubscriptionSharedMap<WebSocketSubscription>) -> Self {
-		use uuid::Uuid;
-		let uuid = Uuid::new_v4().to_string();
-		Self { id: uuid, clients: clients.clone(), ..Default::default() }
-	}
 }
 
 /// Starts a ws listener given the config
@@ -94,14 +67,6 @@ struct CandidatesQuery {
 	parachain_id: Option<u32>,
 	/// Filter candidates by time
 	not_before: Option<u64>,
-}
-
-/// Used to handle subscription requests
-#[derive(Deserialize, Serialize)]
-struct SubscriptionQuery {
-	/// Filter candidates by parachain
-	parachain_id: Option<u32>,
-	// TODO: add events filter if needed
 }
 
 /// Used to handle requests to get a specific candidate info
@@ -129,14 +94,13 @@ impl WebSocketListener {
 	pub async fn spawn<T, U>(
 		self,
 		mut shutdown_rx: Receiver<T>,
-		mut updates_rx: Sender<U>,
+		updates_broadcast: Sender<U>,
 	) -> Result<(), Box<dyn Error + Sync + Send>>
 	where
-		T: Send + 'static + Clone,
-		U: Send + 'static + Clone,
+		T: Send + Sync + 'static + Clone,
+		U: Send + Sync + 'static + Clone + Serialize + Debug,
 	{
 		let has_sane_tls = self.config.privkey.is_some() && self.config.cert.is_some();
-		let clients_subscription: SubscriptionSharedMap<WebSocketSubscription> = Arc::new(DashMap::new());
 
 		// Setup routes
 		let opt_ping = warp::query::<HealthQuery>()
@@ -160,23 +124,16 @@ impl WebSocketListener {
 			.and(warp::query::<CandidateGetQuery>())
 			.and_then(candidate_get_handler);
 
-		// Both registration and unregistration
-		let subscribe_path = warp::path!("v1" / "subscribe");
-		let subscribe_route = subscribe_path
-			.and(with_clients_subscriptions(clients_subscription.clone()))
-			.and(warp::query::<SubscriptionQuery>())
-			.and_then(subscribe_handler)
-			.or(subscribe_path.and(
-				warp::delete()
-					.and(with_clients_subscriptions(clients_subscription.clone()))
-					.and(warp::query::<String>())
-					.and_then(unsubscribe_handler),
-			));
+		let ws_route = warp::path!("v1" / "ws")
+			.and(warp::ws())
+			.and(with_updates_channel(updates_broadcast))
+			.and(warp::addr::remote())
+			.and_then(ws_handler);
 
 		let routes = health_route
 			.or(candidates_route)
 			.or(get_candidate_route)
-			.or(subscribe_route)
+			.or(ws_route)
 			.with(warp::cors().allow_any_origin())
 			.recover(handle_rejection);
 		let server = warp::serve(routes);
@@ -210,10 +167,10 @@ fn with_storage(
 	warp::any().map(move || storage.clone())
 }
 
-fn with_clients_subscriptions<T: Send + Sync>(
-	clients: SubscriptionSharedMap<T>,
-) -> impl Filter<Extract = (SubscriptionSharedMap<T>,), Error = Infallible> + Clone {
-	warp::any().map(move || clients.clone())
+fn with_updates_channel<T: Send>(
+	updates_rx: Sender<T>,
+) -> impl Filter<Extract = (Receiver<T>,), Error = Infallible> + Clone {
+	warp::any().map(move || updates_rx.subscribe())
 }
 
 #[derive(Serialize, Clone, PartialEq, Debug)]
@@ -285,37 +242,51 @@ async fn candidate_get_handler(
 	}
 }
 
-async fn subscribe_handler(
-	clients: SubscriptionSharedMap<WebSocketSubscription>,
-	query: SubscriptionQuery,
-) -> Result<impl Reply, Rejection> {
-	let mut new_sub = WebSocketSubscription::new(clients.clone());
-	new_sub.para_id = query.parachain_id;
-
-	let reply = warp::reply::json(&new_sub);
-	let hash_key = new_sub.id.clone();
-
-	match clients.entry(hash_key) {
-		Entry::Occupied(_) => {
-			Ok(warp::reply::with_status("Collision on insertion... qed", StatusCode::INTERNAL_SERVER_ERROR)
-				.into_response())
-		},
-		Entry::Vacant(entry) => {
-			entry.insert(new_sub);
-			Ok(reply.into_response())
-		},
-	}
+pub async fn ws_handler<T>(
+	ws: warp::ws::Ws,
+	update_channel: Receiver<T>,
+	remote: Option<SocketAddr>,
+) -> Result<impl Reply, Rejection>
+where
+	T: Send + Sync + Clone + Debug + Serialize + 'static,
+{
+	Ok(ws.on_upgrade(move |socket| handle_ws_connection(socket, update_channel, remote)))
 }
 
-async fn unsubscribe_handler(
-	clients: SubscriptionSharedMap<WebSocketSubscription>,
-	unsubscribe_id: String,
-) -> Result<impl Reply, Rejection> {
-	if let Some((_, _)) = clients.remove(unsubscribe_id.as_str()) {
-		Ok(warp::reply::with_status("Subscription removed", StatusCode::OK).into_response())
-	} else {
-		Ok(warp::reply::with_status("No such candidate", StatusCode::NOT_FOUND).into_response())
-	}
+async fn handle_ws_connection<T>(ws: WebSocket, mut update_channel: Receiver<T>, remote: Option<SocketAddr>)
+where
+	T: Send + Sync + Clone + Debug + Serialize + 'static,
+{
+	let (mut client_ws_sender, _client_ws_rcv) = ws.split();
+	debug!("connected to ws: {:?}", remote.as_ref());
+
+	tokio::task::spawn(async move {
+		loop {
+			match update_channel.recv().await {
+				Ok(update) => {
+					debug!("received event: {:?}", &update);
+
+					match client_ws_sender
+						.send(Message::text(serde_json::to_string(&update).unwrap()))
+						.await
+					{
+						Ok(_) => {
+							debug!("{:?} sent update to ws client", remote.as_ref());
+						},
+						Err(err) => {
+							warn!("{:?} cannot send data: {:?}", remote.as_ref(), err);
+							return;
+						},
+					}
+				},
+				Err(err) => {
+					warn!("{:?} update channel error = {:?}", remote.as_ref(), err);
+
+					return;
+				},
+			}
+		}
+	});
 }
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {

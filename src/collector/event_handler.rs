@@ -351,7 +351,7 @@ impl EventsHandler {
 					.get_mut(ev.variant.as_str())
 					.ok_or_else(|| eyre!("Unknown event {} in pallet {}", ev.variant.as_str(), ev.pallet.as_str()))?;
 				debug!("Got known raw event: {:?}", ev);
-				let update_ev = event_handler(ev, block_hash, &mut self.storage.clone().lock().await.deref_mut())?;
+				let update_ev = event_handler(ev, block_hash, self.storage.clone().lock().await.deref_mut())?;
 
 				match update_ev {
 					Some(update_ev) => {
