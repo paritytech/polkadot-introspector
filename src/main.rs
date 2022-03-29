@@ -101,7 +101,7 @@ async fn main() -> color_eyre::Result<()> {
 
 	match opts.command {
 		Command::Collector(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(",").map(|s| s.to_owned()).collect());
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(',').map(|s| s.to_owned()).collect());
 			let collector_consumer_init = core.create_consumer();
 
 			match collector::run(opts, collector_consumer_init).await {
@@ -110,7 +110,7 @@ async fn main() -> color_eyre::Result<()> {
 			}
 		},
 		Command::BlockTimeMonitor(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(",").map(|s| s.to_owned()).collect());
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(',').map(|s| s.to_owned()).collect());
 			let block_time_consumer_init = core.create_consumer();
 
 			match block_time::BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {

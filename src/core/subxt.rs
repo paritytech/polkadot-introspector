@@ -117,15 +117,14 @@ impl SubxtWrapper {
 	async fn new_client_fn(url: String) -> Option<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>> {
 		for _ in 0..RETRY_COUNT {
 			match ClientBuilder::new().set_url(url.clone()).build().await {
-				Ok(api) => {
+				Ok(api) =>
 					return Some(
 						api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>(),
-					)
-				},
+					),
 				Err(err) => {
 					error!("[{}] Client error: {:?}", url, err);
 					tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-					continue;
+					continue
 				},
 			};
 		}
@@ -179,7 +178,7 @@ impl SubxtWrapper {
 						// Remove the faulty websocket from connection pool.
 						let _ = connection_pool.remove(&request.url);
 						tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-						continue;
+						continue
 					};
 
 					let response = match result {
@@ -189,14 +188,14 @@ impl SubxtWrapper {
 							// Always retry for subxt errors (most of them are transient).
 							let _ = connection_pool.remove(&request.url);
 							tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-							continue;
+							continue
 						},
 					};
 
 					// We only break in the happy case.
 					let _ = request.response_sender.send(response);
 					timeout_task.abort();
-					break;
+					break
 				}
 			} else {
 				// channel closed, exit loop.

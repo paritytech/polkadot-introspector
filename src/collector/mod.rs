@@ -17,8 +17,7 @@
 use clap::Parser;
 use futures::TryFutureExt;
 use log::{debug, info, warn};
-use std::ops::DerefMut;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, ops::DerefMut, sync::Arc};
 use subxt::sp_core::H256;
 use tokio::{
 	signal,
@@ -74,26 +73,30 @@ pub(crate) async fn run(
 	consumer_config: EventConsumerInit<SubxtEvent>,
 ) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 	let records_storage = Arc::new(Mutex::new(RecordsStorage::<H256, CandidateRecord<H256>>::new(opts.clone().into())));
-	let (tx, rx) = broadcast::channel(1);
+	let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+	let (updates_tx, _updates_rx) = broadcast::channel(32);
 
-	let endpoints: Vec<String> = opts.nodes.split(",").map(|s| s.to_owned()).collect();
+	let endpoints = opts.nodes.split(',').map(|s| s.to_owned());
 
 	let (consumer_channels, _to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = consumer_config.into();
-
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
 	let _ = ws_listener
-		.spawn(rx)
+		.spawn(shutdown_rx, updates_tx.clone())
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
 
-	let events_handler = Arc::new(Mutex::new(EventsHandler::builder().storage(records_storage.clone()).build()));
+	let events_handler = Arc::new(Mutex::new(
+		EventsHandler::builder()
+			.storage(records_storage.clone())
+			.broadcast_tx(updates_tx.clone())
+			.build(),
+	));
 
 	let mut futures = endpoints
-		.into_iter()
 		.zip(consumer_channels.into_iter())
 		.map(|(endpoint, mut update_channel)| {
 			let events_handler = events_handler.clone();
-			let mut shutdown_rx = tx.subscribe();
+			let mut shutdown_rx = shutdown_tx.subscribe();
 			tokio::spawn(async move {
 				loop {
 					debug!("[{}] New loop - waiting for events", endpoint);
@@ -124,7 +127,7 @@ pub(crate) async fn run(
 
 	futures.push(tokio::spawn(async move {
 		signal::ctrl_c().await.unwrap();
-		let _ = tx.send(());
+		let _ = shutdown_tx.send(());
 	}));
 	Ok(futures)
 }

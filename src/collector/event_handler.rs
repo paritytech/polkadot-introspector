@@ -20,12 +20,12 @@ use super::{candidate_record::*, records_storage::RecordsStorage};
 use crate::{core::polkadot, eyre};
 use log::debug;
 use serde::Serialize;
-use std::ops::DerefMut;
 use std::{
 	collections::HashMap,
 	error::Error,
 	fmt::Debug,
 	hash::Hash,
+	ops::DerefMut,
 	sync::Arc,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -35,6 +35,8 @@ use subxt::{
 	RawEventDetails,
 };
 use tokio::sync::Mutex;
+
+use tokio::sync::broadcast::Sender;
 
 use typed_builder::TypedBuilder;
 
@@ -51,7 +53,12 @@ where
 	type Event;
 	type HashType;
 	/// Update a record according to a specific event
-	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>>;
+	fn update_candidate(
+		record: &mut CandidateRecord<T>,
+		event: &Self::Event,
+	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>>
+	where
+		<Self as CandidateRecordEvent<T>>::HashType: Hash + Serialize;
 	/// Extract hash from event
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>>;
 }
@@ -63,13 +70,16 @@ where
 {
 	type Event = polkadot::paras_disputes::events::DisputeInitiated;
 	type HashType = H256;
-	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+	fn update_candidate(
+		record: &mut CandidateRecord<T>,
+		event: &Self::Event,
+	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>> {
 		match record.candidate_disputed {
 			None => {
 				// Good to go, a new dispute
 				record.candidate_disputed =
 					Some(CandidateDisputed { disputed: check_unix_time()?, ..Default::default() });
-				Ok(())
+				Ok(Some(CandidateRecordUpdate::Disputed(event.0 .0, DisputeOutcome::InProgress)))
 			},
 			Some(_) => Err(format!("duplicate dispute initiated for: {:?}", event.0).into()),
 		}
@@ -86,7 +96,10 @@ where
 {
 	type Event = polkadot::paras_disputes::events::DisputeConcluded;
 	type HashType = H256;
-	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+	fn update_candidate(
+		record: &mut CandidateRecord<T>,
+		event: &Self::Event,
+	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>> {
 		use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
 
 		match record.candidate_disputed {
@@ -99,7 +112,7 @@ where
 					};
 					disputed.concluded =
 						Some(DisputeResult { concluded_timestamp: check_unix_time()?, outcome: dispute_result });
-					Ok(())
+					Ok(Some(CandidateRecordUpdate::Disputed(event.0 .0, DisputeOutcome::Agreed)))
 				},
 				Some(_) => Err(format!("multiple conclusions for a dispute: {:?}", event.0).into()),
 			},
@@ -117,7 +130,10 @@ where
 {
 	type Event = polkadot::paras_disputes::events::DisputeTimedOut;
 	type HashType = H256;
-	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+	fn update_candidate(
+		record: &mut CandidateRecord<T>,
+		event: &Self::Event,
+	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>> {
 		match record.candidate_disputed {
 			None => Err(format!("dispute concluded but not initiated: {:?}", event.0).into()),
 			Some(ref mut disputed) => match disputed.concluded {
@@ -126,7 +142,7 @@ where
 						concluded_timestamp: check_unix_time()?,
 						outcome: DisputeOutcome::TimedOut,
 					});
-					Ok(())
+					Ok(Some(CandidateRecordUpdate::Disputed(event.0 .0, DisputeOutcome::TimedOut)))
 				},
 				Some(_) => Err(format!("multiple conclusions for a dispute: {:?}", event.0).into()),
 			},
@@ -144,10 +160,13 @@ where
 {
 	type Event = polkadot::para_inclusion::events::CandidateBacked;
 	type HashType = H256;
-	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+	fn update_candidate(
+		record: &mut CandidateRecord<T>,
+		event: &Self::Event,
+	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>> {
 		record.candidate_inclusion.baked = Some(check_unix_time()?);
 		record.candidate_inclusion.core_idx = Some(event.2 .0);
-		Ok(())
+		Ok(Some(CandidateRecordUpdate::Baked(BlakeTwo256::hash_of(&event.0))))
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
 		Ok(BlakeTwo256::hash_of(&event.0))
@@ -160,10 +179,13 @@ where
 {
 	type Event = polkadot::para_inclusion::events::CandidateIncluded;
 	type HashType = H256;
-	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+	fn update_candidate(
+		record: &mut CandidateRecord<T>,
+		event: &Self::Event,
+	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>> {
 		record.candidate_inclusion.included = Some(check_unix_time()?);
 		record.candidate_inclusion.core_idx = Some(event.2 .0);
-		Ok(())
+		Ok(Some(CandidateRecordUpdate::Included(BlakeTwo256::hash_of(&event.0))))
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
 		Ok(BlakeTwo256::hash_of(&event.0))
@@ -176,10 +198,14 @@ where
 {
 	type Event = polkadot::para_inclusion::events::CandidateTimedOut;
 	type HashType = H256;
-	fn update_candidate(record: &mut CandidateRecord<T>, event: &Self::Event) -> Result<(), Box<dyn Error>> {
+	fn update_candidate(
+		record: &mut CandidateRecord<T>,
+		event: &Self::Event,
+	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>> {
 		record.candidate_inclusion.timedout = Some(check_unix_time()?);
 		record.candidate_inclusion.core_idx = Some(event.2 .0);
-		Ok(())
+		// TODO: handle timeouts
+		Ok(None)
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
 		Ok(BlakeTwo256::hash_of(&event.0))
@@ -187,7 +213,11 @@ where
 }
 
 pub type EventDecoderFunctor<T> = Box<
-	dyn Fn(&RawEventDetails, &T, &mut RecordsStorage<T, CandidateRecord<T>>) -> Result<(), Box<dyn Error>>
+	dyn Fn(
+			&RawEventDetails,
+			&T,
+			&mut RecordsStorage<T, CandidateRecord<T>>,
+		) -> Result<Option<CandidateRecordUpdate<T>>, Box<dyn Error>>
 		+ 'static
 		+ Send,
 >;
@@ -203,16 +233,14 @@ where
 		let hash = <E as CandidateRecordEvent<T>>::candidate_hash(&decoded)?;
 		let maybe_record = storage.get_mut(&hash);
 		match maybe_record {
-			Some(record) => {
-				<E as CandidateRecordEvent<T>>::update_candidate(record, &decoded)?;
-			},
+			Some(record) => <E as CandidateRecordEvent<T>>::update_candidate(record, &decoded),
 			None => {
 				let mut record: CandidateRecord<T> = Default::default();
-				<E as CandidateRecordEvent<T>>::update_candidate(&mut record, &decoded)?;
+				let res = <E as CandidateRecordEvent<T>>::update_candidate(&mut record, &decoded);
 				storage.insert(hash, record);
+				res
 			},
 		}
-		Ok(())
 	})
 }
 
@@ -307,6 +335,8 @@ pub struct EventsHandler {
 	pallets: Arc<Mutex<EventRouteMap>>,
 	/// Non generic storage as we are really limited to H256 by subxt so far
 	storage: Arc<StorageType<H256>>,
+	/// Broadcast channel
+	broadcast_tx: Sender<CandidateRecordUpdate<H256>>,
 }
 
 impl EventsHandler {
@@ -321,7 +351,15 @@ impl EventsHandler {
 					.get_mut(ev.variant.as_str())
 					.ok_or_else(|| eyre!("Unknown event {} in pallet {}", ev.variant.as_str(), ev.pallet.as_str()))?;
 				debug!("Got known raw event: {:?}", ev);
-				event_handler(ev, block_hash, &mut self.storage.clone().lock().await.deref_mut())
+				let update_ev = event_handler(ev, block_hash, self.storage.clone().lock().await.deref_mut())?;
+
+				match update_ev {
+					Some(update_ev) => {
+						self.broadcast_tx.send(update_ev)?;
+						Ok(())
+					},
+					None => Ok(()),
+				}
 			},
 			None => {
 				debug!("Events for the pallet {} are not handled by introspector", ev.variant.as_str());

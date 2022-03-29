@@ -16,11 +16,13 @@
 
 use super::{event_handler::StorageType, records_storage::StorageEntry};
 
-use log::warn;
+use futures::{SinkExt, StreamExt};
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::{
 	convert::Infallible,
 	error::Error,
+	fmt::Debug,
 	fs,
 	marker::Send,
 	net::SocketAddr,
@@ -29,9 +31,13 @@ use std::{
 	time::{SystemTime, UNIX_EPOCH},
 };
 use subxt::sp_core::H256;
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::{Receiver, Sender};
 use typed_builder::TypedBuilder;
-use warp::{http::StatusCode, Filter, Rejection, Reply};
+use warp::{
+	http::StatusCode,
+	ws::{Message, WebSocket},
+	Filter, Rejection, Reply,
+};
 
 /// Structure for a WebSocket builder
 #[derive(TypedBuilder, Clone, Debug)]
@@ -85,9 +91,14 @@ impl WebSocketListener {
 	}
 
 	/// Spawn an async HTTP server
-	pub async fn spawn<T>(self, mut shutdown_recv: Receiver<T>) -> Result<(), Box<dyn Error + Sync + Send>>
+	pub async fn spawn<T, U>(
+		self,
+		mut shutdown_rx: Receiver<T>,
+		updates_broadcast: Sender<U>,
+	) -> Result<(), Box<dyn Error + Sync + Send>>
 	where
-		T: Send + 'static + Clone,
+		T: Send + Sync + 'static + Clone,
+		U: Send + Sync + 'static + Clone + Serialize + Debug,
 	{
 		let has_sane_tls = self.config.privkey.is_some() && self.config.cert.is_some();
 
@@ -113,9 +124,16 @@ impl WebSocketListener {
 			.and(warp::query::<CandidateGetQuery>())
 			.and_then(candidate_get_handler);
 
+		let ws_route = warp::path!("v1" / "ws")
+			.and(warp::ws())
+			.and(with_updates_channel(updates_broadcast))
+			.and(warp::addr::remote())
+			.and_then(ws_handler);
+
 		let routes = health_route
 			.or(candidates_route)
 			.or(get_candidate_route)
+			.or(ws_route)
 			.with(warp::cors().allow_any_origin())
 			.recover(handle_rejection);
 		let server = warp::serve(routes);
@@ -126,13 +144,13 @@ impl WebSocketListener {
 			let tls_server = server.tls().cert(cert).key(privkey);
 			// TODO: understand why there is no `try_bind_with_graceful_shutdown` for TLSServer in Warp
 			let (_, server_fut) = tls_server.bind_with_graceful_shutdown(self.config.listen_addr, async move {
-				shutdown_recv.recv().await.ok();
+				shutdown_rx.recv().await.ok();
 			});
 
 			tokio::task::spawn(server_fut);
 		} else {
 			let (_, server_fut) = server.try_bind_with_graceful_shutdown(self.config.listen_addr, async move {
-				shutdown_recv.recv().await.ok();
+				shutdown_rx.recv().await.ok();
 			})?;
 
 			tokio::task::spawn(server_fut);
@@ -142,10 +160,17 @@ impl WebSocketListener {
 	}
 }
 
+// Helper to share storage state
 fn with_storage(
 	storage: Arc<StorageType<H256>>,
 ) -> impl Filter<Extract = (Arc<StorageType<H256>>,), Error = Infallible> + Clone {
 	warp::any().map(move || storage.clone())
+}
+
+fn with_updates_channel<T: Send>(
+	updates_rx: Sender<T>,
+) -> impl Filter<Extract = (Receiver<T>,), Error = Infallible> + Clone {
+	warp::any().map(move || updates_rx.subscribe())
 }
 
 #[derive(Serialize, Clone, PartialEq, Debug)]
@@ -201,7 +226,7 @@ async fn candidates_handler(
 		records.keys().cloned().collect::<Vec<_>>()
 	};
 
-	Ok(warp::reply::json(&CandidatesReply { candidates }))
+	Ok(warp::reply::json(&candidates.as_slice()))
 }
 
 async fn candidate_get_handler(
@@ -215,6 +240,53 @@ async fn candidate_get_handler(
 		Some(rec) => Ok(warp::reply::json(rec).into_response()),
 		None => Ok(warp::reply::with_status("No such candidate", StatusCode::NOT_FOUND).into_response()),
 	}
+}
+
+pub async fn ws_handler<T>(
+	ws: warp::ws::Ws,
+	update_channel: Receiver<T>,
+	remote: Option<SocketAddr>,
+) -> Result<impl Reply, Rejection>
+where
+	T: Send + Sync + Clone + Debug + Serialize + 'static,
+{
+	Ok(ws.on_upgrade(move |socket| handle_ws_connection(socket, update_channel, remote)))
+}
+
+async fn handle_ws_connection<T>(ws: WebSocket, mut update_channel: Receiver<T>, remote: Option<SocketAddr>)
+where
+	T: Send + Sync + Clone + Debug + Serialize + 'static,
+{
+	let (mut client_ws_sender, _client_ws_rcv) = ws.split();
+	debug!("connected to ws: {:?}", remote.as_ref());
+
+	tokio::task::spawn(async move {
+		loop {
+			match update_channel.recv().await {
+				Ok(update) => {
+					debug!("received event: {:?}", &update);
+
+					match client_ws_sender
+						.send(Message::text(serde_json::to_string(&update).unwrap()))
+						.await
+					{
+						Ok(_) => {
+							debug!("{:?} sent update to ws client", remote.as_ref());
+						},
+						Err(err) => {
+							warn!("{:?} cannot send data: {:?}", remote.as_ref(), err);
+							return
+						},
+					}
+				},
+				Err(err) => {
+					warn!("{:?} update channel error = {:?}", remote.as_ref(), err);
+
+					return
+				},
+			}
+		}
+	});
 }
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
