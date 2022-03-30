@@ -43,8 +43,8 @@ use ws::*;
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct CollectorOptions {
-	#[clap(name = "ws", long, default_value = "wss://westmint-rpc.polkadot.io:443")]
-	pub nodes: String,
+	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://westmint-rpc.polkadot.io:443")]
+	pub nodes: Vec<String>,
 	/// Maximum candidates to store
 	#[clap(name = "max-candidates", long)]
 	max_candidates: Option<usize>,
@@ -76,7 +76,7 @@ pub(crate) async fn run(
 	let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 	let (updates_tx, _updates_rx) = broadcast::channel(32);
 
-	let endpoints = opts.nodes.split(',').map(|s| s.to_owned());
+	let endpoints = opts.nodes.clone().into_iter();
 
 	let (consumer_channels, _to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = consumer_config.into();
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());

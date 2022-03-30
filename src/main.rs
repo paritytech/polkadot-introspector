@@ -19,50 +19,14 @@ use color_eyre::eyre::eyre;
 use log::{error, LevelFilter};
 mod collector;
 
+use block_time::BlockTimeOptions;
 use collector::CollectorOptions;
 
 mod block_time;
 mod core;
+mod jaeger;
 
 use crate::core::EventStream;
-
-#[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) enum BlockTimeMode {
-	/// CLI chart mode.
-	Cli(BlockTimeCliOptions),
-	/// Prometheus endpoint mode.
-	Prometheus(BlockTimePrometheusOptions),
-}
-#[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct BlockTimeOptions {
-	/// Websockets url of a substrate nodes.
-	#[clap(name = "ws", long, default_value = "wss://westmint-rpc.polkadot.io:443")]
-	nodes: String,
-	/// Mode of running - cli/prometheus.
-	#[clap(subcommand)]
-	mode: BlockTimeMode,
-}
-
-#[derive(Clone, Debug, Parser, Default)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct BlockTimeCliOptions {
-	/// Chart width.
-	#[clap(long, default_value = "80")]
-	chart_width: usize,
-	/// Chart height.
-	#[clap(long, default_value = "6")]
-	chart_height: usize,
-}
-
-#[derive(Clone, Debug, Parser, Default)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct BlockTimePrometheusOptions {
-	/// Prometheus endpoint port.
-	#[clap(long, default_value = "65432")]
-	port: u16,
-}
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -101,7 +65,7 @@ async fn main() -> color_eyre::Result<()> {
 
 	match opts.command {
 		Command::Collector(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(',').map(|s| s.to_owned()).collect());
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone());
 			let collector_consumer_init = core.create_consumer();
 
 			match collector::run(opts, collector_consumer_init).await {
@@ -110,7 +74,7 @@ async fn main() -> color_eyre::Result<()> {
 			}
 		},
 		Command::BlockTimeMonitor(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(',').map(|s| s.to_owned()).collect());
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone());
 			let block_time_consumer_init = core.create_consumer();
 
 			match block_time::BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
