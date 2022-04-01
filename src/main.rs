@@ -16,13 +16,15 @@
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
+use futures::future;
 use log::{error, LevelFilter};
-mod collector;
 
 use block_time::BlockTimeOptions;
 use collector::CollectorOptions;
+use jaeger::JaegerOptions;
 
 mod block_time;
+mod collector;
 mod core;
 mod jaeger;
 
@@ -33,6 +35,7 @@ use crate::core::EventStream;
 enum Command {
 	BlockTimeMonitor(BlockTimeOptions),
 	Collector(CollectorOptions),
+	Jaeger(JaegerOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -80,6 +83,15 @@ async fn main() -> color_eyre::Result<()> {
 			match block_time::BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
 				Ok(futures) => core.run(futures).await?,
 				Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
+			}
+		},
+		Command::Jaeger(opts) => {
+			let jaeger_cli = jaeger::JaegerTool::new(opts)?;
+			match jaeger_cli.run().await {
+				Ok(futures) => {
+					let results = future::try_join_all(futures).await.map_err(|e| eyre!("Join error: {:?}", e))?;
+				},
+				Err(err) => error!("FATAL: cannot start jaeger command: {}", err),
 			}
 		},
 	}

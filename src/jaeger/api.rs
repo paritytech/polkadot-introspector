@@ -17,12 +17,14 @@
 
 //! A wrapper for Jaeger HTTP API
 
+use log::debug;
 use reqwest;
-use std::borrow::Borrow;
+use serde::Deserialize;
 use std::error::Error;
-use std::fmt::format;
 use std::time::Duration;
 use typed_builder::TypedBuilder;
+
+use super::primitives::*;
 
 /// `/api/traces`
 /// Params:
@@ -66,8 +68,21 @@ impl JaegerApi {
 		}
 	}
 
-	pub async fn traces(&self) -> Result<String, Box<dyn Error>> {
-		let response = self.http_client.get(self.traces_url.clone()).send().await?;
+	pub async fn traces(&self, service: &str) -> Result<String, Box<dyn Error>> {
+		let mut url = self.traces_url.clone();
+		append_query_param(&mut url, "service", service);
+		let response = self.http_client.get(url).send().await?;
+		debug!("got response from the /traces endpoint, {:?}", &response);
+		response
+			.text()
+			.await
+			.or_else(|err| Err(Box::new(err) as Box<dyn std::error::Error>))
+	}
+
+	pub async fn trace(&self, id: &str) -> Result<String, Box<dyn Error>> {
+		let url = self.traces_url.join(format!("/{}", id).as_str())?;
+		let response = self.http_client.get(url).send().await?;
+		debug!("got response from the /traces/{} endpoint, {:?}", id, &response);
 		response
 			.text()
 			.await
@@ -76,20 +91,29 @@ impl JaegerApi {
 
 	pub async fn services(&self) -> Result<String, Box<dyn Error>> {
 		let response = self.http_client.get(self.services_url.clone()).send().await?;
+		debug!("got response from the /services endpoint, {:?}", &response);
 		response
 			.text()
 			.await
 			.or_else(|err| Err(Box::new(err) as Box<dyn std::error::Error>))
 	}
+
+	pub fn to_json<'a, T>(&self, response: &'a str) -> Result<Vec<T>, Box<dyn Error>>
+	where
+		T: Deserialize<'a>,
+	{
+		let response: RpcResponse<T> = serde_json::from_str(&response)?;
+		Ok(response.consume())
+	}
 }
 
 #[derive(TypedBuilder, Clone)]
 pub struct JaegerApiOptions {
-	#[builder(default, setter(strip_option))]
+	#[builder(default)]
 	limit: Option<usize>,
-	#[builder(default, setter(strip_option))]
+	#[builder(default)]
 	service: Option<String>,
-	#[builder(default, setter(strip_option))]
+	#[builder(default)]
 	lookback: Option<String>,
 	#[builder(default = 10.0)]
 	timeout: f32,
@@ -98,17 +122,21 @@ pub struct JaegerApiOptions {
 impl JaegerApiOptions {
 	pub fn enrich_base_url(&self, mut base_url: reqwest::Url) -> reqwest::Url {
 		if let Some(limit) = self.limit {
-			base_url.query_pairs_mut().append_pair("limit", format!("{}", limit).as_str());
+			append_query_param(&mut base_url, "limit", format!("{}", limit).as_str());
 		}
 
 		if let Some(ref service) = self.service {
-			base_url.query_pairs_mut().append_pair("service", service.as_str());
+			append_query_param(&mut base_url, "service", service.as_str());
 		}
 
 		if let Some(ref lookback) = self.lookback {
-			base_url.query_pairs_mut().append_pair("lookback", lookback.as_str());
+			append_query_param(&mut base_url, "lookback", lookback.as_str());
 		}
 
 		base_url
 	}
+}
+
+fn append_query_param(url: &mut reqwest::Url, param: &str, value: &str) {
+	url.query_pairs_mut().append_pair(param, value);
 }

@@ -20,6 +20,22 @@
 use serde::{de::Deserializer, Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// RPC Primitives
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RpcResponse<T> {
+	data: Vec<T>,
+	total: usize,
+	limit: usize,
+	offset: usize,
+	errors: Option<serde_json::Value>,
+}
+
+impl<T> RpcResponse<T> {
+	pub fn consume(self) -> Vec<T> {
+		self.data
+	}
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TraceObject<'a> {
 	#[serde(rename = "traceID")]
