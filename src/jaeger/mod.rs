@@ -15,11 +15,12 @@ use std::borrow::Borrow;
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-use crate::eyre;
-use crate::jaeger::api::JaegerApi;
-use crate::jaeger::primitives::TraceObject;
+use crate::{
+	eyre,
+	jaeger::{api::JaegerApi, primitives::TraceObject},
+};
 use clap::Parser;
-use log::{debug, error, info, warn};
+use log::debug;
 use serde::Serialize;
 use std::str::FromStr;
 
@@ -131,7 +132,21 @@ impl JaegerTool {
 	pub async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<color_eyre::Result<()>>>> {
 		let mut futures: Vec<tokio::task::JoinHandle<color_eyre::Result<()>>> = vec![];
 		match self.opts.mode {
-			JaegerMode::Trace { id } => {},
+			JaegerMode::Trace { id } => {
+				futures.push(tokio::spawn(async move {
+					let trace = self
+						.api
+						.trace(id.as_str())
+						.await
+						.map_err(|e| eyre!("Cannot get trace: {:?}", e))?;
+					let response: Vec<TraceObject> = self
+						.api
+						.to_json(trace.as_str())
+						.map_err(|e| eyre!("Cannot parse trace json: {:?}", e))?;
+					format_output(&response, self.opts.output)?;
+					Ok(())
+				}));
+			},
 			JaegerMode::AllTraces { service } => {
 				futures.push(tokio::spawn(async move {
 					let traces = self
@@ -150,7 +165,7 @@ impl JaegerTool {
 			JaegerMode::Services => {
 				futures.push(tokio::spawn(async move {
 					let services = self.api.services().await.map_err(|e| eyre!("Cannot get services: {:?}", e))?;
-					let response: Vec<TraceObject> = self
+					let response: Vec<String> = self
 						.api
 						.to_json(services.as_str())
 						.map_err(|e| eyre!("Cannot parse services json: {:?}", e))?;

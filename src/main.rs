@@ -90,6 +90,12 @@ async fn main() -> color_eyre::Result<()> {
 			match jaeger_cli.run().await {
 				Ok(futures) => {
 					let results = future::try_join_all(futures).await.map_err(|e| eyre!("Join error: {:?}", e))?;
+
+					for res in results.iter() {
+						if let Err(err) = res {
+							error!("FATAL: {}", err);
+						}
+					}
 				},
 				Err(err) => error!("FATAL: cannot start jaeger command: {}", err),
 			}

@@ -20,8 +20,7 @@
 use log::debug;
 use reqwest;
 use serde::Deserialize;
-use std::error::Error;
-use std::time::Duration;
+use std::{error::Error, time::Duration};
 use typed_builder::TypedBuilder;
 
 use super::primitives::*;
@@ -41,8 +40,6 @@ const HTTP_UA: &'static str = "polkadot-introspector";
 
 /// Main API exported module
 pub struct JaegerApi {
-	/// Base URL for the requests
-	base_url: reqwest::Url,
 	/// Cached urls for frequent requests
 	traces_url: reqwest::Url,
 	services_url: reqwest::Url,
@@ -61,7 +58,6 @@ impl JaegerApi {
 		let base_url = reqwest::Url::parse(url).expect("cannot parse base URL");
 
 		Self {
-			base_url: base_url.clone(),
 			traces_url: opts.enrich_base_url(base_url.join(TRACES_ENDPOINT).expect("cannot parse traces URL")),
 			services_url: opts.enrich_base_url(base_url.join(SERVICES_ENDPOINT).expect("cannot parse services URL")),
 			http_client,
@@ -80,7 +76,7 @@ impl JaegerApi {
 	}
 
 	pub async fn trace(&self, id: &str) -> Result<String, Box<dyn Error>> {
-		let url = self.traces_url.join(format!("/{}", id).as_str())?;
+		let url = self.traces_url.join(format!("{}/{}", TRACES_ENDPOINT, id).as_str())?;
 		let response = self.http_client.get(url).send().await?;
 		debug!("got response from the /traces/{} endpoint, {:?}", id, &response);
 		response
