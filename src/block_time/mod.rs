@@ -14,10 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{
-	core::{EventConsumerInit, Request, RequestExecutor, SubxtEvent},
-	BlockTimeCliOptions, BlockTimeMode, BlockTimeOptions,
-};
+use crate::core::{EventConsumerInit, Request, RequestExecutor, SubxtEvent};
+use clap::Parser;
 use colored::Colorize;
 use crossterm::{
 	cursor,
@@ -33,6 +31,44 @@ use std::{
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) enum BlockTimeMode {
+	/// CLI chart mode.
+	Cli(BlockTimeCliOptions),
+	/// Prometheus endpoint mode.
+	Prometheus(BlockTimePrometheusOptions),
+}
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct BlockTimeOptions {
+	/// Websockets url of a substrate nodes.
+	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://westmint-rpc.polkadot.io:443")]
+	pub nodes: Vec<String>,
+	/// Mode of running - cli/prometheus.
+	#[clap(subcommand)]
+	mode: BlockTimeMode,
+}
+
+#[derive(Clone, Debug, Parser, Default)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct BlockTimeCliOptions {
+	/// Chart width.
+	#[clap(long, default_value = "80")]
+	chart_width: usize,
+	/// Chart height.
+	#[clap(long, default_value = "6")]
+	chart_height: usize,
+}
+
+#[derive(Clone, Debug, Parser, Default)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct BlockTimePrometheusOptions {
+	/// Prometheus endpoint port.
+	#[clap(long, default_value = "65432")]
+	port: u16,
+}
+
 pub(crate) struct BlockTimeMonitor {
 	values: Vec<Arc<Mutex<VecDeque<u64>>>>,
 	opts: BlockTimeOptions,
@@ -46,7 +82,7 @@ impl BlockTimeMonitor {
 		opts: BlockTimeOptions,
 		consumer_config: EventConsumerInit<SubxtEvent>,
 	) -> color_eyre::Result<Self> {
-		let endpoints: Vec<String> = opts.nodes.split(",").map(|s| s.to_owned()).collect();
+		let endpoints = opts.nodes.clone();
 		let mut values = Vec::new();
 		for _ in 0..endpoints.len() {
 			values.push(Default::default());

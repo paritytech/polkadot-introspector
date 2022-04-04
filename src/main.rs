@@ -16,59 +16,26 @@
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
+use futures::future;
 use log::{error, LevelFilter};
-mod collector;
 
+use block_time::BlockTimeOptions;
 use collector::CollectorOptions;
+use jaeger::JaegerOptions;
 
 mod block_time;
+mod collector;
 mod core;
+mod jaeger;
 
 use crate::core::EventStream;
-
-#[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) enum BlockTimeMode {
-	/// CLI chart mode.
-	Cli(BlockTimeCliOptions),
-	/// Prometheus endpoint mode.
-	Prometheus(BlockTimePrometheusOptions),
-}
-#[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct BlockTimeOptions {
-	/// Websockets url of a substrate nodes.
-	#[clap(name = "ws", long, default_value = "wss://westmint-rpc.polkadot.io:443")]
-	nodes: String,
-	/// Mode of running - cli/prometheus.
-	#[clap(subcommand)]
-	mode: BlockTimeMode,
-}
-
-#[derive(Clone, Debug, Parser, Default)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct BlockTimeCliOptions {
-	/// Chart width.
-	#[clap(long, default_value = "80")]
-	chart_width: usize,
-	/// Chart height.
-	#[clap(long, default_value = "6")]
-	chart_height: usize,
-}
-
-#[derive(Clone, Debug, Parser, Default)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct BlockTimePrometheusOptions {
-	/// Prometheus endpoint port.
-	#[clap(long, default_value = "65432")]
-	port: u16,
-}
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 enum Command {
 	BlockTimeMonitor(BlockTimeOptions),
 	Collector(CollectorOptions),
+	Jaeger(JaegerOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -101,7 +68,7 @@ async fn main() -> color_eyre::Result<()> {
 
 	match opts.command {
 		Command::Collector(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(',').map(|s| s.to_owned()).collect());
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone());
 			let collector_consumer_init = core.create_consumer();
 
 			match collector::run(opts, collector_consumer_init).await {
@@ -110,12 +77,27 @@ async fn main() -> color_eyre::Result<()> {
 			}
 		},
 		Command::BlockTimeMonitor(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone().split(',').map(|s| s.to_owned()).collect());
+			let mut core = core::SubxtWrapper::new(opts.nodes.clone());
 			let block_time_consumer_init = core.create_consumer();
 
 			match block_time::BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
 				Ok(futures) => core.run(futures).await?,
 				Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
+			}
+		},
+		Command::Jaeger(opts) => {
+			let jaeger_cli = jaeger::JaegerTool::new(opts)?;
+			match jaeger_cli.run().await {
+				Ok(futures) => {
+					let results = future::try_join_all(futures).await.map_err(|e| eyre!("Join error: {:?}", e))?;
+
+					for res in results.iter() {
+						if let Err(err) = res {
+							error!("FATAL: {}", err);
+						}
+					}
+				},
+				Err(err) => error!("FATAL: cannot start jaeger command: {}", err),
 			}
 		},
 	}
