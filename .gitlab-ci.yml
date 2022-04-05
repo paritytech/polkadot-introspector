@@ -115,15 +115,15 @@ build:
   <<:                              *collect-artifacts
   script:
     - time cargo build --release
-    - mkdir artifacts || echo "dir exists"
-    - cp $CARGO_TARGET_DIR/release/polkadot-introspector artifacts/
+    - mkdir ./artifacts || echo "dir exists"
+    - cp $CARGO_TARGET_DIR/release/polkadot-introspector ./artifacts/
 
 #### stage:                       publish
 
 publish-docker:
   stage:                           publish
   variables:
-    DOCKERFILE:                    scripts/dockerfiles/polkadot-introspector_injected.Dockerfile
+    DOCKERFILE:                    ./scripts/ci/dockerfiles/polkadot-introspector_injected.Dockerfile
     IMAGE_NAME:                    docker.io/paritytech/polkadot-introspector
   needs:
     - job:                         build

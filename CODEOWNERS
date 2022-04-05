@@ -19,3 +19,4 @@
 # CI
 /.gitlab-ci.yml @paritytech/ci
 /.github/ @paritytech/ci
+/scripts/ci/ @paritytech/ci
