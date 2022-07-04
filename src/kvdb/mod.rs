@@ -21,8 +21,7 @@ use clap::Parser;
 use color_eyre::Result;
 use serde::Serialize;
 use std::fmt::{Display, Formatter};
-use strum::Display;
-use strum::EnumString;
+use strum::{Display, EnumString};
 
 pub use crate::kvdb::traits::*;
 

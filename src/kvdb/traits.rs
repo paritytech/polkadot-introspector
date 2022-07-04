@@ -16,6 +16,7 @@
 
 use color_eyre::Result;
 
+pub type DBIter<'a> = Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a>;
 /// A minimum subset of the functions required to open a database for introspection
 pub trait IntrospectorKvdb {
 	/// Opens database with some configuration
@@ -25,5 +26,5 @@ pub trait IntrospectorKvdb {
 	/// List all column families in a database
 	fn list_columns(&self) -> Result<&Vec<String>>;
 	/// Iterates over all keys in a specific column, calling a specific functor
-	fn iter_values(&self, column: &str) -> Result<Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_>>;
+	fn iter_values(&self, column: &str) -> Result<DBIter>;
 }

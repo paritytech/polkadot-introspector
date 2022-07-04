@@ -16,9 +16,8 @@
 
 //! Implementation of the introspection using RocksDB
 
-use super::IntrospectorKvdb;
-use color_eyre::eyre::eyre;
-use color_eyre::Result;
+use super::{DBIter, IntrospectorKvdb};
+use color_eyre::{eyre::eyre, Result};
 use rocksdb::{IteratorMode, Options as RocksdbOptions, DB};
 
 pub struct IntrospectorRocksDB {
@@ -38,8 +37,11 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		Ok(&self.columns)
 	}
 
-	fn iter_values(&self, column: &str) -> Result<Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_>> {
-		let cf_handle = self.inner.cf_handle(column).ok_or(eyre!("invalid column: {}", column))?;
+	fn iter_values(&self, column: &str) -> Result<DBIter> {
+		let cf_handle = self
+			.inner
+			.cf_handle(column)
+			.ok_or_else(|| eyre!("invalid column: {}", column))?;
 		let iter = self.inner.iterator_cf(cf_handle, IteratorMode::Start);
 		Ok(Box::new(iter))
 	}

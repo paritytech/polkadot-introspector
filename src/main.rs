@@ -29,8 +29,7 @@ mod core;
 mod jaeger;
 mod kvdb;
 
-use crate::core::EventStream;
-use crate::kvdb::KvdbOptions;
+use crate::{core::EventStream, kvdb::KvdbOptions};
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
