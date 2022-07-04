@@ -19,8 +19,8 @@ mod traits;
 
 use clap::Parser;
 use color_eyre::Result;
-use std::cell::RefCell;
-use std::rc::Rc;
+use serde::Serialize;
+use std::fmt::{Display, Formatter};
 use strum::Display;
 use strum::EnumString;
 
@@ -66,14 +66,44 @@ pub struct KvdbOptions {
 	mode: KvdbMode,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct UsageResults {
+	keys_count: usize,
+	keys_size: usize,
+	values_size: usize,
+}
+
+impl Display for UsageResults {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		if self.keys_count > 0 {
+			write!(
+				f,
+				"{} keys size: {} bytes, values size: {} bytes ({:.2} bytes per key in average)",
+				self.keys_count,
+				self.keys_size,
+				self.values_size,
+				self.values_size as f64 / self.keys_count as f64
+			)
+		} else {
+			write!(
+				f,
+				"{} keys size: {} bytes, values size: {} bytes (0 bytes per key in average)",
+				self.keys_count, self.keys_size, self.values_size
+			)
+		}
+	}
+}
+
 pub fn inrospect_kvdb(opts: KvdbOptions) -> Result<()> {
-	let db: Box<dyn traits::IntrospectorKvdb> = match opts.db_type {
-		KvdbType::RocksDB => Box::new(rocksdb::IntrospectorRocksDB::new(opts.db.as_str())?),
+	match opts.db_type {
+		KvdbType::RocksDB => run_with_db(rocksdb::IntrospectorRocksDB::new(opts.db.as_str())?, opts),
 		KvdbType::ParityDB => {
 			todo!();
 		},
-	};
+	}
+}
 
+fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 	match opts.mode {
 		KvdbMode::Columns => {
 			let columns = db.list_columns()?;
@@ -86,25 +116,19 @@ pub fn inrospect_kvdb(opts: KvdbOptions) -> Result<()> {
 			let columns = db.list_columns()?;
 
 			for col in columns {
-				let keys_space = Rc::new(RefCell::new(0_usize));
-				let keys_count = Rc::new(RefCell::new(0_usize));
-				let values_space = Rc::new(RefCell::new(0_usize));
+				let mut keys_space = 0_usize;
+				let mut keys_count = 0_usize;
+				let mut values_space = 0_usize;
+				let iter = db.iter_values(col.as_str())?;
+				for (key, value) in iter {
+					keys_space += key.len();
+					keys_count += 1;
+					values_space += value.len();
+				}
 
-				db.iter_values(col.as_str(), &|key: &[u8], value: &[u8]| {
-					*keys_space.borrow_mut() += key.len();
-					*keys_count.borrow_mut() += 1;
-					*values_space.borrow_mut() += value.len();
-					true // Continue iterations
-				})
-				.ok();
+				let res = UsageResults { keys_count, values_size: values_space, keys_size: keys_space };
 
-				println!(
-					"{}: {} keys size: {} bytes, values size: {} bytes",
-					col.as_str(),
-					keys_count.borrow(),
-					keys_space.borrow(),
-					values_space.borrow()
-				);
+				println!("{}: {}", col.as_str(), res);
 			}
 		},
 	}

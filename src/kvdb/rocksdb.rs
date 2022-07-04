@@ -38,16 +38,9 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		Ok(&self.columns)
 	}
 
-	fn iter_values(&self, column: &str, func: &dyn Fn(&[u8], &[u8]) -> bool) -> Result<bool> {
+	fn iter_values(&self, column: &str) -> Result<Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_>> {
 		let cf_handle = self.inner.cf_handle(column).ok_or(eyre!("invalid column: {}", column))?;
 		let iter = self.inner.iterator_cf(cf_handle, IteratorMode::Start);
-
-		for (key, value) in iter {
-			if !func(&key[..], &value[..]) {
-				return Ok(false);
-			}
-		}
-
-		Ok(true)
+		Ok(Box::new(iter))
 	}
 }
