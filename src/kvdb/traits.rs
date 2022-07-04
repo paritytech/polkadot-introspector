@@ -24,4 +24,6 @@ pub trait IntrospectorKvdb {
 		Self: Sized;
 	/// List all column families in a database
 	fn list_columns(&self) -> Result<&Vec<String>>;
+	/// Iterates over all keys in a specific column, calling a specific functor
+	fn iter_values(&self, column: &str, func: &dyn Fn(&[u8], &[u8]) -> bool) -> Result<bool>;
 }

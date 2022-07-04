@@ -17,8 +17,9 @@
 //! Implementation of the introspection using RocksDB
 
 use super::IntrospectorKvdb;
+use color_eyre::eyre::eyre;
 use color_eyre::Result;
-use rocksdb::{Options as RocksdbOptions, DB};
+use rocksdb::{IteratorMode, Options as RocksdbOptions, DB};
 
 pub struct IntrospectorRocksDB {
 	inner: DB,
@@ -29,11 +30,24 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 	fn new(path: &str) -> Result<Self> {
 		let cf_opts = RocksdbOptions::default();
 		let columns = DB::list_cf(&cf_opts, path)?;
-		let db = DB::open_for_read_only(&cf_opts, path, false)?;
+		let db = DB::open_cf_for_read_only(&cf_opts, path, columns.clone(), false)?;
 		Ok(Self { inner: db, columns })
 	}
 
 	fn list_columns(&self) -> color_eyre::Result<&Vec<String>> {
 		Ok(&self.columns)
+	}
+
+	fn iter_values(&self, column: &str, func: &dyn Fn(&[u8], &[u8]) -> bool) -> Result<bool> {
+		let cf_handle = self.inner.cf_handle(column).ok_or(eyre!("invalid column: {}", column))?;
+		let iter = self.inner.iterator_cf(cf_handle, IteratorMode::Start);
+
+		for (key, value) in iter {
+			if !func(&key[..], &value[..]) {
+				return Ok(false);
+			}
+		}
+
+		Ok(true)
 	}
 }

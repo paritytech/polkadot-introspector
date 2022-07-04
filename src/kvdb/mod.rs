@@ -19,6 +19,8 @@ mod traits;
 
 use clap::Parser;
 use color_eyre::Result;
+use std::cell::RefCell;
+use std::rc::Rc;
 use strum::Display;
 use strum::EnumString;
 
@@ -80,7 +82,31 @@ pub fn inrospect_kvdb(opts: KvdbOptions) -> Result<()> {
 				println!("{}", col.as_str());
 			}
 		},
-		_ => todo!(),
+		KvdbMode::Usage => {
+			let columns = db.list_columns()?;
+
+			for col in columns {
+				let keys_space = Rc::new(RefCell::new(0_usize));
+				let keys_count = Rc::new(RefCell::new(0_usize));
+				let values_space = Rc::new(RefCell::new(0_usize));
+
+				db.iter_values(col.as_str(), &|key: &[u8], value: &[u8]| {
+					*keys_space.borrow_mut() += key.len();
+					*keys_count.borrow_mut() += 1;
+					*values_space.borrow_mut() += value.len();
+					true // Continue iterations
+				})
+				.ok();
+
+				println!(
+					"{}: {} keys size: {} bytes, values size: {} bytes",
+					col.as_str(),
+					keys_count.borrow(),
+					keys_space.borrow(),
+					values_space.borrow()
+				);
+			}
+		},
 	}
 
 	Ok(())
