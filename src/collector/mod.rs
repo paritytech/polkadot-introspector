@@ -80,7 +80,7 @@ pub(crate) async fn run(
 
 	let (consumer_channels, _to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = consumer_config.into();
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
-	let _ = ws_listener
+	ws_listener
 		.spawn(shutdown_rx, updates_tx.clone())
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
