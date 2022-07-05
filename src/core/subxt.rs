@@ -219,7 +219,7 @@ impl SubxtWrapper {
 									let hash = events.block_hash();
 									info!("[{}] Block imported ({:?})", url, &hash);
 
-									if let Err(e) = update_channel.send(SubxtEvent::NewHead(hash.clone())).await {
+									if let Err(e) = update_channel.send(SubxtEvent::NewHead(hash)).await {
 										info!("Event consumer has terminated: {:?}, shutting down", e);
 										return;
 									}
@@ -228,7 +228,7 @@ impl SubxtWrapper {
 										let event = event.unwrap();
 
 										update_channel
-											.send(SubxtEvent::RawEvent(hash.clone(), event.clone()))
+											.send(SubxtEvent::RawEvent(hash, event.clone()))
 											.await
 											.unwrap();
 									}
