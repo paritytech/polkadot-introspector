@@ -47,7 +47,7 @@ pub(crate) enum KvdbMode {
 	Usage(KvdbUsageOpts),
 }
 
-/// Mode of this command
+/// Database type
 #[derive(Clone, Debug, Parser, EnumString, Display)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum KvdbType {
