@@ -103,7 +103,7 @@ async fn main() -> color_eyre::Result<()> {
 			}
 		},
 		Command::Kvdb(opts) => {
-			kvdb::inrospect_kvdb(opts)?;
+			kvdb::introspect_kvdb(opts)?;
 		},
 	}
 

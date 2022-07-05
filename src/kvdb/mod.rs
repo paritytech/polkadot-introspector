@@ -126,12 +126,10 @@ impl<'a> Display for UsageResults<'a> {
 	}
 }
 
-pub fn inrospect_kvdb(opts: KvdbOptions) -> Result<()> {
+pub fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
 	match opts.db_type {
 		KvdbType::RocksDB => run_with_db(rocksdb::IntrospectorRocksDB::new(opts.db.as_str())?, opts),
-		KvdbType::ParityDB => {
-			todo!();
-		},
+		KvdbType::ParityDB => run_with_db(paritydb::IntrospectorParityDB::new(opts.db.as_str())?, opts),
 	}
 }
 
