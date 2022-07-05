@@ -27,4 +27,5 @@ serde_urlencoded = "0.7.1"
 async-trait = "0.1.52"
 strum = { version = "0.24.1", features = ["derive"] }
 rocksdb = "0.18.0"
+parity-db = "0.3.14"
 
