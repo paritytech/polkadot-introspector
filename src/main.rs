@@ -27,8 +27,9 @@ mod block_time;
 mod collector;
 mod core;
 mod jaeger;
+mod kvdb;
 
-use crate::core::EventStream;
+use crate::{core::EventStream, kvdb::KvdbOptions};
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -36,6 +37,7 @@ enum Command {
 	BlockTimeMonitor(BlockTimeOptions),
 	Collector(CollectorOptions),
 	Jaeger(JaegerOptions),
+	Kvdb(KvdbOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -99,6 +101,9 @@ async fn main() -> color_eyre::Result<()> {
 				},
 				Err(err) => error!("FATAL: cannot start jaeger command: {}", err),
 			}
+		},
+		Command::Kvdb(opts) => {
+			kvdb::introspect_kvdb(opts)?;
 		},
 	}
 

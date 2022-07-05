@@ -35,9 +35,9 @@ pub struct EventConsumerInit<Event> {
 	to_api: Sender<Request>,
 }
 
-impl<Event> Into<(Vec<Receiver<Event>>, Sender<Request>)> for EventConsumerInit<Event> {
-	fn into(self) -> (Vec<Receiver<Event>>, Sender<Request>) {
-		(self.update_channels, self.to_api)
+impl<Event> From<EventConsumerInit<Event>> for (Vec<Receiver<Event>>, Sender<Request>) {
+	fn from(event: EventConsumerInit<Event>) -> Self {
+		(event.update_channels, event.to_api)
 	}
 }
 

@@ -31,6 +31,7 @@
 mod api;
 mod constants;
 mod consumer;
+#[allow(clippy::enum_variant_names)]
 mod subxt;
 
 pub use self::subxt::*;

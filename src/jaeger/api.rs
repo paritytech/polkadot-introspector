@@ -18,7 +18,6 @@
 //! A wrapper for Jaeger HTTP API
 
 use log::debug;
-use reqwest;
 use serde::Deserialize;
 use std::{error::Error, time::Duration};
 use typed_builder::TypedBuilder;
@@ -30,13 +29,13 @@ use super::primitives::*;
 ///     limit: specify how many to return
 ///     service: Where did the trace originate
 ///     prettyPrint: Make JSON nice
-const TRACES_ENDPOINT: &'static str = "/api/traces";
+const TRACES_ENDPOINT: &str = "/api/traces";
 /// `/api/services`
 ///     returns services reporting to the jaeger agent
-const SERVICES_ENDPOINT: &'static str = "/api/services";
+const SERVICES_ENDPOINT: &str = "/api/services";
 
 /// Used to distinguish our user-agent
-const HTTP_UA: &'static str = "polkadot-introspector";
+const HTTP_UA: &str = "polkadot-introspector";
 
 /// Main API exported module
 pub struct JaegerApi {
@@ -69,36 +68,27 @@ impl JaegerApi {
 		append_query_param(&mut url, "service", service);
 		let response = self.http_client.get(url).send().await?;
 		debug!("got response from the /traces endpoint, {:?}", &response);
-		response
-			.text()
-			.await
-			.or_else(|err| Err(Box::new(err) as Box<dyn std::error::Error>))
+		response.text().await.map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
 	}
 
 	pub async fn trace(&self, id: &str) -> Result<String, Box<dyn Error>> {
 		let url = self.traces_url.join(format!("{}/{}", TRACES_ENDPOINT, id).as_str())?;
 		let response = self.http_client.get(url).send().await?;
 		debug!("got response from the /traces/{} endpoint, {:?}", id, &response);
-		response
-			.text()
-			.await
-			.or_else(|err| Err(Box::new(err) as Box<dyn std::error::Error>))
+		response.text().await.map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
 	}
 
 	pub async fn services(&self) -> Result<String, Box<dyn Error>> {
 		let response = self.http_client.get(self.services_url.clone()).send().await?;
 		debug!("got response from the /services endpoint, {:?}", &response);
-		response
-			.text()
-			.await
-			.or_else(|err| Err(Box::new(err) as Box<dyn std::error::Error>))
+		response.text().await.map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
 	}
 
 	pub fn to_json<'a, T>(&self, response: &'a str) -> Result<Vec<T>, Box<dyn Error>>
 	where
 		T: Deserialize<'a>,
 	{
-		let response: RpcResponse<T> = serde_json::from_str(&response)?;
+		let response: RpcResponse<T> = serde_json::from_str(response)?;
 		Ok(response.consume())
 	}
 }
