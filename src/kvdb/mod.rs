@@ -33,6 +33,7 @@ pub(crate) struct KvdbUsageOpts {
 	/// Check only specific column(s)
 	#[clap(long, short = 'c')]
 	column: Vec<String>,
+	/// Limit scan by specific key prefix(es)
 	#[clap(long, short = 'p')]
 	keys_prefix: Vec<String>,
 }
