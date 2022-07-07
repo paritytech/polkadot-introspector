@@ -156,17 +156,24 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				let mut keys_space = 0_usize;
 				let mut keys_count = 0_usize;
 				let mut values_space = 0_usize;
-				let iter = db.iter_values(col.as_str())?.filter(|(key, _)| {
-					if !usage_opts.keys_prefix.is_empty() {
-						usage_opts.keys_prefix.iter().any(|prefix| key.starts_with(prefix.as_bytes()))
-					} else {
-						true
+
+				if usage_opts.keys_prefix.is_empty() {
+					let iter = db.iter_values(col.as_str())?;
+					for (key, value) in iter {
+						keys_space += key.len();
+						keys_count += 1;
+						values_space += value.len();
 					}
-				});
-				for (key, value) in iter {
-					keys_space += key.len();
-					keys_count += 1;
-					values_space += value.len();
+				} else {
+					// Iterate over all requested prefixes
+					for prefix in &usage_opts.keys_prefix {
+						let iter = db.prefixed_iter_values(col.as_str(), prefix.as_str())?;
+						for (key, value) in iter {
+							keys_space += key.len();
+							keys_count += 1;
+							values_space += value.len();
+						}
+					}
 				}
 
 				let res = UsageResults {
