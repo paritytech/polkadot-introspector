@@ -18,7 +18,7 @@
 use async_trait::async_trait;
 use futures::{future, StreamExt};
 use log::{error, info};
-use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, DefaultExtra};
+use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
 
 #[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
 pub mod polkadot {}
@@ -88,14 +88,14 @@ impl EventStream for SubxtWrapper {
 }
 
 async fn subxt_get_head(
-	api: &polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>,
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	maybe_hash: Option<H256>,
 ) -> Result {
 	Ok(Response::GetHeadResponse(api.client.rpc().header(maybe_hash).await.map_err(Error::SubxtError)?))
 }
 
 async fn subxt_get_block_ts(
-	api: &polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>,
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	maybe_hash: Option<H256>,
 ) -> Result {
 	Ok(Response::GetBlockTimestampResponse(api.storage().timestamp().now(maybe_hash).await.map_err(Error::SubxtError)?))
@@ -114,13 +114,14 @@ impl SubxtWrapper {
 	}
 
 	// Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-	async fn new_client_fn(url: String) -> Option<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>> {
+	async fn new_client_fn(
+		url: String,
+	) -> Option<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>> {
 		for _ in 0..RETRY_COUNT {
 			match ClientBuilder::new().set_url(url.clone()).build().await {
-				Ok(api) =>
-					return Some(
-						api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>(),
-					),
+				Ok(api) => return Some(
+					api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>>(),
+				),
 				Err(err) => {
 					error!("[{}] Client error: {:?}", url, err);
 					tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
@@ -209,7 +210,9 @@ impl SubxtWrapper {
 		loop {
 			match ClientBuilder::new().set_url(url.clone()).build().await {
 				Ok(api) => {
-					let api = api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, DefaultExtra<DefaultConfig>>>();
+					let api = api
+						.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>>(
+						);
 					info!("[{}] Connected", url);
 					match api.events().subscribe().await {
 						Ok(mut sub) => loop {

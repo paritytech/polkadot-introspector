@@ -262,7 +262,7 @@ impl Default for EventRouteMap {
 				polkadot::paras_disputes::events::DisputeInitiated,
 				Box<dyn Error>,
 			> {
-				<polkadot::paras_disputes::events::DisputeInitiated as codec::Decode>::decode(&mut &ev.data[..])
+				<polkadot::paras_disputes::events::DisputeInitiated as codec::Decode>::decode(&mut &ev.bytes[..])
 					.map_err(|e| e.into())
 			}),
 		);
@@ -272,7 +272,7 @@ impl Default for EventRouteMap {
 				polkadot::paras_disputes::events::DisputeConcluded,
 				Box<dyn Error>,
 			> {
-				<polkadot::paras_disputes::events::DisputeConcluded as codec::Decode>::decode(&mut &ev.data[..])
+				<polkadot::paras_disputes::events::DisputeConcluded as codec::Decode>::decode(&mut &ev.bytes[..])
 					.map_err(|e| e.into())
 			}),
 		);
@@ -282,7 +282,7 @@ impl Default for EventRouteMap {
 				polkadot::paras_disputes::events::DisputeTimedOut,
 				Box<dyn Error>,
 			> {
-				<polkadot::paras_disputes::events::DisputeTimedOut as codec::Decode>::decode(&mut &ev.data[..])
+				<polkadot::paras_disputes::events::DisputeTimedOut as codec::Decode>::decode(&mut &ev.bytes[..])
 					.map_err(|e| e.into())
 			}),
 		);
@@ -296,7 +296,7 @@ impl Default for EventRouteMap {
 				polkadot::para_inclusion::events::CandidateBacked,
 				Box<dyn Error>,
 			> {
-				<polkadot::para_inclusion::events::CandidateBacked as codec::Decode>::decode(&mut &ev.data[..])
+				<polkadot::para_inclusion::events::CandidateBacked as codec::Decode>::decode(&mut &ev.bytes[..])
 					.map_err(|e| e.into())
 			}),
 		);
@@ -306,7 +306,7 @@ impl Default for EventRouteMap {
 				polkadot::para_inclusion::events::CandidateIncluded,
 				Box<dyn Error>,
 			> {
-				<polkadot::para_inclusion::events::CandidateIncluded as codec::Decode>::decode(&mut &ev.data[..])
+				<polkadot::para_inclusion::events::CandidateIncluded as codec::Decode>::decode(&mut &ev.bytes[..])
 					.map_err(|e| e.into())
 			}),
 		);
@@ -316,7 +316,7 @@ impl Default for EventRouteMap {
 				polkadot::para_inclusion::events::CandidateTimedOut,
 				Box<dyn Error>,
 			> {
-				<polkadot::para_inclusion::events::CandidateTimedOut as codec::Decode>::decode(&mut &ev.data[..])
+				<polkadot::para_inclusion::events::CandidateTimedOut as codec::Decode>::decode(&mut &ev.bytes[..])
 					.map_err(|e| e.into())
 			}),
 		);
