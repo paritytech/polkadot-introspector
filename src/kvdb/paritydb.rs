@@ -61,4 +61,23 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 			}
 		})))
 	}
+
+	fn prefixed_iter_values<'a>(&'a self, column: &str, prefix: &'a str) -> Result<DBIter<'a>> {
+		let column_idx = self
+			.columns
+			.iter()
+			.position(|col| col.as_str() == column)
+			.ok_or_else(|| eyre!("invalid column: {}", column))? as u8;
+		let mut iter = self.inner.iter(column_idx)?;
+		iter.seek(prefix.as_bytes())?;
+
+		Ok(Box::new(std::iter::from_fn(move || {
+			if let Some((key, value)) = iter.next().unwrap_or(None) {
+				key.starts_with(prefix.as_bytes())
+					.then(|| (key.into_boxed_slice(), value.into_boxed_slice()))
+			} else {
+				None
+			}
+		})))
+	}
 }

@@ -45,4 +45,13 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		let iter = self.inner.iterator_cf(cf_handle, IteratorMode::Start);
 		Ok(Box::new(iter))
 	}
+
+	fn prefixed_iter_values(&self, column: &str, prefix: &str) -> Result<DBIter> {
+		let cf_handle = self
+			.inner
+			.cf_handle(column)
+			.ok_or_else(|| eyre!("invalid column: {}", column))?;
+		let iter = self.inner.prefix_iterator_cf(cf_handle, prefix);
+		Ok(Box::new(iter))
+	}
 }

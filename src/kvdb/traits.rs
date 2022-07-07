@@ -25,6 +25,8 @@ pub trait IntrospectorKvdb {
 		Self: Sized;
 	/// List all column families in a database
 	fn list_columns(&self) -> Result<&Vec<String>>;
-	/// Iterates over all keys in a specific column, calling a specific functor
-	fn iter_values(&self, column: &str) -> Result<DBIter>;
+	/// Iterates over all keys in a specific column
+	fn iter_values<'a>(&'a self, column: &str) -> Result<DBIter<'a>>;
+	/// Iterates over all keys that begin with the specific prefix, column must have order defined
+	fn prefixed_iter_values<'a>(&'a self, column: &str, prefix: &'a str) -> Result<DBIter<'a>>;
 }
