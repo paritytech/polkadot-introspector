@@ -29,10 +29,12 @@ impl DecodeResult for i32 {}
 impl DecodeResult for u64 {}
 impl DecodeResult for String {}
 
+type DecoderFunctor = Box<dyn Fn(&[u8]) -> Result<Box<dyn DecodeResult>>>;
+
 /// This structure is used to decode a single entry
 pub struct DecodeElement {
 	/// Represents a decoder functor
-	decoder: Box<dyn Fn(&[u8]) -> Result<Box<dyn DecodeResult>>>,
+	decoder: DecoderFunctor,
 	/// How much bytes this functor consume
 	consume_size: usize,
 }
