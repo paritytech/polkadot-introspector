@@ -19,11 +19,11 @@
 use crate::kvdb::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};
 use itertools::Itertools;
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 use subxt::sp_core::H256;
 
 /// Decode result trait, used to display and format output of the decoder
-pub trait DecodeResult: Display + Debug {}
+pub trait DecodeResult: Display + ToString {}
 
 impl DecodeResult for i32 {}
 impl DecodeResult for u64 {}
@@ -91,7 +91,7 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 
 				if leftover.len() < 2 {
 					// Invalid percent encoding
-					return Err(eyre!("invalid percent encoding after {}: {}", plain_string, leftover));
+					return Err(eyre!("invalid percent encoding after {}: {}", plain_string, leftover))
 				}
 
 				let percent_char = leftover.get(1..2).unwrap();
@@ -115,8 +115,14 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 	Ok(ret)
 }
 
-pub fn decode_keys<D: IntrospectorKvdb>(db: &D, column: &str, decode_fmt: &str) -> Result<()> {
+pub fn decode_keys<D: IntrospectorKvdb>(
+	db: &D,
+	column: &str,
+	decode_fmt: &str,
+	lim: &Option<usize>,
+) -> Result<Vec<Vec<String>>> {
 	let percent_pos = decode_fmt.find('%');
+	let mut final_result: Vec<Vec<String>> = vec![];
 
 	if let Some(pos) = percent_pos {
 		let (prefix, _) = decode_fmt.split_at(pos);
@@ -127,22 +133,31 @@ pub fn decode_keys<D: IntrospectorKvdb>(db: &D, column: &str, decode_fmt: &str) 
 
 		for (k, _) in iter {
 			if k.len() != expected_key_len {
-				return Err(eyre!("invalid key size: {}; expected key size: {}", k.len(), expected_key_len));
+				return Err(eyre!("invalid key size: {}; expected key size: {}", k.len(), expected_key_len))
 			}
 
 			let mut remain = &*k;
 
-			let res: Vec<_> = decoders
+			let cur: Vec<_> = decoders
 				.iter()
 				.map(move |decoder| {
 					let (cur, next) = remain.split_at(decoder.consume_size);
 					remain = next;
 					(decoder.decoder)(cur)
 				})
+				.map_ok(|elt| elt.to_string())
 				.try_collect()?;
-			println!("{:?}", res);
+
+			final_result.push(cur);
+
+			if let Some(lim) = lim {
+				if final_result.len() > *lim {
+					final_result.truncate(*lim);
+					break
+				}
+			}
 		}
 	}
 
-	Ok(())
+	Ok(final_result)
 }

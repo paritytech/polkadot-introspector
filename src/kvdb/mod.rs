@@ -49,6 +49,9 @@ pub(crate) struct KvdbKeysOpts {
 	/// Decode keys matching the specific format (like `candidate-votes%i%h`, where `%i` represents a big-endian integer)
 	#[clap(long, short = 'f')]
 	fmt: String,
+	/// Limit number of output entries
+	#[clap(long, short = 'l')]
+	limit: Option<usize>,
 }
 
 /// Mode of this command
@@ -201,8 +204,14 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				output_result(&res, &opts)?;
 			}
 		},
-		KvdbMode::Keys(kvdb_keys_opts) => {
-			decode::decode_keys(&db, kvdb_keys_opts.column.as_str(), kvdb_keys_opts.fmt.as_str())?;
+		KvdbMode::Keys(ref kvdb_keys_opts) => {
+			let res = decode::decode_keys(
+				&db,
+				kvdb_keys_opts.column.as_str(),
+				kvdb_keys_opts.fmt.as_str(),
+				&kvdb_keys_opts.limit,
+			)?;
+			output_keys(&res, &opts)?;
 		},
 	}
 
@@ -216,6 +225,20 @@ where
 	match opts.output {
 		OutputMode::Json => println!("{}", serde_json::to_string(res)?),
 		OutputMode::Pretty => println!("{}", res),
+	}
+
+	Ok(())
+}
+
+fn output_keys(res: &Vec<Vec<String>>, opts: &KvdbOptions) -> Result<()> {
+	match opts.output {
+		OutputMode::Json => {
+			println!("{}", serde_json::to_string(res)?)
+		},
+		OutputMode::Pretty =>
+			for elt in res {
+				println!("{:?}", elt);
+			},
 	}
 
 	Ok(())
