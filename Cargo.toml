@@ -28,4 +28,6 @@ async-trait = "0.1.56"
 strum = { version = "0.24.1", features = ["derive"] }
 rocksdb = "0.18.0"
 parity-db = "0.3.14"
+hex = "0.4.3"
+itertools = "0.10.3"
 
