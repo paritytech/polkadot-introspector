@@ -14,10 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+mod decode;
 mod paritydb;
 mod rocksdb;
 mod traits;
 
+use crate::kvdb::decode::DecodedOutput;
 use clap::Parser;
 use color_eyre::Result;
 use serde::Serialize;
@@ -38,6 +40,21 @@ pub(crate) struct KvdbUsageOpts {
 	keys_prefix: Vec<String>,
 }
 
+/// Specific options for the keys subcommand
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct KvdbKeysOpts {
+	/// Check only specific column(s)
+	#[clap(long, short = 'c')]
+	column: String,
+	/// Decode keys matching the specific format (like `candidate-votes%i%h`, where `%i` represents a big-endian integer)
+	#[clap(long, short = 'f')]
+	fmt: String,
+	/// Limit number of output entries
+	#[clap(long, short = 'l')]
+	limit: Option<usize>,
+}
+
 /// Mode of this command
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -46,6 +63,8 @@ pub(crate) enum KvdbMode {
 	Columns,
 	/// Returns usage in the database
 	Usage(KvdbUsageOpts),
+	/// Decode specific keys in the database
+	DecodeKeys(KvdbKeysOpts),
 }
 
 /// Database type
@@ -186,6 +205,15 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				output_result(&res, &opts)?;
 			}
 		},
+		KvdbMode::DecodeKeys(ref kvdb_keys_opts) => {
+			let res = decode::decode_keys(
+				&db,
+				kvdb_keys_opts.column.as_str(),
+				kvdb_keys_opts.fmt.as_str(),
+				&kvdb_keys_opts.limit,
+			)?;
+			output_decoded_keys(&res, &opts)?;
+		},
 	}
 
 	Ok(())
@@ -198,6 +226,20 @@ where
 	match opts.output {
 		OutputMode::Json => println!("{}", serde_json::to_string(res)?),
 		OutputMode::Pretty => println!("{}", res),
+	}
+
+	Ok(())
+}
+
+fn output_decoded_keys(res: &DecodedOutput, opts: &KvdbOptions) -> Result<()> {
+	match opts.output {
+		OutputMode::Json => {
+			println!("{}", serde_json::to_string(res)?);
+		},
+		OutputMode::Pretty =>
+			for elt in res {
+				println!("{:?}", elt);
+			},
 	}
 
 	Ok(())
