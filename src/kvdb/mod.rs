@@ -236,11 +236,10 @@ fn output_decoded_keys(res: &DecodedOutput, opts: &KvdbOptions) -> Result<()> {
 		OutputMode::Json => {
 			println!("{}", serde_json::to_string(res)?);
 		},
-		OutputMode::Pretty => {
+		OutputMode::Pretty =>
 			for elt in res {
 				println!("{:?}", elt);
-			}
-		},
+			},
 	}
 
 	Ok(())

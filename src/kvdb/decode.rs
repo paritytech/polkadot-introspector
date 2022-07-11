@@ -14,7 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-//! KVDB decoding functions
+//! This module contains keys decoding functions according to a user specified
+//! format string. Format string can currently include plain strings, and one or
+//! more percent encoding values, such as `%i`. Currently, this module supports the
+//! following percent strings:
+//! - %i - big endian i32 value
+//! - %t - big endian u64 value (timestamp)
+//! - %h - blake2b hash represented as hex string
+//! - %s<d> - string of length `d` (for example `%s10` represents a string of size 10)
 
 use crate::kvdb::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};
@@ -246,12 +253,43 @@ mod tests {
 		let good_test_cases: Vec<(Vec<u8>, i32)> = vec![
 			(vec![0x0u8, 0x0, 0x0, 0x1], 1_i32),
 			(vec![0x0u8, 0x0, 0x0, 0x0], 0_i32),
-			(vec![0xffu8, 0xff, 0xff, 0xff], i32::MIN),
+			(vec![0xffu8, 0xff, 0xff, 0xff], -1),
 		];
 
 		for (case, expected) in good_test_cases {
 			let res = decode_with_format_string("%i", case.as_slice()).unwrap();
 			assert_eq!(expected, res[0][0].to_string().parse::<i32>().unwrap());
+		}
+	}
+
+	#[test]
+	fn decode_complex() {
+		// Format string + Input + Expected output
+		let good_test_cases: Vec<(&str, Vec<u8>, Vec<&str>)> = vec![
+			("%s2%i", vec![0x21, 0x21, 0x0u8, 0x0, 0x0, 0x1], vec!["!!", "1"]),
+			("!!%i", vec![0x21, 0x21, 0x0u8, 0x0, 0x0, 0x1], vec!["!!", "1"]),
+		];
+
+		for (fmt_string, case, expected) in good_test_cases {
+			let res = decode_with_format_string(fmt_string, case.as_slice()).unwrap();
+
+			for (idx, elt) in res[0].iter().enumerate() {
+				assert_eq!(expected[idx], elt.to_string());
+			}
+		}
+
+		let bad_test_cases: Vec<(&str, Vec<u8>)> = vec![
+			// Extra byte
+			("%s2%i", vec![0x21, 0x21, 0x21, 0x0u8, 0x0, 0x0, 0x1]),
+			// Unmatching static string
+			("!?%i", vec![0x21, 0x21, 0x0u8, 0x0, 0x0, 0x1]),
+			// Truncated input
+			("!!%i", vec![0x21, 0x21, 0x0u8, 0x0, 0x0]),
+		];
+
+		for (fmt_string, case) in bad_test_cases {
+			let res = decode_with_format_string(fmt_string, case.as_slice());
+			assert!(res.is_err());
 		}
 	}
 }
