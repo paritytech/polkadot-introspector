@@ -19,6 +19,7 @@ mod paritydb;
 mod rocksdb;
 mod traits;
 
+use crate::kvdb::decode::DecodedOutput;
 use clap::Parser;
 use color_eyre::Result;
 use serde::Serialize;
@@ -211,7 +212,7 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				kvdb_keys_opts.fmt.as_str(),
 				&kvdb_keys_opts.limit,
 			)?;
-			output_keys(&res, &opts)?;
+			output_decoded_keys(&res, &opts)?;
 		},
 	}
 
@@ -230,10 +231,10 @@ where
 	Ok(())
 }
 
-fn output_keys(res: &Vec<Vec<String>>, opts: &KvdbOptions) -> Result<()> {
+fn output_decoded_keys(res: &DecodedOutput, opts: &KvdbOptions) -> Result<()> {
 	match opts.output {
 		OutputMode::Json => {
-			println!("{}", serde_json::to_string(res)?)
+			println!("{}", serde_json::to_string(res)?);
 		},
 		OutputMode::Pretty =>
 			for elt in res {

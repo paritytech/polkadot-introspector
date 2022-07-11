@@ -18,12 +18,14 @@
 
 use crate::kvdb::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};
+use erased_serde::{serialize_trait_object, Serialize};
 use itertools::Itertools;
-use std::fmt::Display;
+use std::fmt::Debug;
 use subxt::sp_core::H256;
 
 /// Decode result trait, used to display and format output of the decoder
-pub trait DecodeResult: Display + ToString {}
+pub trait DecodeResult: Debug + Serialize {}
+serialize_trait_object!(DecodeResult);
 
 impl DecodeResult for i32 {}
 impl DecodeResult for u64 {}
@@ -115,14 +117,16 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 	Ok(ret)
 }
 
+pub type DecodedOutput = Vec<Vec<Box<dyn DecodeResult>>>;
+
 pub fn decode_keys<D: IntrospectorKvdb>(
 	db: &D,
 	column: &str,
 	decode_fmt: &str,
 	lim: &Option<usize>,
-) -> Result<Vec<Vec<String>>> {
+) -> Result<DecodedOutput> {
 	let percent_pos = decode_fmt.find('%');
-	let mut final_result: Vec<Vec<String>> = vec![];
+	let mut final_result: DecodedOutput = vec![];
 
 	if let Some(pos) = percent_pos {
 		let (prefix, _) = decode_fmt.split_at(pos);
@@ -145,7 +149,6 @@ pub fn decode_keys<D: IntrospectorKvdb>(
 					remain = next;
 					(decoder.decoder)(cur)
 				})
-				.map_ok(|elt| elt.to_string())
 				.try_collect()?;
 
 			final_result.push(cur);
