@@ -20,11 +20,11 @@ use crate::kvdb::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};
 use erased_serde::{serialize_trait_object, Serialize};
 use itertools::Itertools;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use subxt::sp_core::H256;
 
 /// Decode result trait, used to display and format output of the decoder
-pub trait DecodeResult: Debug + Serialize {}
+pub trait DecodeResult: Debug + Serialize + Display {}
 serialize_trait_object!(DecodeResult);
 
 impl DecodeResult for i32 {}
@@ -152,6 +152,24 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 	Ok(ret)
 }
 
+fn process_decoders_pipeline(input: &[u8], decoders: &[DecodeElement]) -> Result<Vec<Box<dyn DecodeResult>>> {
+	let mut remain = input;
+
+	let result: Vec<_> = decoders
+		.iter()
+		.map(move |decoder| {
+			if remain.len() >= decoder.consume_size {
+				let (cur, next) = remain.split_at(decoder.consume_size);
+				remain = next;
+				(decoder.decoder)(cur)
+			} else {
+				Err(eyre!("truncated input: {} bytes remain, {} bytes expected", remain.len(), decoder.consume_size))
+			}
+		})
+		.try_collect()?;
+	Ok(result)
+}
+
 pub type DecodedOutput = Vec<Vec<Box<dyn DecodeResult>>>;
 
 pub fn decode_keys<D: IntrospectorKvdb>(
@@ -175,16 +193,7 @@ pub fn decode_keys<D: IntrospectorKvdb>(
 				return Err(eyre!("invalid key size: {}; expected key size: {}", k.len(), expected_key_len))
 			}
 
-			let mut remain = &*k;
-
-			let cur: Vec<_> = decoders
-				.iter()
-				.map(move |decoder| {
-					let (cur, next) = remain.split_at(decoder.consume_size);
-					remain = next;
-					(decoder.decoder)(cur)
-				})
-				.try_collect()?;
+			let cur = process_decoders_pipeline(&*k, &decoders)?;
 
 			final_result.push(cur);
 
@@ -198,4 +207,51 @@ pub fn decode_keys<D: IntrospectorKvdb>(
 	}
 
 	Ok(final_result)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn decode_with_format_string(decode_fmt: &str, input: &[u8]) -> Result<DecodedOutput> {
+		let decoders = parse_format_string(decode_fmt)?;
+		let result = process_decoders_pipeline(input, &decoders)?;
+
+		// Check length after parsing to ensure that we can still parse even if the input is wrong
+		let expected_key_len: usize = decoders.iter().map(|elt| elt.consume_size).sum();
+		if input.len() != expected_key_len {
+			Err(eyre!("invalid length: {}, {} expected", input.len(), expected_key_len))
+		} else {
+			Ok(vec![result])
+		}
+	}
+
+	#[test]
+	fn test_decode_string() {
+		let good_test_cases = vec!["test", "TeSt", "aaaa", "\0\0\0\0"];
+
+		for case in good_test_cases {
+			let res = decode_with_format_string("%s4", case.as_bytes()).unwrap();
+			assert_eq!(case, res[0][0].to_string());
+		}
+
+		let bad_test_cases = vec!["testt", "TeS", ""];
+		for case in bad_test_cases {
+			assert!(decode_with_format_string("%s4", case.as_bytes()).is_err());
+		}
+	}
+
+	#[test]
+	fn test_decode_i32() {
+		let good_test_cases: Vec<(Vec<u8>, i32)> = vec![
+			(vec![0x0u8, 0x0, 0x0, 0x1], 1_i32),
+			(vec![0x0u8, 0x0, 0x0, 0x0], 0_i32),
+			(vec![0xffu8, 0xff, 0xff, 0xff], i32::MIN),
+		];
+
+		for (case, expected) in good_test_cases {
+			let res = decode_with_format_string("%i", case.as_slice()).unwrap();
+			assert_eq!(expected, res[0][0].to_string().parse::<i32>().unwrap());
+		}
+	}
 }
