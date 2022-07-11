@@ -120,7 +120,7 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 
 				if leftover.len() < 2 {
 					// Invalid percent encoding
-					return Err(eyre!("invalid percent encoding after {}: {}", plain_string, leftover));
+					return Err(eyre!("invalid percent encoding after {}: {}", plain_string, leftover))
 				}
 
 				let percent_char = leftover.get(1..2).unwrap();
@@ -139,7 +139,7 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 							digits_start.chars().take_while(|c| c.is_ascii_digit()).collect::<String>();
 						let string_size = string_size_format.parse::<usize>()?;
 						if string_size == 0 {
-							return Err(eyre!("invalid string format: {}", leftover));
+							return Err(eyre!("invalid string format: {}", leftover))
 						}
 						pos += string_size_format.len();
 						consume_unknown_string(string_size)
@@ -197,7 +197,7 @@ pub fn decode_keys<D: IntrospectorKvdb>(
 
 		for (k, _) in iter {
 			if k.len() != expected_key_len {
-				return Err(eyre!("invalid key size: {}; expected key size: {}", k.len(), expected_key_len));
+				return Err(eyre!("invalid key size: {}; expected key size: {}", k.len(), expected_key_len))
 			}
 
 			let cur = process_decoders_pipeline(&*k, &decoders)?;
@@ -207,7 +207,7 @@ pub fn decode_keys<D: IntrospectorKvdb>(
 			if let Some(lim) = lim {
 				if final_result.len() > *lim {
 					final_result.truncate(*lim);
-					break;
+					break
 				}
 			}
 		}
