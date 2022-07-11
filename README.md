@@ -51,8 +51,9 @@ Subcommands supported:
 
 * **columns** - list available columns
 * **usage** - show disk usage for keys and values with the ability to limit scan by specific column and/or a set of key prefixes
+* **keys** - decode keys from the database using a format string
 
-`usage` subcommand supports both human-readable and JSON output formats for automatic checks.
+`usage` and `keys` subcommands support both human-readable and JSON output formats for automatic checks.
 
 ```
 USAGE:
@@ -63,3 +64,13 @@ OPTIONS:
     -h, --help                         Print help information
     -p, --keys-prefix <KEYS_PREFIX>    Limit scan by specific key prefix(es)
 ```
+
+#### Keys format string specification
+
+Format string can currently include plain strings, and one or more percent encoding values, such as `key_%i`. Currently, this module supports the  following percent strings:
+ - `%i` - big endian i32 value
+ - `%t` - big endian u64 value (timestamp)
+ - `%h` - blake2b hash represented as hex string
+ - `%s<d>` - string of length `d` (for example `%s10` represents a string of size 10)
+
+
