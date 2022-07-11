@@ -41,6 +41,7 @@ pub struct DecodeElement {
 	consume_size: usize,
 }
 
+// Parses a single i32 in big endian order
 fn consume_bigendian_i32() -> DecodeElement {
 	let decoder = Box::new(|input: &[u8]| -> Result<Box<dyn DecodeResult>> {
 		let (int_bytes, _) = input.split_at(std::mem::size_of::<i32>());
@@ -49,6 +50,7 @@ fn consume_bigendian_i32() -> DecodeElement {
 	DecodeElement { decoder, consume_size: std::mem::size_of::<i32>() }
 }
 
+// Parses 64 bit timestamp value
 fn consume_bigendian_timestamp() -> DecodeElement {
 	let decoder = Box::new(|input: &[u8]| -> Result<Box<dyn DecodeResult>> {
 		let (ts_bytes, _) = input.split_at(std::mem::size_of::<u64>());
@@ -57,6 +59,7 @@ fn consume_bigendian_timestamp() -> DecodeElement {
 	DecodeElement { decoder, consume_size: std::mem::size_of::<u64>() }
 }
 
+// Parses blake2b hash and output it as a hex string
 fn consume_blake2b_hash() -> DecodeElement {
 	let decoder = Box::new(|input: &[u8]| -> Result<Box<dyn DecodeResult>> {
 		let (hash_bytes, _) = input.split_at(std::mem::size_of::<H256>());
@@ -67,11 +70,28 @@ fn consume_blake2b_hash() -> DecodeElement {
 	DecodeElement { decoder, consume_size: std::mem::size_of::<H256>() }
 }
 
-fn consume_string(len: usize) -> DecodeElement {
+// Parses known pattern
+fn consume_known_string(pat: &str) -> DecodeElement {
+	let owned_pat = pat.to_string();
+	let pat_len = pat.len();
+	let decoder = Box::new(move |input: &[u8]| -> Result<Box<dyn DecodeResult>> {
+		let (str_bytes, _) = input.split_at(pat_len);
+		let parsed_string = String::from_utf8_lossy(str_bytes).into_owned();
+		if parsed_string != owned_pat {
+			Err(eyre!("unmatched string: \"{}\", expected: \"{}\"", parsed_string, owned_pat))
+		} else {
+			Ok(Box::new(parsed_string))
+		}
+	});
+	DecodeElement { decoder, consume_size: pat_len }
+}
+
+// Parses an unknown pattern with known length
+fn consume_unknown_string(len: usize) -> DecodeElement {
 	let decoder = Box::new(move |input: &[u8]| -> Result<Box<dyn DecodeResult>> {
 		let (str_bytes, _) = input.split_at(len);
-
-		Ok(Box::new(String::from_utf8_lossy(str_bytes).into_owned()))
+		let parsed_string = String::from_utf8_lossy(str_bytes).into_owned();
+		Ok(Box::new(parsed_string))
 	});
 	DecodeElement { decoder, consume_size: len }
 }
@@ -88,7 +108,7 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 				let (plain_string, leftover) = str_remain.split_at(pos);
 
 				if !plain_string.is_empty() {
-					ret.push(consume_string(plain_string.len()));
+					ret.push(consume_known_string(plain_string));
 				}
 
 				if leftover.len() < 2 {
@@ -97,19 +117,34 @@ fn parse_format_string(fmt_string: &str) -> Result<Vec<DecodeElement>> {
 				}
 
 				let percent_char = leftover.get(1..2).unwrap();
+				let mut pos = 2;
 
 				let decoder = match percent_char.chars().next().unwrap() {
 					'i' => consume_bigendian_i32(),
 					't' => consume_bigendian_timestamp(),
 					'h' => consume_blake2b_hash(),
+					's' => {
+						// Parse something like %s2 for a string of 2 characters
+						let digits_start = leftover
+							.strip_prefix("%s")
+							.ok_or_else(|| eyre!("invalid string format: {}", leftover))?;
+						let string_size_format =
+							digits_start.chars().take_while(|c| c.is_digit(10)).collect::<String>();
+						let string_size = string_size_format.parse::<usize>()?;
+						if string_size == 0 {
+							return Err(eyre!("invalid string format: {}", leftover))
+						}
+						pos += string_size_format.len();
+						consume_unknown_string(string_size)
+					},
 					_ => return Err(eyre!("invalid percent encoding after {}: {}", plain_string, percent_char)),
 				};
 				ret.push(decoder);
-				str_remain = leftover.get(2..).unwrap();
+				str_remain = leftover.get(pos..).unwrap();
 			},
 			None => {
 				str_remain = "";
-				ret.push(consume_string(str_remain.len()));
+				ret.push(consume_known_string(str_remain));
 			},
 		}
 	}
