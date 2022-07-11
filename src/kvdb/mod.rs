@@ -205,7 +205,7 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				output_result(&res, &opts)?;
 			}
 		},
-		KvdbMode::Keys(ref kvdb_keys_opts) => {
+		KvdbMode::DecodeKeys(ref kvdb_keys_opts) => {
 			let res = decode::decode_keys(
 				&db,
 				kvdb_keys_opts.column.as_str(),
@@ -236,10 +236,11 @@ fn output_decoded_keys(res: &DecodedOutput, opts: &KvdbOptions) -> Result<()> {
 		OutputMode::Json => {
 			println!("{}", serde_json::to_string(res)?);
 		},
-		OutputMode::Pretty =>
+		OutputMode::Pretty => {
 			for elt in res {
 				println!("{:?}", elt);
-			},
+			}
+		},
 	}
 
 	Ok(())
