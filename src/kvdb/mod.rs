@@ -64,7 +64,7 @@ pub(crate) enum KvdbMode {
 	/// Returns usage in the database
 	Usage(KvdbUsageOpts),
 	/// Decode specific keys in the database
-	Keys(KvdbKeysOpts),
+	DecodeKeys(KvdbKeysOpts),
 }
 
 /// Database type
