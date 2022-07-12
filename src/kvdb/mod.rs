@@ -55,6 +55,17 @@ pub(crate) struct KvdbKeysOpts {
 	limit: Option<usize>,
 }
 
+impl<'a> From<&'a KvdbKeysOpts> for decode::KeyDecodeOptions<'a> {
+	fn from(cli_opts: &'a KvdbKeysOpts) -> Self {
+		decode::KeyDecodeOptions {
+			decode_fmt: cli_opts.fmt.as_str(),
+			column: cli_opts.column.as_str(),
+			lim: &cli_opts.limit,
+			ignore_failures: false,
+		}
+	}
+}
+
 /// Mode of this command
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -206,12 +217,7 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 			}
 		},
 		KvdbMode::DecodeKeys(ref kvdb_keys_opts) => {
-			let res = decode::decode_keys(
-				&db,
-				kvdb_keys_opts.column.as_str(),
-				kvdb_keys_opts.fmt.as_str(),
-				&kvdb_keys_opts.limit,
-			)?;
+			let res = decode::decode_keys(&db, &kvdb_keys_opts.into())?;
 			output_decoded_keys(&res, &opts)?;
 		},
 	}
@@ -238,7 +244,7 @@ fn output_decoded_keys(res: &DecodedOutput, opts: &KvdbOptions) -> Result<()> {
 		},
 		OutputMode::Pretty =>
 			for elt in res {
-				println!("{:?}", elt);
+				println!("{}", elt);
 			},
 	}
 

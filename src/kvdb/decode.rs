@@ -27,7 +27,7 @@ use crate::kvdb::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};
 use erased_serde::{serialize_trait_object, Serialize};
 use itertools::Itertools;
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, Formatter};
 use subxt::sp_core::H256;
 
 /// Decode result trait, used to display and format output of the decoder
@@ -177,34 +177,57 @@ fn process_decoders_pipeline(input: &[u8], decoders: &[DecodeElement]) -> Result
 	Ok(result)
 }
 
-pub type DecodedOutput = Vec<Vec<Box<dyn DecodeResult>>>;
+/// Represents a decode result
+#[derive(serde::Serialize)]
+pub struct KeyDecodeResult {
+	/// Decoded fields
+	pub fields: Vec<Box<dyn DecodeResult>>,
+	/// Size of the value
+	pub value_size: usize,
+}
 
-pub fn decode_keys<D: IntrospectorKvdb>(
-	db: &D,
-	column: &str,
-	decode_fmt: &str,
-	lim: &Option<usize>,
-) -> Result<DecodedOutput> {
-	let percent_pos = decode_fmt.find('%');
+impl Display for KeyDecodeResult {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{:?}; value size: {}", &self.fields, self.value_size)?;
+		Ok(())
+	}
+}
+
+/// Options to decode keys
+pub struct KeyDecodeOptions<'a> {
+	/// Limit number of entries if needed
+	pub lim: &'a Option<usize>,
+	/// Ignore failures when decoding keys (TODO: maybe make it a mode)
+	pub ignore_failures: bool,
+	/// Column to use
+	pub column: &'a str,
+	/// Decode format
+	pub decode_fmt: &'a str,
+}
+
+pub type DecodedOutput = Vec<KeyDecodeResult>;
+
+pub fn decode_keys<D: IntrospectorKvdb>(db: &D, opts: &KeyDecodeOptions) -> Result<DecodedOutput> {
+	let percent_pos = opts.decode_fmt.find('%');
 	let mut final_result: DecodedOutput = vec![];
 
 	if let Some(pos) = percent_pos {
-		let (prefix, _) = decode_fmt.split_at(pos);
-		let decoders = parse_format_string(decode_fmt)?;
+		let (prefix, _) = opts.decode_fmt.split_at(pos);
+		let decoders = parse_format_string(opts.decode_fmt)?;
 		let expected_key_len: usize = decoders.iter().map(|elt| elt.consume_size).sum();
 
-		let iter = db.prefixed_iter_values(column, prefix)?;
+		let iter = db.prefixed_iter_values(opts.column, prefix)?;
 
-		for (k, _) in iter {
-			if k.len() != expected_key_len {
+		for (k, v) in iter {
+			if k.len() != expected_key_len && !opts.ignore_failures {
 				return Err(eyre!("invalid key size: {}; expected key size: {}", k.len(), expected_key_len))
 			}
 
 			let cur = process_decoders_pipeline(&*k, &decoders)?;
 
-			final_result.push(cur);
+			final_result.push(KeyDecodeResult { fields: cur, value_size: v.len() });
 
-			if let Some(lim) = lim {
+			if let Some(lim) = opts.lim {
 				if final_result.len() > *lim {
 					final_result.truncate(*lim);
 					break
@@ -229,7 +252,7 @@ mod tests {
 		if input.len() != expected_key_len {
 			Err(eyre!("invalid length: {}, {} expected", input.len(), expected_key_len))
 		} else {
-			Ok(vec![result])
+			Ok(vec![KeyDecodeResult { fields: result, value_size: 0 }])
 		}
 	}
 
@@ -239,7 +262,7 @@ mod tests {
 
 		for case in good_test_cases {
 			let res = decode_with_format_string("%s4", case.as_bytes()).unwrap();
-			assert_eq!(case, res[0][0].to_string());
+			assert_eq!(case, res[0].fields[0].to_string());
 		}
 
 		let bad_test_cases = vec!["testt", "TeS", ""];
@@ -258,7 +281,7 @@ mod tests {
 
 		for (case, expected) in good_test_cases {
 			let res = decode_with_format_string("%i", case.as_slice()).unwrap();
-			assert_eq!(expected, res[0][0].to_string().parse::<i32>().unwrap());
+			assert_eq!(expected, res[0].fields[0].to_string().parse::<i32>().unwrap());
 		}
 	}
 
@@ -273,7 +296,7 @@ mod tests {
 		for (fmt_string, case, expected) in good_test_cases {
 			let res = decode_with_format_string(fmt_string, case.as_slice()).unwrap();
 
-			for (idx, elt) in res[0].iter().enumerate() {
+			for (idx, elt) in res[0].fields.iter().enumerate() {
 				assert_eq!(expected[idx], elt.to_string());
 			}
 		}
