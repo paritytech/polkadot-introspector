@@ -53,6 +53,9 @@ pub(crate) struct KvdbKeysOpts {
 	/// Limit number of output entries
 	#[clap(long, short = 'l')]
 	limit: Option<usize>,
+	/// Allow to ignore decode failures
+	#[clap(long, short = 'i', default_value = "false")]
+	ignore_failures: bool,
 }
 
 impl<'a> From<&'a KvdbKeysOpts> for decode::KeyDecodeOptions<'a> {
@@ -61,7 +64,7 @@ impl<'a> From<&'a KvdbKeysOpts> for decode::KeyDecodeOptions<'a> {
 			decode_fmt: cli_opts.fmt.as_str(),
 			column: cli_opts.column.as_str(),
 			lim: &cli_opts.limit,
-			ignore_failures: false,
+			ignore_failures: cli_opts.ignore_failures,
 		}
 	}
 }
