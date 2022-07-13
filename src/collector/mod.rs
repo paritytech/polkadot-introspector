@@ -15,9 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use futures::TryFutureExt;
 use log::{debug, info, warn};
-use std::{net::SocketAddr, ops::DerefMut, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use subxt::sp_core::H256;
 use tokio::{
 	signal,
@@ -105,12 +104,12 @@ pub(crate) async fn run(
 							debug!("New event: {:?}", event);
 							match event {
 								SubxtEvent::RawEvent(hash, raw_ev) => {
-									let _ = events_handler
+									if let Err(e) = events_handler
 										.lock()
 										.await
-										.deref_mut()
-										.handle_runtime_event(&raw_ev, &hash)
-										.map_err(|e| warn!("cannot handle event: {:?}", e));
+										.handle_runtime_event(&raw_ev, &hash).await {
+											debug!("cannot handle event: {:?}", e)
+										};
 								},
 								_ => continue,
 							};

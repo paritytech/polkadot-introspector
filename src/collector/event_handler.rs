@@ -25,7 +25,6 @@ use std::{
 	error::Error,
 	fmt::Debug,
 	hash::Hash,
-	ops::DerefMut,
 	sync::Arc,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -351,7 +350,8 @@ impl EventsHandler {
 					.get_mut(ev.variant.as_str())
 					.ok_or_else(|| eyre!("Unknown event {} in pallet {}", ev.variant.as_str(), ev.pallet.as_str()))?;
 				debug!("Got known raw event: {:?}", ev);
-				let update_ev = event_handler(ev, block_hash, self.storage.clone().lock().await.deref_mut())?;
+				let mut storage = self.storage.lock().await;
+				let update_ev = event_handler(ev, block_hash, &mut storage)?;
 
 				match update_ev {
 					Some(update_ev) => {
