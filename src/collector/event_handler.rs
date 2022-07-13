@@ -152,7 +152,7 @@ where
 	}
 }
 
-/// Candidate event for candidate being baked for a parachain
+/// Candidate event for candidate being backed for a parachain
 impl<T> CandidateRecordEvent<T> for polkadot::para_inclusion::events::CandidateBacked
 where
 	T: Hash + Serialize,
@@ -163,9 +163,9 @@ where
 		record: &mut CandidateRecord<T>,
 		event: &Self::Event,
 	) -> Result<Option<CandidateRecordUpdate<Self::HashType>>, Box<dyn Error>> {
-		record.candidate_inclusion.baked = Some(check_unix_time()?);
+		record.candidate_inclusion.backed = Some(check_unix_time()?);
 		record.candidate_inclusion.core_idx = Some(event.2 .0);
-		Ok(Some(CandidateRecordUpdate::Baked(BlakeTwo256::hash_of(&event.0))))
+		Ok(Some(CandidateRecordUpdate::Backed(BlakeTwo256::hash_of(&event.0))))
 	}
 	fn candidate_hash(event: &Self::Event) -> Result<Self::HashType, Box<dyn Error>> {
 		Ok(BlakeTwo256::hash_of(&event.0))
