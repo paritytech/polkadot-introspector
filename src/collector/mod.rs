@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use log::{debug, info, warn};
+use log::{debug, info};
 use std::{net::SocketAddr, sync::Arc};
 use subxt::sp_core::H256;
 use tokio::{
