@@ -32,8 +32,8 @@ use std::{
 pub struct CandidateInclusion<T: Hash> {
 	/// Parachain id (must be known if we have observed a candidate receipt)
 	pub parachain_id: Option<u32>,
-	/// Time when a candidate has been baked
-	pub baked: Option<Duration>,
+	/// Time when a candidate has been backed
+	pub backed: Option<Duration>,
 	/// Time when a candidate has been included
 	pub included: Option<Duration>,
 	/// Time when a candidate has been timed out
@@ -46,7 +46,7 @@ pub struct CandidateInclusion<T: Hash> {
 
 impl<T: Hash> Default for CandidateInclusion<T> {
 	fn default() -> Self {
-		Self { parachain_id: None, baked: None, included: None, timedout: None, core_idx: None, relay_parent: None }
+		Self { parachain_id: None, backed: None, included: None, timedout: None, core_idx: None, relay_parent: None }
 	}
 }
 
@@ -172,8 +172,8 @@ where
 	/// Returns inclusion time for a candidate
 	#[allow(dead_code)]
 	pub fn inclusion_time(&self) -> Option<Duration> {
-		match (self.candidate_inclusion.baked, self.candidate_inclusion.included) {
-			(Some(baked), Some(included)) => included.checked_sub(baked),
+		match (self.candidate_inclusion.backed, self.candidate_inclusion.included) {
+			(Some(backed), Some(included)) => included.checked_sub(backed),
 			_ => None,
 		}
 	}
@@ -206,8 +206,8 @@ pub enum CandidateRecordUpdate<T>
 where
 	T: Hash + Serialize,
 {
-	/// A candidate has been baked
-	Baked(T),
+	/// A candidate has been backed
+	Backed(T),
 	/// A candidate has been included
 	Included(T),
 	/// A candidate has been disputed
