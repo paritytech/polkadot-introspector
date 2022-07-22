@@ -24,6 +24,8 @@ use clap::Parser;
 use color_eyre::Result;
 use serde::Serialize;
 use std::fmt::{Display, Formatter};
+use std::io;
+use std::io::Write;
 use strum::{Display, EnumString};
 
 pub use crate::kvdb::traits::*;
@@ -105,6 +107,8 @@ pub(crate) enum OutputMode {
 	Pretty,
 	#[strum(ascii_case_insensitive)]
 	Json,
+	#[strum(ascii_case_insensitive)]
+	Bincode,
 }
 
 impl Default for OutputMode {
@@ -235,6 +239,7 @@ where
 	match opts.output {
 		OutputMode::Json => println!("{}", serde_json::to_string(res)?),
 		OutputMode::Pretty => println!("{}", res),
+		OutputMode::Bincode => io::stdout().write_all(bincode::serialize(res)?.as_slice())?,
 	}
 
 	Ok(())
@@ -245,10 +250,14 @@ fn output_decoded_keys(res: &DecodedOutput, opts: &KvdbOptions) -> Result<()> {
 		OutputMode::Json => {
 			println!("{}", serde_json::to_string(res)?);
 		},
-		OutputMode::Pretty =>
+		OutputMode::Pretty => {
 			for elt in res {
 				println!("{}", elt);
-			},
+			}
+		},
+		OutputMode::Bincode => {
+			io::stdout().write_all(bincode::serialize(res)?.as_slice())?;
+		},
 	}
 
 	Ok(())
