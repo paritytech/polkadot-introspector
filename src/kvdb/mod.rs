@@ -19,13 +19,14 @@ mod paritydb;
 mod rocksdb;
 mod traits;
 
-use crate::kvdb::decode::DecodedOutput;
 use clap::Parser;
 use color_eyre::Result;
 use serde::Serialize;
-use std::fmt::{Display, Formatter};
-use std::io;
-use std::io::Write;
+use std::{
+	fmt::{Display, Formatter},
+	io,
+	io::Write,
+};
 use strum::{Display, EnumString};
 
 pub use crate::kvdb::traits::*;
@@ -225,7 +226,7 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 		},
 		KvdbMode::DecodeKeys(ref kvdb_keys_opts) => {
 			let res = decode::decode_keys(&db, &kvdb_keys_opts.into())?;
-			output_decoded_keys(&res, &opts)?;
+			output_result(&res, &opts)?;
 		},
 	}
 
@@ -240,24 +241,6 @@ where
 		OutputMode::Json => println!("{}", serde_json::to_string(res)?),
 		OutputMode::Pretty => println!("{}", res),
 		OutputMode::Bincode => io::stdout().write_all(bincode::serialize(res)?.as_slice())?,
-	}
-
-	Ok(())
-}
-
-fn output_decoded_keys(res: &DecodedOutput, opts: &KvdbOptions) -> Result<()> {
-	match opts.output {
-		OutputMode::Json => {
-			println!("{}", serde_json::to_string(res)?);
-		},
-		OutputMode::Pretty => {
-			for elt in res {
-				println!("{}", elt);
-			}
-		},
-		OutputMode::Bincode => {
-			io::stdout().write_all(bincode::serialize(res)?.as_slice())?;
-		},
 	}
 
 	Ok(())

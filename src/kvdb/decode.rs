@@ -205,11 +205,21 @@ pub struct KeyDecodeOptions<'a> {
 	pub decode_fmt: &'a str,
 }
 
-pub type DecodedOutput = Vec<KeyDecodeResult>;
+#[derive(serde::Serialize)]
+pub struct DecodedOutput(Vec<KeyDecodeResult>);
+
+impl Display for DecodedOutput {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		for elt in &self.0 {
+			writeln!(f, "{}", elt)?;
+		}
+		Ok(())
+	}
+}
 
 pub fn decode_keys<D: IntrospectorKvdb>(db: &D, opts: &KeyDecodeOptions) -> Result<DecodedOutput> {
 	let percent_pos = opts.decode_fmt.find('%');
-	let mut final_result: DecodedOutput = vec![];
+	let mut final_result = DecodedOutput(vec![]);
 
 	if let Some(pos) = percent_pos {
 		let (prefix, _) = opts.decode_fmt.split_at(pos);
@@ -225,11 +235,11 @@ pub fn decode_keys<D: IntrospectorKvdb>(db: &D, opts: &KeyDecodeOptions) -> Resu
 
 			let cur = process_decoders_pipeline(&*k, &decoders)?;
 
-			final_result.push(KeyDecodeResult { fields: cur, value_size: v.len() });
+			final_result.0.push(KeyDecodeResult { fields: cur, value_size: v.len() });
 
 			if let Some(lim) = opts.lim {
-				if final_result.len() > *lim {
-					final_result.truncate(*lim);
+				if final_result.0.len() > *lim {
+					final_result.0.truncate(*lim);
 					break
 				}
 			}
@@ -252,7 +262,7 @@ mod tests {
 		if input.len() != expected_key_len {
 			Err(eyre!("invalid length: {}, {} expected", input.len(), expected_key_len))
 		} else {
-			Ok(vec![KeyDecodeResult { fields: result, value_size: 0 }])
+			Ok(DecodedOutput(vec![KeyDecodeResult { fields: result, value_size: 0 }]))
 		}
 	}
 
@@ -262,7 +272,7 @@ mod tests {
 
 		for case in good_test_cases {
 			let res = decode_with_format_string("%s4", case.as_bytes()).unwrap();
-			assert_eq!(case, res[0].fields[0].to_string());
+			assert_eq!(case, res.0[0].fields[0].to_string());
 		}
 
 		let bad_test_cases = vec!["testt", "TeS", ""];
@@ -281,7 +291,7 @@ mod tests {
 
 		for (case, expected) in good_test_cases {
 			let res = decode_with_format_string("%i", case.as_slice()).unwrap();
-			assert_eq!(expected, res[0].fields[0].to_string().parse::<i32>().unwrap());
+			assert_eq!(expected, res.0[0].fields[0].to_string().parse::<i32>().unwrap());
 		}
 	}
 
@@ -296,7 +306,7 @@ mod tests {
 		for (fmt_string, case, expected) in good_test_cases {
 			let res = decode_with_format_string(fmt_string, case.as_slice()).unwrap();
 
-			for (idx, elt) in res[0].fields.iter().enumerate() {
+			for (idx, elt) in res.0[0].fields.iter().enumerate() {
 				assert_eq!(expected[idx], elt.to_string());
 			}
 		}
