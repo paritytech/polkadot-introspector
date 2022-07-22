@@ -2058,6 +2058,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
+ "snap",
  "strum",
  "substrate-prometheus-endpoint",
  "subxt",

@@ -132,6 +132,9 @@ pub struct KvdbOptions {
 	/// Output mode
 	#[clap(long, default_value_t)]
 	output: OutputMode,
+	/// Compress output with snappy
+	#[clap(long, short = 'c', default_value = "false", takes_value = false)]
+	compress: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -237,10 +240,20 @@ fn output_result<T>(res: &T, opts: &KvdbOptions) -> Result<()>
 where
 	T: Display + Serialize,
 {
-	match opts.output {
-		OutputMode::Json => println!("{}", serde_json::to_string(res)?),
-		OutputMode::Pretty => println!("{}", res),
-		OutputMode::Bincode => io::stdout().write_all(bincode::serialize(res)?.as_slice())?,
+	let output = match opts.output {
+		OutputMode::Json => serde_json::to_vec(res)?,
+		OutputMode::Pretty => {
+			let mut out_str = res.to_string();
+			out_str.push('\n');
+			out_str.into_bytes()
+		},
+		OutputMode::Bincode => bincode::serialize(res)?,
+	};
+
+	if opts.compress {
+		snap::write::FrameEncoder::new(io::stdout().lock()).write_all(output.as_slice())?;
+	} else {
+		io::stdout().write_all(output.as_slice())?;
 	}
 
 	Ok(())

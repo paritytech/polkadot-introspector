@@ -32,4 +32,4 @@ rocksdb = "0.18.0"
 parity-db = "0.3.14"
 hex = "0.4.3"
 itertools = "0.10.3"
-
+snap = "1.0.5"
