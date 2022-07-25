@@ -133,7 +133,7 @@ pub struct KvdbOptions {
 	#[clap(long, default_value_t)]
 	output: OutputMode,
 	/// Compress output with snappy
-	#[clap(long, short = 'c', default_value = "false", takes_value = false)]
+	#[clap(long, short = 'c', parse(from_flag))]
 	compress: bool,
 }
 
