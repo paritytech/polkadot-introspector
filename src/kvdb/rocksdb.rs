@@ -62,7 +62,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 
 	fn put_value(&self, column: &str, key: &[u8], value: &[u8]) -> Result<()> {
 		if self.read_only {
-			return Err(eyre!("cannot put data in read-only database"));
+			return Err(eyre!("cannot put data in read-only database"))
 		}
 
 		let cf_handle = self

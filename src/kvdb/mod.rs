@@ -19,17 +19,15 @@ mod paritydb;
 mod rocksdb;
 mod traits;
 
-use crate::kvdb::paritydb::IntrospectorParityDB;
-use crate::kvdb::rocksdb::IntrospectorRocksDB;
+use crate::kvdb::{paritydb::IntrospectorParityDB, rocksdb::IntrospectorRocksDB};
 use clap::Parser;
-use color_eyre::eyre::eyre;
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
 use std::{
 	fmt::{Display, Formatter},
 	fs, io,
 	io::Write,
+	path::{Path, PathBuf},
 };
 use strum::{Display, EnumString};
 
