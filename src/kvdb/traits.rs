@@ -29,4 +29,14 @@ pub trait IntrospectorKvdb {
 	fn iter_values<'a>(&'a self, column: &str) -> Result<DBIter<'a>>;
 	/// Iterates over all keys that begin with the specific prefix, column must have order defined
 	fn prefixed_iter_values<'a>(&'a self, column: &str, prefix: &'a str) -> Result<DBIter<'a>>;
+	/// Returns if kvdb is in read-only mode
+	fn read_only(&self) -> bool {
+		true
+	}
+	/// Puts a value in kvdb to the specific column (kvdb must be not in the read-only mode)
+	fn put_value(&self, column: &str, key: &[u8], value: &[u8]) -> Result<()>;
+	/// Create a database dump engine
+	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self>
+	where
+		Self: Sized;
 }

@@ -23,6 +23,7 @@ use parity_db::{Db, Options as ParityDBOptions};
 pub struct IntrospectorParityDB {
 	inner: Db,
 	columns: Vec<String>,
+	read_only: bool,
 }
 
 impl IntrospectorKvdb for IntrospectorParityDB {
@@ -38,7 +39,7 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 			.enumerate()
 			.map(|(idx, _)| format!("col{}", idx))
 			.collect::<Vec<_>>();
-		Ok(Self { inner: db, columns })
+		Ok(Self { inner: db, columns, read_only: true })
 	}
 
 	fn list_columns(&self) -> color_eyre::Result<&Vec<String>> {
@@ -79,5 +80,21 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 				None
 			}
 		})))
+	}
+
+	fn read_only(&self) -> bool {
+		self.read_only
+	}
+
+	fn put_value(&self, column: &str, key: &[u8], value: &[u8]) -> Result<()> {
+		todo!()
+	}
+
+	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {
+		let columns = input.list_columns()?.clone();
+		let opts = ParityDBOptions::with_columns(output_path.as_ref(), columns.len() as u8);
+
+		let db = Db::open_or_create(&opts)?;
+		Ok(IntrospectorParityDB { inner: db, columns, read_only: false })
 	}
 }

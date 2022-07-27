@@ -19,12 +19,16 @@ mod paritydb;
 mod rocksdb;
 mod traits;
 
+use crate::kvdb::paritydb::IntrospectorParityDB;
+use crate::kvdb::rocksdb::IntrospectorRocksDB;
 use clap::Parser;
+use color_eyre::eyre::eyre;
 use color_eyre::Result;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::{
 	fmt::{Display, Formatter},
-	io,
+	fs, io,
 	io::Write,
 };
 use strum::{Display, EnumString};
@@ -43,7 +47,7 @@ pub(crate) struct KvdbUsageOpts {
 	keys_prefix: Vec<String>,
 }
 
-/// Specific options for the keys subcommand
+/// Specific options for the decode_keys subcommand
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct KvdbKeysOpts {
@@ -59,6 +63,24 @@ pub(crate) struct KvdbKeysOpts {
 	/// Allow to ignore decode failures
 	#[clap(long, short = 'i', default_value = "false")]
 	ignore_failures: bool,
+}
+
+/// Specific options for the dump subcommand
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct KvdbDumpOpts {
+	/// Check only specific column(s)
+	#[clap(long, short = 'c')]
+	column: Vec<String>,
+	/// Limit scan by specific key prefix(es)
+	#[clap(long, short = 'p')]
+	keys_prefix: Vec<String>,
+	/// Output directory to dump
+	#[clap(long = "output", short = 'o', parse(from_os_str))]
+	output: PathBuf,
+	/// Output database type
+	#[clap(long, default_value_t)]
+	output_type: KvdbType,
 }
 
 impl<'a> From<&'a KvdbKeysOpts> for decode::KeyDecodeOptions<'a> {
@@ -82,6 +104,8 @@ pub(crate) enum KvdbMode {
 	Usage(KvdbUsageOpts),
 	/// Decode specific keys in the database
 	DecodeKeys(KvdbKeysOpts),
+	/// Dump database (works with a live database for RocksDB)
+	Dump(KvdbDumpOpts),
 }
 
 /// Database type
@@ -230,6 +254,47 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 		KvdbMode::DecodeKeys(ref kvdb_keys_opts) => {
 			let res = decode::decode_keys(&db, &kvdb_keys_opts.into())?;
 			output_result(&res, &opts)?;
+		},
+		KvdbMode::Dump(ref dump_opts) => {
+			if !Path::exists(&dump_opts.output) {
+				fs::create_dir_all(&dump_opts.output)?;
+			}
+
+			let output_dir = dump_opts
+				.output
+				.clone()
+				.into_os_string()
+				.into_string()
+				.map_err(|_| eyre!("invalid output directory"))?;
+			let output_db: Box<dyn IntrospectorKvdb> = match dump_opts.output_type {
+				KvdbType::RocksDB => Box::new(IntrospectorRocksDB::new_dumper(&db, &output_dir.as_str())?),
+				KvdbType::ParityDB => Box::new(IntrospectorParityDB::new_dumper(&db, &output_dir.as_str())?),
+			};
+
+			let columns = db.list_columns()?.iter().filter(|col| {
+				if !dump_opts.column.is_empty() {
+					dump_opts.column.contains(col)
+				} else {
+					true
+				}
+			});
+
+			for col in columns {
+				if dump_opts.keys_prefix.is_empty() {
+					let iter = db.iter_values(col.as_str())?;
+					for (key, value) in iter {
+						output_db.put_value(col.as_str(), &key, &value)?;
+					}
+				} else {
+					// Iterate over all requested prefixes
+					for prefix in &dump_opts.keys_prefix {
+						let iter = db.prefixed_iter_values(col.as_str(), prefix.as_str())?;
+						for (key, value) in iter {
+							output_db.put_value(col.as_str(), &key, &value)?;
+						}
+					}
+				}
+			}
 		},
 	}
 

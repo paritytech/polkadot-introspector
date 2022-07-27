@@ -23,6 +23,7 @@ use rocksdb::{IteratorMode, Options as RocksdbOptions, DB};
 pub struct IntrospectorRocksDB {
 	inner: DB,
 	columns: Vec<String>,
+	read_only: bool,
 }
 
 impl IntrospectorKvdb for IntrospectorRocksDB {
@@ -30,7 +31,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		let cf_opts = RocksdbOptions::default();
 		let columns = DB::list_cf(&cf_opts, path)?;
 		let db = DB::open_cf_for_read_only(&cf_opts, path, columns.clone(), false)?;
-		Ok(Self { inner: db, columns })
+		Ok(Self { inner: db, columns, read_only: true })
 	}
 
 	fn list_columns(&self) -> color_eyre::Result<&Vec<String>> {
@@ -53,5 +54,34 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 			.ok_or_else(|| eyre!("invalid column: {}", column))?;
 		let iter = self.inner.prefix_iterator_cf(cf_handle, prefix);
 		Ok(Box::new(iter))
+	}
+
+	fn read_only(&self) -> bool {
+		self.read_only
+	}
+
+	fn put_value(&self, column: &str, key: &[u8], value: &[u8]) -> Result<()> {
+		if self.read_only {
+			return Err(eyre!("cannot put data in read-only database"));
+		}
+
+		let cf_handle = self
+			.inner
+			.cf_handle(column)
+			.ok_or_else(|| eyre!("invalid column: {}", column))?;
+
+		self.inner
+			.put_cf(cf_handle, key, value)
+			.map_err(|e| eyre!("error putting the key: {:?}", e))
+	}
+
+	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {
+		let mut cf_opts = RocksdbOptions::default();
+		let columns = input.list_columns()?.clone();
+		cf_opts.create_if_missing(true);
+		cf_opts.create_missing_column_families(true);
+
+		let db = DB::open_cf(&cf_opts, output_path, &columns)?;
+		Ok(IntrospectorRocksDB { inner: db, columns, read_only: false })
 	}
 }
