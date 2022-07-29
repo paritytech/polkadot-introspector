@@ -3204,7 +3204,7 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 [[package]]
 name = "subxt"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#b3f6ff1cf873dba67d9f84167bb735a081c9233d"
 dependencies = [
  "bitvec",
  "derivative",
@@ -3229,7 +3229,7 @@ dependencies = [
 [[package]]
 name = "subxt-codegen"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#b3f6ff1cf873dba67d9f84167bb735a081c9233d"
 dependencies = [
  "darling",
  "frame-metadata",
@@ -3246,7 +3246,7 @@ dependencies = [
 [[package]]
 name = "subxt-macro"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#b3f6ff1cf873dba67d9f84167bb735a081c9233d"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -3257,7 +3257,7 @@ dependencies = [
 [[package]]
 name = "subxt-metadata"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#b3f6ff1cf873dba67d9f84167bb735a081c9233d"
 dependencies = [
  "frame-metadata",
  "parity-scale-codec",
