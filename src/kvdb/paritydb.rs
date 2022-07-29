@@ -107,7 +107,13 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 
 	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {
 		let columns = input.list_columns()?.clone();
-		let opts = ParityDBOptions::with_columns(output_path.as_ref(), columns.len() as u8);
+		let mut opts = ParityDBOptions::with_columns(output_path.as_ref(), columns.len() as u8);
+
+		// In RocksDB we always have order, and for the ParityDB case it is not always true
+		// So we assume that all columns are ordered as a safety measure
+		for column in opts.columns.iter_mut() {
+			column.btree_index = true;
+		}
 
 		let db = Db::open_or_create(&opts)?;
 		Ok(IntrospectorParityDB { inner: db, columns, read_only: false })
