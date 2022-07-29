@@ -74,7 +74,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		V: AsRef<[u8]>,
 	{
 		if self.read_only {
-			return Err(eyre!("cannot put data in read-only database"));
+			return Err(eyre!("cannot put data in read-only database"))
 		}
 
 		let cf_handle = self
