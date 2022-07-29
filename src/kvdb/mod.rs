@@ -22,6 +22,7 @@ mod traits;
 use crate::kvdb::{paritydb::IntrospectorParityDB, rocksdb::IntrospectorRocksDB};
 use clap::Parser;
 use color_eyre::{eyre::eyre, Result};
+use log::info;
 use serde::Serialize;
 use std::{
 	fmt::{Display, Formatter},
@@ -110,8 +111,10 @@ pub(crate) enum KvdbMode {
 #[derive(Clone, Debug, Parser, EnumString, Display)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum KvdbType {
+	#[strum(ascii_case_insensitive)]
 	/// RocksDB database
 	RocksDB,
+	#[strum(ascii_case_insensitive)]
 	/// ParityDB database
 	ParityDB,
 }
@@ -294,12 +297,15 @@ fn dump_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
 	});
 
 	for col in columns {
+		info!("dumping column {}", col.as_str());
+
 		if dump_opts.keys_prefix.is_empty() {
 			let iter = source.iter_values(col.as_str())?;
 			destination.put_iter(col.as_str(), iter)?;
 		} else {
 			// Iterate over all requested prefixes
 			for prefix in &dump_opts.keys_prefix {
+				info!("dumping prefix {} in column {}", prefix.as_str(), col.as_str());
 				let iter = source.prefixed_iter_values(col.as_str(), prefix.as_str())?;
 				destination.put_iter(col.as_str(), iter)?;
 			}
