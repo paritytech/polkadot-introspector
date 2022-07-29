@@ -86,8 +86,23 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 		self.read_only
 	}
 
-	fn put_value(&self, column: &str, key: &[u8], value: &[u8]) -> Result<()> {
-		todo!()
+	fn put_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
+	where
+		I: IntoIterator<Item = (K, V)>,
+		K: AsRef<[u8]>,
+		V: AsRef<[u8]>,
+	{
+		let column_idx = self
+			.columns
+			.iter()
+			.position(|col| col.as_str() == column)
+			.ok_or_else(|| eyre!("invalid column: {}", column))? as u8;
+		self.inner
+			.commit(
+				iter.into_iter()
+					.map(|(key, value)| (column_idx, key, Some(value.as_ref().to_vec()))),
+			)
+			.map_err(|e| eyre!("commit error: {:?}", e))
 	}
 
 	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {

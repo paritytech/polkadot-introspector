@@ -60,7 +60,12 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		self.read_only
 	}
 
-	fn put_value(&self, column: &str, key: &[u8], value: &[u8]) -> Result<()> {
+	fn put_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
+	where
+		I: IntoIterator<Item = (K, V)>,
+		K: AsRef<[u8]>,
+		V: AsRef<[u8]>,
+	{
 		if self.read_only {
 			return Err(eyre!("cannot put data in read-only database"))
 		}
@@ -70,9 +75,13 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 			.cf_handle(column)
 			.ok_or_else(|| eyre!("invalid column: {}", column))?;
 
-		self.inner
-			.put_cf(cf_handle, key, value)
-			.map_err(|e| eyre!("error putting the key: {:?}", e))
+		for (key, value) in iter {
+			self.inner
+				.put_cf(cf_handle, key, value)
+				.map_err(|e| eyre!("error putting the key: {:?}", e))?;
+		}
+
+		Ok(())
 	}
 
 	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {

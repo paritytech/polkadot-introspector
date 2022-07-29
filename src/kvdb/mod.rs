@@ -264,36 +264,46 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				.into_os_string()
 				.into_string()
 				.map_err(|_| eyre!("invalid output directory"))?;
-			let output_db: Box<dyn IntrospectorKvdb> = match dump_opts.output_type {
-				KvdbType::RocksDB => Box::new(IntrospectorRocksDB::new_dumper(&db, &output_dir.as_str())?),
-				KvdbType::ParityDB => Box::new(IntrospectorParityDB::new_dumper(&db, &output_dir.as_str())?),
+			match dump_opts.output_type {
+				KvdbType::RocksDB => {
+					let dest_db = IntrospectorRocksDB::new_dumper(&db, &output_dir.as_str())?;
+					dump_db(db, dest_db, dump_opts)?
+				},
+				KvdbType::ParityDB => {
+					let dest_db = IntrospectorParityDB::new_dumper(&db, &output_dir.as_str())?;
+					dump_db(db, dest_db, dump_opts)?
+				},
 			};
-
-			let columns = db.list_columns()?.iter().filter(|col| {
-				if !dump_opts.column.is_empty() {
-					dump_opts.column.contains(col)
-				} else {
-					true
-				}
-			});
-
-			for col in columns {
-				if dump_opts.keys_prefix.is_empty() {
-					let iter = db.iter_values(col.as_str())?;
-					for (key, value) in iter {
-						output_db.put_value(col.as_str(), &key, &value)?;
-					}
-				} else {
-					// Iterate over all requested prefixes
-					for prefix in &dump_opts.keys_prefix {
-						let iter = db.prefixed_iter_values(col.as_str(), prefix.as_str())?;
-						for (key, value) in iter {
-							output_db.put_value(col.as_str(), &key, &value)?;
-						}
-					}
-				}
-			}
 		},
+	}
+
+	Ok(())
+}
+
+fn dump_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
+	source: S,
+	destination: D,
+	dump_opts: &KvdbDumpOpts,
+) -> Result<()> {
+	let columns = source.list_columns()?.iter().filter(|col| {
+		if !dump_opts.column.is_empty() {
+			dump_opts.column.contains(col)
+		} else {
+			true
+		}
+	});
+
+	for col in columns {
+		if dump_opts.keys_prefix.is_empty() {
+			let iter = source.iter_values(col.as_str())?;
+			destination.put_iter(col.as_str(), iter)?;
+		} else {
+			// Iterate over all requested prefixes
+			for prefix in &dump_opts.keys_prefix {
+				let iter = source.prefixed_iter_values(col.as_str(), prefix.as_str())?;
+				destination.put_iter(col.as_str(), iter)?;
+			}
+		}
 	}
 
 	Ok(())
