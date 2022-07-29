@@ -266,11 +266,11 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				.map_err(|_| eyre!("invalid output directory"))?;
 			match dump_opts.output_type {
 				KvdbType::RocksDB => {
-					let dest_db = IntrospectorRocksDB::new_dumper(&db, &output_dir.as_str())?;
+					let dest_db = IntrospectorRocksDB::new_dumper(&db, output_dir.as_str())?;
 					dump_db(db, dest_db, dump_opts)?
 				},
 				KvdbType::ParityDB => {
-					let dest_db = IntrospectorParityDB::new_dumper(&db, &output_dir.as_str())?;
+					let dest_db = IntrospectorParityDB::new_dumper(&db, output_dir.as_str())?;
 					dump_db(db, dest_db, dump_opts)?
 				},
 			};
