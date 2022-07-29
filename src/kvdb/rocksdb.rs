@@ -26,10 +26,17 @@ pub struct IntrospectorRocksDB {
 	read_only: bool,
 }
 
+const DEFAULT_COLUMN: &str = "default";
+
 impl IntrospectorKvdb for IntrospectorRocksDB {
 	fn new(path: &str) -> Result<Self> {
 		let cf_opts = RocksdbOptions::default();
-		let columns = DB::list_cf(&cf_opts, path)?;
+		let mut columns = DB::list_cf(&cf_opts, path)?;
+		// Always ignore default column to be compatible with ParityDB
+		columns
+			.iter()
+			.position(|elt| elt == DEFAULT_COLUMN)
+			.map(|default_column_pos| columns.remove(default_column_pos));
 		let db = DB::open_cf_for_read_only(&cf_opts, path, columns.clone(), false)?;
 		Ok(Self { inner: db, columns, read_only: true })
 	}
@@ -67,7 +74,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		V: AsRef<[u8]>,
 	{
 		if self.read_only {
-			return Err(eyre!("cannot put data in read-only database"))
+			return Err(eyre!("cannot put data in read-only database"));
 		}
 
 		let cf_handle = self
