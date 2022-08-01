@@ -86,7 +86,7 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 		self.read_only
 	}
 
-	fn put_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
+	fn write_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
 	where
 		I: IntoIterator<Item = (K, V)>,
 		K: AsRef<[u8]>,

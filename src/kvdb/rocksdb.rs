@@ -67,14 +67,14 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		self.read_only
 	}
 
-	fn put_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
+	fn write_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
 	where
 		I: IntoIterator<Item = (K, V)>,
 		K: AsRef<[u8]>,
 		V: AsRef<[u8]>,
 	{
 		if self.read_only {
-			return Err(eyre!("cannot put data in read-only database"))
+			return Err(eyre!("cannot write a read-only database"))
 		}
 
 		let cf_handle = self

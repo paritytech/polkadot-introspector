@@ -33,8 +33,8 @@ pub trait IntrospectorKvdb {
 	fn read_only(&self) -> bool {
 		true
 	}
-	/// Puts an iterator of columns/keys/values in kvdb  (kvdb must be not in the read-only mode)
-	fn put_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
+	/// Writes an iterator of columns/keys/values to the kvdb  (kvdb must be not in the read-only mode)
+	fn write_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
 	where
 		I: IntoIterator<Item = (K, V)>,
 		K: AsRef<[u8]>,

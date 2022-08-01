@@ -68,18 +68,18 @@ pub(crate) struct KvdbKeysOpts {
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct KvdbDumpOpts {
-	/// Check only specific column(s)
+	/// Dump only specific column(s)
 	#[clap(long, short = 'c')]
 	column: Vec<String>,
-	/// Limit scan by specific key prefix(es)
+	/// Limit dump by specific key prefix(es)
 	#[clap(long, short = 'p')]
 	keys_prefix: Vec<String>,
-	/// Output directory to dump
+	/// Output directory to use for a dump
 	#[clap(long = "output", short = 'o', parse(from_os_str))]
 	output: PathBuf,
-	/// Output database type
+	/// Output type
 	#[clap(long, default_value_t)]
-	output_type: KvdbType,
+	format: KvdbDumpMode,
 }
 
 impl<'a> From<&'a KvdbKeysOpts> for decode::KeyDecodeOptions<'a> {
@@ -129,10 +129,13 @@ impl Default for KvdbType {
 #[derive(Clone, Debug, Parser, EnumString, Display)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum OutputMode {
+	/// Human readable output
 	#[strum(ascii_case_insensitive)]
 	Pretty,
+	/// Json output
 	#[strum(ascii_case_insensitive)]
 	Json,
+	/// Bincode output
 	#[strum(ascii_case_insensitive)]
 	Bincode,
 }
@@ -140,6 +143,27 @@ pub(crate) enum OutputMode {
 impl Default for OutputMode {
 	fn default() -> Self {
 		OutputMode::Pretty
+	}
+}
+
+/// Database type
+#[derive(Clone, Debug, Parser, EnumString, Display)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) enum KvdbDumpMode {
+	#[strum(ascii_case_insensitive)]
+	/// RocksDB database
+	RocksDB,
+	#[strum(ascii_case_insensitive)]
+	/// ParityDB database
+	ParityDB,
+	/// Dump as new-line delimited JSON into files with a pattern `column_name.json`
+	#[strum(ascii_case_insensitive)]
+	Json,
+}
+
+impl Default for KvdbDumpMode {
+	fn default() -> Self {
+		KvdbDumpMode::RocksDB
 	}
 }
 
@@ -267,14 +291,17 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				.into_os_string()
 				.into_string()
 				.map_err(|_| eyre!("invalid output directory"))?;
-			match dump_opts.output_type {
-				KvdbType::RocksDB => {
+			match dump_opts.format {
+				KvdbDumpMode::RocksDB => {
 					let dest_db = IntrospectorRocksDB::new_dumper(&db, output_dir.as_str())?;
 					dump_db(db, dest_db, dump_opts)?
 				},
-				KvdbType::ParityDB => {
+				KvdbDumpMode::ParityDB => {
 					let dest_db = IntrospectorParityDB::new_dumper(&db, output_dir.as_str())?;
 					dump_db(db, dest_db, dump_opts)?
+				},
+				KvdbDumpMode::Json => {
+					todo!();
 				},
 			};
 		},
@@ -301,13 +328,13 @@ fn dump_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
 
 		if dump_opts.keys_prefix.is_empty() {
 			let iter = source.iter_values(col.as_str())?;
-			destination.put_iter(col.as_str(), iter)?;
+			destination.write_iter(col.as_str(), iter)?;
 		} else {
 			// Iterate over all requested prefixes
 			for prefix in &dump_opts.keys_prefix {
 				info!("dumping prefix {} in column {}", prefix.as_str(), col.as_str());
 				let iter = source.prefixed_iter_values(col.as_str(), prefix.as_str())?;
-				destination.put_iter(col.as_str(), iter)?;
+				destination.write_iter(col.as_str(), iter)?;
 			}
 		}
 	}
