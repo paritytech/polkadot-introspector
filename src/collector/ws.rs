@@ -173,7 +173,7 @@ fn with_updates_channel<T: Send>(
 	warp::any().map(move || updates_rx.subscribe())
 }
 
-#[derive(Serialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct HealthReply {
 	/// How many candidates have we processed
 	pub candidates_stored: usize,
@@ -190,7 +190,7 @@ async fn health_handler(storage: Arc<StorageType<H256>>, ping: Option<HealthQuer
 	Ok(warp::reply::json(&HealthReply { candidates_stored: storage_locked.len(), ts }))
 }
 
-#[derive(Serialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct CandidatesReply {
 	/// How many candidates have we processed
 	pub candidates: Vec<H256>,

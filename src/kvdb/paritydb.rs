@@ -23,6 +23,7 @@ use parity_db::{Db, Options as ParityDBOptions};
 pub struct IntrospectorParityDB {
 	inner: Db,
 	columns: Vec<String>,
+	read_only: bool,
 }
 
 impl IntrospectorKvdb for IntrospectorParityDB {
@@ -38,7 +39,7 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 			.enumerate()
 			.map(|(idx, _)| format!("col{}", idx))
 			.collect::<Vec<_>>();
-		Ok(Self { inner: db, columns })
+		Ok(Self { inner: db, columns, read_only: true })
 	}
 
 	fn list_columns(&self) -> color_eyre::Result<&Vec<String>> {
@@ -79,5 +80,42 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 				None
 			}
 		})))
+	}
+
+	fn read_only(&self) -> bool {
+		self.read_only
+	}
+
+	fn write_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
+	where
+		I: IntoIterator<Item = (K, V)>,
+		K: AsRef<[u8]>,
+		V: AsRef<[u8]>,
+	{
+		let column_idx = self
+			.columns
+			.iter()
+			.position(|col| col.as_str() == column)
+			.ok_or_else(|| eyre!("invalid column: {}", column))? as u8;
+		self.inner
+			.commit(
+				iter.into_iter()
+					.map(|(key, value)| (column_idx, key, Some(value.as_ref().to_vec()))),
+			)
+			.map_err(|e| eyre!("commit error: {:?}", e))
+	}
+
+	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {
+		let columns = input.list_columns()?.clone();
+		let mut opts = ParityDBOptions::with_columns(output_path.as_ref(), columns.len() as u8);
+
+		// In RocksDB we always have order, and for the ParityDB case it is not always true
+		// So we assume that all columns are ordered as a safety measure
+		for column in opts.columns.iter_mut() {
+			column.btree_index = true;
+		}
+
+		let db = Db::open_or_create(&opts)?;
+		Ok(IntrospectorParityDB { inner: db, columns, read_only: false })
 	}
 }

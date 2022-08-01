@@ -19,13 +19,18 @@ mod paritydb;
 mod rocksdb;
 mod traits;
 
+use crate::kvdb::{paritydb::IntrospectorParityDB, rocksdb::IntrospectorRocksDB};
 use clap::Parser;
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
+use log::info;
 use serde::Serialize;
 use std::{
 	fmt::{Display, Formatter},
+	fs,
+	fs::File,
 	io,
-	io::Write,
+	io::{BufWriter, Write},
+	path::{Path, PathBuf},
 };
 use strum::{Display, EnumString};
 
@@ -43,7 +48,7 @@ pub(crate) struct KvdbUsageOpts {
 	keys_prefix: Vec<String>,
 }
 
-/// Specific options for the keys subcommand
+/// Specific options for the decode_keys subcommand
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct KvdbKeysOpts {
@@ -59,6 +64,24 @@ pub(crate) struct KvdbKeysOpts {
 	/// Allow to ignore decode failures
 	#[clap(long, short = 'i', default_value = "false")]
 	ignore_failures: bool,
+}
+
+/// Specific options for the dump subcommand
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) struct KvdbDumpOpts {
+	/// Dump only specific column(s)
+	#[clap(long, short = 'c')]
+	column: Vec<String>,
+	/// Limit dump by specific key prefix(es)
+	#[clap(long, short = 'p')]
+	keys_prefix: Vec<String>,
+	/// Output directory to use for a dump
+	#[clap(long = "output", short = 'o', parse(from_os_str))]
+	output: PathBuf,
+	/// Output type
+	#[clap(long, default_value_t)]
+	format: KvdbDumpMode,
 }
 
 impl<'a> From<&'a KvdbKeysOpts> for decode::KeyDecodeOptions<'a> {
@@ -82,14 +105,18 @@ pub(crate) enum KvdbMode {
 	Usage(KvdbUsageOpts),
 	/// Decode specific keys in the database
 	DecodeKeys(KvdbKeysOpts),
+	/// Dump database (works with a live database for RocksDB)
+	Dump(KvdbDumpOpts),
 }
 
 /// Database type
 #[derive(Clone, Debug, Parser, EnumString, Display)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum KvdbType {
+	#[strum(ascii_case_insensitive)]
 	/// RocksDB database
 	RocksDB,
+	#[strum(ascii_case_insensitive)]
 	/// ParityDB database
 	ParityDB,
 }
@@ -104,10 +131,13 @@ impl Default for KvdbType {
 #[derive(Clone, Debug, Parser, EnumString, Display)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum OutputMode {
+	/// Human readable output
 	#[strum(ascii_case_insensitive)]
 	Pretty,
+	/// Json output
 	#[strum(ascii_case_insensitive)]
 	Json,
+	/// Bincode output
 	#[strum(ascii_case_insensitive)]
 	Bincode,
 }
@@ -115,6 +145,27 @@ pub(crate) enum OutputMode {
 impl Default for OutputMode {
 	fn default() -> Self {
 		OutputMode::Pretty
+	}
+}
+
+/// Database type
+#[derive(Clone, Debug, Parser, EnumString, Display)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) enum KvdbDumpMode {
+	#[strum(ascii_case_insensitive)]
+	/// RocksDB database
+	RocksDB,
+	#[strum(ascii_case_insensitive)]
+	/// ParityDB database
+	ParityDB,
+	/// Dump as new-line delimited JSON into files with a pattern `column_name.json`
+	#[strum(ascii_case_insensitive)]
+	Json,
+}
+
+impl Default for KvdbDumpMode {
+	fn default() -> Self {
+		KvdbDumpMode::RocksDB
 	}
 }
 
@@ -185,13 +236,10 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 			}
 		},
 		KvdbMode::Usage(ref usage_opts) => {
-			let columns = db.list_columns()?.iter().filter(|col| {
-				if !usage_opts.column.is_empty() {
-					usage_opts.column.contains(col)
-				} else {
-					true
-				}
-			});
+			let columns = db
+				.list_columns()?
+				.iter()
+				.filter(|col| usage_opts.column.is_empty() || usage_opts.column.contains(col));
 
 			for col in columns {
 				let mut keys_space = 0_usize;
@@ -231,6 +279,113 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 			let res = decode::decode_keys(&db, &kvdb_keys_opts.into())?;
 			output_result(&res, &opts)?;
 		},
+		KvdbMode::Dump(ref dump_opts) => {
+			if !Path::exists(&dump_opts.output) {
+				fs::create_dir_all(&dump_opts.output)?;
+			}
+
+			let output_dir = dump_opts
+				.output
+				.clone()
+				.into_os_string()
+				.into_string()
+				.map_err(|_| eyre!("invalid output directory"))?;
+			match dump_opts.format {
+				KvdbDumpMode::RocksDB => {
+					let dest_db = IntrospectorRocksDB::new_dumper(&db, output_dir.as_str())?;
+					dump_into_db(db, dest_db, dump_opts)?
+				},
+				KvdbDumpMode::ParityDB => {
+					let dest_db = IntrospectorParityDB::new_dumper(&db, output_dir.as_str())?;
+					dump_into_db(db, dest_db, dump_opts)?
+				},
+				KvdbDumpMode::Json => dump_into_json(db, dump_opts, output_dir.as_str())?,
+			};
+		},
+	}
+
+	Ok(())
+}
+
+fn dump_into_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
+	source: S,
+	destination: D,
+	dump_opts: &KvdbDumpOpts,
+) -> Result<()> {
+	let columns = source
+		.list_columns()?
+		.iter()
+		.filter(|col| dump_opts.column.is_empty() || dump_opts.column.contains(col));
+
+	for col in columns {
+		info!("dumping column {}", col.as_str());
+
+		if dump_opts.keys_prefix.is_empty() {
+			let iter = source.iter_values(col.as_str())?;
+			destination.write_iter(col.as_str(), iter)?;
+		} else {
+			// Iterate over all requested prefixes
+			for prefix in &dump_opts.keys_prefix {
+				info!("dumping prefix {} in column {}", prefix.as_str(), col.as_str());
+				let iter = source.prefixed_iter_values(col.as_str(), prefix.as_str())?;
+				destination.write_iter(col.as_str(), iter)?;
+			}
+		}
+	}
+
+	Ok(())
+}
+
+fn dump_into_json<D: IntrospectorKvdb>(db: D, dump_opts: &KvdbDumpOpts, output_dir: &str) -> Result<()> {
+	let columns = db
+		.list_columns()?
+		.iter()
+		.filter(|col| dump_opts.column.is_empty() || dump_opts.column.contains(col));
+
+	for col in columns {
+		let output_fname: PathBuf = [output_dir, format!("{}.json", col).as_str()].iter().collect();
+		let output_file = File::create(output_fname.as_path())?;
+		{
+			let mut writer = BufWriter::new(output_file);
+			info!("dumping column {}", col.as_str());
+
+			if dump_opts.keys_prefix.is_empty() {
+				let iter = db.iter_values(col.as_str())?;
+				write_db_iter_into_json(iter, &mut writer)?;
+			} else {
+				// Iterate over all requested prefixes
+				for prefix in &dump_opts.keys_prefix {
+					info!("dumping prefix {} in column {}", prefix.as_str(), col.as_str());
+					let iter = db.prefixed_iter_values(col.as_str(), prefix.as_str())?;
+					write_db_iter_into_json(iter, &mut writer)?;
+				}
+			}
+		}
+	}
+
+	Ok(())
+}
+
+#[derive(Serialize)]
+struct KeyValueDumpElement<'a> {
+	#[serde(with = "serde_bytes")]
+	key: &'a [u8],
+	#[serde(with = "serde_bytes")]
+	value: &'a [u8],
+}
+
+fn write_db_iter_into_json<I, K, V, W>(iter: I, writer: &mut BufWriter<W>) -> Result<()>
+where
+	I: IntoIterator<Item = (K, V)>,
+	K: AsRef<[u8]>,
+	V: AsRef<[u8]>,
+	W: std::io::Write,
+{
+	for (key, value) in iter {
+		let dump_struct = KeyValueDumpElement { key: key.as_ref(), value: value.as_ref() };
+
+		let json = serde_json::to_string(&dump_struct)?;
+		writeln!(writer, "{}", json)?;
 	}
 
 	Ok(())

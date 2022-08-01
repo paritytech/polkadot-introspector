@@ -233,7 +233,7 @@ pub fn decode_keys<D: IntrospectorKvdb>(db: &D, opts: &KeyDecodeOptions) -> Resu
 				return Err(eyre!("invalid key size: {}; expected key size: {}", k.len(), expected_key_len))
 			}
 
-			let cur = process_decoders_pipeline(&*k, &decoders)?;
+			let cur = process_decoders_pipeline(&k, &decoders)?;
 
 			final_result.0.push(KeyDecodeResult { fields: cur, value_size: v.len() });
 
