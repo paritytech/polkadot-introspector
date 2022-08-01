@@ -26,8 +26,10 @@ use log::info;
 use serde::Serialize;
 use std::{
 	fmt::{Display, Formatter},
-	fs, io,
-	io::Write,
+	fs,
+	fs::File,
+	io,
+	io::{BufWriter, Write},
 	path::{Path, PathBuf},
 };
 use strum::{Display, EnumString};
@@ -234,13 +236,10 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 			}
 		},
 		KvdbMode::Usage(ref usage_opts) => {
-			let columns = db.list_columns()?.iter().filter(|col| {
-				if !usage_opts.column.is_empty() {
-					usage_opts.column.contains(col)
-				} else {
-					true
-				}
-			});
+			let columns = db
+				.list_columns()?
+				.iter()
+				.filter(|col| usage_opts.column.is_empty() || usage_opts.column.contains(col));
 
 			for col in columns {
 				let mut keys_space = 0_usize;
@@ -294,15 +293,13 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 			match dump_opts.format {
 				KvdbDumpMode::RocksDB => {
 					let dest_db = IntrospectorRocksDB::new_dumper(&db, output_dir.as_str())?;
-					dump_db(db, dest_db, dump_opts)?
+					dump_into_db(db, dest_db, dump_opts)?
 				},
 				KvdbDumpMode::ParityDB => {
 					let dest_db = IntrospectorParityDB::new_dumper(&db, output_dir.as_str())?;
-					dump_db(db, dest_db, dump_opts)?
+					dump_into_db(db, dest_db, dump_opts)?
 				},
-				KvdbDumpMode::Json => {
-					todo!();
-				},
+				KvdbDumpMode::Json => dump_into_json(db, dump_opts, output_dir.as_str())?,
 			};
 		},
 	}
@@ -310,18 +307,15 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 	Ok(())
 }
 
-fn dump_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
+fn dump_into_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
 	source: S,
 	destination: D,
 	dump_opts: &KvdbDumpOpts,
 ) -> Result<()> {
-	let columns = source.list_columns()?.iter().filter(|col| {
-		if !dump_opts.column.is_empty() {
-			dump_opts.column.contains(col)
-		} else {
-			true
-		}
-	});
+	let columns = source
+		.list_columns()?
+		.iter()
+		.filter(|col| dump_opts.column.is_empty() || dump_opts.column.contains(col));
 
 	for col in columns {
 		info!("dumping column {}", col.as_str());
@@ -337,6 +331,59 @@ fn dump_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
 				destination.write_iter(col.as_str(), iter)?;
 			}
 		}
+	}
+
+	Ok(())
+}
+
+fn dump_into_json<D: IntrospectorKvdb>(db: D, dump_opts: &KvdbDumpOpts, output_dir: &str) -> Result<()> {
+	let columns = db
+		.list_columns()?
+		.iter()
+		.filter(|col| dump_opts.column.is_empty() || dump_opts.column.contains(col));
+
+	for col in columns {
+		let output_fname: PathBuf = [output_dir, format!("{}.json", col).as_str()].iter().collect();
+		let output_file = File::create(output_fname.as_path())?;
+		{
+			let mut writer = BufWriter::new(output_file);
+			info!("dumping column {}", col.as_str());
+
+			if dump_opts.keys_prefix.is_empty() {
+				let iter = db.iter_values(col.as_str())?;
+				write_db_iter_into_json(iter, &mut writer)?;
+			} else {
+				// Iterate over all requested prefixes
+				for prefix in &dump_opts.keys_prefix {
+					info!("dumping prefix {} in column {}", prefix.as_str(), col.as_str());
+					let iter = db.prefixed_iter_values(col.as_str(), prefix.as_str())?;
+					write_db_iter_into_json(iter, &mut writer)?;
+				}
+			}
+		}
+	}
+
+	Ok(())
+}
+
+#[derive(Serialize)]
+struct KeyValueDumpElement<'a> {
+	key: &'a [u8],
+	value: &'a [u8],
+}
+
+fn write_db_iter_into_json<I, K, V, W>(iter: I, writer: &mut BufWriter<W>) -> Result<()>
+where
+	I: IntoIterator<Item = (K, V)>,
+	K: AsRef<[u8]>,
+	V: AsRef<[u8]>,
+	W: std::io::Write,
+{
+	for (key, value) in iter {
+		let dump_struct = KeyValueDumpElement { key: key.as_ref(), value: value.as_ref() };
+
+		let json = serde_json::to_string(&dump_struct)?;
+		writer.write(json.as_bytes())?;
 	}
 
 	Ok(())
