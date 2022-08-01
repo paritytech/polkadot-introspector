@@ -51,9 +51,15 @@ Subcommands supported:
 
 * **columns** - list available columns
 * **usage** - show disk usage for keys and values with the ability to limit scan by specific column and/or a set of key prefixes
-* **keys** - decode keys from the database using a format string
+* **decode-keys** - decode keys from the database using a format string
+* **dump** - dump a live[^1] database to another directory in a set of different formats
 
 `usage` and `keys` subcommands support both human-readable and JSON output formats for automatic checks.
+
+
+### Usage mode 
+
+In this mode, introspector shows disk space usage for keys and values.
 
 ```
 USAGE:
@@ -65,6 +71,32 @@ OPTIONS:
     -p, --keys-prefix <KEYS_PREFIX>    Limit scan by specific key prefix(es)
 ```
 
+### Decode keys mode
+
+In this mode, introspector allows to decode keys using format strings.
+
+```
+USAGE:
+    polkadot-introspector kvdb --db <DB> decode-keys [OPTIONS] --column <COLUMN> --fmt <FMT>
+
+OPTIONS:
+    -c, --column <COLUMN>
+            Check only specific column(s)
+
+    -f, --fmt <FMT>
+            Decode keys matching the specific format (like `candidate-votes%i%h`, where `%i`
+            represents a big-endian integer)
+
+    -h, --help
+            Print help information
+
+    -i, --ignore-failures <ignore-failures>
+            Allow to ignore decode failures [default: false]
+
+    -l, --limit <LIMIT>
+            Limit number of output entries
+```
+
 #### Keys format string specification
 
 Format string can currently include plain strings, and one or more percent encoding values, such as `key_%i`. Currently, this module supports the  following percent strings:
@@ -72,5 +104,27 @@ Format string can currently include plain strings, and one or more percent encod
  - `%t` - big endian u64 value (timestamp)
  - `%h` - blake2b hash represented as hex string
  - `%s<d>` - string of length `d` (for example `%s10` represents a string of size 10)
+
+### Dump subcommand
+
+This subcommand is designed to dump the database to another output directory in a set of output formats:
+
+* **RocksDB** - dump database in RocksDB format
+* **ParityDB** - dump database in ParityDB format, in this mode all input columns are treated as ordered columns (btree), dump of non-ordered columns is currently limited
+* **JSON** - output database as a set of [new-line separated JSON](http://ndjson.org/) files, one for each column
+
+```
+USAGE:
+    polkadot-introspector kvdb --db <DB> dump [OPTIONS] --output <OUTPUT>
+
+OPTIONS:
+    -c, --column <COLUMN>              Check only specific column(s)
+    -h, --help                         Print help information
+    -o, --output <OUTPUT>              Output directory to dump
+        --output-type <OUTPUT_TYPE>    Output database type [default: RocksDB]
+    -p, --keys-prefix <KEYS_PREFIX>    Limit scan by specific key prefix(es)
+```
+
+[^1]: Live mode is currently supported for RocksDB only
 
 
