@@ -368,7 +368,9 @@ fn dump_into_json<D: IntrospectorKvdb>(db: D, dump_opts: &KvdbDumpOpts, output_d
 
 #[derive(Serialize)]
 struct KeyValueDumpElement<'a> {
+	#[serde(with = "serde_bytes")]
 	key: &'a [u8],
+	#[serde(with = "serde_bytes")]
 	value: &'a [u8],
 }
 
@@ -383,7 +385,7 @@ where
 		let dump_struct = KeyValueDumpElement { key: key.as_ref(), value: value.as_ref() };
 
 		let json = serde_json::to_string(&dump_struct)?;
-		writer.write(json.as_bytes())?;
+		writeln!(writer, "{}", json)?;
 	}
 
 	Ok(())
