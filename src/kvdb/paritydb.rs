@@ -31,7 +31,8 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 		let metadata = ParityDBOptions::load_metadata(path)
 			.map_err(|e| eyre!("Error resolving metas: {:?}", e))?
 			.ok_or_else(|| eyre!("Missing metadata"))?;
-		let opts = ParityDBOptions::with_columns(path, metadata.columns.len() as u8);
+		let mut opts = ParityDBOptions::with_columns(path, metadata.columns.len() as u8);
+		opts.columns = metadata.columns.clone();
 		let db = Db::open_read_only(&opts)?;
 		let columns = metadata
 			.columns

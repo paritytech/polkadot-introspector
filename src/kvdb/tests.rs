@@ -39,6 +39,7 @@ mod tests {
 		let tmpdir = std::env::temp_dir();
 		let mut rng = thread_rng();
 		let suffix: String = (0..20).map(|_| rng.sample(Alphanumeric) as char).collect();
+		let suffix = format!("intro-kvdb-test-{}", suffix);
 		let path = tmpdir.join(&suffix);
 		std::fs::create_dir(&path).unwrap();
 		path
@@ -97,6 +98,46 @@ mod tests {
 		let ncolumns = 10;
 		let src_dir = make_temp_dir();
 		let src_db = crate::kvdb::paritydb::tests::new_test_parity_db(src_dir.as_path(), ncolumns);
+
+		write_db(&src_db, ncolumns);
+		let dst_dir = make_temp_dir();
+
+		{
+			let dest_db = crate::kvdb::paritydb::IntrospectorParityDB::new_dumper(&src_db, &dst_dir.as_path()).unwrap();
+			copy_db(&src_db, &dest_db, ncolumns);
+		}
+
+		let dest_db = crate::kvdb::paritydb::IntrospectorParityDB::new(dst_dir.as_path()).unwrap();
+		check_db(&dest_db, ncolumns);
+		std::fs::remove_dir_all(src_dir).unwrap();
+		std::fs::remove_dir_all(dst_dir).unwrap();
+	}
+
+	#[test]
+	fn test_migration_paritydb_rocksdb() {
+		let ncolumns = 10;
+		let src_dir = make_temp_dir();
+		let src_db = crate::kvdb::paritydb::tests::new_test_parity_db(src_dir.as_path(), ncolumns);
+
+		write_db(&src_db, ncolumns);
+		let dst_dir = make_temp_dir();
+
+		{
+			let dest_db = crate::kvdb::rocksdb::IntrospectorRocksDB::new_dumper(&src_db, &dst_dir.as_path()).unwrap();
+			copy_db(&src_db, &dest_db, ncolumns);
+		}
+
+		let dest_db = crate::kvdb::rocksdb::IntrospectorRocksDB::new(dst_dir.as_path()).unwrap();
+		check_db(&dest_db, ncolumns);
+		std::fs::remove_dir_all(src_dir).unwrap();
+		std::fs::remove_dir_all(dst_dir).unwrap();
+	}
+
+	#[test]
+	fn test_migration_rocksdb_paritydb() {
+		let ncolumns = 10;
+		let src_dir = make_temp_dir();
+		let src_db = crate::kvdb::rocksdb::tests::new_test_rocks_db(src_dir.as_path(), ncolumns);
 
 		write_db(&src_db, ncolumns);
 		let dst_dir = make_temp_dir();
