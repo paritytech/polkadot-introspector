@@ -20,7 +20,7 @@ pub type DBIter<'a> = Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a>;
 /// A minimum subset of the functions required to open a database for introspection
 pub trait IntrospectorKvdb {
 	/// Opens database with some configuration
-	fn new(path: &str) -> Result<Self>
+	fn new(path: &std::path::Path) -> Result<Self>
 	where
 		Self: Sized;
 	/// List all column families in a database
@@ -40,7 +40,7 @@ pub trait IntrospectorKvdb {
 		K: AsRef<[u8]>,
 		V: AsRef<[u8]>;
 	/// Create a database dump engine
-	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self>
+	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &std::path::Path) -> Result<Self>
 	where
 		Self: Sized;
 }

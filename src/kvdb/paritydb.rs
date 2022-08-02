@@ -27,11 +27,11 @@ pub struct IntrospectorParityDB {
 }
 
 impl IntrospectorKvdb for IntrospectorParityDB {
-	fn new(path: &str) -> Result<Self> {
-		let metadata = ParityDBOptions::load_metadata(path.as_ref())
+	fn new(path: &std::path::Path) -> Result<Self> {
+		let metadata = ParityDBOptions::load_metadata(path)
 			.map_err(|e| eyre!("Error resolving metas: {:?}", e))?
 			.ok_or_else(|| eyre!("Missing metadata"))?;
-		let opts = ParityDBOptions::with_columns(path.as_ref(), metadata.columns.len() as u8);
+		let opts = ParityDBOptions::with_columns(path, metadata.columns.len() as u8);
 		let db = Db::open_read_only(&opts)?;
 		let columns = metadata
 			.columns
@@ -105,9 +105,9 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 			.map_err(|e| eyre!("commit error: {:?}", e))
 	}
 
-	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {
+	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &std::path::Path) -> Result<Self> {
 		let columns = input.list_columns()?.clone();
-		let mut opts = ParityDBOptions::with_columns(output_path.as_ref(), columns.len() as u8);
+		let mut opts = ParityDBOptions::with_columns(output_path, columns.len() as u8);
 
 		// In RocksDB we always have order, and for the ParityDB case it is not always true
 		// So we assume that all columns are ordered as a safety measure
@@ -117,5 +117,24 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 
 		let db = Db::open_or_create(&opts)?;
 		Ok(IntrospectorParityDB { inner: db, columns, read_only: false })
+	}
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+	use super::*;
+	use std::path::Path;
+
+	pub fn new_test_parity_db(output_path: &Path, num_columns: usize) -> IntrospectorParityDB {
+		let mut opts = ParityDBOptions::with_columns(output_path, num_columns as u8);
+		let mut columns: Vec<String> = vec![];
+
+		for (idx, column) in opts.columns.iter_mut().enumerate() {
+			column.btree_index = true;
+			columns.push(format!("col{}", idx));
+		}
+
+		let db = Db::open_or_create(&opts).unwrap();
+		IntrospectorParityDB { inner: db, columns, read_only: false }
 	}
 }

@@ -29,7 +29,7 @@ pub struct IntrospectorRocksDB {
 const DEFAULT_COLUMN: &str = "default";
 
 impl IntrospectorKvdb for IntrospectorRocksDB {
-	fn new(path: &str) -> Result<Self> {
+	fn new(path: &std::path::Path) -> Result<Self> {
 		let cf_opts = RocksdbOptions::default();
 		let mut columns = DB::list_cf(&cf_opts, path)?;
 		// Always ignore default column to be compatible with ParityDB
@@ -91,7 +91,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		Ok(())
 	}
 
-	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &str) -> Result<Self> {
+	fn new_dumper<D: IntrospectorKvdb>(input: &D, output_path: &std::path::Path) -> Result<Self> {
 		let mut cf_opts = RocksdbOptions::default();
 		let columns = input.list_columns()?.clone();
 		cf_opts.create_if_missing(true);
@@ -99,5 +99,26 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 
 		let db = DB::open_cf(&cf_opts, output_path, &columns)?;
 		Ok(IntrospectorRocksDB { inner: db, columns, read_only: false })
+	}
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+	use super::*;
+	use std::path::Path;
+
+	pub fn new_test_rocks_db(output_path: &Path, num_columns: usize) -> IntrospectorRocksDB {
+		let mut cf_opts = RocksdbOptions::default();
+		let mut columns: Vec<String> = vec![];
+
+		for i in 0..num_columns {
+			columns.push(format!("col{}", i));
+		}
+
+		cf_opts.create_if_missing(true);
+		cf_opts.create_missing_column_families(true);
+
+		let db = DB::open_cf(&cf_opts, output_path, &columns).unwrap();
+		IntrospectorRocksDB { inner: db, columns, read_only: false }
 	}
 }

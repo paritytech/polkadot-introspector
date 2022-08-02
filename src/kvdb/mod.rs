@@ -19,9 +19,12 @@ mod paritydb;
 mod rocksdb;
 mod traits;
 
+#[cfg(test)]
+mod tests;
+
 use crate::kvdb::{paritydb::IntrospectorParityDB, rocksdb::IntrospectorRocksDB};
 use clap::Parser;
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
 use log::info;
 use serde::Serialize;
 use std::{
@@ -221,8 +224,8 @@ impl<'a> Display for UsageResults<'a> {
 
 pub fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
 	match opts.db_type {
-		KvdbType::RocksDB => run_with_db(rocksdb::IntrospectorRocksDB::new(opts.db.as_str())?, opts),
-		KvdbType::ParityDB => run_with_db(paritydb::IntrospectorParityDB::new(opts.db.as_str())?, opts),
+		KvdbType::RocksDB => run_with_db(rocksdb::IntrospectorRocksDB::new(Path::new(opts.db.as_str()))?, opts),
+		KvdbType::ParityDB => run_with_db(paritydb::IntrospectorParityDB::new(Path::new(opts.db.as_str()))?, opts),
 	}
 }
 
@@ -284,22 +287,17 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				fs::create_dir_all(&dump_opts.output)?;
 			}
 
-			let output_dir = dump_opts
-				.output
-				.clone()
-				.into_os_string()
-				.into_string()
-				.map_err(|_| eyre!("invalid output directory"))?;
+			let output_dir = &dump_opts.output;
 			match dump_opts.format {
 				KvdbDumpMode::RocksDB => {
-					let dest_db = IntrospectorRocksDB::new_dumper(&db, output_dir.as_str())?;
+					let dest_db = IntrospectorRocksDB::new_dumper(&db, output_dir.as_path())?;
 					dump_into_db(db, dest_db, dump_opts)?
 				},
 				KvdbDumpMode::ParityDB => {
-					let dest_db = IntrospectorParityDB::new_dumper(&db, output_dir.as_str())?;
+					let dest_db = IntrospectorParityDB::new_dumper(&db, output_dir.as_path())?;
 					dump_into_db(db, dest_db, dump_opts)?
 				},
-				KvdbDumpMode::Json => dump_into_json(db, dump_opts, output_dir.as_str())?,
+				KvdbDumpMode::Json => dump_into_json(db, dump_opts, output_dir.as_path())?,
 			};
 		},
 	}
@@ -336,14 +334,15 @@ fn dump_into_db<S: IntrospectorKvdb, D: IntrospectorKvdb>(
 	Ok(())
 }
 
-fn dump_into_json<D: IntrospectorKvdb>(db: D, dump_opts: &KvdbDumpOpts, output_dir: &str) -> Result<()> {
+fn dump_into_json<D: IntrospectorKvdb>(db: D, dump_opts: &KvdbDumpOpts, output_dir: &Path) -> Result<()> {
 	let columns = db
 		.list_columns()?
 		.iter()
 		.filter(|col| dump_opts.column.is_empty() || dump_opts.column.contains(col));
 
 	for col in columns {
-		let output_fname: PathBuf = [output_dir, format!("{}.json", col).as_str()].iter().collect();
+		let mut output_fname: PathBuf = output_dir.to_path_buf();
+		output_fname.set_file_name(format!("{}.json", col));
 		let output_file = File::create(output_fname.as_path())?;
 		{
 			let mut writer = BufWriter::new(output_file);

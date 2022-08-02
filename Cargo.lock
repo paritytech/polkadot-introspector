@@ -2050,6 +2050,7 @@ dependencies = [
  "log",
  "parity-db",
  "parity-scale-codec",
+ "rand 0.8.5",
  "rasciigraph",
  "reqwest",
  "rocksdb",
