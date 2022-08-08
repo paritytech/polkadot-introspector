@@ -50,8 +50,14 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 			.inner
 			.cf_handle(column)
 			.ok_or_else(|| eyre!("invalid column: {}", column))?;
-		let iter = self.inner.iterator_cf(cf_handle, IteratorMode::Start);
-		Ok(Box::new(iter))
+		let mut iter = self.inner.iterator_cf(cf_handle, IteratorMode::Start);
+		Ok(Box::new(std::iter::from_fn(move || {
+			if let Some(Ok((key, value))) = iter.next() {
+				Some((key, value))
+			} else {
+				None
+			}
+		})))
 	}
 
 	fn prefixed_iter_values(&self, column: &str, prefix: &str) -> Result<DBIter> {
@@ -59,8 +65,14 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 			.inner
 			.cf_handle(column)
 			.ok_or_else(|| eyre!("invalid column: {}", column))?;
-		let iter = self.inner.prefix_iterator_cf(cf_handle, prefix);
-		Ok(Box::new(iter))
+		let mut iter = self.inner.prefix_iterator_cf(cf_handle, prefix);
+		Ok(Box::new(std::iter::from_fn(move || {
+			if let Some(Ok((key, value))) = iter.next() {
+				Some((key, value))
+			} else {
+				None
+			}
+		})))
 	}
 
 	fn read_only(&self) -> bool {
