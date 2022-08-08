@@ -13,7 +13,6 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-
 //! Ephemeral/persistent in memory storage facilities for on-chain/off-chain data.
 use std::{
 	borrow::Borrow,
@@ -39,7 +38,8 @@ pub struct RecordTime {
 	timestamp: Option<Duration>,
 }
 
-/// An internal generic storage entry representation
+/// An generic storage entry representation
+/// TODO: create methods to create storage entries and redeem the inner data.
 pub struct StorageEntry {
 	/// The source of the data.
 	record_source: RecordSource,
@@ -47,6 +47,8 @@ pub struct StorageEntry {
 	/// All entries will have a block number. For offchain data, this is estimated based on the
 	/// timestamp, or otherwise it will be set to the latest known block.
 	record_time: RecordTime,
+	/// The actual scale encoded data.
+	data: Vec<u8>,
 }
 
 /// A required trait to implement for storing records.
@@ -55,6 +57,19 @@ pub trait StorageInfo {
 	fn source(&self) -> RecordSource;
 	/// Returns the time when the data was recorded.
 	fn time(&self) -> RecordTime;
+}
+
+/// Dummy impl to allow retrieveal of scale encoded values from storage.
+/// After the value is decoded, the concrete type provides the real impl.
+impl StorageInfo for Vec<u8> {
+	/// Returns the source of the data.
+	fn source(&self) -> RecordSource {
+		RecordSource::Offchain
+	}
+	/// Returns the time when the data was recorded.
+	fn time(&self) -> RecordTime {
+		RecordTime { block_number: 0, timestamp: None }
+	}
 }
 
 impl RecordTime {
@@ -90,7 +105,7 @@ pub struct RecordsStorage<K: Hash + Clone, EphemeralValue> {
 	direct_records: HashMap<K, Arc<EphemeralValue>>,
 }
 
-impl<K: Hash + Clone + Eq, EphemeralValue: StorageInfo + Clone + Copy> RecordsStorage<K, EphemeralValue> {
+impl<K: Hash + Clone + Eq, EphemeralValue: StorageInfo + Clone> RecordsStorage<K, EphemeralValue> {
 	/// Creates a new storage with the specified config
 	pub fn new(config: RecordsStorageConfig) -> Self {
 		let persistent_records = BTreeMap::new();
@@ -100,7 +115,7 @@ impl<K: Hash + Clone + Eq, EphemeralValue: StorageInfo + Clone + Copy> RecordsSt
 	}
 
 	/// Inserts a record in ephemeral storage.
-	// TODO: must fail on duplicate + check that timestamp >= front.timestamp
+	// TODO: must fail for values with blocks below the pruning threshold.
 	pub fn insert(&mut self, key: K, value: EphemeralValue) {
 		if self.direct_records.contains_key(&key) {
 			return
@@ -154,8 +169,7 @@ impl<K: Hash + Clone + Eq, EphemeralValue: StorageInfo + Clone + Copy> RecordsSt
 
 	/// Size of the storage
 	pub fn len(&self) -> usize {
-		// TODO
-		0
+		self.direct_records.len()
 	}
 }
 
@@ -192,5 +206,18 @@ mod tests {
 
 		assert_eq!(st.get("key1"), None);
 		assert_eq!(st.get("key100"), None);
+	}
+
+	#[test]
+	fn test_prune() {
+		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 2 });
+
+		for idx in 0..1000 {
+			st.insert(idx, idx);
+			st.insert(idx, idx);
+		}
+
+		// 10 keys per block * 2 max blocks.
+		assert_eq!(st.len(), 20);
 	}
 }
