@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::{EventConsumerInit, Request, RequestExecutor, SubxtEvent};
+use crate::core::{api::ApiService, EventConsumerInit, SubxtEvent};
 use clap::Parser;
 use colored::Colorize;
 use crossterm::{
@@ -29,7 +29,7 @@ use std::{
 	io::{stdout, Write},
 	sync::{Arc, Mutex},
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -75,6 +75,7 @@ pub(crate) struct BlockTimeMonitor {
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
 	consumer_config: EventConsumerInit<SubxtEvent>,
+	api_service: ApiService,
 }
 
 impl BlockTimeMonitor {
@@ -88,6 +89,9 @@ impl BlockTimeMonitor {
 			values.push(Default::default());
 		}
 
+		// This starts the both the storage and subxt APIs.
+		let api_service = ApiService::new();
+
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(prometheus_opts) => {
 				let prometheus_registry = Registry::new_custom(Some("introspector".into()), None)?;
@@ -99,15 +103,15 @@ impl BlockTimeMonitor {
 				);
 				tokio::spawn(prometheus_endpoint::init_prometheus(socket_addr, prometheus_registry));
 
-				Ok(BlockTimeMonitor { values, opts, block_time_metric, endpoints, consumer_config })
+				Ok(BlockTimeMonitor { values, opts, block_time_metric, endpoints, consumer_config, api_service })
 			},
 			BlockTimeMode::Cli(_) =>
-				Ok(BlockTimeMonitor { values, opts, block_time_metric: None, endpoints, consumer_config }),
+				Ok(BlockTimeMonitor { values, opts, block_time_metric: None, endpoints, consumer_config, api_service }),
 		}
 	}
 
 	pub(crate) async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let (consumer_channels, to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = self.consumer_config.into();
+		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
 
 		let mut futures = self
 			.endpoints
@@ -121,7 +125,8 @@ impl BlockTimeMonitor {
 					endpoint,
 					self.block_time_metric.clone(),
 					values,
-					(update_channel, to_api.clone()),
+					update_channel,
+					self.api_service.clone(),
 				))
 			})
 			.collect::<Vec<_>>();
@@ -192,17 +197,18 @@ impl BlockTimeMonitor {
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
 		// TODO: make this a struct.
-		mut consumer_config: (Receiver<SubxtEvent>, Sender<Request>),
+		mut consumer_config: Receiver<SubxtEvent>,
+		api_service: ApiService,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
 		let url = leak_static_str(url);
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(_) => {},
 			BlockTimeMode::Cli(cli_opts) => {
-				populate_view(values.clone(), url, cli_opts, consumer_config.1.clone()).await;
+				populate_view(values.clone(), url, cli_opts, api_service.clone()).await;
 			},
 		}
-		let executor = RequestExecutor::new(consumer_config.1);
+		let executor = api_service.subxt();
 
 		let mut prev_ts = 0;
 		let mut prev_block = 0u32;
@@ -210,7 +216,7 @@ impl BlockTimeMonitor {
 
 		loop {
 			debug!("[{}] New loop - waiting for events", url);
-			if let Some(event) = consumer_config.0.recv().await {
+			if let Some(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
 				match event {
 					SubxtEvent::NewHead(hash) => {
@@ -253,6 +259,7 @@ impl BlockTimeMonitor {
 				}
 			} else {
 				error!("[{}] Update channel disconnected", url);
+				break
 			}
 		}
 	}
@@ -262,11 +269,11 @@ async fn populate_view(
 	values: Arc<Mutex<VecDeque<u64>>>,
 	url: &str,
 	cli_opts: BlockTimeCliOptions,
-	to_api: Sender<Request>,
+	api_service: ApiService,
 ) {
 	let mut prev_ts = 0u64;
 	let blocks_to_fetch = cli_opts.chart_width;
-	let executor = RequestExecutor::new(to_api);
+	let executor = api_service.subxt();
 	let mut parent_hash = None;
 
 	for _ in 0..blocks_to_fetch {

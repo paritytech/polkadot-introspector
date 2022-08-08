@@ -28,13 +28,16 @@
 //! TODO: expose storage via event/api. Build a new event source such that new tools
 //! can be built by combining existing ones by listening to storage update events.
 
-mod api;
-mod constants;
-mod consumer;
-#[allow(clippy::enum_variant_names)]
-mod subxt;
+pub mod api;
+pub mod constants;
+pub mod consumer;
+pub mod storage;
 
-pub use self::subxt::*;
+#[allow(clippy::enum_variant_names)]
+mod subxt_wrapper;
+
+pub use self::subxt_wrapper::*;
 pub use api::*;
 pub use constants::*;
 pub use consumer::*;
+pub use storage::*;
