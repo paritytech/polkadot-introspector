@@ -22,7 +22,7 @@ use tokio::{
 	signal,
 	sync::{
 		broadcast,
-		mpsc::{Receiver, Sender},
+		mpsc::Receiver,
 		Mutex,
 	},
 };
@@ -32,7 +32,7 @@ mod event_handler;
 mod records_storage;
 mod ws;
 
-use crate::core::{EventConsumerInit, Request, SubxtEvent};
+use crate::core::{EventConsumerInit, SubxtEvent};
 use candidate_record::*;
 use color_eyre::eyre::eyre;
 use event_handler::*;
@@ -77,7 +77,7 @@ pub(crate) async fn run(
 
 	let endpoints = opts.nodes.clone().into_iter();
 
-	let (consumer_channels, _to_api): (Vec<Receiver<SubxtEvent>>, Sender<Request>) = consumer_config.into();
+	let consumer_channels: Vec<Receiver<SubxtEvent>> = consumer_config.into();
 	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
 	ws_listener
 		.spawn(shutdown_rx, updates_tx.clone())
