@@ -20,11 +20,7 @@ use std::{net::SocketAddr, sync::Arc};
 use subxt::sp_core::H256;
 use tokio::{
 	signal,
-	sync::{
-		broadcast,
-		mpsc::Receiver,
-		Mutex,
-	},
+	sync::{broadcast, mpsc::Receiver, Mutex},
 };
 
 mod candidate_record;

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::{api::ApiService, EventConsumerInit, SubxtEvent, RecordsStorageConfig};
+use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent};
 use clap::Parser;
 use colored::Colorize;
 use crossterm::{
@@ -90,7 +90,7 @@ impl BlockTimeMonitor {
 		}
 
 		// This starts the both the storage and subxt APIs.
-		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000});
+		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 });
 
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(prometheus_opts) => {
