@@ -58,7 +58,7 @@ impl RecordTime {
 }
 
 /// An generic storage entry representation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageEntry {
 	/// The source of the data.
 	record_source: RecordSource,
