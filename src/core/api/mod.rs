@@ -47,3 +47,24 @@ impl ApiService {
 		subxt_wrapper::RequestExecutor::new(self.subxt_tx.clone())
 	}
 }
+
+mod tests {
+	use super::*;
+	use crate::core::*;
+	use subxt::{
+		sp_core::H256,
+		sp_runtime::traits::{BlakeTwo256, Hash},
+	};
+
+	#[tokio::test]
+	async fn basic_storage_test() {
+		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
+		let storage = api.storage();
+		let key = BlakeTwo256::hash_of(&100);
+		storage
+			.storage_write(key, StorageEntry::new_onchain(1.into(), "some data"))
+			.await;
+		let value = storage.storage_read(key).await.unwrap();
+		assert_eq!(value.into_inner::<String>(), "some data");
+	}
+}
