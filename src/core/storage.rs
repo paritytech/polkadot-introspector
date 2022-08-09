@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //! Ephemeral in memory storage facilities for on-chain/off-chain data.
+#![allow(dead_code)]
+
 use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
@@ -155,8 +157,8 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 
 		self.ephemeral_records
 			.entry(block_number)
-			.or_insert(Default::default())
-			.insert(key.clone(), entry);
+			.or_insert_with(Default::default)
+			.insert(key, entry);
 
 		self.prune();
 	}
@@ -169,7 +171,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 			// Prune all entries at oldest block
 			let oldest_block = {
 				let (oldest_block, entries) = self.ephemeral_records.iter().next().unwrap();
-				for (key, _value) in entries.into_iter() {
+				for (key, _value) in entries.iter() {
 					self.direct_records.remove(key);
 				}
 
@@ -188,11 +190,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		K: Borrow<Q>,
 		Q: Hash + Eq,
 	{
-		if let Some(value) = self.direct_records.get(key).cloned() {
-			Some((*value).clone())
-		} else {
-			None
-		}
+		self.direct_records.get(key).cloned().map(|value| (*value).clone())
 	}
 
 	/// Size of the storage

@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-use tokio::sync::mpsc::{channel, Sender};
-
+#![allow(dead_code)]
 use crate::core::{RecordsStorageConfig, MAX_MSG_QUEUE_SIZE};
+use tokio::sync::mpsc::{channel, Sender};
 
 mod storage;
 mod subxt_wrapper;
@@ -48,6 +48,7 @@ impl ApiService {
 	}
 }
 
+#[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::core::*;

@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
+#![allow(dead_code)]
 
 use crate::core::storage::{RecordsStorage, RecordsStorageConfig, StorageEntry};
 use subxt::sp_core::H256;
@@ -72,23 +73,18 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>, storage_config:
 	// The storage lives here.
 	let mut the_storage = RecordsStorage::new(storage_config);
 
-	loop {
-		if let Some(request) = api.recv().await {
-			match request.request_type {
-				RequestType::StorageRead(key) => {
-					request
-						.response_sender
-						.expect("no sender provided")
-						.send(Response::StorageReadResponse(the_storage.get(&key)))
-						.unwrap();
-				},
-				RequestType::StorageWrite(key, value) => {
-					the_storage.insert(key, value);
-				},
-			}
-		} else {
-			// Channel closed.
-			break
+	while let Some(request) = api.recv().await {
+		match request.request_type {
+			RequestType::StorageRead(key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::StorageReadResponse(the_storage.get(&key)))
+					.unwrap();
+			},
+			RequestType::StorageWrite(key, value) => {
+				the_storage.insert(key, value);
+			},
 		}
 	}
 }
