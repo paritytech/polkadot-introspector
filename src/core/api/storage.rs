@@ -15,8 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::core::storage::{RecordsStorage, RecordsStorageConfig, StorageInfo};
-use codec::{Decode, Encode};
+use crate::core::storage::{RecordsStorage, RecordsStorageConfig, StorageEntry};
 use subxt::sp_core::H256;
 use tokio::sync::{
 	mpsc::{Receiver, Sender},
@@ -26,7 +25,7 @@ use tokio::sync::{
 // Storage requests
 #[derive(Clone, Debug)]
 pub enum RequestType {
-	StorageWrite(H256, Vec<u8>),
+	StorageWrite(H256, StorageEntry),
 	StorageRead(H256),
 }
 
@@ -38,7 +37,7 @@ pub struct Request {
 
 #[derive(Debug)]
 pub enum Response {
-	StorageReadResponse(Option<Vec<u8>>),
+	StorageReadResponse(Option<StorageEntry>),
 }
 pub struct RequestExecutor {
 	to_api: Sender<Request>,
@@ -49,20 +48,19 @@ impl RequestExecutor {
 		RequestExecutor { to_api }
 	}
 	/// Write a value to storage. Panics if API channel is gone.
-	pub async fn storage_write<Value: Encode + StorageInfo>(&self, key: H256, value: Value) {
-		let request = Request { request_type: RequestType::StorageWrite(key, value.encode()), response_sender: None };
+	pub async fn storage_write(&self, key: H256, value: StorageEntry) {
+		let request = Request { request_type: RequestType::StorageWrite(key, value), response_sender: None };
 		self.to_api.send(request).await.expect("Channel closed");
 	}
 
 	/// Read a value from storage. Returns `None` if the key is not found.
-	pub async fn storage_read<Value: Decode + StorageInfo>(&self, key: H256) -> Option<Value> {
+	pub async fn storage_read(&self, key: H256) -> Option<StorageEntry> {
 		let (sender, receiver) = oneshot::channel::<Response>();
 		let request = Request { request_type: RequestType::StorageRead(key), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::StorageReadResponse(Some(value))) =>
-				Some(Value::decode(&mut value.as_slice()).expect("decode failed")),
+			Ok(Response::StorageReadResponse(Some(value))) => Some(value),
 			Ok(Response::StorageReadResponse(None)) => None,
 			Err(err) => panic!("Storage API error {}", err),
 		}
