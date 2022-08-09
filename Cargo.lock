@@ -204,7 +204,6 @@ checksum = "1489fcb93a5bb47da0462ca93ad252ad6af2145cce58d10d46a83931ba9f016b"
 dependencies = [
  "funty",
  "radium",
- "serde",
  "tap",
  "wyz",
 ]
@@ -1321,9 +1320,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee"
-version = "0.14.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11e017217fcd18da0a25296d3693153dd19c8a6aadab330b3595285d075385d1"
+checksum = "8bd0d559d5e679b1ab2f869b486a11182923863b1b3ee8b421763cdd707b783a"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -1331,9 +1330,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-client-transport"
-version = "0.14.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce395539a14d3ad4ec1256fde105abd36a2da25d578a291cabe98f45adfdb111"
+checksum = "8752740ecd374bcbf8b69f3e80b0327942df76f793f8d4e60d3355650c31fb74"
 dependencies = [
  "futures-util",
  "http",
@@ -1352,9 +1351,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-core"
-version = "0.14.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16efcd4477de857d4a2195a45769b2fe9ebb54f3ef5a4221d3b014a4fe33ec0b"
+checksum = "f3dc3e9cf2ba50b7b1d7d76a667619f82846caa39e8e8daa8a4962d74acaddca"
 dependencies = [
  "anyhow",
  "async-lock",
@@ -1370,13 +1369,14 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-futures",
 ]
 
 [[package]]
 name = "jsonrpsee-types"
-version = "0.14.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bcf76cd316f5d3ad48138085af1f45e2c58c98e02f0779783dbb034d43f7c86"
+checksum = "e290bba767401b646812f608c099b922d8142603c9e73a50fb192d3ac86f4a0d"
 dependencies = [
  "anyhow",
  "beef",
@@ -2488,9 +2488,9 @@ dependencies = [
 
 [[package]]
 name = "scale-value"
-version = "0.2.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4005122df6aa30891a2f918e66cac7668c2c5eb64b6771da9c267ecdd2d23e0"
+checksum = "a6a0cc49d7a1c07c93f1de4c738d7d18831e31a0360ccac372513fe8133b2dfb"
 dependencies = [
  "bitvec",
  "either",
@@ -3205,7 +3205,7 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 [[package]]
 name = "subxt"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#e48f0e3b1de130779abb3dd092c86b845de81116"
 dependencies = [
  "bitvec",
  "derivative",
@@ -3230,7 +3230,7 @@ dependencies = [
 [[package]]
 name = "subxt-codegen"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#e48f0e3b1de130779abb3dd092c86b845de81116"
 dependencies = [
  "darling",
  "frame-metadata",
@@ -3247,7 +3247,7 @@ dependencies = [
 [[package]]
 name = "subxt-macro"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#e48f0e3b1de130779abb3dd092c86b845de81116"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -3258,7 +3258,7 @@ dependencies = [
 [[package]]
 name = "subxt-metadata"
 version = "0.22.0"
-source = "git+https://github.com/paritytech/subxt?branch=master#c55b7ba3e34118f61dc51499a0b38262c513aec4"
+source = "git+https://github.com/paritytech/subxt?branch=master#e48f0e3b1de130779abb3dd092c86b845de81116"
 dependencies = [
  "frame-metadata",
  "parity-scale-codec",
@@ -3570,6 +3570,16 @@ checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
 dependencies = [
  "tracing",
  "tracing-subscriber 0.3.14",
+]
+
+[[package]]
+name = "tracing-futures"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97d095ae15e245a057c8e8451bab9b3ee1e1f68e9ba2b4fbc18d0ac5237835f2"
+dependencies = [
+ "pin-project",
+ "tracing",
 ]
 
 [[package]]
