@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-use crate::core::subxt_wrapper::polkadot;
+use crate::core::subxt_subscription::polkadot;
 use log::error;
 use std::collections::hash_map::{Entry, HashMap};
 use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};

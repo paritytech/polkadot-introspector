@@ -51,10 +51,7 @@ impl ApiService {
 mod tests {
 	use super::*;
 	use crate::core::*;
-	use subxt::{
-		sp_core::H256,
-		sp_runtime::traits::{BlakeTwo256, Hash},
-	};
+	use subxt::sp_runtime::traits::{BlakeTwo256, Hash};
 
 	#[tokio::test]
 	async fn basic_storage_test() {
@@ -66,5 +63,16 @@ mod tests {
 			.await;
 		let value = storage.storage_read(key).await.unwrap();
 		assert_eq!(value.into_inner::<String>(), "some data");
+	}
+
+	#[tokio::test]
+	async fn basic_subxt_test() {
+		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
+		let subxt = api.subxt();
+
+		let rpc_node_url = "wss://rpc.polkadot.io:443".to_owned();
+		let head = subxt.get_block_head(rpc_node_url.clone(), None).await.unwrap();
+		let timestamp = subxt.get_block_timestamp(rpc_node_url, Some(head.hash())).await;
+		assert!(timestamp > 0);
 	}
 }

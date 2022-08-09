@@ -34,9 +34,9 @@ pub mod consumer;
 pub mod storage;
 
 #[allow(clippy::enum_variant_names)]
-mod subxt_wrapper;
+mod subxt_subscription;
 
-pub use self::subxt_wrapper::*;
+pub use self::subxt_subscription::*;
 pub use api::*;
 pub use constants::*;
 pub use consumer::*;

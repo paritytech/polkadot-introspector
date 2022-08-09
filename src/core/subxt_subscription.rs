@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
+// TODO: rename to subxt subscription.
 
 use async_trait::async_trait;
 use futures::{future, StreamExt};
