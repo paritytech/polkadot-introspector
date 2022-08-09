@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-
-use super::Request;
+//! Event consumer traits and types. Abstracts on-chain/off-chain event streams and
+//! APIs for RPC nodes and internal storage.
 use async_trait::async_trait;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 
 #[async_trait]
 pub trait EventStream {
@@ -32,17 +32,16 @@ pub trait EventStream {
 pub struct EventConsumerInit<Event> {
 	// One per ws connection.
 	update_channels: Vec<Receiver<Event>>,
-	to_api: Sender<Request>,
 }
 
-impl<Event> From<EventConsumerInit<Event>> for (Vec<Receiver<Event>>, Sender<Request>) {
+impl<Event> From<EventConsumerInit<Event>> for Vec<Receiver<Event>> {
 	fn from(event: EventConsumerInit<Event>) -> Self {
-		(event.update_channels, event.to_api)
+		event.update_channels
 	}
 }
 
 impl<Event> EventConsumerInit<Event> {
-	pub fn new(update_channels: Vec<Receiver<Event>>, to_api: Sender<Request>) -> Self {
-		Self { update_channels, to_api }
+	pub fn new(update_channels: Vec<Receiver<Event>>) -> Self {
+		Self { update_channels }
 	}
 }
