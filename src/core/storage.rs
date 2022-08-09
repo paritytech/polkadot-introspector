@@ -13,7 +13,8 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-//! Ephemeral/persistent in memory storage facilities for on-chain/off-chain data.
+//! Ephemeral in memory storage facilities for on-chain/off-chain data.
+use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
 	collections::{BTreeMap, HashMap},
@@ -25,6 +26,7 @@ use std::{
 pub type BlockNumber = u32;
 
 /// A type to identify the data source.
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub enum RecordSource {
 	/// For onchain data.
 	Onchain,
@@ -33,22 +35,53 @@ pub enum RecordSource {
 }
 
 /// A type to represent record timing information.
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub struct RecordTime {
 	block_number: BlockNumber,
 	timestamp: Option<Duration>,
 }
 
-/// An generic storage entry representation
-/// TODO: create methods to create storage entries and redeem the inner data.
+impl From<BlockNumber> for RecordTime {
+	fn from(block_number: BlockNumber) -> Self {
+		let timestamp = None;
+		RecordTime { block_number, timestamp }
+	}
+}
+
+impl RecordTime {
+	pub fn with_ts(block_number: BlockNumber, timestamp: Duration) -> Self {
+		let timestamp = Some(timestamp);
+		RecordTime { block_number, timestamp }
+	}
+}
+
+/// An generic storage entry representation.
+#[derive(Clone, Debug, PartialEq)]
 pub struct StorageEntry {
 	/// The source of the data.
 	record_source: RecordSource,
 	/// Time index when data was recorded.
 	/// All entries will have a block number. For offchain data, this is estimated based on the
-	/// timestamp, or otherwise it will be set to the latest known block.
+	/// timestamp, or otherwise it needs to be set to the latest known block.
 	record_time: RecordTime,
 	/// The actual scale encoded data.
 	data: Vec<u8>,
+}
+
+impl StorageEntry {
+	/// Creates a new storage entry for onchain data.
+	pub fn new_onchain<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
+		StorageEntry { record_source: RecordSource::Onchain, record_time, data: data.encode() }
+	}
+
+	/// Creates a new storage entry for onchain data.
+	pub fn new_offchain<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
+		StorageEntry { record_source: RecordSource::Offchain, record_time, data: data.encode() }
+	}
+
+	pub fn into_inner<T: Decode>(self) -> T {
+		T::decode(&mut self.data.as_slice()).unwrap()
+	}
 }
 
 /// A required trait to implement for storing records.
@@ -59,16 +92,14 @@ pub trait StorageInfo {
 	fn time(&self) -> RecordTime;
 }
 
-/// Dummy impl to allow retrieveal of scale encoded values from storage.
-/// After the value is decoded, the concrete type provides the real impl.
-impl StorageInfo for Vec<u8> {
+impl StorageInfo for StorageEntry {
 	/// Returns the source of the data.
 	fn source(&self) -> RecordSource {
-		RecordSource::Offchain
+		self.record_source
 	}
 	/// Returns the time when the data was recorded.
 	fn time(&self) -> RecordTime {
-		RecordTime { block_number: 0, timestamp: None }
+		self.record_time
 	}
 }
 
@@ -92,43 +123,40 @@ pub struct RecordsStorageConfig {
 /// Persistent in-memory storage with expiration and max ttl
 /// This storage has also an associative component allowing to get an element
 /// by hash
-pub struct RecordsStorage<K: Hash + Clone, EphemeralValue> {
+pub struct RecordsStorage<K: Hash + Clone> {
 	/// The configuration.
 	config: RecordsStorageConfig,
 	/// The last block number we've seen. Used to index the storage of all entries.
 	last_block: Option<BlockNumber>,
-	/// Elements with no expire date.
-	persistent_records: BTreeMap<BlockNumber, HashMap<K, Arc<EphemeralValue>>>,
 	/// Elements with expire dates.
-	ephemeral_records: BTreeMap<BlockNumber, HashMap<K, Arc<EphemeralValue>>>,
+	ephemeral_records: BTreeMap<BlockNumber, HashMap<K, Arc<StorageEntry>>>,
 	/// Direct mapping to values.
-	direct_records: HashMap<K, Arc<EphemeralValue>>,
+	direct_records: HashMap<K, Arc<StorageEntry>>,
 }
 
-impl<K: Hash + Clone + Eq, EphemeralValue: StorageInfo + Clone> RecordsStorage<K, EphemeralValue> {
+impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 	/// Creates a new storage with the specified config
 	pub fn new(config: RecordsStorageConfig) -> Self {
-		let persistent_records = BTreeMap::new();
 		let ephemeral_records = BTreeMap::new();
 		let direct_records = HashMap::new();
-		Self { config, last_block: None, persistent_records, ephemeral_records, direct_records }
+		Self { config, last_block: None, ephemeral_records, direct_records }
 	}
 
 	/// Inserts a record in ephemeral storage.
 	// TODO: must fail for values with blocks below the pruning threshold.
-	pub fn insert(&mut self, key: K, value: EphemeralValue) {
+	pub fn insert(&mut self, key: K, entry: StorageEntry) {
 		if self.direct_records.contains_key(&key) {
 			return
 		}
-		let value = Arc::new(value);
-		let block_number = value.time().block_number();
+		let entry = Arc::new(entry);
+		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
-		self.direct_records.insert(key.clone(), value.clone());
+		self.direct_records.insert(key.clone(), entry.clone());
 
 		self.ephemeral_records
 			.entry(block_number)
 			.or_insert(Default::default())
-			.insert(key.clone(), value);
+			.insert(key.clone(), entry);
 
 		self.prune();
 	}
@@ -155,7 +183,7 @@ impl<K: Hash + Clone + Eq, EphemeralValue: StorageInfo + Clone> RecordsStorage<K
 
 	/// Gets a value with a specific key
 	// TODO: think if we need to check max_ttl and initiate expiry on `get` method
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<EphemeralValue>
+	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
 		Q: Hash + Eq,
@@ -193,16 +221,21 @@ mod tests {
 	fn test_it_works() {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
-		st.insert("key1".to_owned(), 1);
-		st.insert("key100".to_owned(), 2);
+		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1));
+		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2));
 
-		assert_eq!(st.get("key1").unwrap(), 1);
-		assert_eq!(st.get("key100").unwrap(), 2);
+		let a = st.get("key1").unwrap();
+		assert_eq!(a.record_source, RecordSource::Onchain);
+		assert_eq!(a.into_inner::<u32>(), 1);
+
+		let b = st.get("key100").unwrap();
+		assert_eq!(b.record_source, RecordSource::Offchain);
+		assert_eq!(b.into_inner::<u32>(), 2);
 		assert_eq!(st.get("key2"), None);
 
 		// This insert prunes prev entries at block #1
-		st.insert("key2".to_owned(), 100);
-		assert_eq!(st.get("key2").unwrap(), 100);
+		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100));
+		assert_eq!(st.get("key2").unwrap().into_inner::<u32>(), 100);
 
 		assert_eq!(st.get("key1"), None);
 		assert_eq!(st.get("key100"), None);
@@ -213,8 +246,8 @@ mod tests {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 2 });
 
 		for idx in 0..1000 {
-			st.insert(idx, idx);
-			st.insert(idx, idx);
+			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx));
+			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx));
 		}
 
 		// 10 keys per block * 2 max blocks.
