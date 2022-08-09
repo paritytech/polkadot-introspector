@@ -28,7 +28,7 @@ use std::{
 pub type BlockNumber = u32;
 
 /// A type to identify the data source.
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum RecordSource {
 	/// For onchain data.
 	Onchain,
@@ -37,7 +37,7 @@ pub enum RecordSource {
 }
 
 /// A type to represent record timing information.
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub struct RecordTime {
 	block_number: BlockNumber,
 	timestamp: Option<Duration>,
