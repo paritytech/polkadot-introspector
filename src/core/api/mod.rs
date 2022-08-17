@@ -73,7 +73,8 @@ mod tests {
 
 		let rpc_node_url = "wss://rpc.polkadot.io:443".to_owned();
 		let head = subxt.get_block_head(rpc_node_url.clone(), None).await.unwrap();
-		let timestamp = subxt.get_block_timestamp(rpc_node_url, Some(head.hash())).await;
+		let timestamp = subxt.get_block_timestamp(rpc_node_url.clone(), Some(head.hash())).await;
+		let block = subxt.get_block(rpc_node_url, Some(head.hash())).await.unwrap();
 		assert!(timestamp > 0);
 	}
 }

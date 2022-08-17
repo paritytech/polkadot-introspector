@@ -30,12 +30,14 @@ use tokio::sync::{
 pub enum RequestType {
 	GetBlockTimestamp(Option<<DefaultConfig as subxt::Config>::Hash>),
 	GetHead(Option<<DefaultConfig as subxt::Config>::Hash>),
+	GetBlock(Option<<DefaultConfig as subxt::Config>::Hash>),
 }
 
 #[derive(Debug)]
 pub enum Response {
 	GetBlockTimestampResponse(u64),
 	GetHeadResponse(Option<<DefaultConfig as subxt::Config>::Header>),
+	GetBlockResponse(Option<subxt::rpc::ChainBlock<DefaultConfig>>),
 }
 
 #[derive(Debug)]
@@ -76,6 +78,20 @@ impl RequestExecutor {
 
 		match receiver.await {
 			Ok(Response::GetHeadResponse(maybe_head)) => maybe_head,
+			_ => panic!("Expected GetHeadResponse, got something else."),
+		}
+	}
+	pub async fn get_block(
+		&self,
+		url: String,
+		hash: Option<<DefaultConfig as subxt::Config>::Hash>,
+	) -> Option<subxt::rpc::ChainBlock<DefaultConfig>> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { url, request_type: RequestType::GetBlock(hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::GetBlockResponse(maybe_block)) => maybe_block,
 			_ => panic!("Expected GetHeadResponse, got something else."),
 		}
 	}
@@ -142,6 +158,7 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 					match request.request_type {
 						RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
 						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
+						RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
 					}
 				} else {
 					// Remove the faulty websocket from connection pool.
@@ -185,6 +202,13 @@ async fn subxt_get_block_ts(
 	maybe_hash: Option<H256>,
 ) -> Result {
 	Ok(Response::GetBlockTimestampResponse(api.storage().timestamp().now(maybe_hash).await.map_err(Error::SubxtError)?))
+}
+
+async fn subxt_get_block(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	maybe_hash: Option<H256>,
+) -> Result {
+	Ok(Response::GetBlockResponse(api.client.rpc().block(maybe_hash).await.map_err(Error::SubxtError)?))
 }
 
 #[derive(Debug)]
