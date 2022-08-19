@@ -247,7 +247,7 @@ async fn subxt_get_block(
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {
-	// `ParaInherent` data is always at index #2.
+	// `ParaInherent` data is always at index #1.
 	let bytes = block.block.extrinsics[1].encode();
 	let extrinsic = UncheckedExtrinsic::decode(&mut bytes.as_slice()).expect("Failed to decode ParaInherent extrinsic");
 	match extrinsic.function {
