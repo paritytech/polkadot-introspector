@@ -77,4 +77,16 @@ mod tests {
 		let _block = subxt.get_block(rpc_node_url, Some(head.hash())).await.unwrap();
 		assert!(timestamp > 0);
 	}
+
+	#[tokio::test]
+	async fn extract_parainherent_data() {
+		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let subxt = api.subxt();
+
+		let rpc_node_url = "wss://rpc.polkadot.io:443".to_owned();
+		subxt
+			.extract_parainherent_data(rpc_node_url, None)
+			.await
+			.expect("Inherent data must be present");
+	}
 }
