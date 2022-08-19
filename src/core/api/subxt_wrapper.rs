@@ -15,7 +15,9 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 use crate::core::subxt_subscription::polkadot;
+use codec::{Decode, Encode};
 use log::error;
+use polkadot_runtime::UncheckedExtrinsic;
 use std::collections::hash_map::{Entry, HashMap};
 use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
 
@@ -25,19 +27,30 @@ use tokio::sync::{
 	oneshot::error::TryRecvError,
 };
 
-// Subxt based APIs.
+/// Subxt based APIs for fetching via RPC and processing of extrinsics.
 #[derive(Clone, Debug)]
 pub enum RequestType {
+	/// Returns the block TS from the inherent data.
 	GetBlockTimestamp(Option<<DefaultConfig as subxt::Config>::Hash>),
+	/// Get a block header.
 	GetHead(Option<<DefaultConfig as subxt::Config>::Hash>),
+	/// Get a full block.
 	GetBlock(Option<<DefaultConfig as subxt::Config>::Hash>),
+	/// Extract the `ParaInherentData` from a given block.
+	ExtractParaInherent(subxt::rpc::ChainBlock<DefaultConfig>),
 }
 
+/// Response types for APIs.
 #[derive(Debug)]
 pub enum Response {
-	GetBlockTimestampResponse(u64),
-	GetHeadResponse(Option<<DefaultConfig as subxt::Config>::Header>),
-	GetBlockResponse(Option<subxt::rpc::ChainBlock<DefaultConfig>>),
+	/// A timestamp.
+	Timestamp(u64),
+	/// A block heahder.
+	MaybeHead(Option<<DefaultConfig as subxt::Config>::Header>),
+	/// A full block.
+	MaybeBlock(Option<subxt::rpc::ChainBlock<DefaultConfig>>),
+	/// `ParaInherent` data.
+	ParaInherentData(polkadot_primitives::v2::InherentData),
 }
 
 #[derive(Debug)]
@@ -62,8 +75,8 @@ impl RequestExecutor {
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::GetBlockTimestampResponse(ts)) => ts,
-			_ => panic!("Expected GetBlockTimestampResponse, got something else."),
+			Ok(Response::Timestamp(ts)) => ts,
+			_ => panic!("Expected Timestamp, got something else."),
 		}
 	}
 
@@ -77,10 +90,11 @@ impl RequestExecutor {
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::GetHeadResponse(maybe_head)) => maybe_head,
-			_ => panic!("Expected GetHeadResponse, got something else."),
+			Ok(Response::MaybeHead(maybe_head)) => maybe_head,
+			_ => panic!("Expected MaybeHead, got something else."),
 		}
 	}
+
 	pub async fn get_block(
 		&self,
 		url: String,
@@ -91,8 +105,28 @@ impl RequestExecutor {
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::GetBlockResponse(maybe_block)) => maybe_block,
-			_ => panic!("Expected GetHeadResponse, got something else."),
+			Ok(Response::MaybeBlock(maybe_block)) => maybe_block,
+			_ => panic!("Expected MaybeHead, got something else."),
+		}
+	}
+
+	pub async fn extract_parainherent_data(
+		&self,
+		url: String,
+		maybe_hash: Option<<DefaultConfig as subxt::Config>::Hash>,
+	) -> Option<polkadot_primitives::v2::InherentData> {
+		if let Some(block) = self.get_block(url.clone(), maybe_hash).await {
+			let (sender, receiver) = oneshot::channel::<Response>();
+			let request =
+				Request { url, request_type: RequestType::ExtractParaInherent(block), response_sender: sender };
+			self.to_api.send(request).await.expect("Channel closed");
+
+			match receiver.await {
+				Ok(Response::ParaInherentData(data)) => Some(data),
+				_ => panic!("Expected MaybeHead, got something else."),
+			}
+		} else {
+			None
 		}
 	}
 }
@@ -159,6 +193,7 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 						RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
 						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
 						RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
+						RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
 					}
 				} else {
 					// Remove the faulty websocket from connection pool.
@@ -194,21 +229,38 @@ async fn subxt_get_head(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	maybe_hash: Option<H256>,
 ) -> Result {
-	Ok(Response::GetHeadResponse(api.client.rpc().header(maybe_hash).await.map_err(Error::SubxtError)?))
+	Ok(Response::MaybeHead(api.client.rpc().header(maybe_hash).await.map_err(Error::SubxtError)?))
 }
 
 async fn subxt_get_block_ts(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	maybe_hash: Option<H256>,
 ) -> Result {
-	Ok(Response::GetBlockTimestampResponse(api.storage().timestamp().now(maybe_hash).await.map_err(Error::SubxtError)?))
+	Ok(Response::Timestamp(api.storage().timestamp().now(maybe_hash).await.map_err(Error::SubxtError)?))
 }
 
 async fn subxt_get_block(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	maybe_hash: Option<H256>,
 ) -> Result {
-	Ok(Response::GetBlockResponse(api.client.rpc().block(maybe_hash).await.map_err(Error::SubxtError)?))
+	Ok(Response::MaybeBlock(api.client.rpc().block(maybe_hash).await.map_err(Error::SubxtError)?))
+}
+
+fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {
+	// `ParaInherent` data is always at index #2.
+	let bytes = block.block.extrinsics[1].encode();
+	let extrinsic = UncheckedExtrinsic::decode(&mut bytes.as_slice()).expect("Failed to decode ParaInherent extrinsic");
+	match extrinsic.function {
+		polkadot_runtime::Call::ParaInherent(call) => {
+			let data = if let polkadot_runtime_parachains::paras_inherent::pallet::Call::enter { data } = call {
+				data
+			} else {
+				unimplemented!("Unhandled variant")
+			};
+			Ok(Response::ParaInherentData(data))
+		},
+		_ => unimplemented!("Unhandled variant"),
+	}
 }
 
 #[derive(Debug)]
