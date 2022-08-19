@@ -3237,6 +3237,7 @@ dependencies = [
  "log",
  "parity-db",
  "parity-scale-codec",
+ "polkadot-primitives",
  "polkadot-runtime",
  "polkadot-runtime-parachains",
  "rand 0.8.5",
