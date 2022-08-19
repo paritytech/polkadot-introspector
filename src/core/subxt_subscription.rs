@@ -21,7 +21,7 @@ use futures::{future, StreamExt};
 use log::{error, info};
 use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
 
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
+#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
 pub mod polkadot {}
 
 use tokio::sync::mpsc::{channel, Sender};
