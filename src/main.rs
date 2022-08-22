@@ -28,6 +28,7 @@ mod collector;
 mod core;
 mod jaeger;
 mod kvdb;
+mod pc;
 
 use crate::{core::EventStream, kvdb::KvdbOptions};
 
