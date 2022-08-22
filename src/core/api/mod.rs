@@ -98,6 +98,6 @@ mod tests {
 		let rpc_node_url = "wss://rpc.polkadot.io:443".to_owned();
 		let head = subxt.get_block_head(rpc_node_url.clone(), None).await.unwrap();
 
-		assert!(subxt.get_scheduled_paras(rpc_node_url, head.hash()).await.len() > 0)
+		assert!(!subxt.get_scheduled_paras(rpc_node_url, head.hash()).await.is_empty())
 	}
 }
