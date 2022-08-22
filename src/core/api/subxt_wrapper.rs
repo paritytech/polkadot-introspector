@@ -14,9 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-use crate::core::{
-	polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment, subxt_subscription::polkadot,
+pub use crate::core::polkadot::runtime_types::{
+	polkadot_primitives::v2::{CoreOccupied, ValidatorIndex},
+	polkadot_runtime_parachains::scheduler::CoreAssignment,
 };
+use crate::core::subxt_subscription::polkadot;
+
 use codec::{Decode, Encode};
 use log::error;
 use polkadot_runtime::UncheckedExtrinsic;
@@ -42,6 +45,10 @@ pub enum RequestType {
 	ExtractParaInherent(subxt::rpc::ChainBlock<DefaultConfig>),
 	/// Get the availability core scheduling information at a given block.
 	GetScheduledParas(<DefaultConfig as subxt::Config>::Hash),
+	/// Get occupied core information at a given block.
+	GetOccupiedCores(<DefaultConfig as subxt::Config>::Hash),
+	/// Get occupied core information at a given block.
+	GetBackingGroups(<DefaultConfig as subxt::Config>::Hash),
 }
 
 /// Response types for APIs.
@@ -57,6 +64,10 @@ pub enum Response {
 	ParaInherentData(polkadot_primitives::v2::InherentData),
 	/// Availability core assignments for parachains.
 	ScheduledParas(Vec<CoreAssignment>),
+	/// Availability core assignments for parachains.
+	OccupiedCores(Vec<Option<CoreOccupied>>),
+	/// Backing validator groups.
+	BackingGroups(Vec<Vec<ValidatorIndex>>),
 }
 
 #[derive(Debug)]
@@ -148,7 +159,37 @@ impl RequestExecutor {
 
 		match receiver.await {
 			Ok(Response::ScheduledParas(assignments)) => assignments,
-			_ => panic!("Expected MaybeHead, got something else."),
+			_ => panic!("Expected ScheduledParas, got something else."),
+		}
+	}
+
+	pub async fn get_occupied_cores(
+		&self,
+		url: String,
+		block_hash: <DefaultConfig as subxt::Config>::Hash,
+	) -> Vec<Option<CoreOccupied>> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { url, request_type: RequestType::GetOccupiedCores(block_hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::OccupiedCores(assignments)) => assignments,
+			_ => panic!("Expected OccupiedCores, got something else."),
+		}
+	}
+
+	pub async fn get_backing_groups(
+		&self,
+		url: String,
+		block_hash: <DefaultConfig as subxt::Config>::Hash,
+	) -> Vec<Vec<ValidatorIndex>> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { url, request_type: RequestType::GetBackingGroups(block_hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::BackingGroups(groups)) => groups,
+			_ => panic!("Expected BackingGroups, got something else."),
 		}
 	}
 }
@@ -175,8 +216,7 @@ async fn new_client_fn(
 // A task that handles subxt API calls.
 pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 	let mut connection_pool = HashMap::new();
-	loop {
-		if let Some(request) = api.recv().await {
+		while let Some(request) = api.recv().await {
 			let (timeout_sender, mut timeout_receiver) = oneshot::channel::<bool>();
 
 			// Start API retry timeout task.
@@ -217,6 +257,8 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 						RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
 						RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
 						RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
+						RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
+						RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
 					}
 				} else {
 					// Remove the faulty websocket from connection pool.
@@ -241,12 +283,8 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 				timeout_task.abort();
 				break
 			}
-		} else {
-			// channel closed, exit loop.
-			panic!("Channel closed. Cascade failure ?")
 		}
 	}
-}
 
 async fn subxt_get_head(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
@@ -280,6 +318,32 @@ async fn subxt_get_sheduled_paras(
 		.await
 		.map_err(Error::SubxtError)?;
 	Ok(Response::ScheduledParas(scheduled_paras))
+}
+
+async fn subxt_get_occupied_cores(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+) -> Result {
+	let occupied_cores = api
+		.storage()
+		.para_scheduler()
+		.availability_cores(Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::OccupiedCores(occupied_cores))
+}
+
+async fn subxt_get_validator_groups(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+) -> Result {
+	let groups = api
+		.storage()
+		.para_scheduler()
+		.validator_groups(Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::BackingGroups(groups))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {

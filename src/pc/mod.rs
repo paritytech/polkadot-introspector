@@ -19,31 +19,23 @@
 //!
 //! Features:
 //! - backing and availability health metrics for all parachains
-//! - parachain block times measured in relay chain blocks
-//! - parachain XCM tput
-//! - parachain code size
+//! - TODO: parachain block times measured in relay chain blocks
+//! - TODO: parachain XCM tput
+//! - TODO: parachain code size
 //!
-//! Main usecase is debugging/development via CLI/TUI. CI integration also supported
-//! via Prometheus metrics exporting.
+//! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
+//! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent};
+use crate::core::{
+	api::{ApiService, ValidatorIndex},
+	EventConsumerInit, RecordsStorageConfig, SubxtEvent,
+};
 use clap::Parser;
 use colored::Colorize;
-use crossterm::{
-	cursor,
-	terminal::{Clear, ClearType},
-	QueueableCommand,
-};
-use log::{debug, error, info, warn};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use super::core::polkadot;
-
-use std::{
-	error::Error,
-	io,
-	time::{Duration, Instant},
-};
+use log::error;
+use std::time::Duration;
+use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -84,7 +76,7 @@ impl ParachainCommander {
 			self.node.clone(),
 			// There is only one update channel (we only follow one RPC node).
 			consumer_channels.into_iter().next().unwrap(),
-			self.api_service.clone(),
+			self.api_service,
 		));
 
 		Ok(vec![watcher_future])
@@ -101,23 +93,119 @@ impl ParachainCommander {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
 		let para_id = opts.para_id;
+		let mut last_assignment = None;
+		let mut current_candidate = None;
+		let mut last_backed_at = None;
+		println!(
+			"{} will trace parachain {} on {}",
+			"Parachain Commander(TM)".to_string().bold().purple(),
+			para_id,
+			&url
+		);
+		println!("{}", "-----------------------------------------------------------------------".to_string().bold());
 
 		// Break if user quits.
 		loop {
-			// Process all pending events.
-			while let Ok(event) = consumer_config.try_recv() {
-				match event {
-					SubxtEvent::NewHead(hash) => {
+			let recv_result = consumer_config.try_recv();
+			match recv_result {
+				Ok(event) => {
+					if let SubxtEvent::NewHead(hash) = event {
 						if let Some(header) = executor.get_block_head(url.clone(), Some(hash)).await {
-							println!("New relay block build #{}, {}", header.number, header.hash());
+							if let Some(inherent) = executor.extract_parainherent_data(url.clone(), Some(hash)).await {
+								let core_assignments = executor.get_scheduled_paras(url.clone(), hash).await;
+								let backed_candidates = inherent.backed_candidates;
+								let occupied_cores = executor.get_occupied_cores(url.clone(), hash).await;
+								let validator_groups = executor.get_backing_groups(url.clone(), hash).await;
+
+								for candidate in backed_candidates {
+									let current_para_id: u32 = candidate.candidate.descriptor().para_id.into();
+									if current_para_id == para_id {
+										println!(
+											"{} parachain {} candidate {} on relay parent {:?}",
+											format!("[#{}] BACKED", header.number).bold().green(),
+											para_id,
+											candidate.candidate.hash(),
+											header.hash()
+										);
+										current_candidate = Some(candidate.candidate.hash());
+										last_backed_at = Some(header.number);
+										break
+									}
+								}
+
+								for assignment in core_assignments {
+									if assignment.para_id.0 == para_id {
+										last_assignment = Some(assignment.core.0 as usize);
+										println!(
+											"\t- Parachain {} assigned to core index {}",
+											assignment.para_id.0, assignment.core.0
+										);
+										break
+									}
+								}
+
+								if current_candidate.is_none() {
+									// Continue if no candidate is backed.
+									println!(
+										"{} for parachain {}, no candidate backed at {:?}",
+										format!("[#{}] SLOW BACKING", header.number).bold().red(),
+										para_id,
+										header.hash()
+									);
+									continue
+								}
+
+								if let Some(assigned_core) = last_assignment {
+									let avail_bits: u32 = inherent
+										.bitfields
+										.iter()
+										.map(|bitfield| {
+											let bitfield = &bitfield.unchecked_payload().0;
+											let bit = bitfield[assigned_core];
+											bit as u32
+										})
+										.sum();
+
+									let all_bits =
+										validator_groups.into_iter().flatten().collect::<Vec<ValidatorIndex>>();
+
+									// TODO: Availability timeout.
+									if avail_bits > (all_bits.len() as u32 / 3) * 2 {
+										println!(
+											"{} candidate {} in block {:?}",
+											format!("[#{}] INCLUDED", header.number).bold().green(),
+											current_candidate.unwrap(),
+											header.hash()
+										);
+										current_candidate = None;
+									} else if occupied_cores[assigned_core].is_some() &&
+										last_backed_at != Some(header.number)
+									{
+										println!(
+											"{} for candidate {} at block {:?}",
+											format!("[#{}] SLOW AVAILABILITY", header.number).bold().bright_magenta(),
+											current_candidate.unwrap(),
+											header.hash()
+										);
+									}
+
+									println!("\t- Availability bits: {}/{}", avail_bits, all_bits.len());
+									println!(
+										"\t- Availability core {}",
+										if occupied_cores[assigned_core].is_none() { "FREE" } else { "OCCUPIED" }
+									);
+								}
+							} else {
+								error!("Cannot get inherent data.")
+							}
 						} else {
 							error!("Failed to get header for {}", hash);
 						}
-					},
-					_ => {}
-				}
-			}
+					}
+				},
+				Err(TryRecvError::Disconnected) => break,
+				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
+			};
 		}
 	}
 }
-
