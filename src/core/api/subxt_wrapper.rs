@@ -14,7 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-use crate::core::subxt_subscription::polkadot;
+use crate::core::{
+	polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment, subxt_subscription::polkadot,
+};
 use codec::{Decode, Encode};
 use log::error;
 use polkadot_runtime::UncheckedExtrinsic;
@@ -38,6 +40,8 @@ pub enum RequestType {
 	GetBlock(Option<<DefaultConfig as subxt::Config>::Hash>),
 	/// Extract the `ParaInherentData` from a given block.
 	ExtractParaInherent(subxt::rpc::ChainBlock<DefaultConfig>),
+	/// Get the availability core scheduling information at a given block.
+	GetScheduledParas(<DefaultConfig as subxt::Config>::Hash),
 }
 
 /// Response types for APIs.
@@ -51,6 +55,8 @@ pub enum Response {
 	MaybeBlock(Option<subxt::rpc::ChainBlock<DefaultConfig>>),
 	/// `ParaInherent` data.
 	ParaInherentData(polkadot_primitives::v2::InherentData),
+	/// Availability core assignments for parachains.
+	ScheduledParas(Vec<CoreAssignment>),
 }
 
 #[derive(Debug)]
@@ -129,6 +135,22 @@ impl RequestExecutor {
 			None
 		}
 	}
+
+	pub async fn get_scheduled_paras(
+		&self,
+		url: String,
+		block_hash: <DefaultConfig as subxt::Config>::Hash,
+	) -> Vec<CoreAssignment> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request =
+			Request { url, request_type: RequestType::GetScheduledParas(block_hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::ScheduledParas(assignments)) => assignments,
+			_ => panic!("Expected MaybeHead, got something else."),
+		}
+	}
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
@@ -194,6 +216,7 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
 						RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
 						RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
+						RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
 					}
 				} else {
 					// Remove the faulty websocket from connection pool.
@@ -244,6 +267,19 @@ async fn subxt_get_block(
 	maybe_hash: Option<H256>,
 ) -> Result {
 	Ok(Response::MaybeBlock(api.client.rpc().block(maybe_hash).await.map_err(Error::SubxtError)?))
+}
+
+async fn subxt_get_sheduled_paras(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+) -> Result {
+	let scheduled_paras = api
+		.storage()
+		.para_scheduler()
+		.scheduled(Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::ScheduledParas(scheduled_paras))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {
