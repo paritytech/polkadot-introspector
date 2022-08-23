@@ -34,6 +34,4 @@ hex = "0.4.3"
 itertools = "0.10.3"
 snap = "1.0.5"
 rand = "0.8.5"
-polkadot-runtime = { git = "https://github.com/paritytech/polkadot", branch = "master" }
-polkadot-runtime-parachains = { git = "https://github.com/paritytech/polkadot", branch = "master" }
-polkadot-primitives = { git = "https://github.com/paritytech/polkadot", branch = "master" }
+
