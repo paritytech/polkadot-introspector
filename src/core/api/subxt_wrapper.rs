@@ -229,82 +229,82 @@ async fn new_client_fn(
 // A task that handles subxt API calls.
 pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 	let mut connection_pool = HashMap::new();
-		while let Some(request) = api.recv().await {
-			let (timeout_sender, mut timeout_receiver) = oneshot::channel::<bool>();
+	while let Some(request) = api.recv().await {
+		let (timeout_sender, mut timeout_receiver) = oneshot::channel::<bool>();
 
-			// Start API retry timeout task.
-			let timeout_task = tokio::spawn(async move {
-				tokio::time::sleep(std::time::Duration::from_millis(crate::core::API_RETRY_TIMEOUT_MS)).await;
-				timeout_sender.send(true).expect("Sending timeout signal never fails.");
-			});
+		// Start API retry timeout task.
+		let timeout_task = tokio::spawn(async move {
+			tokio::time::sleep(std::time::Duration::from_millis(crate::core::API_RETRY_TIMEOUT_MS)).await;
+			timeout_sender.send(true).expect("Sending timeout signal never fails.");
+		});
 
-			// Loop while the timeout task doesn't fire. Other errors will cancel this loop
-			loop {
-				match timeout_receiver.try_recv() {
-					Err(TryRecvError::Empty) => {},
-					Err(TryRecvError::Closed) => {
-						// Timeout task has exit unexpectedely. this shuld never happen.
-						panic!("API timeout task closed channel: {:?}", request);
-					},
-					Ok(_) => {
-						// Panic on timeout.
-						panic!("Request timed out: {:?}", request);
-					},
-				}
-				match connection_pool.entry(request.url.clone()) {
-					Entry::Occupied(_) => (),
-					Entry::Vacant(entry) => {
-						let maybe_api = new_client_fn(request.url.clone()).await;
-						if let Some(api) = maybe_api {
-							entry.insert(api);
-						}
-					},
-				};
-
-				let api = connection_pool.get(&request.url.clone());
-
-				let result = if let Some(api) = api {
-					match request.request_type {
-						RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
-						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
-						RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
-						RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
-						RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
-						RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
-						RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
+		// Loop while the timeout task doesn't fire. Other errors will cancel this loop
+		loop {
+			match timeout_receiver.try_recv() {
+				Err(TryRecvError::Empty) => {},
+				Err(TryRecvError::Closed) => {
+					// Timeout task has exit unexpectedely. this shuld never happen.
+					panic!("API timeout task closed channel: {:?}", request);
+				},
+				Ok(_) => {
+					// Panic on timeout.
+					panic!("Request timed out: {:?}", request);
+				},
+			}
+			match connection_pool.entry(request.url.clone()) {
+				Entry::Occupied(_) => (),
+				Entry::Vacant(entry) => {
+					let maybe_api = new_client_fn(request.url.clone()).await;
+					if let Some(api) = maybe_api {
+						entry.insert(api);
 					}
-				} else {
-					// Remove the faulty websocket from connection pool.
+				},
+			};
+
+			let api = connection_pool.get(&request.url.clone());
+
+			let result = if let Some(api) = api {
+				match request.request_type {
+					RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
+					RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
+					RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
+					RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
+					RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
+					RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
+					RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
+				}
+			} else {
+				// Remove the faulty websocket from connection pool.
+				let _ = connection_pool.remove(&request.url);
+				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
+				continue
+			};
+
+			let response = match result {
+				Ok(response) => response,
+				Err(Error::SubxtError(err)) => {
+					error!("subxt call error: {:?}", err);
+					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
 					continue
-				};
+				},
+				Err(Error::DecodeExtrinsicError) => {
+					error!("Decoding extrinsic failed");
+					// Always retry for subxt errors (most of them are transient).
+					let _ = connection_pool.remove(&request.url);
+					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
+					continue
+				},
+			};
 
-				let response = match result {
-					Ok(response) => response,
-					Err(Error::SubxtError(err)) => {
-						error!("subxt call error: {:?}", err);
-						// Always retry for subxt errors (most of them are transient).
-						let _ = connection_pool.remove(&request.url);
-						tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-						continue
-					},
-					Err(Error::DecodeExtrinsicError) => {
-						error!("Decoding extrinsic failed");
-						// Always retry for subxt errors (most of them are transient).
-						let _ = connection_pool.remove(&request.url);
-						tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-						continue
-					},
-				};
-
-				// We only break in the happy case.
-				let _ = request.response_sender.send(response);
-				timeout_task.abort();
-				break
-			}
+			// We only break in the happy case.
+			let _ = request.response_sender.send(response);
+			timeout_task.abort();
+			break
 		}
 	}
+}
 
 async fn subxt_get_head(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,

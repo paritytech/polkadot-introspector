@@ -30,6 +30,9 @@ use crate::core::{
 	api::{ApiService, ValidatorIndex},
 	EventConsumerInit, RecordsStorageConfig, SubxtEvent,
 };
+
+use subxt::sp_runtime::traits::{BlakeTwo256, Hash};
+
 use clap::Parser;
 use colored::Colorize;
 
@@ -102,7 +105,12 @@ impl ParachainCommander {
 			para_id,
 			&url
 		);
-		println!("{}", "-----------------------------------------------------------------------".to_string().bold());
+		println!(
+			"{}",
+			"-----------------------------------------------------------------------"
+				.to_string()
+				.bold()
+		);
 
 		// Break if user quits.
 		loop {
@@ -118,16 +126,16 @@ impl ParachainCommander {
 								let validator_groups = executor.get_backing_groups(url.clone(), hash).await;
 
 								for candidate in backed_candidates {
-									let current_para_id: u32 = candidate.candidate.descriptor().para_id.into();
+									let current_para_id: u32 = candidate.candidate.descriptor.para_id.0;
 									if current_para_id == para_id {
 										println!(
 											"{} parachain {} candidate {} on relay parent {:?}",
 											format!("[#{}] BACKED", header.number).bold().green(),
 											para_id,
-											candidate.candidate.hash(),
+											BlakeTwo256::hash_of(&candidate.candidate),
 											header.hash()
 										);
-										current_candidate = Some(candidate.candidate.hash());
+										current_candidate = Some(BlakeTwo256::hash_of(&candidate.candidate));
 										last_backed_at = Some(header.number);
 										break
 									}
@@ -160,7 +168,7 @@ impl ParachainCommander {
 										.bitfields
 										.iter()
 										.map(|bitfield| {
-											let bitfield = &bitfield.unchecked_payload().0;
+											let bitfield = &bitfield.payload.0;
 											let bit = bitfield[assigned_core];
 											bit as u32
 										})
