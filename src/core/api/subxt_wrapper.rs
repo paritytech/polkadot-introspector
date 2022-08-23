@@ -20,9 +20,14 @@ pub use crate::core::polkadot::runtime_types::{
 };
 use crate::core::subxt_subscription::polkadot;
 
-use codec::{Decode, Encode};
+use codec::{Compact, Decode, Encode};
 use log::error;
-use polkadot_runtime::UncheckedExtrinsic;
+
+use crate::core::subxt_subscription::polkadot::{
+	runtime_types as subxt_runtime_types, runtime_types::polkadot_primitives as polkadot_rt_primitives,
+};
+pub use subxt_runtime_types::polkadot_runtime::Call as SubxtCall;
+
 use std::collections::hash_map::{Entry, HashMap};
 use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
 
@@ -51,6 +56,14 @@ pub enum RequestType {
 	GetBackingGroups(<DefaultConfig as subxt::Config>::Hash),
 }
 
+/// The `InherentData` constructed with the subxt API.
+type InherentData = polkadot_rt_primitives::v2::InherentData<
+	subxt_runtime_types::sp_runtime::generic::header::Header<
+		::core::primitive::u32,
+		subxt_runtime_types::sp_runtime::traits::BlakeTwo256,
+	>,
+>;
+
 /// Response types for APIs.
 #[derive(Debug)]
 pub enum Response {
@@ -61,7 +74,7 @@ pub enum Response {
 	/// A full block.
 	MaybeBlock(Option<subxt::rpc::ChainBlock<DefaultConfig>>),
 	/// `ParaInherent` data.
-	ParaInherentData(polkadot_primitives::v2::InherentData),
+	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
 	ScheduledParas(Vec<CoreAssignment>),
 	/// Availability core assignments for parachains.
@@ -131,7 +144,7 @@ impl RequestExecutor {
 		&self,
 		url: String,
 		maybe_hash: Option<<DefaultConfig as subxt::Config>::Hash>,
-	) -> Option<polkadot_primitives::v2::InherentData> {
+	) -> Option<InherentData> {
 		if let Some(block) = self.get_block(url.clone(), maybe_hash).await {
 			let (sender, receiver) = oneshot::channel::<Response>();
 			let request =
@@ -276,6 +289,13 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 						tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
 						continue
 					},
+					Err(Error::DecodeExtrinsicError) => {
+						error!("Decoding extrinsic failed");
+						// Always retry for subxt errors (most of them are transient).
+						let _ = connection_pool.remove(&request.url);
+						tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
+						continue
+					},
 				};
 
 				// We only break in the happy case.
@@ -305,6 +325,39 @@ async fn subxt_get_block(
 	maybe_hash: Option<H256>,
 ) -> Result {
 	Ok(Response::MaybeBlock(api.client.rpc().block(maybe_hash).await.map_err(Error::SubxtError)?))
+}
+
+/// Error originated from decoding an extrinsic.
+#[derive(Clone, Debug)]
+pub enum DecodeExtrinsicError {
+	/// Expected more data.
+	EarlyEof,
+	/// Unsupported extrinsic.
+	Unsupported,
+	/// Failed to decode.
+	CodecError(codec::Error),
+}
+
+/// Decode a Polkadot emitted extrinsic from provided bytes.
+fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeExtrinsicError> {
+	// Extrinsic are encoded in memory in the following way:
+	//   - Compact<u32>: Length of the extrinsic
+	//   - first byte: abbbbbbb (a = 0 for unsigned, 1 for signed, b = version)
+	//   - signature: emitted `ParaInherent` must be unsigned.
+	//   - extrinsic data
+	let _expected_length: Compact<u32> = Decode::decode(data).map_err(DecodeExtrinsicError::CodecError)?;
+	if data.is_empty() {
+		return Err(DecodeExtrinsicError::EarlyEof)
+	}
+
+	let is_signed = data[0] & 0b1000_0000 != 0;
+	let version = data[0] & 0b0111_1111;
+	*data = &data[1..];
+	if is_signed || version != 4 {
+		return Err(DecodeExtrinsicError::Unsupported)
+	}
+
+	SubxtCall::decode(data).map_err(DecodeExtrinsicError::CodecError)
 }
 
 async fn subxt_get_sheduled_paras(
@@ -349,22 +402,19 @@ async fn subxt_get_validator_groups(
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {
 	// `ParaInherent` data is always at index #1.
 	let bytes = block.block.extrinsics[1].encode();
-	let extrinsic = UncheckedExtrinsic::decode(&mut bytes.as_slice()).expect("Failed to decode ParaInherent extrinsic");
-	match extrinsic.function {
-		polkadot_runtime::Call::ParaInherent(call) => {
-			let data = if let polkadot_runtime_parachains::paras_inherent::pallet::Call::enter { data } = call {
-				data
-			} else {
-				unimplemented!("Unhandled variant")
-			};
-			Ok(Response::ParaInherentData(data))
-		},
+
+	let data = match decode_extrinsic(&mut bytes.as_slice()).expect("Failed to decode `ParaInherent`") {
+		SubxtCall::ParaInherent(
+			subxt_runtime_types::polkadot_runtime_parachains::paras_inherent::pallet::Call::enter { data },
+		) => data,
 		_ => unimplemented!("Unhandled variant"),
-	}
+	};
+	Ok(Response::ParaInherentData(data))
 }
 
 #[derive(Debug)]
 pub enum Error {
 	SubxtError(subxt::BasicError),
+	DecodeExtrinsicError,
 }
 pub type Result = std::result::Result<Response, Error>;
