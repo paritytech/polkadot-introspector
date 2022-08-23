@@ -67,7 +67,7 @@ pub enum Response {
 	/// A full block.
 	MaybeBlock(Option<subxt::rpc::ChainBlock<DefaultConfig>>),
 	/// `ParaInherent` data.
-	ParaInherentData(polkadot_primitives::v2::InherentData),
+	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
 	ScheduledParas(Vec<CoreAssignment>),
 }
