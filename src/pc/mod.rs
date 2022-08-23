@@ -19,6 +19,7 @@
 //!
 //! Features:
 //! - backing and availability health metrics for all parachains
+//! - TODO: backing group information - validator addresses
 //! - TODO: parachain block times measured in relay chain blocks
 //! - TODO: parachain XCM tput
 //! - TODO: parachain code size
