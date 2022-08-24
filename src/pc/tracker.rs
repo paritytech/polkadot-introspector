@@ -36,7 +36,7 @@ pub trait ParachainBlockTracker {
 	type RelayChainBlockNumber;
 	/// The parachain inherent data.
 	type ParaInherentData;
-	/// The state outputed from processing a block.
+	/// The state obtained from processing a block.
 	type ParachainBlockInfo;
 
 	/// Injects a new relay chain block into the tracker.
