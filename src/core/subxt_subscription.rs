@@ -21,7 +21,7 @@ use futures::{future, StreamExt};
 use log::{error, info};
 use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
 
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
+#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
 pub mod polkadot {}
 
 use tokio::sync::mpsc::{channel, Sender};
@@ -89,7 +89,7 @@ impl SubxtWrapper {
 						.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>>(
 						);
 					info!("[{}] Connected", url);
-					match api.events().subscribe().await {
+					match api.events().subscribe_finalized().await {
 						Ok(mut sub) => loop {
 							tokio::select! {
 								Some(events) = sub.next() => {

@@ -22,12 +22,14 @@ use log::{error, LevelFilter};
 use block_time::BlockTimeOptions;
 use collector::CollectorOptions;
 use jaeger::JaegerOptions;
+use pc::ParachainCommanderOptions;
 
 mod block_time;
 mod collector;
 mod core;
 mod jaeger;
 mod kvdb;
+mod pc;
 
 use crate::{core::EventStream, kvdb::KvdbOptions};
 
@@ -38,6 +40,7 @@ enum Command {
 	Collector(CollectorOptions),
 	Jaeger(JaegerOptions),
 	Kvdb(KvdbOptions),
+	ParachainCommander(ParachainCommanderOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -104,6 +107,15 @@ async fn main() -> color_eyre::Result<()> {
 		},
 		Command::Kvdb(opts) => {
 			kvdb::introspect_kvdb(opts)?;
+		},
+		Command::ParachainCommander(opts) => {
+			let mut core = core::SubxtWrapper::new(vec![opts.node.clone()]);
+			let consumer_init = core.create_consumer();
+
+			match pc::ParachainCommander::new(opts, consumer_init)?.run().await {
+				Ok(futures) => core.run(futures).await?,
+				Err(err) => error!("FATAL: cannot start parachain commander: {}", err),
+			}
 		},
 	}
 
