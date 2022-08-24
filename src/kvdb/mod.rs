@@ -22,7 +22,10 @@ mod traits;
 #[cfg(test)]
 mod tests;
 
-use crate::kvdb::{paritydb::IntrospectorParityDB, rocksdb::IntrospectorRocksDB};
+use crate::{
+	eyre,
+	kvdb::{paritydb::IntrospectorParityDB, rocksdb::IntrospectorRocksDB},
+};
 use clap::Parser;
 use color_eyre::Result;
 use log::info;
@@ -113,9 +116,12 @@ pub(crate) enum KvdbMode {
 }
 
 /// Database type
-#[derive(Clone, Debug, Parser, EnumString, Display)]
+#[derive(Clone, Copy, Debug, Parser, EnumString, Display, PartialEq, Eq)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum KvdbType {
+	/// Automatically detect database type
+	#[strum(ascii_case_insensitive)]
+	Auto,
 	#[strum(ascii_case_insensitive)]
 	/// RocksDB database
 	RocksDB,
@@ -126,7 +132,7 @@ pub(crate) enum KvdbType {
 
 impl Default for KvdbType {
 	fn default() -> Self {
-		KvdbType::RocksDB
+		KvdbType::Auto
 	}
 }
 
@@ -222,8 +228,26 @@ impl<'a> Display for UsageResults<'a> {
 	}
 }
 
+fn autodetect_db_type(db_path: &str) -> Result<KvdbType> {
+	let rocksdb_specific = Path::new(db_path).join("CURRENT");
+	let paritydb_specific = Path::new(db_path).join("metadata");
+
+	if rocksdb_specific.as_path().exists() {
+		info!("Detected db type: RocksDB");
+		Ok(KvdbType::RocksDB)
+	} else if paritydb_specific.as_path().exists() {
+		info!("Detected db type: ParityDB");
+		Ok(KvdbType::ParityDB)
+	} else {
+		Err(eyre!("Cannot detect database type in path: {}", db_path))
+	}
+}
+
 pub fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
-	match opts.db_type {
+	let db_type = if opts.db_type == KvdbType::Auto { autodetect_db_type(opts.db.as_str())? } else { opts.db_type };
+
+	match db_type {
+		KvdbType::Auto => unreachable!(),
 		KvdbType::RocksDB => run_with_db(rocksdb::IntrospectorRocksDB::new(Path::new(opts.db.as_str()))?, opts),
 		KvdbType::ParityDB => run_with_db(paritydb::IntrospectorParityDB::new(Path::new(opts.db.as_str()))?, opts),
 	}
