@@ -21,7 +21,7 @@ use tokio::sync::mpsc::{channel, Sender};
 mod storage;
 mod subxt_wrapper;
 
-pub use subxt_wrapper::ValidatorIndex;
+pub use subxt_wrapper::*;
 
 // Provides access to subxt and storage APIs, more to come.
 #[derive(Clone)]

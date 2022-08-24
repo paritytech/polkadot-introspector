@@ -15,9 +15,12 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 pub use crate::core::polkadot::runtime_types::{
-	polkadot_primitives::v2::{CoreOccupied, ValidatorIndex},
+	polkadot_core_primitives::CandidateHash,
+	polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
 	polkadot_runtime_parachains::scheduler::CoreAssignment,
 };
+
+pub type BlockNumber = u32;
 use crate::core::subxt_subscription::polkadot;
 
 use codec::{Compact, Decode, Encode};
@@ -26,6 +29,7 @@ use log::error;
 use crate::core::subxt_subscription::polkadot::{
 	runtime_types as subxt_runtime_types, runtime_types::polkadot_primitives as polkadot_rt_primitives,
 };
+
 pub use subxt_runtime_types::polkadot_runtime::Call as SubxtCall;
 
 use std::collections::hash_map::{Entry, HashMap};
@@ -57,7 +61,7 @@ pub enum RequestType {
 }
 
 /// The `InherentData` constructed with the subxt API.
-type InherentData = polkadot_rt_primitives::v2::InherentData<
+pub type InherentData = polkadot_rt_primitives::v2::InherentData<
 	subxt_runtime_types::sp_runtime::generic::header::Header<
 		::core::primitive::u32,
 		subxt_runtime_types::sp_runtime::traits::BlakeTwo256,
@@ -90,6 +94,7 @@ pub struct Request {
 	pub response_sender: oneshot::Sender<Response>,
 }
 
+#[derive(Clone)]
 pub struct RequestExecutor {
 	to_api: Sender<Request>,
 }
