@@ -14,13 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
+pub use crate::core::polkadot::runtime_types::{
+	polkadot_core_primitives::CandidateHash,
+	polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
+	polkadot_runtime_parachains::scheduler::CoreAssignment,
+};
+
+pub type BlockNumber = u32;
 use crate::core::subxt_subscription::polkadot;
+
 use codec::{Compact, Decode, Encode};
 use log::error;
 
 use crate::core::subxt_subscription::polkadot::{
 	runtime_types as subxt_runtime_types, runtime_types::polkadot_primitives as polkadot_rt_primitives,
 };
+
 pub use subxt_runtime_types::polkadot_runtime::Call as SubxtCall;
 
 use std::collections::hash_map::{Entry, HashMap};
@@ -43,10 +52,16 @@ pub enum RequestType {
 	GetBlock(Option<<DefaultConfig as subxt::Config>::Hash>),
 	/// Extract the `ParaInherentData` from a given block.
 	ExtractParaInherent(subxt::rpc::ChainBlock<DefaultConfig>),
+	/// Get the availability core scheduling information at a given block.
+	GetScheduledParas(<DefaultConfig as subxt::Config>::Hash),
+	/// Get occupied core information at a given block.
+	GetOccupiedCores(<DefaultConfig as subxt::Config>::Hash),
+	/// Get baking groups at a given block.
+	GetBackingGroups(<DefaultConfig as subxt::Config>::Hash),
 }
 
 /// The `InherentData` constructed with the subxt API.
-type InherentData = polkadot_rt_primitives::v2::InherentData<
+pub type InherentData = polkadot_rt_primitives::v2::InherentData<
 	subxt_runtime_types::sp_runtime::generic::header::Header<
 		::core::primitive::u32,
 		subxt_runtime_types::sp_runtime::traits::BlakeTwo256,
@@ -64,6 +79,12 @@ pub enum Response {
 	MaybeBlock(Option<subxt::rpc::ChainBlock<DefaultConfig>>),
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
+	/// Availability core assignments for parachains.
+	ScheduledParas(Vec<CoreAssignment>),
+	/// List of the occupied availability cores.
+	OccupiedCores(Vec<Option<CoreOccupied>>),
+	/// Backing validator groups.
+	BackingGroups(Vec<Vec<ValidatorIndex>>),
 }
 
 #[derive(Debug)]
@@ -73,6 +94,7 @@ pub struct Request {
 	pub response_sender: oneshot::Sender<Response>,
 }
 
+#[derive(Clone)]
 pub struct RequestExecutor {
 	to_api: Sender<Request>,
 }
@@ -142,6 +164,52 @@ impl RequestExecutor {
 			None
 		}
 	}
+
+	pub async fn get_scheduled_paras(
+		&self,
+		url: String,
+		block_hash: <DefaultConfig as subxt::Config>::Hash,
+	) -> Vec<CoreAssignment> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request =
+			Request { url, request_type: RequestType::GetScheduledParas(block_hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::ScheduledParas(assignments)) => assignments,
+			_ => panic!("Expected ScheduledParas, got something else."),
+		}
+	}
+
+	pub async fn get_occupied_cores(
+		&self,
+		url: String,
+		block_hash: <DefaultConfig as subxt::Config>::Hash,
+	) -> Vec<Option<CoreOccupied>> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { url, request_type: RequestType::GetOccupiedCores(block_hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::OccupiedCores(assignments)) => assignments,
+			_ => panic!("Expected OccupiedCores, got something else."),
+		}
+	}
+
+	pub async fn get_backing_groups(
+		&self,
+		url: String,
+		block_hash: <DefaultConfig as subxt::Config>::Hash,
+	) -> Vec<Vec<ValidatorIndex>> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { url, request_type: RequestType::GetBackingGroups(block_hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::BackingGroups(groups)) => groups,
+			_ => panic!("Expected BackingGroups, got something else."),
+		}
+	}
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
@@ -166,81 +234,79 @@ async fn new_client_fn(
 // A task that handles subxt API calls.
 pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 	let mut connection_pool = HashMap::new();
-	loop {
-		if let Some(request) = api.recv().await {
-			let (timeout_sender, mut timeout_receiver) = oneshot::channel::<bool>();
+	while let Some(request) = api.recv().await {
+		let (timeout_sender, mut timeout_receiver) = oneshot::channel::<bool>();
 
-			// Start API retry timeout task.
-			let timeout_task = tokio::spawn(async move {
-				tokio::time::sleep(std::time::Duration::from_millis(crate::core::API_RETRY_TIMEOUT_MS)).await;
-				timeout_sender.send(true).expect("Sending timeout signal never fails.");
-			});
+		// Start API retry timeout task.
+		let timeout_task = tokio::spawn(async move {
+			tokio::time::sleep(std::time::Duration::from_millis(crate::core::API_RETRY_TIMEOUT_MS)).await;
+			timeout_sender.send(true).expect("Sending timeout signal never fails.");
+		});
 
-			// Loop while the timeout task doesn't fire. Other errors will cancel this loop
-			loop {
-				match timeout_receiver.try_recv() {
-					Err(TryRecvError::Empty) => {},
-					Err(TryRecvError::Closed) => {
-						// Timeout task has exit unexpectedely. this shuld never happen.
-						panic!("API timeout task closed channel: {:?}", request);
-					},
-					Ok(_) => {
-						// Panic on timeout.
-						panic!("Request timed out: {:?}", request);
-					},
-				}
-				match connection_pool.entry(request.url.clone()) {
-					Entry::Occupied(_) => (),
-					Entry::Vacant(entry) => {
-						let maybe_api = new_client_fn(request.url.clone()).await;
-						if let Some(api) = maybe_api {
-							entry.insert(api);
-						}
-					},
-				};
-
-				let api = connection_pool.get(&request.url.clone());
-
-				let result = if let Some(api) = api {
-					match request.request_type {
-						RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
-						RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
-						RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
-						RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
+		// Loop while the timeout task doesn't fire. Other errors will cancel this loop
+		loop {
+			match timeout_receiver.try_recv() {
+				Err(TryRecvError::Empty) => {},
+				Err(TryRecvError::Closed) => {
+					// Timeout task has exit unexpectedely; this should never happen.
+					panic!("API timeout task closed channel: {:?}", request);
+				},
+				Ok(_) => {
+					// Panic on timeout.
+					panic!("Request timed out: {:?}", request);
+				},
+			}
+			match connection_pool.entry(request.url.clone()) {
+				Entry::Occupied(_) => (),
+				Entry::Vacant(entry) => {
+					let maybe_api = new_client_fn(request.url.clone()).await;
+					if let Some(api) = maybe_api {
+						entry.insert(api);
 					}
-				} else {
-					// Remove the faulty websocket from connection pool.
+				},
+			};
+
+			let api = connection_pool.get(&request.url.clone());
+
+			let result = if let Some(api) = api {
+				match request.request_type {
+					RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
+					RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
+					RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
+					RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
+					RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
+					RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
+					RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
+				}
+			} else {
+				// Remove the faulty websocket from connection pool.
+				let _ = connection_pool.remove(&request.url);
+				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
+				continue
+			};
+
+			let response = match result {
+				Ok(response) => response,
+				Err(Error::SubxtError(err)) => {
+					error!("subxt call error: {:?}", err);
+					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
 					continue
-				};
+				},
+				Err(Error::DecodeExtrinsicError) => {
+					error!("Decoding extrinsic failed");
+					// Always retry for subxt errors (most of them are transient).
+					let _ = connection_pool.remove(&request.url);
+					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
+					continue
+				},
+			};
 
-				let response = match result {
-					Ok(response) => response,
-					Err(Error::SubxtError(err)) => {
-						error!("subxt call error: {:?}", err);
-						// Always retry for subxt errors (most of them are transient).
-						let _ = connection_pool.remove(&request.url);
-						tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-						continue
-					},
-					Err(Error::DecodeExtrinsicError) => {
-						error!("Decoding extrinsic failed");
-						// Always retry for subxt errors (most of them are transient).
-						let _ = connection_pool.remove(&request.url);
-						tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-						continue
-					},
-				};
-
-				// We only break in the happy case.
-				let _ = request.response_sender.send(response);
-				timeout_task.abort();
-				break
-			}
-		} else {
-			// channel closed, exit loop.
-			panic!("Channel closed. Cascade failure ?")
+			// We only break in the happy case.
+			let _ = request.response_sender.send(response);
+			timeout_task.abort();
+			break
 		}
 	}
 }
@@ -297,6 +363,45 @@ fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeEx
 	}
 
 	SubxtCall::decode(data).map_err(DecodeExtrinsicError::CodecError)
+}
+
+async fn subxt_get_sheduled_paras(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+) -> Result {
+	let scheduled_paras = api
+		.storage()
+		.para_scheduler()
+		.scheduled(Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::ScheduledParas(scheduled_paras))
+}
+
+async fn subxt_get_occupied_cores(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+) -> Result {
+	let occupied_cores = api
+		.storage()
+		.para_scheduler()
+		.availability_cores(Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::OccupiedCores(occupied_cores))
+}
+
+async fn subxt_get_validator_groups(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+) -> Result {
+	let groups = api
+		.storage()
+		.para_scheduler()
+		.validator_groups(Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::BackingGroups(groups))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {
