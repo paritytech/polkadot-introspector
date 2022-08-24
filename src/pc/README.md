@@ -18,7 +18,7 @@ It's important to note that the tool cannot further drill down into the details 
 - WIP: backing group information for each backed candidate (validator stash addresses)
 - (soon) parachain block times measured in relay chain blocks
 - (soon) dispute resolution tracking
-- parachain XCM tput
+- parachain XCM throughput
 - parachain code size
 - parachain PoV size
 - (some time in the future) collator protocol introspection via gossip traffic analysis
