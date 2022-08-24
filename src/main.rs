@@ -36,15 +36,20 @@ use crate::{core::EventStream, kvdb::KvdbOptions};
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 enum Command {
+	/// Observe block times using an RPC node
 	BlockTimeMonitor(BlockTimeOptions),
+	/// Run in the collector mode
 	Collector(CollectorOptions),
+	/// Examine jaeger traces
 	Jaeger(JaegerOptions),
+	/// Examine key-value database for both relay chain and parachains
 	Kvdb(KvdbOptions),
+	/// Observe parachain state
 	ParachainCommander(ParachainCommanderOptions),
 }
 
 #[derive(Debug, Parser)]
-#[clap(author, version)]
+#[clap(author, version, about = "Introspection in the chain progress from a 🐦-view ")]
 pub(crate) struct IntrospectorCli {
 	#[clap(subcommand)]
 	pub command: Command,
