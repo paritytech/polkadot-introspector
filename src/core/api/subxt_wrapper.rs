@@ -56,7 +56,7 @@ pub enum RequestType {
 	GetScheduledParas(<DefaultConfig as subxt::Config>::Hash),
 	/// Get occupied core information at a given block.
 	GetOccupiedCores(<DefaultConfig as subxt::Config>::Hash),
-	/// Get occupied core information at a given block.
+	/// Get baking groups at a given block.
 	GetBackingGroups(<DefaultConfig as subxt::Config>::Hash),
 }
 
