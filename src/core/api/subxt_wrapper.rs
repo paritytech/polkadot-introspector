@@ -81,7 +81,7 @@ pub enum Response {
 	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
 	ScheduledParas(Vec<CoreAssignment>),
-	/// Availability core assignments for parachains.
+	/// List of the occupied availability cores.
 	OccupiedCores(Vec<Option<CoreOccupied>>),
 	/// Backing validator groups.
 	BackingGroups(Vec<Vec<ValidatorIndex>>),
