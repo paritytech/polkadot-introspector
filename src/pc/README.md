@@ -5,7 +5,7 @@ There are two modes of running Parachain Commander: `CLI` and `Prometheus`. In b
 
 ### Modes
 The CLI mode is designed for debugging parachain's performance issues and to determine what parts of the pipeline are slow.
-Generally the said performance issues always lead to less than optimal block times (> 12s) while the tool is able to recognize the following conditions:
+In general, performance issues always lead to less than optimal block times (> 12s) while this tool is able to recognize the following conditions:
 - slow backing - no candidate is backed even if the availability core is free
 - slow availability - less than 2/3 + 1 para validators did not receive the erasure coded chunks of a previously backed candidate
 - slow bitfield propagation - the relay block author did not receive(via gossip) 2/3 + 1 the signed bitfields from the parachain validators
