@@ -1,7 +1,7 @@
 ## Parachain Commander (TM)
 ### What problem does it solve ?
 Provides an automated way to digest the `on-chain` information to reason about why a candidate was not backed or was not included in time.
-There are two modes of running it: `CLI` and `Prometheus`. In both modes, it can trace only a single parachain. The `CLI` mode is purposed for development use, while `Prometheus` is for monitoring.
+There are two modes of running Parachain Commander: `CLI` and `Prometheus`. In both modes, it can trace only a single parachain. The `CLI` mode is purposed for development use, while `Prometheus` is for monitoring.
 
 ### Modes
 The CLI mode is to be used for debugging parachain block performance issues and is able to determine which parts of the pipeline are slow.
