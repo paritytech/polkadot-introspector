@@ -12,6 +12,7 @@ Depending on the tool, the data source and output might differ.
 * [Collector tool](#collector-tool) - observe and monitor runtime events via subxt
 * [Block time monitor](#block-time-monitor) - display the current block time in the substrate based network
 * [KVDB tool](#kvdb-introspection-tool) - inspect key-value database used by parachains or the relay chain
+* [Parachain commander](#parachain-commander) - Parachain progress monitoring and debugging utility
 
 ### Collector tool
 
@@ -32,6 +33,15 @@ cargo run --release -- \
 
 The collector provides both websocket API for subscription to the runtime events filtered and the
 historical data API to obtain and query the existing state.
+
+### Parachain commander
+A parachain progress monitor and debugger which uses `on-chain` data to trace parachain candidates during backing and inclusion.
+
+The tool documentation is available [here](src/pc/README.md). 
+
+This is how it looks when it's running:
+![Tracing a parachain on Kusama](img/pc1.png)
+
 
 ### Block time monitor
 
