@@ -248,7 +248,7 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 			match timeout_receiver.try_recv() {
 				Err(TryRecvError::Empty) => {},
 				Err(TryRecvError::Closed) => {
-					// Timeout task has exit unexpectedely. this shuld never happen.
+					// Timeout task has exit unexpectedely; this should never happen.
 					panic!("API timeout task closed channel: {:?}", request);
 				},
 				Ok(_) => {
