@@ -114,12 +114,20 @@ impl ParachainCommander {
 		loop {
 			let recv_result = consumer_config.try_recv();
 			match recv_result {
-				Ok(event) =>
-					if let SubxtEvent::NewHead(hash) = event {
+				Ok(event) => match event {
+					SubxtEvent::NewHead(hash) => {
 						let _state = tracker.inject_block(hash).await;
 						println!("{}", tracker);
 						tracker.maybe_reset_state();
 					},
+					SubxtEvent::DisputeInitiated(dispute) => {
+						println!("Dispute initiated: {:?}", dispute);
+					},
+					SubxtEvent::DisputeConcluded(dispute, outcome) => {
+						println!("Dispute concluded: {:?} = {:?}", dispute, outcome);
+					},
+					_ => {},
+				},
 				Err(TryRecvError::Disconnected) => break,
 				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			};

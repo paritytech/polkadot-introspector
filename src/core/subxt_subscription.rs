@@ -17,6 +17,7 @@
 // TODO: rename to subxt subscription.
 
 use async_trait::async_trait;
+use color_eyre::eyre::eyre;
 use futures::{future, StreamExt};
 use log::{error, info};
 use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
@@ -34,9 +35,33 @@ pub struct SubxtWrapper {
 	consumers: Vec<Vec<Sender<SubxtEvent>>>,
 }
 
+/// Dispute result as seen by subxt event
+#[derive(Debug)]
+pub enum SubxtDisputeResult {
+	/// Dispute outcome is valid
+	Valid,
+	/// Dispute outcome is invalid
+	Invalid,
+	/// Dispute has been timed out
+	TimedOut,
+}
+
+/// A helper structure to keep track of a dispute and it's relay parent
+#[derive(Debug, Clone)]
+pub struct SubxtDispute {
+	relay_parent_block: <DefaultConfig as subxt::Config>::Hash,
+	candidate_hash: <DefaultConfig as subxt::Config>::Hash,
+}
+
 #[derive(Debug)]
 pub enum SubxtEvent {
+	/// New relay chain head
 	NewHead(<DefaultConfig as subxt::Config>::Hash),
+	/// Dispute for a specific candidate hash
+	DisputeInitiated(SubxtDispute),
+	/// Conclusion for a dispute
+	DisputeConcluded(SubxtDispute, SubxtDisputeResult),
+	/// Anything undecoded
 	RawEvent(<DefaultConfig as subxt::Config>::Hash, subxt::RawEventDetails),
 }
 
@@ -104,11 +129,7 @@ impl SubxtWrapper {
 
 									for event in events.iter_raw() {
 										let event = event.unwrap();
-
-										update_channel
-											.send(SubxtEvent::RawEvent(hash, event.clone()))
-											.await
-											.unwrap();
+										decode_or_send_raw_event(hash.clone(), event.clone(), &update_channel).await.unwrap()
 									}
 								},
 								_ = tokio::signal::ctrl_c() => {
@@ -145,4 +166,57 @@ impl SubxtWrapper {
 			.map(|(update_channel, url)| tokio::spawn(Self::run_per_node(update_channel, url)))
 			.collect()
 	}
+}
+
+async fn decode_or_send_raw_event(
+	block_hash: <DefaultConfig as subxt::Config>::Hash,
+	event: subxt::events::RawEventDetails,
+	update_channel: &Sender<SubxtEvent>,
+) -> color_eyre::Result<()> {
+	use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
+	let event_pallet = event.pallet.as_str();
+	let event_variant = event.variant.as_str();
+
+	let subxt_event = match event_pallet {
+		"ParasDisputes" => match event_variant {
+			"DisputeInitiated" => {
+				let decoded = <polkadot::paras_disputes::events::DisputeInitiated as codec::Decode>::decode(
+					&mut &event.bytes[..],
+				)?;
+				SubxtEvent::DisputeInitiated(SubxtDispute {
+					relay_parent_block: block_hash,
+					candidate_hash: decoded.0 .0,
+				})
+			},
+			"DisputeConcluded" => {
+				let decoded = <polkadot::paras_disputes::events::DisputeConcluded as codec::Decode>::decode(
+					&mut &event.bytes[..],
+				)?;
+				let outcome = match decoded.1 {
+					RuntimeDisputeResult::Valid => SubxtDisputeResult::Valid,
+					RuntimeDisputeResult::Invalid => SubxtDisputeResult::Invalid,
+				};
+				SubxtEvent::DisputeConcluded(
+					SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
+					outcome,
+				)
+			},
+			"DisputeTimedOut" => {
+				let decoded = <polkadot::paras_disputes::events::DisputeTimedOut as codec::Decode>::decode(
+					&mut &event.bytes[..],
+				)?;
+				SubxtEvent::DisputeConcluded(
+					SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
+					SubxtDisputeResult::TimedOut,
+				)
+			},
+			_ => SubxtEvent::RawEvent(block_hash, event),
+		},
+		_ => SubxtEvent::RawEvent(block_hash, event),
+	};
+
+	update_channel
+		.send(subxt_event)
+		.await
+		.map_err(|e| eyre!("cannot send to the channel: {:?}", e))
 }
