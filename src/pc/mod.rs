@@ -27,11 +27,11 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent};
+use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtDisputeResult, SubxtEvent};
 
 use clap::Parser;
-use colored::Colorize;
-
+use color_eyre::owo_colors::OwoColorize;
+use crossterm::style::Stylize;
 use std::time::Duration;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
@@ -95,12 +95,7 @@ impl ParachainCommander {
 		let executor = api_service.subxt();
 		let para_id = opts.para_id;
 
-		println!(
-			"{} will trace parachain {} on {}",
-			"Parachain Commander(TM)".to_string().bold().purple(),
-			para_id,
-			&url
-		);
+		println!("{} will trace parachain {} on {}", format!("Parachain Commander(TM)").purple(), para_id, &url);
 		println!(
 			"{}",
 			"-----------------------------------------------------------------------"
@@ -121,10 +116,29 @@ impl ParachainCommander {
 						tracker.maybe_reset_state();
 					},
 					SubxtEvent::DisputeInitiated(dispute) => {
-						println!("Dispute initiated: {:?}", dispute);
+						println!(
+							"{}: {}",
+							format!("Dispute initiated").dark_red(),
+							format!(
+								"relay parent: {:?}, candidate: {:?}",
+								dispute.relay_parent_block, dispute.candidate_hash
+							)
+						);
 					},
 					SubxtEvent::DisputeConcluded(dispute, outcome) => {
-						println!("Dispute concluded: {:?} = {:?}", dispute, outcome);
+						let str_outcome = match outcome {
+							SubxtDisputeResult::Valid => format!("valid 👍").green(),
+							SubxtDisputeResult::Invalid => format!("invalid 👎").dark_yellow(),
+							SubxtDisputeResult::TimedOut => format!("timedout").dark_red(),
+						};
+						println!(
+							"{}: {}",
+							format!("Dispute concluded").bold(),
+							format!(
+								"relay parent: {:?}, candidate: {:?}, result: {}",
+								dispute.relay_parent_block, dispute.candidate_hash, str_outcome
+							)
+						);
 					},
 					_ => {},
 				},

@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-// TODO: rename to subxt subscription.
 
 use async_trait::async_trait;
 use color_eyre::eyre::eyre;
@@ -49,8 +48,8 @@ pub enum SubxtDisputeResult {
 /// A helper structure to keep track of a dispute and it's relay parent
 #[derive(Debug, Clone)]
 pub struct SubxtDispute {
-	relay_parent_block: <DefaultConfig as subxt::Config>::Hash,
-	candidate_hash: <DefaultConfig as subxt::Config>::Hash,
+	pub relay_parent_block: <DefaultConfig as subxt::Config>::Hash,
+	pub candidate_hash: <DefaultConfig as subxt::Config>::Hash,
 }
 
 #[derive(Debug)]
