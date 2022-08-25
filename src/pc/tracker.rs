@@ -69,36 +69,25 @@ impl Display for SubxtTracker {
 		}
 		self.display_bitfield_propagation(f)?;
 
-		let (relay_block_number, relay_block_hash) = self.current_relay_block.unwrap();
+		let (relay_block_number, _) = self.current_relay_block.unwrap();
 		match self.current_candidate.state {
 			ParachainBlockState::Idle => {
 				writeln!(
 					f,
-					"{} for parachain {}, no candidate backed at {:?}",
+					"{} for parachain {}, no candidate backed",
 					format!("[#{}] SLOW BACKING", relay_block_number).bold().red(),
 					self.para_id,
-					relay_block_hash
 				)?;
 			},
 			ParachainBlockState::Backed => {
-				writeln!(
-					f,
-					"{} parachain {} candidate {} on relay parent {:?}",
-					format!("[#{}] BACKED", relay_block_number).bold().green(),
-					self.para_id,
-					BlakeTwo256::hash_of(&self.current_candidate.candidate),
-					relay_block_hash
-				)?;
+				writeln!(f, "{}", format!("[#{}] CANDIDATE BACKED", relay_block_number).bold().green(),)?;
 			},
-			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => self.display_availability(
-				f,
-				self.current_candidate
-					.candidate
-					.as_ref()
-					.expect("Pending availability without candidate"),
-			)?,
+			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
+				self.display_availability(f)?;
+			},
 		}
 
+		self.display_block_info(f)?;
 		self.display_core_assignment(f)?;
 		self.display_core_status(f)
 	}
@@ -294,15 +283,14 @@ impl SubxtTracker {
 
 	fn display_bitfield_propagation(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
-		if let Some((relay_block_number, relay_block_hash)) = self.current_relay_block {
+		if let Some((relay_block_number, _)) = self.current_relay_block {
 			if self.current_candidate.state != ParachainBlockState::Idle &&
 				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
-					"{} in block {:?} bitfield count {}/{}",
+					"{} bitfield count {}/{}",
 					format!("[#{}] SLOW BITFIELD PROPAGATION", relay_block_number).dark_red(),
-					relay_block_hash,
 					self.current_candidate.bitfield_count,
 					self.current_candidate.max_av_bits
 				)?;
@@ -312,37 +300,42 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	fn display_availability(&self, f: &mut fmt::Formatter, candidate: &BackedCandidate<H256>) -> fmt::Result {
-		let (relay_block_number, relay_block_hash) = self.current_relay_block.unwrap();
-		let candidate_hash = BlakeTwo256::hash_of(&candidate.candidate);
+	fn display_availability(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let (relay_block_number, _) = self.current_relay_block.unwrap();
 
 		// TODO: Availability timeout.
 		if self.current_candidate.current_av_bits > (self.current_candidate.max_av_bits / 3) * 2 {
-			writeln!(
-				f,
-				"{} candidate {} in block {:?}",
-				format!("[#{}] INCLUDED", relay_block_number).bold().green(),
-				candidate_hash,
-				relay_block_hash
-			)?;
+			writeln!(f, "{}", format!("[#{}] CANDIDATE INCLUDED", relay_block_number).bold().green(),)?;
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
-			writeln!(
-				f,
-				"{} for candidate {} at block {:?}",
-				format!("[#{}] SLOW AVAILABILITY", relay_block_number).bold().yellow(),
-				candidate_hash,
-				relay_block_hash
-			)?;
+			writeln!(f, "{}", format!("[#{}] SLOW AVAILABILITY", relay_block_number).bold().yellow(),)?;
 		}
 
 		writeln!(
 			f,
-			"\t- Availability bits: {}/{}",
+			"\t🟢 Availability bits: {}/{}",
 			self.current_candidate.current_av_bits, self.current_candidate.max_av_bits
 		)
 	}
 
 	fn display_core_status(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(f, "\t- Availability core {}", if !self.current_candidate.core_occupied { "FREE" } else { "OCCUPIED" })
+		writeln!(
+			f,
+			"\t🥝 Availability core {}",
+			if !self.current_candidate.core_occupied { "FREE" } else { "OCCUPIED" }
+		)
+	}
+
+	fn display_block_info(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
+			let candidate_hash = BlakeTwo256::hash_of(&backed_candidate.candidate);
+
+			writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
+		}
+
+		if let Some((_, relay_block_hash)) = self.current_relay_block {
+			writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", relay_block_hash).bold())?;
+		}
+
+		Ok(())
 	}
 }
