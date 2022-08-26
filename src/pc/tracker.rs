@@ -14,9 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //! This module tracks parachain blocks.
-use crate::core::api::{
-	AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData, RequestExecutor,
-	ValidatorIndex,
+use crate::core::{
+	api::{
+		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
+		RequestExecutor, ValidatorIndex,
+	},
+	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 };
 use codec::{Decode, Encode};
 use crossterm::style::Stylize;
@@ -65,7 +68,7 @@ pub struct SubxtTracker {
 impl Display for SubxtTracker {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),);
+			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 		}
 		self.display_bitfield_propagation(f)?;
 
@@ -104,6 +107,12 @@ impl Display for SubxtTracker {
 	}
 }
 
+#[derive(Encode, Decode, Debug, Default)]
+struct DisputesOutcome {
+	voted_for: u32,
+	voted_against: u32,
+}
+
 /// The parachain block tracking information.
 /// This is used for displaying CLI updates and also goes to Storage.
 #[derive(Encode, Decode, Debug, Default)]
@@ -122,6 +131,8 @@ pub struct ParachainBlockInfo {
 	assigned_core: Option<u32>,
 	/// Core occupation status.
 	core_occupied: bool,
+	/// Disputes information if any disputes are there.
+	disputes: Option<DisputesOutcome>,
 }
 
 /// The state of parachain block.
@@ -204,15 +215,20 @@ impl SubxtTracker {
 		if let Some(assigned_core) = self.current_candidate.assigned_core {
 			self.update_core_occupation(assigned_core, occupied_cores);
 		}
+
+		if data.disputes.len() > 0 {
+			self.update_disputes(&data.disputes[..]);
+		}
+
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return;
+			return
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return;
+			return
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -248,6 +264,27 @@ impl SubxtTracker {
 	}
 	fn update_core_occupation(&mut self, core: u32, occupied_cores: Vec<Option<CoreOccupied>>) {
 		self.current_candidate.core_occupied = occupied_cores[core as usize].is_some();
+	}
+	fn update_disputes(&mut self, disputes: &[DisputeStatementSet]) {
+		let our_candidate = BlakeTwo256::hash_of(&self.current_candidate.candidate);
+		let our_dispute_pos = disputes
+			.iter()
+			.position(|dispute_statement| dispute_statement.candidate_hash.0 == our_candidate);
+
+		if let Some(our_dispute_pos) = our_dispute_pos {
+			let our_dispute = &disputes[our_dispute_pos];
+			// TODO: we would like to distinguish different dispute phases at some point
+			let voted_for = our_dispute
+				.statements
+				.iter()
+				.filter(|(dispute_statement, _, _)| match dispute_statement {
+					DisputeStatement::Valid(_) => true,
+					_ => false,
+				})
+				.count() as u32;
+			let voted_against = our_dispute.statements.len() as u32 - voted_for;
+			self.current_candidate.disputes = Some(DisputesOutcome { voted_for, voted_against });
+		}
 	}
 
 	fn update_availability(
@@ -295,8 +332,8 @@ impl SubxtTracker {
 	fn display_bitfield_propagation(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
 		if let Some((relay_block_number, relay_block_hash)) = self.current_relay_block {
-			if self.current_candidate.state != ParachainBlockState::Idle
-				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			if self.current_candidate.state != ParachainBlockState::Idle &&
+				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
