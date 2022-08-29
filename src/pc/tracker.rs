@@ -327,7 +327,8 @@ impl SubxtTracker {
 
 	fn display_block_info(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
-			let candidate_hash = BlakeTwo256::hash_of(&backed_candidate.candidate);
+			let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
+			let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
 
 			writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
 		}
