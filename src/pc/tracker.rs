@@ -22,6 +22,7 @@ use crate::core::{
 	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 };
 use codec::{Decode, Encode};
+use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::error;
 use std::{fmt, fmt::Display};
@@ -63,6 +64,8 @@ pub struct SubxtTracker {
 	current_candidate: ParachainBlockInfo,
 	/// Current relay chain block
 	current_relay_block: Option<(BlockNumber, H256)>,
+	/// Disputes information if any disputes are there.
+	disputes: Vec<DisputesOutcome>,
 }
 
 impl Display for SubxtTracker {
@@ -98,6 +101,7 @@ impl Display for SubxtTracker {
 
 #[derive(Encode, Decode, Debug, Default)]
 struct DisputesOutcome {
+	candidate: H256,
 	voted_for: u32,
 	voted_against: u32,
 }
@@ -120,8 +124,6 @@ pub struct ParachainBlockInfo {
 	assigned_core: Option<u32>,
 	/// Core occupation status.
 	core_occupied: bool,
-	/// Disputes information if any disputes are there.
-	disputes: Option<DisputesOutcome>,
 }
 
 /// The state of parachain block.
@@ -176,6 +178,7 @@ impl SubxtTracker {
 			last_assignment: None,
 			last_backed_at: None,
 			current_relay_block: None,
+			disputes: vec![],
 		}
 	}
 
@@ -255,25 +258,22 @@ impl SubxtTracker {
 		self.current_candidate.core_occupied = occupied_cores[core as usize].is_some();
 	}
 	fn update_disputes(&mut self, disputes: &[DisputeStatementSet]) {
-		let our_candidate = BlakeTwo256::hash_of(&self.current_candidate.candidate);
-		let our_dispute_pos = disputes
+		self.disputes = disputes
 			.iter()
-			.position(|dispute_statement| dispute_statement.candidate_hash.0 == our_candidate);
-
-		if let Some(our_dispute_pos) = our_dispute_pos {
-			let our_dispute = &disputes[our_dispute_pos];
-			// TODO: we would like to distinguish different dispute phases at some point
-			let voted_for = our_dispute
-				.statements
-				.iter()
-				.filter(|(dispute_statement, _, _)| match dispute_statement {
-					DisputeStatement::Valid(_) => true,
-					_ => false,
-				})
-				.count() as u32;
-			let voted_against = our_dispute.statements.len() as u32 - voted_for;
-			self.current_candidate.disputes = Some(DisputesOutcome { voted_for, voted_against });
-		}
+			.map(|dispute_info| {
+				// TODO: we would like to distinguish different dispute phases at some point
+				let voted_for = dispute_info
+					.statements
+					.iter()
+					.filter(|(statement, _, _)| match statement {
+						DisputeStatement::Valid(_) => true,
+						_ => false,
+					})
+					.count() as u32;
+				let voted_against = dispute_info.statements.len() as u32 - voted_for;
+				DisputesOutcome { candidate: dispute_info.candidate_hash.0, voted_for, voted_against }
+			})
+			.collect();
 	}
 
 	fn update_availability(
@@ -308,6 +308,7 @@ impl SubxtTracker {
 			self.current_candidate.state = ParachainBlockState::Idle;
 			self.current_candidate.candidate = None;
 		}
+		self.disputes.clear();
 	}
 
 	fn display_core_assignment(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -362,6 +363,30 @@ impl SubxtTracker {
 		)
 	}
 
+	fn display_disputes(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		writeln!(f, "\t👊 Disputes tracked")?;
+		for dispute in &self.disputes {
+			if dispute.voted_for < dispute.voted_against {
+				writeln!(
+					f,
+					"\t\t👎 Candidate: {}, resolved invalid; voted for: {}; voted against: {}",
+					format!("{:?}", dispute.candidate).dark_red(),
+					dispute.voted_for,
+					dispute.voted_against
+				)?;
+			} else {
+				writeln!(
+					f,
+					"\t\t👍 Candidate: {}, resolved valid; voted for: {}; voted against: {}",
+					format!("{:?}", dispute.candidate).bright_green(),
+					dispute.voted_for,
+					dispute.voted_against
+				)?;
+			}
+		}
+		Ok(())
+	}
+
 	fn display_block_info(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
 			let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
@@ -372,6 +397,10 @@ impl SubxtTracker {
 
 		if let Some((_, relay_block_hash)) = self.current_relay_block {
 			writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", relay_block_hash).bold())?;
+		}
+
+		if self.disputes.len() > 0 {
+			self.display_disputes(f)?;
 		}
 
 		Ok(())
