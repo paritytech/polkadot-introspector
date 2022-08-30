@@ -89,7 +89,7 @@ impl Display for SubxtTracker {
 				)?;
 			},
 			ParachainBlockState::Backed => {
-				info!(
+				writeln!(
 					f,
 					"{}",
 					format!("{} [#{}] CANDIDATE BACKED", self.format_ts(), relay_block_number)
