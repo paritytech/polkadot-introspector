@@ -24,6 +24,7 @@ use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
 pub mod polkadot {}
 
+use polkadot::paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut};
 use tokio::sync::mpsc::{channel, Sender};
 
 use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
@@ -173,45 +174,25 @@ async fn decode_or_send_raw_event(
 	update_channel: &Sender<SubxtEvent>,
 ) -> color_eyre::Result<()> {
 	use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
-	let event_pallet = event.pallet.as_str();
-	let event_variant = event.variant.as_str();
 
-	let subxt_event = match event_pallet {
-		"ParasDisputes" => match event_variant {
-			"DisputeInitiated" => {
-				let decoded = <polkadot::paras_disputes::events::DisputeInitiated as codec::Decode>::decode(
-					&mut &event.bytes[..],
-				)?;
-				SubxtEvent::DisputeInitiated(SubxtDispute {
-					relay_parent_block: block_hash,
-					candidate_hash: decoded.0 .0,
-				})
-			},
-			"DisputeConcluded" => {
-				let decoded = <polkadot::paras_disputes::events::DisputeConcluded as codec::Decode>::decode(
-					&mut &event.bytes[..],
-				)?;
-				let outcome = match decoded.1 {
-					RuntimeDisputeResult::Valid => SubxtDisputeResult::Valid,
-					RuntimeDisputeResult::Invalid => SubxtDisputeResult::Invalid,
-				};
-				SubxtEvent::DisputeConcluded(
-					SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
-					outcome,
-				)
-			},
-			"DisputeTimedOut" => {
-				let decoded = <polkadot::paras_disputes::events::DisputeTimedOut as codec::Decode>::decode(
-					&mut &event.bytes[..],
-				)?;
-				SubxtEvent::DisputeConcluded(
-					SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
-					SubxtDisputeResult::TimedOut,
-				)
-			},
-			_ => SubxtEvent::RawEvent(block_hash, event),
-		},
-		_ => SubxtEvent::RawEvent(block_hash, event),
+	let subxt_event = if let Ok(Some(DisputeInitiated(candidate_hash, _))) = event.as_event() {
+		SubxtEvent::DisputeInitiated(SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 })
+	} else if let Ok(Some(DisputeConcluded(candidate_hash, outcome))) = event.as_event() {
+		let outcome = match outcome {
+			RuntimeDisputeResult::Valid => SubxtDisputeResult::Valid,
+			RuntimeDisputeResult::Invalid => SubxtDisputeResult::Invalid,
+		};
+		SubxtEvent::DisputeConcluded(
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 },
+			outcome,
+		)
+	} else if let Ok(Some(DisputeTimedOut(candidate_hash))) = event.as_event() {
+		SubxtEvent::DisputeConcluded(
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 },
+			SubxtDisputeResult::TimedOut,
+		)
+	} else {
+		SubxtEvent::RawEvent(block_hash, event)
 	};
 
 	update_channel
