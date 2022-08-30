@@ -28,11 +28,13 @@
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
 use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtDisputeResult, SubxtEvent};
+use std::collections::HashMap;
 
 use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use subxt::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
 mod tracker;
@@ -94,6 +96,7 @@ impl ParachainCommander {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
 		let para_id = opts.para_id;
+		let mut recent_disputes: HashMap<H256, Duration> = HashMap::new();
 
 		println!("{} will trace parachain {} on {}", format!("Parachain Commander(TM)").purple(), para_id, &url);
 		println!(
@@ -124,6 +127,7 @@ impl ParachainCommander {
 								dispute.relay_parent_block, dispute.candidate_hash
 							)
 						);
+						recent_disputes.insert(dispute.candidate_hash, get_unix_time_unwrap());
 					},
 					SubxtEvent::DisputeConcluded(dispute, outcome) => {
 						let str_outcome = match outcome {
@@ -131,9 +135,15 @@ impl ParachainCommander {
 							SubxtDisputeResult::Invalid => format!("invalid 👎").dark_yellow(),
 							SubxtDisputeResult::TimedOut => format!("timedout").dark_red(),
 						};
+						let noticed_dispute = recent_disputes.remove(&dispute.candidate_hash);
+						let resolve_time = if let Some(noticed) = noticed_dispute {
+							get_unix_time_unwrap().saturating_sub(noticed)
+						} else {
+							Duration::from_millis(0)
+						};
 						println!(
 							"{}: {}",
-							format!("Dispute concluded").bold(),
+							format!("Dispute concluded in {}ms", resolve_time.as_millis()).bright_green(),
 							format!(
 								"relay parent: {:?}, candidate: {:?}, result: {}",
 								dispute.relay_parent_block, dispute.candidate_hash, str_outcome
@@ -147,4 +157,8 @@ impl ParachainCommander {
 			};
 		}
 	}
+}
+
+fn get_unix_time_unwrap() -> Duration {
+	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }
