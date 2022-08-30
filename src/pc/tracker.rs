@@ -208,7 +208,7 @@ impl SubxtTracker {
 			self.update_core_occupation(assigned_core, occupied_cores);
 		}
 
-		if data.disputes.len() > 0 {
+		if !data.disputes.is_empty() {
 			self.update_disputes(&data.disputes[..]);
 		}
 
@@ -265,10 +265,7 @@ impl SubxtTracker {
 				let voted_for = dispute_info
 					.statements
 					.iter()
-					.filter(|(statement, _, _)| match statement {
-						DisputeStatement::Valid(_) => true,
-						_ => false,
-					})
+					.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
 					.count() as u32;
 				let voted_against = dispute_info.statements.len() as u32 - voted_for;
 				DisputesOutcome { candidate: dispute_info.candidate_hash.0, voted_for, voted_against }
@@ -399,7 +396,7 @@ impl SubxtTracker {
 			writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", relay_block_hash).bold())?;
 		}
 
-		if self.disputes.len() > 0 {
+		if !self.disputes.is_empty() {
 			self.display_disputes(f)?;
 		}
 

@@ -33,6 +33,7 @@ use std::collections::HashMap;
 use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use log::info;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subxt::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
@@ -98,7 +99,7 @@ impl ParachainCommander {
 		let para_id = opts.para_id;
 		let mut recent_disputes: HashMap<H256, Duration> = HashMap::new();
 
-		println!("{} will trace parachain {} on {}", format!("Parachain Commander(TM)").purple(), para_id, &url);
+		println!("{} will trace parachain {} on {}", "Parachain Commander(TM)".to_string().purple(), para_id, &url);
 		println!(
 			"{}",
 			"-----------------------------------------------------------------------"
@@ -119,21 +120,19 @@ impl ParachainCommander {
 						tracker.maybe_reset_state();
 					},
 					SubxtEvent::DisputeInitiated(dispute) => {
-						println!(
-							"{}: {}",
-							format!("Dispute initiated").dark_red(),
-							format!(
-								"relay parent: {:?}, candidate: {:?}",
-								dispute.relay_parent_block, dispute.candidate_hash
-							)
+						info!(
+							"{}: relay parent: {:?}, candidate: {:?}",
+							dispute.relay_parent_block,
+							dispute.candidate_hash,
+							"Dispute initiated".to_string().dark_red(),
 						);
 						recent_disputes.insert(dispute.candidate_hash, get_unix_time_unwrap());
 					},
 					SubxtEvent::DisputeConcluded(dispute, outcome) => {
 						let str_outcome = match outcome {
-							SubxtDisputeResult::Valid => format!("valid 👍").green(),
-							SubxtDisputeResult::Invalid => format!("invalid 👎").dark_yellow(),
-							SubxtDisputeResult::TimedOut => format!("timedout").dark_red(),
+							SubxtDisputeResult::Valid => "valid 👍".to_string().green(),
+							SubxtDisputeResult::Invalid => "invalid 👎".to_string().dark_yellow(),
+							SubxtDisputeResult::TimedOut => "timedout".to_string().dark_red(),
 						};
 						let noticed_dispute = recent_disputes.remove(&dispute.candidate_hash);
 						let resolve_time = if let Some(noticed) = noticed_dispute {
@@ -141,13 +140,12 @@ impl ParachainCommander {
 						} else {
 							Duration::from_millis(0)
 						};
-						println!(
-							"{}: {}",
+						info!(
+							"{}: relay parent: {:?}, candidate: {:?}, result: {}",
+							dispute.relay_parent_block,
+							dispute.candidate_hash,
+							str_outcome,
 							format!("Dispute concluded in {}ms", resolve_time.as_millis()).bright_green(),
-							format!(
-								"relay parent: {:?}, candidate: {:?}, result: {}",
-								dispute.relay_parent_block, dispute.candidate_hash, str_outcome
-							)
 						);
 					},
 					_ => {},

@@ -129,7 +129,7 @@ impl SubxtWrapper {
 
 									for event in events.iter_raw() {
 										let event = event.unwrap();
-										decode_or_send_raw_event(hash.clone(), event.clone(), &update_channel).await.unwrap()
+										decode_or_send_raw_event(hash, event.clone(), &update_channel).await.unwrap()
 									}
 								},
 								_ = tokio::signal::ctrl_c() => {
