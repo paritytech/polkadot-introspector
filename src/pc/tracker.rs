@@ -308,6 +308,8 @@ impl SubxtTracker {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
 		if let Some((relay_block_number, _)) = self.current_relay_block {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
+			// Usually this happens at startup, when we miss a core assignment and we do not update
+			// availability before calling this `fn`.
 			if self.current_candidate.max_av_bits > 0 &&
 				self.current_candidate.state != ParachainBlockState::Idle &&
 				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
