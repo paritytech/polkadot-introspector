@@ -34,3 +34,4 @@ hex = "0.4.3"
 itertools = "0.10.3"
 snap = "1.0.5"
 rand = "0.8.5"
+time = { version = "0.3.14", features = ["formatting"] }
