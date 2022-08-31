@@ -25,7 +25,10 @@ use codec::{Decode, Encode};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::error;
-use std::{fmt, fmt::Display};
+use std::{
+	fmt,
+	fmt::{Debug, Display},
+};
 use subxt::{
 	sp_core::H256,
 	sp_runtime::traits::{BlakeTwo256, Hash},
@@ -62,16 +65,20 @@ pub struct SubxtTracker {
 	last_backed_at: Option<BlockNumber>,
 	/// Information about current block we track.
 	current_candidate: ParachainBlockInfo,
-	/// Current relay chain block
+	/// Current relay chain block.
 	current_relay_block: Option<(BlockNumber, H256)>,
 	/// Disputes information if any disputes are there.
 	disputes: Vec<DisputesOutcome>,
+	/// Current relay chain block timestamp.
+	current_relay_block_ts: Option<u64>,
+	/// Last relay chain block timestamp.
+	last_relay_block_ts: Option<u64>,
 }
 
 impl Display for SubxtTracker {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
+			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),);
 		}
 		self.display_bitfield_propagation(f)?;
 
@@ -81,12 +88,20 @@ impl Display for SubxtTracker {
 				writeln!(
 					f,
 					"{} for parachain {}, no candidate backed",
-					format!("[#{}] SLOW BACKING", relay_block_number).bold().red(),
+					format!("{} [#{}] SLOW BACKING", self.format_ts(), relay_block_number)
+						.bold()
+						.red(),
 					self.para_id,
 				)?;
 			},
 			ParachainBlockState::Backed => {
-				writeln!(f, "{}", format!("[#{}] CANDIDATE BACKED", relay_block_number).bold().green(),)?;
+				writeln!(
+					f,
+					"{}",
+					format!("{} [#{}] CANDIDATE BACKED", self.format_ts(), relay_block_number)
+						.bold()
+						.green(),
+				)?;
 			},
 			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
 				self.display_availability(f)?;
@@ -179,6 +194,8 @@ impl SubxtTracker {
 			last_backed_at: None,
 			current_relay_block: None,
 			disputes: vec![],
+			current_relay_block_ts: None,
+			last_relay_block_ts: None,
 		}
 	}
 
@@ -199,6 +216,12 @@ impl SubxtTracker {
 			.collect::<Vec<AvailabilityBitfield>>();
 
 		self.current_candidate.bitfield_count = bitfields.len() as u32;
+		self.last_relay_block_ts = self.current_relay_block_ts;
+		self.current_relay_block_ts = Some(
+			self.executor
+				.get_block_timestamp(self.node_rpc_url.clone(), Some(block_hash))
+				.await,
+		);
 
 		// Update backing information if any.
 		let candidate_backed = self.update_backing(backed_candidates, block_number);
@@ -214,13 +237,13 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return
+			return;
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return
+			return;
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -319,13 +342,17 @@ impl SubxtTracker {
 	fn display_bitfield_propagation(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
 		if let Some((relay_block_number, _)) = self.current_relay_block {
-			if self.current_candidate.state != ParachainBlockState::Idle &&
-				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			// If `max_av_bits` is not set do not check for bitfield propagation.
+			// Usually this happens at startup, when we miss a core assignment and we do not update
+			// availability before calling this `fn`.
+			if self.current_candidate.max_av_bits > 0
+				&& self.current_candidate.state != ParachainBlockState::Idle
+				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
 					"{} bitfield count {}/{}",
-					format!("[#{}] SLOW BITFIELD PROPAGATION", relay_block_number).dark_red(),
+					format!("{} [#{}] SLOW BITFIELD PROPAGATION", self.format_ts(), relay_block_number).dark_red(),
 					self.current_candidate.bitfield_count,
 					self.current_candidate.max_av_bits
 				)?;
@@ -340,9 +367,21 @@ impl SubxtTracker {
 
 		// TODO: Availability timeout.
 		if self.current_candidate.current_av_bits > (self.current_candidate.max_av_bits / 3) * 2 {
-			writeln!(f, "{}", format!("[#{}] CANDIDATE INCLUDED", relay_block_number).bold().green(),)?;
+			writeln!(
+				f,
+				"{}",
+				format!("{} [#{}] CANDIDATE INCLUDED", self.format_ts(), relay_block_number)
+					.bold()
+					.green(),
+			)?;
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
-			writeln!(f, "{}", format!("[#{}] SLOW AVAILABILITY", relay_block_number).bold().yellow(),)?;
+			writeln!(
+				f,
+				"{}",
+				format!("{} [#{}] SLOW AVAILABILITY", self.format_ts(), relay_block_number)
+					.bold()
+					.yellow(),
+			)?;
 		}
 
 		writeln!(
@@ -401,5 +440,25 @@ impl SubxtTracker {
 		}
 
 		Ok(())
+	}
+
+	/// Format the current block inherent timestamp.
+	pub fn format_ts(&self) -> String {
+		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
+		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
+		let duration =
+			std::time::Duration::from_millis(cur_ts).saturating_sub(std::time::Duration::from_millis(base_ts));
+
+		let dt = time::OffsetDateTime::from_unix_timestamp_nanos(
+			self.current_relay_block_ts.unwrap_or_default() as i128 * 1_000_000,
+		)
+		.unwrap();
+		format!(
+			"{} +{}",
+			dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
+				.expect("Invalid datetime format"),
+			format!("{}ms", duration.as_millis())
+		)
+		.to_string()
 	}
 }

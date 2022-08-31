@@ -7,7 +7,7 @@ edition = "2021"
 env_logger = "0.9.0"
 log = "0.4.17"
 color-eyre = "0.6.2"
-clap = {version = "3.2.18", features = ["derive"]}
+clap = {version = "3.2.19", features = ["derive"]}
 codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false, features = ["derive", "full", "bit-vec"] }
 subxt = { git = "https://github.com/paritytech/subxt", rev = "c55b7ba3e34118f61dc51499a0b38262c513aec4" }
 tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread", "signal"] }
@@ -34,3 +34,4 @@ hex = "0.4.3"
 itertools = "0.10.3"
 snap = "1.0.5"
 rand = "0.8.5"
+time = { version = "0.3.14", features = ["formatting"] }
