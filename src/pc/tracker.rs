@@ -457,8 +457,7 @@ impl SubxtTracker {
 			"{} +{}",
 			dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
 				.expect("Invalid datetime format"),
-			format!("{}ms", duration.as_millis())
+			format_args!("{}ms", duration.as_millis())
 		)
-		.to_string()
 	}
 }
