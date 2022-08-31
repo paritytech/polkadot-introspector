@@ -78,7 +78,7 @@ pub struct SubxtTracker {
 impl Display for SubxtTracker {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),);
+			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 		}
 		self.display_bitfield_propagation(f)?;
 
@@ -119,6 +119,7 @@ struct DisputesOutcome {
 	candidate: H256,
 	voted_for: u32,
 	voted_against: u32,
+	misbehaving_validators: Vec<u32>,
 }
 
 /// The parachain block tracking information.
@@ -237,13 +238,13 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return;
+			return
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return;
+			return
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -291,7 +292,28 @@ impl SubxtTracker {
 					.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
 					.count() as u32;
 				let voted_against = dispute_info.statements.len() as u32 - voted_for;
-				DisputesOutcome { candidate: dispute_info.candidate_hash.0, voted_for, voted_against }
+
+				let misbehaving_validators = if voted_for > voted_against {
+					dispute_info
+						.statements
+						.iter()
+						.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
+						.map(|(_, idx, _)| idx.0 as u32)
+						.collect::<Vec<u32>>()
+				} else {
+					dispute_info
+						.statements
+						.iter()
+						.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+						.map(|(_, idx, _)| idx.0 as u32)
+						.collect::<Vec<u32>>()
+				};
+				DisputesOutcome {
+					candidate: dispute_info.candidate_hash.0,
+					voted_for,
+					voted_against,
+					misbehaving_validators,
+				}
 			})
 			.collect();
 	}
@@ -345,9 +367,9 @@ impl SubxtTracker {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
 			// Usually this happens at startup, when we miss a core assignment and we do not update
 			// availability before calling this `fn`.
-			if self.current_candidate.max_av_bits > 0
-				&& self.current_candidate.state != ParachainBlockState::Idle
-				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			if self.current_candidate.max_av_bits > 0 &&
+				self.current_candidate.state != ParachainBlockState::Idle &&
+				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
@@ -418,6 +440,16 @@ impl SubxtTracker {
 					dispute.voted_for,
 					dispute.voted_against
 				)?;
+			}
+
+			if !dispute.misbehaving_validators.is_empty() {
+				for validator in &dispute.misbehaving_validators {
+					writeln!(
+						f,
+						"\t\t\t👹 Validator voted against supermajority: {}",
+						format!("{:?}", validator).bright_red(),
+					)?;
+				}
 			}
 		}
 		Ok(())
