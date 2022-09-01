@@ -58,6 +58,10 @@ pub enum RequestType {
 	GetOccupiedCores(<DefaultConfig as subxt::Config>::Hash),
 	/// Get baking groups at a given block.
 	GetBackingGroups(<DefaultConfig as subxt::Config>::Hash),
+	/// Get session index for a specific block.
+	GetSessionIndex(<DefaultConfig as subxt::Config>::Hash),
+	/// Get information about specific session.
+	GetSessionInfo(u32),
 }
 
 /// The `InherentData` constructed with the subxt API.
@@ -85,6 +89,10 @@ pub enum Response {
 	OccupiedCores(Vec<Option<CoreOccupied>>),
 	/// Backing validator groups.
 	BackingGroups(Vec<Vec<ValidatorIndex>>),
+	/// Returns a session index
+	SessionIndex(u32),
+	/// Session info
+	SessionInfo(Option<polkadot_rt_primitives::v2::SessionInfo>),
 }
 
 #[derive(Debug)]
@@ -210,6 +218,33 @@ impl RequestExecutor {
 			_ => panic!("Expected BackingGroups, got something else."),
 		}
 	}
+
+	pub async fn get_session_info(
+		&self,
+		url: String,
+		session_index: u32,
+	) -> Option<polkadot_rt_primitives::v2::SessionInfo> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request =
+			Request { url, request_type: RequestType::GetSessionInfo(session_index), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::SessionInfo(info)) => info,
+			_ => panic!("Expected SessionInfo, got something else."),
+		}
+	}
+
+	pub async fn get_session_index(&self, url: String, block_hash: <DefaultConfig as subxt::Config>::Hash) -> u32 {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { url, request_type: RequestType::GetSessionIndex(block_hash), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::SessionIndex(index)) => index,
+			_ => panic!("Expected SessionInfo, got something else."),
+		}
+	}
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
@@ -278,6 +313,8 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 					RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
 					RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
 					RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
+					RequestType::GetSessionIndex(hash) => subxt_get_session_index(api, hash).await,
+					RequestType::GetSessionInfo(session_index) => subxt_get_session_info(api, session_index).await,
 				}
 			} else {
 				// Remove the faulty websocket from connection pool.
@@ -403,6 +440,32 @@ async fn subxt_get_validator_groups(
 		.await
 		.map_err(Error::SubxtError)?;
 	Ok(Response::BackingGroups(groups))
+}
+
+async fn subxt_get_session_index(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+) -> Result {
+	let session_index = api
+		.storage()
+		.session()
+		.current_index(Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::SessionIndex(session_index))
+}
+
+async fn subxt_get_session_info(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	session_index: u32,
+) -> Result {
+	let session_info = api
+		.storage()
+		.para_session_info()
+		.sessions(&session_index, None)
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::SessionInfo(session_info))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {

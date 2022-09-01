@@ -19,7 +19,7 @@ use crate::core::{
 		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
 		RequestExecutor, ValidatorIndex,
 	},
-	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
+	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet, SessionInfo},
 };
 use codec::{Decode, Encode};
 use color_eyre::owo_colors::OwoColorize;
@@ -51,6 +51,16 @@ pub trait ParachainBlockTracker {
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo;
 }
 
+/// Used to track session data, where we store two subsequent sessions: the current and the previous one
+struct SubxtSessionTracker {
+	/// The current session index
+	session_index: u32,
+	/// The current session info
+	current_session: SessionInfo,
+	/// The previous session (if available)
+	prev_session: Option<SessionInfo>,
+}
+
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
 	/// Parachain ID to track.
@@ -73,12 +83,14 @@ pub struct SubxtTracker {
 	current_relay_block_ts: Option<u64>,
 	/// Last relay chain block timestamp.
 	last_relay_block_ts: Option<u64>,
+	/// Session tracker
+	session_data: Option<SubxtSessionTracker>,
 }
 
 impl Display for SubxtTracker {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
+			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),);
 		}
 		self.display_bitfield_propagation(f)?;
 
@@ -119,7 +131,7 @@ struct DisputesOutcome {
 	candidate: H256,
 	voted_for: u32,
 	voted_against: u32,
-	misbehaving_validators: Vec<u32>,
+	misbehaving_validators: Vec<(u32, String)>,
 }
 
 /// The parachain block tracking information.
@@ -171,6 +183,26 @@ impl ParachainBlockTracker for SubxtTracker {
 				.await
 			{
 				self.set_relay_block(header.number, block_hash);
+				let session = self.executor.get_session_index(self.node_rpc_url.clone(), block_hash).await;
+				if let Some(cur_session) = self.get_current_session_index() {
+					if cur_session != session {
+						self.new_session(
+							session,
+							self.executor
+								.get_session_info(self.node_rpc_url.clone(), session)
+								.await
+								.unwrap(),
+						)
+					}
+				} else {
+					self.new_session(
+						session,
+						self.executor
+							.get_session_info(self.node_rpc_url.clone(), session)
+							.await
+							.unwrap(),
+					)
+				}
 				self.on_inherent_data(block_hash, header.number, inherent).await;
 			} else {
 				error!("Failed to get inherent data for {:?}", block_hash);
@@ -197,11 +229,24 @@ impl SubxtTracker {
 			disputes: vec![],
 			current_relay_block_ts: None,
 			last_relay_block_ts: None,
+			session_data: None,
 		}
 	}
 
 	fn set_relay_block(&mut self, block_number: BlockNumber, block_hash: H256) {
 		self.current_relay_block = Some((block_number, block_hash));
+	}
+
+	fn get_session_info(&self, session_index: u32) -> Option<&SessionInfo> {
+		self.session_data.as_ref().map_or(None, |session_data| {
+			if session_data.session_index == session_index {
+				Some(&session_data.current_session)
+			} else if session_data.session_index - 1 == session_index {
+				session_data.prev_session.as_ref()
+			} else {
+				None
+			}
+		})
 	}
 
 	// Parse inherent data and update state.
@@ -238,13 +283,13 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return
+			return;
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return
+			return;
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -281,10 +326,13 @@ impl SubxtTracker {
 	fn update_core_occupation(&mut self, core: u32, occupied_cores: Vec<Option<CoreOccupied>>) {
 		self.current_candidate.core_occupied = occupied_cores[core as usize].is_some();
 	}
+
 	fn update_disputes(&mut self, disputes: &[DisputeStatementSet]) {
 		self.disputes = disputes
 			.iter()
 			.map(|dispute_info| {
+				let session_index = dispute_info.session;
+				let session_info = self.get_session_info(session_index);
 				// TODO: we would like to distinguish different dispute phases at some point
 				let voted_for = dispute_info
 					.statements
@@ -298,15 +346,15 @@ impl SubxtTracker {
 						.statements
 						.iter()
 						.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
-						.map(|(_, idx, _)| idx.0 as u32)
-						.collect::<Vec<u32>>()
+						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0 as u32))
+						.collect()
 				} else {
 					dispute_info
 						.statements
 						.iter()
 						.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
-						.map(|(_, idx, _)| idx.0 as u32)
-						.collect::<Vec<u32>>()
+						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0 as u32))
+						.collect()
 				};
 				DisputesOutcome {
 					candidate: dispute_info.candidate_hash.0,
@@ -344,13 +392,25 @@ impl SubxtTracker {
 		}
 	}
 
-	// Called to move to idle state after inclusion/timeout.
+	/// Called to move to idle state after inclusion/timeout.
 	pub fn maybe_reset_state(&mut self) {
 		if self.current_candidate.state == ParachainBlockState::Included {
 			self.current_candidate.state = ParachainBlockState::Idle;
 			self.current_candidate.candidate = None;
 		}
 		self.disputes.clear();
+	}
+
+	/// Updates cashed session with a new one, storing the previous session if needed
+	fn new_session(&mut self, session_index: u32, session: SessionInfo) {
+		if let Some(session_data) = &mut self.session_data {
+			let old_current = std::mem::replace(&mut session_data.current_session, session);
+			session_data.prev_session.replace(old_current);
+			session_data.session_index = session_index;
+		} else {
+			self.session_data =
+				Some(SubxtSessionTracker { session_index, current_session: session, prev_session: None })
+		}
 	}
 
 	fn display_core_assignment(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -367,9 +427,9 @@ impl SubxtTracker {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
 			// Usually this happens at startup, when we miss a core assignment and we do not update
 			// availability before calling this `fn`.
-			if self.current_candidate.max_av_bits > 0 &&
-				self.current_candidate.state != ParachainBlockState::Idle &&
-				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			if self.current_candidate.max_av_bits > 0
+				&& self.current_candidate.state != ParachainBlockState::Idle
+				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
@@ -447,7 +507,7 @@ impl SubxtTracker {
 					writeln!(
 						f,
 						"\t\t\t👹 Validator voted against supermajority: {}",
-						format!("{:?}", validator).bright_red(),
+						format!("idx: {}, address: {:?}", validator.0, validator.1).bright_red(),
 					)?;
 				}
 			}
@@ -492,4 +552,28 @@ impl SubxtTracker {
 			format_args!("{}ms", duration.as_millis())
 		)
 	}
+
+	/// Returns the current session index if present
+	pub fn get_current_session_index(&self) -> Option<u32> {
+		self.session_data.as_ref().map_or(None, |session| Some(session.session_index))
+	}
+}
+
+// Examines session info (if any) and find the corresponding validator
+fn extract_validator_address(session_info: Option<&SessionInfo>, validator_index: u32) -> (u32, String) {
+	if let Some(session_info) = session_info.as_ref() {
+		// TODO: maybe store validators in a hash map to avoid linear search, but realistically
+		// we are doing only up to `max_validators` lookups which is under 1000 typically
+		let validator_pos = session_info
+			.active_validator_indices
+			.iter()
+			.position(|idx| idx.0 == validator_index);
+
+		return if let Some(validator_pos) = validator_pos {
+			(validator_index, format!("{:?}", session_info.discovery_keys[validator_pos]))
+		} else {
+			(validator_index, format!("??? (no such validator: have {} valida)", session_info.validators.len()))
+		};
+	}
+	(validator_index, "??? (no session info)".to_string())
 }
