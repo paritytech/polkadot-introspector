@@ -238,7 +238,7 @@ impl SubxtTracker {
 	}
 
 	fn get_session_keys(&self, session_index: u32) -> Option<&Vec<AccountId32>> {
-		self.session_data.as_ref().map_or(None, |session_data| {
+		self.session_data.as_ref().and_then(|session_data| {
 			if session_data.session_index == session_index {
 				Some(&session_data.current_keys)
 			} else if session_data.session_index - 1 == session_index {
@@ -554,7 +554,7 @@ impl SubxtTracker {
 
 	/// Returns the current session index if present
 	pub fn get_current_session_index(&self) -> Option<u32> {
-		self.session_data.as_ref().map_or(None, |session| Some(session.session_index))
+		self.session_data.as_ref().map(|session| session.session_index)
 	}
 }
 
