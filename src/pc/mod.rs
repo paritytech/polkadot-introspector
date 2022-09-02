@@ -27,12 +27,15 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent};
+use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtDisputeResult, SubxtEvent};
+use std::collections::HashMap;
 
 use clap::Parser;
-use colored::Colorize;
-
-use std::time::Duration;
+use color_eyre::owo_colors::OwoColorize;
+use crossterm::style::Stylize;
+use log::info;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use subxt::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
 mod tracker;
@@ -94,13 +97,9 @@ impl ParachainCommander {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
 		let para_id = opts.para_id;
+		let mut recent_disputes: HashMap<H256, Duration> = HashMap::new();
 
-		println!(
-			"{} will trace parachain {} on {}",
-			"Parachain Commander(TM)".to_string().bold().purple(),
-			para_id,
-			&url
-		);
+		println!("{} will trace parachain {} on {}", "Parachain Commander(TM)".to_string().purple(), para_id, &url);
 		println!(
 			"{}",
 			"-----------------------------------------------------------------------"
@@ -114,15 +113,50 @@ impl ParachainCommander {
 		loop {
 			let recv_result = consumer_config.try_recv();
 			match recv_result {
-				Ok(event) =>
-					if let SubxtEvent::NewHead(hash) = event {
+				Ok(event) => match event {
+					SubxtEvent::NewHead(hash) => {
 						let _state = tracker.inject_block(hash).await;
 						println!("{}", tracker);
 						tracker.maybe_reset_state();
 					},
+					SubxtEvent::DisputeInitiated(dispute) => {
+						info!(
+							"{}: relay parent: {:?}, candidate: {:?}",
+							dispute.relay_parent_block,
+							dispute.candidate_hash,
+							"Dispute initiated".to_string().dark_red(),
+						);
+						recent_disputes.insert(dispute.candidate_hash, get_unix_time_unwrap());
+					},
+					SubxtEvent::DisputeConcluded(dispute, outcome) => {
+						let str_outcome = match outcome {
+							SubxtDisputeResult::Valid => "valid 👍".to_string().green(),
+							SubxtDisputeResult::Invalid => "invalid 👎".to_string().dark_yellow(),
+							SubxtDisputeResult::TimedOut => "timedout".to_string().dark_red(),
+						};
+						let noticed_dispute = recent_disputes.remove(&dispute.candidate_hash);
+						let resolve_time = if let Some(noticed) = noticed_dispute {
+							get_unix_time_unwrap().saturating_sub(noticed)
+						} else {
+							Duration::from_millis(0)
+						};
+						info!(
+							"{}: relay parent: {:?}, candidate: {:?}, result: {}",
+							dispute.relay_parent_block,
+							dispute.candidate_hash,
+							str_outcome,
+							format!("Dispute concluded in {}ms", resolve_time.as_millis()).bright_green(),
+						);
+					},
+					_ => {},
+				},
 				Err(TryRecvError::Disconnected) => break,
 				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			};
 		}
 	}
+}
+
+fn get_unix_time_unwrap() -> Duration {
+	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }

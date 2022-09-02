@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-// TODO: rename to subxt subscription.
 
 use async_trait::async_trait;
+use color_eyre::eyre::eyre;
 use futures::{future, StreamExt};
 use log::{error, info};
 use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
@@ -24,6 +24,7 @@ use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
 pub mod polkadot {}
 
+use polkadot::paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut};
 use tokio::sync::mpsc::{channel, Sender};
 
 use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
@@ -34,9 +35,33 @@ pub struct SubxtWrapper {
 	consumers: Vec<Vec<Sender<SubxtEvent>>>,
 }
 
+/// Dispute result as seen by subxt event
+#[derive(Debug)]
+pub enum SubxtDisputeResult {
+	/// Dispute outcome is valid
+	Valid,
+	/// Dispute outcome is invalid
+	Invalid,
+	/// Dispute has been timed out
+	TimedOut,
+}
+
+/// A helper structure to keep track of a dispute and it's relay parent
+#[derive(Debug, Clone)]
+pub struct SubxtDispute {
+	pub relay_parent_block: <DefaultConfig as subxt::Config>::Hash,
+	pub candidate_hash: <DefaultConfig as subxt::Config>::Hash,
+}
+
 #[derive(Debug)]
 pub enum SubxtEvent {
+	/// New relay chain head
 	NewHead(<DefaultConfig as subxt::Config>::Hash),
+	/// Dispute for a specific candidate hash
+	DisputeInitiated(SubxtDispute),
+	/// Conclusion for a dispute
+	DisputeConcluded(SubxtDispute, SubxtDisputeResult),
+	/// Anything undecoded
 	RawEvent(<DefaultConfig as subxt::Config>::Hash, subxt::RawEventDetails),
 }
 
@@ -104,11 +129,7 @@ impl SubxtWrapper {
 
 									for event in events.iter_raw() {
 										let event = event.unwrap();
-
-										update_channel
-											.send(SubxtEvent::RawEvent(hash, event.clone()))
-											.await
-											.unwrap();
+										decode_or_send_raw_event(hash, event.clone(), &update_channel).await.unwrap()
 									}
 								},
 								_ = tokio::signal::ctrl_c() => {
@@ -145,4 +166,37 @@ impl SubxtWrapper {
 			.map(|(update_channel, url)| tokio::spawn(Self::run_per_node(update_channel, url)))
 			.collect()
 	}
+}
+
+async fn decode_or_send_raw_event(
+	block_hash: <DefaultConfig as subxt::Config>::Hash,
+	event: subxt::events::RawEventDetails,
+	update_channel: &Sender<SubxtEvent>,
+) -> color_eyre::Result<()> {
+	use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
+
+	let subxt_event = if let Ok(Some(DisputeInitiated(candidate_hash, _))) = event.as_event() {
+		SubxtEvent::DisputeInitiated(SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 })
+	} else if let Ok(Some(DisputeConcluded(candidate_hash, outcome))) = event.as_event() {
+		let outcome = match outcome {
+			RuntimeDisputeResult::Valid => SubxtDisputeResult::Valid,
+			RuntimeDisputeResult::Invalid => SubxtDisputeResult::Invalid,
+		};
+		SubxtEvent::DisputeConcluded(
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 },
+			outcome,
+		)
+	} else if let Ok(Some(DisputeTimedOut(candidate_hash))) = event.as_event() {
+		SubxtEvent::DisputeConcluded(
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 },
+			SubxtDisputeResult::TimedOut,
+		)
+	} else {
+		SubxtEvent::RawEvent(block_hash, event)
+	};
+
+	update_channel
+		.send(subxt_event)
+		.await
+		.map_err(|e| eyre!("cannot send to the channel: {:?}", e))
 }
