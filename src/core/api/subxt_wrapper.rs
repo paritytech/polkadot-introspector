@@ -33,7 +33,10 @@ use crate::core::subxt_subscription::polkadot::{
 pub use subxt_runtime_types::polkadot_runtime::Call as SubxtCall;
 
 use std::collections::hash_map::{Entry, HashMap};
-use subxt::{sp_core::H256, ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
+use subxt::{
+	sp_core::{crypto::AccountId32, H256},
+	ClientBuilder, DefaultConfig, PolkadotExtrinsicParams,
+};
 
 use tokio::sync::{
 	mpsc::{Receiver, Sender},
@@ -62,6 +65,8 @@ pub enum RequestType {
 	GetSessionIndex(<DefaultConfig as subxt::Config>::Hash),
 	/// Get information about specific session.
 	GetSessionInfo(u32),
+	/// Get information about validators account keys in some session.
+	GetSessionAccountKeys(u32),
 }
 
 /// The `InherentData` constructed with the subxt API.
@@ -93,6 +98,8 @@ pub enum Response {
 	SessionIndex(u32),
 	/// Session info
 	SessionInfo(Option<polkadot_rt_primitives::v2::SessionInfo>),
+	/// Session info
+	SessionAccountKeys(Option<Vec<AccountId32>>),
 }
 
 #[derive(Debug)]
@@ -245,6 +252,18 @@ impl RequestExecutor {
 			_ => panic!("Expected SessionInfo, got something else."),
 		}
 	}
+
+	pub async fn get_session_account_keys(&self, url: String, session_index: u32) -> Option<Vec<AccountId32>> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request =
+			Request { url, request_type: RequestType::GetSessionAccountKeys(session_index), response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::SessionAccountKeys(maybe_keys)) => maybe_keys,
+			_ => panic!("Expected SessionInfo, got something else."),
+		}
+	}
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
@@ -253,15 +272,14 @@ async fn new_client_fn(
 ) -> Option<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>> {
 	for _ in 0..crate::core::RETRY_COUNT {
 		match ClientBuilder::new().set_url(url.clone()).build().await {
-			Ok(api) => {
+			Ok(api) =>
 				return Some(
 					api.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>>(),
-				)
-			},
+				),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
 				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-				continue;
+				continue
 			},
 		};
 	}
@@ -315,12 +333,14 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 					RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
 					RequestType::GetSessionIndex(hash) => subxt_get_session_index(api, hash).await,
 					RequestType::GetSessionInfo(session_index) => subxt_get_session_info(api, session_index).await,
+					RequestType::GetSessionAccountKeys(session_index) =>
+						subxt_get_session_account_keys(api, session_index).await,
 				}
 			} else {
 				// Remove the faulty websocket from connection pool.
 				let _ = connection_pool.remove(&request.url);
 				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-				continue;
+				continue
 			};
 
 			let response = match result {
@@ -330,21 +350,21 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-					continue;
+					continue
 				},
 				Err(Error::DecodeExtrinsicError) => {
 					error!("Decoding extrinsic failed");
 					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-					continue;
+					continue
 				},
 			};
 
 			// We only break in the happy case.
 			let _ = request.response_sender.send(response);
 			timeout_task.abort();
-			break;
+			break
 		}
 	}
 }
@@ -390,14 +410,14 @@ fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeEx
 	//   - extrinsic data
 	let _expected_length: Compact<u32> = Decode::decode(data).map_err(DecodeExtrinsicError::CodecError)?;
 	if data.is_empty() {
-		return Err(DecodeExtrinsicError::EarlyEof);
+		return Err(DecodeExtrinsicError::EarlyEof)
 	}
 
 	let is_signed = data[0] & 0b1000_0000 != 0;
 	let version = data[0] & 0b0111_1111;
 	*data = &data[1..];
 	if is_signed || version != 4 {
-		return Err(DecodeExtrinsicError::Unsupported);
+		return Err(DecodeExtrinsicError::Unsupported)
 	}
 
 	SubxtCall::decode(data).map_err(DecodeExtrinsicError::CodecError)
@@ -466,6 +486,19 @@ async fn subxt_get_session_info(
 		.await
 		.map_err(Error::SubxtError)?;
 	Ok(Response::SessionInfo(session_info))
+}
+
+async fn subxt_get_session_account_keys(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	session_index: u32,
+) -> Result {
+	let session_keys = api
+		.storage()
+		.para_session_info()
+		.account_keys(&session_index, None)
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::SessionAccountKeys(session_keys))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {

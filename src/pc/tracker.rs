@@ -19,7 +19,7 @@ use crate::core::{
 		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
 		RequestExecutor, ValidatorIndex,
 	},
-	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet, SessionInfo},
+	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 };
 use codec::{Decode, Encode};
 use color_eyre::owo_colors::OwoColorize;
@@ -30,7 +30,7 @@ use std::{
 	fmt::{Debug, Display},
 };
 use subxt::{
-	sp_core::H256,
+	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
 };
 
@@ -56,9 +56,9 @@ struct SubxtSessionTracker {
 	/// The current session index
 	session_index: u32,
 	/// The current session info
-	current_session: SessionInfo,
+	current_keys: Vec<AccountId32>,
 	/// The previous session (if available)
-	prev_session: Option<SessionInfo>,
+	prev_keys: Option<Vec<AccountId32>>,
 }
 
 /// A subxt based parachain candidate tracker.
@@ -90,7 +90,7 @@ pub struct SubxtTracker {
 impl Display for SubxtTracker {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),);
+			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 		}
 		self.display_bitfield_propagation(f)?;
 
@@ -183,22 +183,22 @@ impl ParachainBlockTracker for SubxtTracker {
 				.await
 			{
 				self.set_relay_block(header.number, block_hash);
-				let session = self.executor.get_session_index(self.node_rpc_url.clone(), block_hash).await;
-				if let Some(cur_session) = self.get_current_session_index() {
-					if cur_session != session {
+				let cur_session = self.executor.get_session_index(self.node_rpc_url.clone(), block_hash).await;
+				if let Some(stored_session) = self.get_current_session_index() {
+					if cur_session != stored_session {
 						self.new_session(
-							session,
+							cur_session,
 							self.executor
-								.get_session_info(self.node_rpc_url.clone(), session)
+								.get_session_account_keys(self.node_rpc_url.clone(), cur_session)
 								.await
 								.unwrap(),
 						)
 					}
 				} else {
 					self.new_session(
-						session,
+						cur_session,
 						self.executor
-							.get_session_info(self.node_rpc_url.clone(), session)
+							.get_session_account_keys(self.node_rpc_url.clone(), cur_session)
 							.await
 							.unwrap(),
 					)
@@ -237,12 +237,12 @@ impl SubxtTracker {
 		self.current_relay_block = Some((block_number, block_hash));
 	}
 
-	fn get_session_info(&self, session_index: u32) -> Option<&SessionInfo> {
+	fn get_session_keys(&self, session_index: u32) -> Option<&Vec<AccountId32>> {
 		self.session_data.as_ref().map_or(None, |session_data| {
 			if session_data.session_index == session_index {
-				Some(&session_data.current_session)
+				Some(&session_data.current_keys)
 			} else if session_data.session_index - 1 == session_index {
-				session_data.prev_session.as_ref()
+				session_data.prev_keys.as_ref()
 			} else {
 				None
 			}
@@ -283,13 +283,13 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return;
+			return
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return;
+			return
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -332,7 +332,7 @@ impl SubxtTracker {
 			.iter()
 			.map(|dispute_info| {
 				let session_index = dispute_info.session;
-				let session_info = self.get_session_info(session_index);
+				let session_info = self.get_session_keys(session_index);
 				// TODO: we would like to distinguish different dispute phases at some point
 				let voted_for = dispute_info
 					.statements
@@ -402,14 +402,13 @@ impl SubxtTracker {
 	}
 
 	/// Updates cashed session with a new one, storing the previous session if needed
-	fn new_session(&mut self, session_index: u32, session: SessionInfo) {
+	fn new_session(&mut self, session_index: u32, account_keys: Vec<AccountId32>) {
 		if let Some(session_data) = &mut self.session_data {
-			let old_current = std::mem::replace(&mut session_data.current_session, session);
-			session_data.prev_session.replace(old_current);
+			let old_current = std::mem::replace(&mut session_data.current_keys, account_keys);
+			session_data.prev_keys.replace(old_current);
 			session_data.session_index = session_index;
 		} else {
-			self.session_data =
-				Some(SubxtSessionTracker { session_index, current_session: session, prev_session: None })
+			self.session_data = Some(SubxtSessionTracker { session_index, current_keys: account_keys, prev_keys: None })
 		}
 	}
 
@@ -427,9 +426,9 @@ impl SubxtTracker {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
 			// Usually this happens at startup, when we miss a core assignment and we do not update
 			// availability before calling this `fn`.
-			if self.current_candidate.max_av_bits > 0
-				&& self.current_candidate.state != ParachainBlockState::Idle
-				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			if self.current_candidate.max_av_bits > 0 &&
+				self.current_candidate.state != ParachainBlockState::Idle &&
+				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
@@ -507,7 +506,7 @@ impl SubxtTracker {
 					writeln!(
 						f,
 						"\t\t\t👹 Validator voted against supermajority: {}",
-						format!("idx: {}, address: {:?}", validator.0, validator.1).bright_red(),
+						format!("idx: {}, address: {}", validator.0, validator.1).bright_red(),
 					)?;
 				}
 			}
@@ -560,20 +559,18 @@ impl SubxtTracker {
 }
 
 // Examines session info (if any) and find the corresponding validator
-fn extract_validator_address(session_info: Option<&SessionInfo>, validator_index: u32) -> (u32, String) {
-	if let Some(session_info) = session_info.as_ref() {
-		// TODO: maybe store validators in a hash map to avoid linear search, but realistically
-		// we are doing only up to `max_validators` lookups which is under 1000 typically
-		let validator_pos = session_info
-			.active_validator_indices
-			.iter()
-			.position(|idx| idx.0 == validator_index);
-
-		return if let Some(validator_pos) = validator_pos {
-			(validator_index, format!("{:?}", session_info.discovery_keys[validator_pos]))
+fn extract_validator_address(session_keys: Option<&Vec<AccountId32>>, validator_index: u32) -> (u32, String) {
+	if let Some(session_keys) = session_keys.as_ref() {
+		if validator_index < session_keys.len() as u32 {
+			let validator_identity = &session_keys[validator_index as usize];
+			(validator_index, validator_identity.to_string())
 		} else {
-			(validator_index, format!("??? (no such validator: have {} valida)", session_info.validators.len()))
-		};
+			(
+				validator_index,
+				format!("??? (no such validator index {}: know {} validators)", validator_index, session_keys.len()),
+			)
+		}
+	} else {
+		(validator_index, "??? (no session keys)".to_string())
 	}
-	(validator_index, "??? (no session info)".to_string())
 }
