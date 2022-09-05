@@ -19,16 +19,18 @@ mod paritydb;
 mod rocksdb;
 mod traits;
 
+mod prometheus;
 #[cfg(test)]
 mod tests;
 
 use crate::{
 	eyre,
-	kvdb::{paritydb::IntrospectorParityDB, rocksdb::IntrospectorRocksDB},
+	kvdb::{paritydb::IntrospectorParityDB, prometheus::KvdbPrometheusOptions, rocksdb::IntrospectorRocksDB},
 };
 use clap::Parser;
 use color_eyre::Result;
-use log::info;
+use futures::future;
+use log::{error, info};
 use serde::Serialize;
 use std::{
 	fmt::{Display, Formatter},
@@ -113,6 +115,8 @@ pub(crate) enum KvdbMode {
 	DecodeKeys(KvdbKeysOpts),
 	/// Dump database (works with a live database for RocksDB)
 	Dump(KvdbDumpOpts),
+	/// Work as prometheus endpoint providing kvdb metrics
+	Prometheus(KvdbPrometheusOptions),
 }
 
 /// Database type
@@ -243,17 +247,18 @@ fn autodetect_db_type(db_path: &str) -> Result<KvdbType> {
 	}
 }
 
-pub fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
+pub async fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
 	let db_type = if opts.db_type == KvdbType::Auto { autodetect_db_type(opts.db.as_str())? } else { opts.db_type };
 
 	match db_type {
 		KvdbType::Auto => unreachable!(),
-		KvdbType::RocksDB => run_with_db(rocksdb::IntrospectorRocksDB::new(Path::new(opts.db.as_str()))?, opts),
-		KvdbType::ParityDB => run_with_db(paritydb::IntrospectorParityDB::new(Path::new(opts.db.as_str()))?, opts),
+		KvdbType::RocksDB => run_with_db(rocksdb::IntrospectorRocksDB::new(Path::new(opts.db.as_str()))?, opts).await,
+		KvdbType::ParityDB =>
+			run_with_db(paritydb::IntrospectorParityDB::new(Path::new(opts.db.as_str()))?, opts).await,
 	}
 }
 
-fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
+async fn run_with_db<D: IntrospectorKvdb + Sync + Send + 'static>(db: D, opts: KvdbOptions) -> Result<()> {
 	match opts.mode {
 		KvdbMode::Columns => {
 			let columns = db.list_columns()?;
@@ -323,6 +328,14 @@ fn run_with_db<D: IntrospectorKvdb>(db: D, opts: KvdbOptions) -> Result<()> {
 				},
 				KvdbDumpMode::Json => dump_into_json(db, dump_opts, output_dir.as_path())?,
 			};
+		},
+		KvdbMode::Prometheus(prometheus_opts) => {
+			match prometheus::run_prometheus_endpoint_with_db(db, prometheus_opts).await {
+				Ok(futures) => {
+					future::try_join_all(futures).await.map_err(|e| eyre!("Join error: {:?}", e))?;
+				},
+				Err(err) => error!("FATAL: cannot start prometheus kvdb command: {}", err),
+			}
 		},
 	}
 
