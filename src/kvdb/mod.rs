@@ -115,7 +115,7 @@ pub(crate) enum KvdbMode {
 	DecodeKeys(KvdbKeysOpts),
 	/// Dump database (works with a live database for RocksDB)
 	Dump(KvdbDumpOpts),
-	/// Work as prometheus endpoint providing kvdb metrics
+	/// Same as Usage, exposing metrics via a Prometheus endpoint
 	Prometheus(KvdbPrometheusOptions),
 }
 
@@ -334,7 +334,7 @@ async fn run_with_db<D: IntrospectorKvdb + Sync + Send + 'static>(db: D, opts: K
 				Ok(futures) => {
 					future::try_join_all(futures).await.map_err(|e| eyre!("Join error: {:?}", e))?;
 				},
-				Err(err) => error!("FATAL: cannot start prometheus kvdb command: {}", err),
+				Err(err) => error!("FATAL: cannot start kvdb command in prometheus mode: {}", err),
 			}
 		},
 	}
