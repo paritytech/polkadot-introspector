@@ -17,7 +17,7 @@
 use crate::kvdb::IntrospectorKvdb;
 use clap::Parser;
 use color_eyre::Result;
-use log::info;
+use log::{error, info};
 use prometheus_endpoint::{prometheus::IntGaugeVec, Opts, Registry};
 
 #[derive(Clone, Debug, Parser, Default)]
@@ -66,42 +66,69 @@ struct UpdateResult {
 	values_space: i64,
 }
 
-async fn update_db<D: IntrospectorKvdb>(db: D, metrics: KvdbPrometheusMetrics, prometheus_opts: KvdbPrometheusOptions) {
+async fn update_db<D: IntrospectorKvdb>(
+	mut db: D,
+	metrics: KvdbPrometheusMetrics,
+	prometheus_opts: KvdbPrometheusOptions,
+) {
 	loop {
 		info!("Starting update db iteration");
-		let columns = db.list_columns().unwrap();
-		let mut update_results: Vec<UpdateResult> = vec![];
-		for col in columns {
-			let mut keys_space = 0_i64;
-			let mut keys_count = 0_i64;
-			let mut values_space = 0_i64;
+		match db.list_columns() {
+			Ok(columns) => {
+				let mut update_results: Vec<UpdateResult> = vec![];
 
-			info!("Iterating over column {}", col.as_str());
-			let iter = db.iter_values(col.as_str()).unwrap();
-			for (key, value) in iter {
-				keys_space += key.len() as i64;
-				keys_count += 1;
-				values_space += value.len() as i64;
-			}
+				let all_done = columns.iter().all(|col| {
+					let mut keys_space = 0_i64;
+					let mut keys_count = 0_i64;
+					let mut values_space = 0_i64;
 
-			update_results.push(UpdateResult { column: col.clone(), keys_count, keys_space, values_space });
+					info!("Iterating over column {}", col.as_str());
+					match db.iter_values(col.as_str()) {
+						Ok(iter) =>
+							for (key, value) in iter {
+								keys_space += key.len() as i64;
+								keys_count += 1;
+								values_space += value.len() as i64;
+							},
+						Err(e) => {
+							error!(
+								"Failed to get iterator for column {} in database: {:?}, trying to reopen database",
+								col.as_str(),
+								e
+							);
+							return false
+						},
+					}
+
+					update_results.push(UpdateResult { column: col.clone(), keys_count, keys_space, values_space });
+					true
+				});
+
+				if all_done {
+					for res in &update_results {
+						metrics
+							.elements_count_gauge
+							.with_label_values(&[res.column.as_str()])
+							.set(res.keys_count);
+						metrics
+							.keys_size_gauge
+							.with_label_values(&[res.column.as_str()])
+							.set(res.keys_space);
+						metrics
+							.values_size_gauge
+							.with_label_values(&[res.column.as_str()])
+							.set(res.values_space);
+					}
+					info!("Ended update db iteration");
+				} else {
+					db = maybe_reopen_db(db);
+				}
+			},
+			Err(e) => {
+				error!("Failed to list columns in database: {:?}, trying to reopen database", e);
+				db = maybe_reopen_db(db);
+			},
 		}
-
-		for res in &update_results {
-			metrics
-				.elements_count_gauge
-				.with_label_values(&[res.column.as_str()])
-				.set(res.keys_count);
-			metrics
-				.keys_size_gauge
-				.with_label_values(&[res.column.as_str()])
-				.set(res.keys_space);
-			metrics
-				.values_size_gauge
-				.with_label_values(&[res.column.as_str()])
-				.set(res.values_space);
-		}
-		info!("Ended update db iteration");
 		tokio::time::sleep(std::time::Duration::from_secs_f32(prometheus_opts.poll_timeout)).await;
 	}
 }
@@ -124,4 +151,11 @@ fn register_metrics(registry: &Registry) -> KvdbPrometheusMetrics {
 	.expect("Failed to register metric");
 
 	KvdbPrometheusMetrics { keys_size_gauge, values_size_gauge, elements_count_gauge }
+}
+
+fn maybe_reopen_db<D: IntrospectorKvdb>(db: D) -> D {
+	match D::new(db.get_db_path()) {
+		Ok(new_db) => new_db,
+		Err(_) => db,
+	}
 }
