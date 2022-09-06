@@ -19,8 +19,6 @@ use clap::Parser;
 use color_eyre::Result;
 use log::info;
 use prometheus_endpoint::{prometheus::IntGaugeVec, Opts, Registry};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
@@ -44,7 +42,7 @@ pub async fn run_prometheus_endpoint_with_db<D: IntrospectorKvdb + Send + Sync +
 	prometheus_opts: KvdbPrometheusOptions,
 ) -> Result<Vec<tokio::task::JoinHandle<()>>> {
 	let prometheus_registry = Registry::new_custom(Some("introspector".into()), None)?;
-	let metrics = Arc::new(Mutex::new(register_metrics(&prometheus_registry)));
+	let metrics = register_metrics(&prometheus_registry);
 	let socket_addr =
 		std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), prometheus_opts.port);
 	let mut futures: Vec<tokio::task::JoinHandle<()>> = vec![];
@@ -54,7 +52,7 @@ pub async fn run_prometheus_endpoint_with_db<D: IntrospectorKvdb + Send + Sync +
 			.unwrap()
 	}));
 	futures.push(tokio::spawn(async move {
-		update_db(db, metrics.clone(), prometheus_opts).await;
+		update_db(db, metrics, prometheus_opts).await;
 	}));
 	info!("Starting prometheus node on {:?}", socket_addr);
 
@@ -68,11 +66,7 @@ struct UpdateResult {
 	values_space: i64,
 }
 
-async fn update_db<D: IntrospectorKvdb>(
-	db: D,
-	metrics: Arc<Mutex<KvdbPrometheusMetrics>>,
-	prometheus_opts: KvdbPrometheusOptions,
-) {
+async fn update_db<D: IntrospectorKvdb>(db: D, metrics: KvdbPrometheusMetrics, prometheus_opts: KvdbPrometheusOptions) {
 	loop {
 		info!("Starting update db iteration");
 		let columns = db.list_columns().unwrap();
@@ -93,18 +87,16 @@ async fn update_db<D: IntrospectorKvdb>(
 			update_results.push(UpdateResult { column: col.clone(), keys_count, keys_space, values_space });
 		}
 
-		let unlocked_metrics = metrics.lock().await;
-
 		for res in &update_results {
-			unlocked_metrics
+			metrics
 				.elements_count_gauge
 				.with_label_values(&[res.column.as_str()])
 				.set(res.keys_count);
-			unlocked_metrics
+			metrics
 				.keys_size_gauge
 				.with_label_values(&[res.column.as_str()])
 				.set(res.keys_space);
-			unlocked_metrics
+			metrics
 				.values_size_gauge
 				.with_label_values(&[res.column.as_str()])
 				.set(res.values_space);
