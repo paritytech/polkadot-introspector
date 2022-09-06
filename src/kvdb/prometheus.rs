@@ -156,6 +156,9 @@ fn register_metrics(registry: &Registry) -> KvdbPrometheusMetrics {
 fn maybe_reopen_db<D: IntrospectorKvdb>(db: D) -> D {
 	match D::new(db.get_db_path()) {
 		Ok(new_db) => new_db,
-		Err(_) => db,
+		Err(e) => {
+			error!("Cannot reopen database at {:?}: {:?}", db.get_db_path(), e);
+			db
+		},
 	}
 }
