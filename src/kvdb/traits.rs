@@ -33,6 +33,8 @@ pub trait IntrospectorKvdb {
 	fn read_only(&self) -> bool {
 		true
 	}
+	/// Returns a path to database
+	fn get_db_path(&self) -> &std::path::Path;
 	/// Writes an iterator of columns/keys/values to the kvdb  (kvdb must be not in the read-only mode)
 	fn write_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
 	where

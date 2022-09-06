@@ -19,11 +19,13 @@
 use super::{DBIter, IntrospectorKvdb};
 use color_eyre::{eyre::eyre, Result};
 use rocksdb::{IteratorMode, Options as RocksdbOptions, DB};
+use std::path::{Path, PathBuf};
 
 pub struct IntrospectorRocksDB {
 	inner: DB,
 	columns: Vec<String>,
 	read_only: bool,
+	path: PathBuf,
 }
 
 const DEFAULT_COLUMN: &str = "default";
@@ -38,7 +40,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 			.position(|elt| elt == DEFAULT_COLUMN)
 			.map(|default_column_pos| columns.remove(default_column_pos));
 		let db = DB::open_cf_for_read_only(&cf_opts, path, columns.clone(), false)?;
-		Ok(Self { inner: db, columns, read_only: true })
+		Ok(Self { inner: db, columns, read_only: true, path: path.into() })
 	}
 
 	fn list_columns(&self) -> color_eyre::Result<&Vec<String>> {
@@ -79,6 +81,10 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		self.read_only
 	}
 
+	fn get_db_path(&self) -> &Path {
+		self.path.as_path()
+	}
+
 	fn write_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
 	where
 		I: IntoIterator<Item = (K, V)>,
@@ -110,7 +116,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		cf_opts.create_missing_column_families(true);
 
 		let db = DB::open_cf(&cf_opts, output_path, &columns)?;
-		Ok(IntrospectorRocksDB { inner: db, columns, read_only: false })
+		Ok(IntrospectorRocksDB { inner: db, columns, read_only: false, path: output_path.into() })
 	}
 }
 
@@ -131,6 +137,6 @@ pub(crate) mod tests {
 		cf_opts.create_missing_column_families(true);
 
 		let db = DB::open_cf(&cf_opts, output_path, &columns).unwrap();
-		IntrospectorRocksDB { inner: db, columns, read_only: false }
+		IntrospectorRocksDB { inner: db, columns, read_only: false, path: output_path.into() }
 	}
 }

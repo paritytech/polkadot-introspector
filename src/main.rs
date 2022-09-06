@@ -111,7 +111,7 @@ async fn main() -> color_eyre::Result<()> {
 			}
 		},
 		Command::Kvdb(opts) => {
-			kvdb::introspect_kvdb(opts)?;
+			kvdb::introspect_kvdb(opts).await?;
 		},
 		Command::ParachainCommander(opts) => {
 			let mut core = core::SubxtWrapper::new(vec![opts.node.clone()]);

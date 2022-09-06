@@ -19,11 +19,13 @@
 use super::{DBIter, IntrospectorKvdb};
 use color_eyre::{eyre::eyre, Result};
 use parity_db::{Db, Options as ParityDBOptions};
+use std::path::{Path, PathBuf};
 
 pub struct IntrospectorParityDB {
 	inner: Db,
 	columns: Vec<String>,
 	read_only: bool,
+	path: PathBuf,
 }
 
 impl IntrospectorKvdb for IntrospectorParityDB {
@@ -40,7 +42,7 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 			.enumerate()
 			.map(|(idx, _)| format!("col{}", idx))
 			.collect::<Vec<_>>();
-		Ok(Self { inner: db, columns, read_only: true })
+		Ok(Self { inner: db, columns, read_only: true, path: path.into() })
 	}
 
 	fn list_columns(&self) -> color_eyre::Result<&Vec<String>> {
@@ -87,6 +89,10 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 		self.read_only
 	}
 
+	fn get_db_path(&self) -> &Path {
+		self.path.as_path()
+	}
+
 	fn write_iter<I, K, V>(&self, column: &str, iter: I) -> Result<()>
 	where
 		I: IntoIterator<Item = (K, V)>,
@@ -117,7 +123,7 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 		}
 
 		let db = Db::open_or_create(&opts)?;
-		Ok(IntrospectorParityDB { inner: db, columns, read_only: false })
+		Ok(IntrospectorParityDB { inner: db, columns, read_only: false, path: output_path.into() })
 	}
 }
 
@@ -136,6 +142,6 @@ pub(crate) mod tests {
 		}
 
 		let db = Db::open_or_create(&opts).unwrap();
-		IntrospectorParityDB { inner: db, columns, read_only: false }
+		IntrospectorParityDB { inner: db, columns, read_only: false, path: output_path.into() }
 	}
 }
