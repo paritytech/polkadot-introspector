@@ -17,8 +17,9 @@
 use crate::kvdb::IntrospectorKvdb;
 use clap::Parser;
 use color_eyre::Result;
-use log::{error, info};
+use log::{debug, error, info};
 use prometheus_endpoint::{prometheus::IntGaugeVec, Opts, Registry};
+use rand::{thread_rng, Rng};
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
@@ -29,6 +30,12 @@ pub struct KvdbPrometheusOptions {
 	/// Database poll timeout (default, once per 5 minutes).
 	#[clap(long, default_value = "300.0")]
 	poll_timeout: f32,
+	/// Probability to delay in the iteration to reduce instant DB load (default - around 10000 iterations)
+	#[clap(long, default_value = "0.00001")]
+	sleep_probability: f32,
+	/// Sleep time in seconds (default 10ms)
+	#[clap(long, default_value = "0.01")]
+	sleep_time: f32,
 }
 
 struct KvdbPrometheusMetrics {
@@ -77,10 +84,13 @@ async fn update_db<D: IntrospectorKvdb>(
 			Ok(columns) => {
 				let mut update_results: Vec<UpdateResult> = vec![];
 
-				let all_done = columns.iter().all(|col| {
+				let mut all_done = true;
+				for col in columns {
 					let mut keys_space = 0_i64;
 					let mut keys_count = 0_i64;
 					let mut values_space = 0_i64;
+					// Used to sleep more frequently on large keys
+					let mut size_factor: f32 = 1.0;
 
 					info!("Iterating over column {}", col.as_str());
 					match db.iter_values(col.as_str()) {
@@ -89,6 +99,19 @@ async fn update_db<D: IntrospectorKvdb>(
 								keys_space += key.len() as i64;
 								keys_count += 1;
 								values_space += value.len() as i64;
+
+								if prometheus_opts.sleep_probability > 0.0 && prometheus_opts.sleep_time > 0.0 {
+									let dice: f32 = thread_rng().gen_range(0.0..1.0);
+									size_factor += (key.len() + value.len()) as f32 / 10240.0;
+									if dice < prometheus_opts.sleep_probability * size_factor {
+										debug!("sleeping to unload database");
+										tokio::time::sleep(std::time::Duration::from_secs_f32(
+											prometheus_opts.sleep_time,
+										))
+										.await;
+										size_factor = 1.0;
+									}
+								}
 							},
 						Err(e) => {
 							error!(
@@ -96,13 +119,13 @@ async fn update_db<D: IntrospectorKvdb>(
 								col.as_str(),
 								e
 							);
-							return false
+							all_done = false;
+							break
 						},
 					}
 
 					update_results.push(UpdateResult { column: col.clone(), keys_count, keys_space, values_space });
-					true
-				});
+				}
 
 				if all_done {
 					for res in &update_results {

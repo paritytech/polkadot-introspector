@@ -16,7 +16,7 @@
 
 use color_eyre::Result;
 
-pub type DBIter<'a> = Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a>;
+pub type DBIter<'a> = Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a + Send + Sync>;
 /// A minimum subset of the functions required to open a database for introspection
 pub trait IntrospectorKvdb {
 	/// Opens database with some configuration
