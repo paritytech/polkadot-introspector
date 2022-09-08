@@ -18,7 +18,7 @@
 
 use super::{DBIter, IntrospectorKvdb};
 use color_eyre::{eyre::eyre, Result};
-use rocksdb::{IteratorMode, Options as RocksdbOptions, DB};
+use rocksdb::{Options as RocksdbOptions, DB};
 use std::path::{Path, PathBuf};
 
 pub struct IntrospectorRocksDB {
@@ -32,7 +32,9 @@ const DEFAULT_COLUMN: &str = "default";
 
 impl IntrospectorKvdb for IntrospectorRocksDB {
 	fn new(path: &std::path::Path) -> Result<Self> {
-		let cf_opts = RocksdbOptions::default();
+		let mut cf_opts = RocksdbOptions::default();
+		cf_opts.set_allow_mmap_reads(true);
+		cf_opts.set_dump_malloc_stats(true);
 		let mut columns = DB::list_cf(&cf_opts, path)?;
 		// Always ignore default column to be compatible with ParityDB
 		columns
@@ -48,14 +50,30 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 	}
 
 	fn iter_values(&self, column: &str) -> Result<DBIter> {
+		let mut iter_config = rocksdb::ReadOptions::default();
+		// Do not cache values we read
+		iter_config.fill_cache(false);
+		// Optimize for iterations
+		iter_config.set_readahead_size(4_194_304);
+		// We don't care about checksums in this tool
+		iter_config.set_verify_checksums(false);
+		// We never iterate backwards
+		iter_config.set_tailing(true);
+		// We never need to store elements when iterating
+		iter_config.set_pin_data(false);
 		let cf_handle = self
 			.inner
 			.cf_handle(column)
 			.ok_or_else(|| eyre!("invalid column: {}", column))?;
-		let mut iter = self.inner.iterator_cf(cf_handle, IteratorMode::Start);
+		let mut iter = self.inner.raw_iterator_cf_opt(cf_handle, iter_config);
+		iter.seek_to_first();
 		Ok(Box::new(std::iter::from_fn(move || {
-			if let Some(Ok((key, value))) = iter.next() {
-				Some((key, value))
+			if !iter.valid() {
+				None
+			} else if let Some((key, value)) = iter.item() {
+				let ret = Some((Box::from(key), Box::from(value)));
+				iter.next();
+				ret
 			} else {
 				None
 			}
@@ -67,6 +85,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 			.inner
 			.cf_handle(column)
 			.ok_or_else(|| eyre!("invalid column: {}", column))?;
+		// TODO: rocksdb does not support iterators with prefixes and options?
 		let mut iter = self.inner.prefix_iterator_cf(cf_handle, prefix);
 		Ok(Box::new(std::iter::from_fn(move || {
 			if let Some(Ok((key, value))) = iter.next() {
