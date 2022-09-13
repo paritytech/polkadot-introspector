@@ -80,6 +80,7 @@ async fn update_db<D: IntrospectorKvdb>(
 ) {
 	loop {
 		info!("Starting update db iteration");
+
 		match db.list_columns() {
 			Ok(columns) => {
 				let mut update_results: Vec<UpdateResult> = vec![];
@@ -152,7 +153,10 @@ async fn update_db<D: IntrospectorKvdb>(
 				db = maybe_reopen_db(db);
 			},
 		}
+
 		tokio::time::sleep(std::time::Duration::from_secs_f32(prometheus_opts.poll_timeout)).await;
+		// We need to reopen database on each iteration, since we would have outdated data for RocksDB otherwise
+		db = maybe_reopen_db(db);
 	}
 }
 
