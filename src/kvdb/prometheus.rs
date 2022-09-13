@@ -17,7 +17,7 @@
 use crate::kvdb::IntrospectorKvdb;
 use clap::Parser;
 use color_eyre::Result;
-use log::{debug, error, info};
+use log::{error, info, trace};
 use prometheus_endpoint::{prometheus::IntGaugeVec, Opts, Registry};
 use rand::{thread_rng, Rng};
 
@@ -105,7 +105,7 @@ async fn update_db<D: IntrospectorKvdb>(
 									let dice: f32 = thread_rng().gen_range(0.0..1.0);
 									size_factor += (key.len() + value.len()) as f32 / 10240.0;
 									if dice < prometheus_opts.sleep_probability * size_factor {
-										debug!("sleeping to unload database");
+										trace!("sleeping to unload database");
 										tokio::time::sleep(std::time::Duration::from_secs_f32(
 											prometheus_opts.sleep_time,
 										))
