@@ -175,20 +175,23 @@ async fn decode_or_send_raw_event(
 ) -> color_eyre::Result<()> {
 	use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
 
-	let subxt_event = if let Ok(Some(DisputeInitiated(candidate_hash, _))) = event.as_event() {
-		SubxtEvent::DisputeInitiated(SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 })
-	} else if let Ok(Some(DisputeConcluded(candidate_hash, outcome))) = event.as_event() {
-		let outcome = match outcome {
+	let subxt_event = if is_specific_event::<DisputeInitiated>(&event) {
+		let decoded = decode_to_specific_event::<DisputeInitiated>(&event)?;
+		SubxtEvent::DisputeInitiated(SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 })
+	} else if is_specific_event::<DisputeConcluded>(&event) {
+		let decoded = decode_to_specific_event::<DisputeConcluded>(&event)?;
+		let outcome = match decoded.1 {
 			RuntimeDisputeResult::Valid => SubxtDisputeResult::Valid,
 			RuntimeDisputeResult::Invalid => SubxtDisputeResult::Invalid,
 		};
 		SubxtEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 },
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
 			outcome,
 		)
-	} else if let Ok(Some(DisputeTimedOut(candidate_hash))) = event.as_event() {
+	} else if is_specific_event::<DisputeTimedOut>(&event) {
+		let decoded = decode_to_specific_event::<DisputeTimedOut>(&event)?;
 		SubxtEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: candidate_hash.0 },
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
 			SubxtDisputeResult::TimedOut,
 		)
 	} else {
@@ -199,4 +202,30 @@ async fn decode_or_send_raw_event(
 		.send(subxt_event)
 		.await
 		.map_err(|e| eyre!("cannot send to the channel: {:?}", e))
+}
+
+fn is_specific_event<E: subxt::Event>(raw_event: &subxt::events::RawEventDetails) -> bool {
+	E::is_event(raw_event.pallet.as_str(), raw_event.variant.as_str())
+}
+
+fn decode_to_specific_event<E: subxt::Event>(raw_event: &subxt::events::RawEventDetails) -> color_eyre::Result<E> {
+	raw_event
+		.as_event()
+		.map_err(|e| {
+			eyre!(
+				"cannot decode event pallet {}, variant {}: {:?}",
+				raw_event.pallet.as_str(),
+				raw_event.variant.as_str(),
+				e
+			)
+		})
+		.and_then(|maybe_event| {
+			maybe_event.ok_or_else(|| {
+				eyre!(
+					"cannot decode event pallet {}, variant {}: no event found",
+					raw_event.pallet.as_str(),
+					raw_event.variant.as_str(),
+				)
+			})
+		})
 }
