@@ -15,19 +15,21 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
 use async_trait::async_trait;
 use color_eyre::eyre::eyre;
 use futures::{future, StreamExt};
 use log::{error, info};
+use subxt::sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash};
 use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
+use tokio::sync::mpsc::{channel, Sender};
 
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
 pub mod polkadot {}
 
+use polkadot::para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut};
 use polkadot::paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut};
-use tokio::sync::mpsc::{channel, Sender};
-
-use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
+use polkadot::runtime_types::polkadot_primitives::v2::CandidateDescriptor;
 
 pub struct SubxtWrapper {
 	urls: Vec<String>,
@@ -49,8 +51,33 @@ pub enum SubxtDisputeResult {
 /// A helper structure to keep track of a dispute and it's relay parent
 #[derive(Debug, Clone)]
 pub struct SubxtDispute {
+	/// Relay chain block where a dispute has taken place
 	pub relay_parent_block: <DefaultConfig as subxt::Config>::Hash,
+	/// Specific candidate being disputed about
 	pub candidate_hash: <DefaultConfig as subxt::Config>::Hash,
+}
+
+#[derive(Debug)]
+pub enum SubxtCandidateEventType {
+	/// Candidate has been backed
+	Backed,
+	/// Candidate has been included
+	Included,
+	/// Candidate has been timed out
+	TimedOut,
+}
+/// A structure that helps to deal with the candidate events decoding some of
+/// the important fields there
+#[derive(Debug)]
+pub struct SubxtCandidateEvent {
+	/// Result of candidate receipt hashing
+	pub candidate_hash: <DefaultConfig as subxt::Config>::Hash,
+	/// Full candidate receipt if needed
+	pub candidate_descriptor: CandidateDescriptor<<DefaultConfig as subxt::Config>::Hash>,
+	/// The parachain id
+	pub parachain_id: u32,
+	/// The event type
+	pub event_type: SubxtCandidateEventType,
 }
 
 #[derive(Debug)]
@@ -61,6 +88,8 @@ pub enum SubxtEvent {
 	DisputeInitiated(SubxtDispute),
 	/// Conclusion for a dispute
 	DisputeConcluded(SubxtDispute, SubxtDisputeResult),
+	/// Backing, inclusion, time out for a parachain candidate
+	CandidateChanged(SubxtCandidateEvent),
 	/// Anything undecoded
 	RawEvent(<DefaultConfig as subxt::Config>::Hash, subxt::RawEventDetails),
 }
@@ -194,6 +223,15 @@ async fn decode_or_send_raw_event(
 			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
 			SubxtDisputeResult::TimedOut,
 		)
+	} else if is_specific_event::<CandidateBacked>(&event) {
+		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
+		SubxtEvent::CandidateChanged(create_candidate_event(decoded.0.descriptor, SubxtCandidateEventType::Backed))
+	} else if is_specific_event::<CandidateIncluded>(&event) {
+		let decoded = decode_to_specific_event::<CandidateIncluded>(&event)?;
+		SubxtEvent::CandidateChanged(create_candidate_event(decoded.0.descriptor, SubxtCandidateEventType::Included))
+	} else if is_specific_event::<CandidateTimedOut>(&event) {
+		let decoded = decode_to_specific_event::<CandidateTimedOut>(&event)?;
+		SubxtEvent::CandidateChanged(create_candidate_event(decoded.0.descriptor, SubxtCandidateEventType::TimedOut))
 	} else {
 		SubxtEvent::RawEvent(block_hash, event)
 	};
@@ -228,4 +266,13 @@ fn decode_to_specific_event<E: subxt::Event>(raw_event: &subxt::events::RawEvent
 				)
 			})
 		})
+}
+
+fn create_candidate_event(
+	candidate_descriptor: CandidateDescriptor<<DefaultConfig as subxt::Config>::Hash>,
+	event_type: SubxtCandidateEventType,
+) -> SubxtCandidateEvent {
+	let candidate_hash = BlakeTwo256::hash_of(&candidate_descriptor);
+	let parachain_id = candidate_descriptor.para_id.0;
+	SubxtCandidateEvent { event_type, candidate_descriptor, parachain_id, candidate_hash }
 }
