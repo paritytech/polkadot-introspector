@@ -31,7 +31,7 @@ strum = { version = "0.24.1", features = ["derive"] }
 rocksdb = "0.19.0"
 parity-db = "0.3.17"
 hex = "0.4.3"
-itertools = "0.10.3"
+itertools = "0.10.4"
 snap = "1.0.5"
 rand = "0.8.5"
 time = { version = "0.3.14", features = ["formatting"] }
