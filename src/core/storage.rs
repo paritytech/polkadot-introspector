@@ -16,6 +16,7 @@
 //! Ephemeral in memory storage facilities for on-chain/off-chain data.
 #![allow(dead_code)]
 
+use crate::eyre;
 use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
@@ -81,8 +82,8 @@ impl StorageEntry {
 		StorageEntry { record_source: RecordSource::Offchain, record_time, data: data.encode() }
 	}
 
-	pub fn into_inner<T: Decode>(self) -> T {
-		T::decode(&mut self.data.as_slice()).unwrap()
+	pub fn into_inner<T: Decode>(self) -> color_eyre::Result<T> {
+		T::decode(&mut self.data.as_slice()).map_err(|e| eyre!("decode error: {:?}", e))
 	}
 }
 
@@ -148,7 +149,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 	// TODO: must fail for values with blocks below the pruning threshold.
 	pub fn insert(&mut self, key: K, entry: StorageEntry) {
 		if self.direct_records.contains_key(&key) {
-			return
+			return;
 		}
 		let entry = Arc::new(entry);
 		let block_number = entry.time().block_number();
