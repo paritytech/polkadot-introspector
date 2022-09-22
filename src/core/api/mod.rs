@@ -68,7 +68,7 @@ mod tests {
 			.storage_write(key, StorageEntry::new_onchain(1.into(), "some data"))
 			.await;
 		let value = storage.storage_read(key).await.unwrap();
-		assert_eq!(value.into_inner::<String>(), "some data");
+		assert_eq!(value.into_inner::<String>().unwrap(), "some data");
 	}
 
 	#[tokio::test]

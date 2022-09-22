@@ -28,6 +28,7 @@ use tokio::sync::{
 pub enum RequestType {
 	StorageWrite(H256, StorageEntry),
 	StorageRead(H256),
+	StorageReplace(H256, StorageEntry),
 }
 
 #[derive(Debug)]
@@ -51,6 +52,12 @@ impl RequestExecutor {
 	/// Write a value to storage. Panics if API channel is gone.
 	pub async fn storage_write(&self, key: H256, value: StorageEntry) {
 		let request = Request { request_type: RequestType::StorageWrite(key, value), response_sender: None };
+		self.to_api.send(request).await.expect("Channel closed");
+	}
+
+	/// Replaces a value in storage. Panics if API channel is gone.
+	pub async fn storage_replace(&self, key: H256, value: StorageEntry) {
+		let request = Request { request_type: RequestType::StorageReplace(key, value), response_sender: None };
 		self.to_api.send(request).await.expect("Channel closed");
 	}
 
@@ -84,6 +91,9 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>, storage_config:
 			},
 			RequestType::StorageWrite(key, value) => {
 				the_storage.insert(key, value);
+			},
+			RequestType::StorageReplace(key, value) => {
+				the_storage.replace(key, value);
 			},
 		}
 	}

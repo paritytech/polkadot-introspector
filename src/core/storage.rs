@@ -18,6 +18,7 @@
 
 use crate::eyre;
 use codec::{Decode, Encode};
+use std::sync::Weak;
 use std::{
 	borrow::Borrow,
 	collections::{BTreeMap, HashMap},
@@ -132,7 +133,7 @@ pub struct RecordsStorage<K: Hash + Clone> {
 	/// The last block number we've seen. Used to index the storage of all entries.
 	last_block: Option<BlockNumber>,
 	/// Elements with expire dates.
-	ephemeral_records: BTreeMap<BlockNumber, HashMap<K, Arc<StorageEntry>>>,
+	ephemeral_records: BTreeMap<BlockNumber, HashMap<K, Weak<StorageEntry>>>,
 	/// Direct mapping to values.
 	direct_records: HashMap<K, Arc<StorageEntry>>,
 }
@@ -159,9 +160,18 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		self.ephemeral_records
 			.entry(block_number)
 			.or_insert_with(Default::default)
-			.insert(key, entry);
+			.insert(key, Arc::downgrade(&entry));
 
 		self.prune();
+	}
+
+	pub fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry> {
+		if !self.direct_records.contains_key(&key) {
+			None
+		} else {
+			let record = self.direct_records.get_mut(&key).unwrap();
+			Some(std::mem::replace(Arc::make_mut(record), entry))
+		}
 	}
 
 	// Prune all entries which are older than `self.config.max_blocks` vs current block.
@@ -172,7 +182,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 			// Prune all entries at oldest block
 			let oldest_block = {
 				let (oldest_block, entries) = self.ephemeral_records.iter().next().unwrap();
-				for (key, _value) in entries.iter() {
+				for (key, _) in entries.iter() {
 					self.direct_records.remove(key);
 				}
 
@@ -225,16 +235,16 @@ mod tests {
 
 		let a = st.get("key1").unwrap();
 		assert_eq!(a.record_source, RecordSource::Onchain);
-		assert_eq!(a.into_inner::<u32>(), 1);
+		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
 
 		let b = st.get("key100").unwrap();
 		assert_eq!(b.record_source, RecordSource::Offchain);
-		assert_eq!(b.into_inner::<u32>(), 2);
+		assert_eq!(b.into_inner::<u32>().unwrap(), 2);
 		assert_eq!(st.get("key2"), None);
 
 		// This insert prunes prev entries at block #1
 		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100));
-		assert_eq!(st.get("key2").unwrap().into_inner::<u32>(), 100);
+		assert_eq!(st.get("key2").unwrap().into_inner::<u32>().unwrap(), 100);
 
 		assert_eq!(st.get("key1"), None);
 		assert_eq!(st.get("key100"), None);
@@ -251,5 +261,20 @@ mod tests {
 
 		// 10 keys per block * 2 max blocks.
 		assert_eq!(st.len(), 20);
+	}
+
+	#[test]
+	fn test_duplicate() {
+		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
+
+		st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 1));
+		// Cannot overwrite
+		st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 2));
+		let a = st.get("key").unwrap();
+		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
+		// Can replace
+		st.replace("key".to_owned(), StorageEntry::new_onchain(1.into(), 2));
+		let a = st.get("key").unwrap();
+		assert_eq!(a.into_inner::<u32>().unwrap(), 2);
 	}
 }
