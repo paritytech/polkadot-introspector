@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::records_storage::StorageEntry;
 use crate::core::polkadot::runtime_types::polkadot_primitives::v2 as polkadot_rt_primitives;
 use serde::{
 	ser::{SerializeStruct, Serializer},
@@ -22,18 +21,17 @@ use serde::{
 };
 use serde_bytes::Bytes;
 
-use std::{
-	hash::Hash,
-	time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use codec::{Decode, Encode};
+use std::{hash::Hash, time::Duration};
+use subxt::sp_core::H256;
 
 /// Tracks candidate inclusion as seen by a node(s)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CandidateInclusion<T: Hash> {
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
+pub struct CandidateInclusion<T: Encode + Decode> {
 	/// Parachain id (must be known if we have observed a candidate receipt)
-	pub parachain_id: Option<u32>,
+	pub parachain_id: u32,
 	/// Time when a candidate has been backed
-	pub backed: Option<Duration>,
+	pub backed: Duration,
 	/// Time when a candidate has been included
 	pub included: Option<Duration>,
 	/// Time when a candidate has been timed out
@@ -41,17 +39,11 @@ pub struct CandidateInclusion<T: Hash> {
 	/// Observed core index
 	pub core_idx: Option<u32>,
 	/// Relay parent
-	pub relay_parent: Option<T>,
-}
-
-impl<T: Hash> Default for CandidateInclusion<T> {
-	fn default() -> Self {
-		Self { parachain_id: None, backed: None, included: None, timedout: None, core_idx: None, relay_parent: None }
-	}
+	pub relay_parent: T,
 }
 
 /// Outcome of the dispute
-#[derive(Debug, Copy, Clone, Serialize)]
+#[derive(Debug, Copy, Clone, Serialize, Encode, Decode)]
 pub enum DisputeOutcome {
 	/// Dispute has not been concluded yet
 	InProgress,
@@ -70,7 +62,7 @@ impl Default for DisputeOutcome {
 }
 
 /// Outcome of the dispute + timestamp
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Clone, Serialize, Decode, Encode)]
 pub struct DisputeResult {
 	/// The current outcome
 	pub outcome: DisputeOutcome,
@@ -79,7 +71,7 @@ pub struct DisputeResult {
 }
 
 /// Tracks candidate disputes as seen by a node(s)
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Clone, Serialize, Decode, Encode)]
 pub struct CandidateDisputed {
 	/// When do we observe this dispute
 	pub disputed: Duration,
@@ -89,7 +81,7 @@ pub struct CandidateDisputed {
 
 impl<T> Serialize for polkadot_rt_primitives::CandidateDescriptor<T>
 where
-	T: Hash + Serialize,
+	T: Hash + Serialize + Decode + Encode,
 {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -111,7 +103,7 @@ where
 
 impl<T> Serialize for polkadot_rt_primitives::CandidateReceipt<T>
 where
-	T: Hash + Serialize,
+	T: Hash + Serialize + Decode + Encode,
 {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -125,44 +117,19 @@ where
 }
 
 /// Stores tracking data for a candidate
-#[derive(Debug, Serialize)]
-pub struct CandidateRecord<T: Hash + Serialize> {
+#[derive(Debug, Serialize, Encode, Decode)]
+pub struct CandidateRecord {
 	/// Candidate receipt (if observed)
-	pub candidate_receipt: Option<polkadot_rt_primitives::CandidateReceipt<T>>,
+	pub candidate_descriptor: polkadot_rt_primitives::CandidateDescriptor<H256>,
 	/// The time we first observed a candidate since UnixEpoch
 	pub candidate_first_seen: Duration,
 	/// Inclusion data
-	pub candidate_inclusion: CandidateInclusion<T>,
+	pub candidate_inclusion: CandidateInclusion<H256>,
 	/// Dispute data
 	pub candidate_disputed: Option<CandidateDisputed>,
 }
 
-impl<T: Hash + Serialize> Default for CandidateRecord<T> {
-	fn default() -> Self {
-		Self {
-			candidate_receipt: None,
-			candidate_first_seen: SystemTime::now()
-				.duration_since(UNIX_EPOCH)
-				.expect("Clock skewed before unix epoch"),
-			candidate_inclusion: Default::default(),
-			candidate_disputed: None,
-		}
-	}
-}
-
-impl<T> StorageEntry for CandidateRecord<T>
-where
-	T: Hash + Serialize,
-{
-	fn get_time(&self) -> Duration {
-		self.candidate_first_seen
-	}
-}
-
-impl<T> CandidateRecord<T>
-where
-	T: Hash + Serialize,
-{
+impl CandidateRecord {
 	/// Returns if a candidate has been disputed
 	#[allow(dead_code)]
 	pub fn is_disputed(&self) -> bool {
@@ -173,7 +140,7 @@ where
 	#[allow(dead_code)]
 	pub fn inclusion_time(&self) -> Option<Duration> {
 		match (self.candidate_inclusion.backed, self.candidate_inclusion.included) {
-			(Some(backed), Some(included)) => included.checked_sub(backed),
+			(backed, Some(included)) => included.checked_sub(backed),
 			_ => None,
 		}
 	}
@@ -189,22 +156,21 @@ where
 
 	/// Returns a relay parent for a specific candidate
 	#[allow(dead_code)]
-	pub fn relay_parent(&self) -> Option<&T> {
-		let receipt = &self.candidate_receipt.as_ref()?;
-		let descriptor = &receipt.descriptor;
-		Some(&descriptor.relay_parent)
+	pub fn relay_parent(&self) -> H256 {
+		let descriptor = &self.candidate_descriptor;
+		descriptor.relay_parent
 	}
 
-	pub fn parachain_id(&self) -> Option<u32> {
+	pub fn parachain_id(&self) -> u32 {
 		self.candidate_inclusion.parachain_id
 	}
 }
 
 /// A type for updates propagation
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Decode, Encode)]
 pub enum CandidateRecordUpdate<T>
 where
-	T: Hash + Serialize,
+	T: Hash + Serialize + Decode + Encode,
 {
 	/// A candidate has been backed
 	Backed(T),

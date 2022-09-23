@@ -15,24 +15,30 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use log::{debug, info};
-use std::{net::SocketAddr, sync::Arc};
+use codec::Encode;
+use log::{debug, info, warn};
+use std::{
+	default::Default,
+	net::SocketAddr,
+	time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use subxt::sp_core::H256;
 use tokio::{
 	signal,
-	sync::{broadcast, mpsc::Receiver, Mutex},
+	sync::{broadcast, mpsc::Receiver},
 };
 
 mod candidate_record;
-mod event_handler;
-mod records_storage;
 mod ws;
 
-use crate::core::{EventConsumerInit, SubxtEvent};
+use crate::core::{
+	ApiService, EventConsumerInit, RecordTime, RecordsStorageConfig, StorageEntry, StorageInfo, SubxtCandidateEvent,
+	SubxtCandidateEventType, SubxtEvent,
+};
 use candidate_record::*;
 use color_eyre::eyre::eyre;
-use event_handler::*;
-use records_storage::*;
+use subxt::DefaultConfig;
+use tokio::sync::broadcast::Sender;
 use ws::*;
 
 #[derive(Clone, Debug, Parser)]
@@ -40,12 +46,9 @@ use ws::*;
 pub(crate) struct CollectorOptions {
 	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://westmint-rpc.polkadot.io:443")]
 	pub nodes: Vec<String>,
-	/// Maximum candidates to store
-	#[clap(name = "max-candidates", long)]
-	max_candidates: Option<usize>,
-	/// Maximum age of candidates to preserve (default: 1 day)
-	#[clap(name = "max-ttl", long, default_value = "86400")]
-	max_ttl: usize,
+	/// Maximum blocks to store
+	#[clap(name = "max-blocks", long)]
+	max_blocks: Option<usize>,
 	/// WS listen address to bind to
 	#[clap(short = 'l', long = "listen", default_value = "0.0.0.0:3030")]
 	listen_addr: SocketAddr,
@@ -57,58 +60,52 @@ impl From<CollectorOptions> for WebSocketListenerConfig {
 	}
 }
 
-impl From<CollectorOptions> for RecordsStorageConfig {
-	fn from(opts: CollectorOptions) -> RecordsStorageConfig {
-		RecordsStorageConfig { max_ttl: Some(opts.max_ttl), max_records: opts.max_candidates }
-	}
-}
-
 pub(crate) async fn run(
 	opts: CollectorOptions,
 	consumer_config: EventConsumerInit<SubxtEvent>,
 ) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-	let records_storage = Arc::new(Mutex::new(RecordsStorage::<H256, CandidateRecord<H256>>::new(opts.clone().into())));
+	let api_service =
+		ApiService::new_with_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(1000) });
 	let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-	let (updates_tx, _updates_rx) = broadcast::channel(32);
-
+	let (to_websocket, _) = broadcast::channel(32);
 	let endpoints = opts.nodes.clone().into_iter();
 
 	let consumer_channels: Vec<Receiver<SubxtEvent>> = consumer_config.into();
-	let ws_listener = WebSocketListener::new(opts.clone().into(), records_storage.clone());
+	let ws_listener = WebSocketListener::new(opts.clone().into(), api_service.clone());
 	ws_listener
-		.spawn(shutdown_rx, updates_tx.clone())
+		.spawn(shutdown_rx, to_websocket.clone())
 		.await
 		.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
-
-	let events_handler = Arc::new(Mutex::new(
-		EventsHandler::builder()
-			.storage(records_storage.clone())
-			.broadcast_tx(updates_tx.clone())
-			.build(),
-	));
 
 	let mut futures = endpoints
 		.zip(consumer_channels.into_iter())
 		.map(|(endpoint, mut update_channel)| {
-			let events_handler = events_handler.clone();
 			let mut shutdown_rx = shutdown_tx.subscribe();
+			let to_websocket = to_websocket.clone();
+			let api_service = api_service.clone();
+
 			tokio::spawn(async move {
 				loop {
 					debug!("[{}] New loop - waiting for events", endpoint);
+
 					tokio::select! {
 						Some(event) = update_channel.recv() => {
 							debug!("New event: {:?}", event);
-							match event {
-								SubxtEvent::RawEvent(hash, raw_ev) => {
-									if let Err(e) = events_handler
-										.lock()
-										.await
-										.handle_runtime_event(&raw_ev, &hash).await {
-											debug!("cannot handle event: {:?}", e)
-										};
+							let result = match event {
+								SubxtEvent::NewHead(block_hash) => {
+									process_new_head(endpoint.as_str(), &api_service, block_hash).await
 								},
-								_ => continue,
+								SubxtEvent::CandidateChanged(change_event) => {
+									process_candidate_change(&api_service, change_event, &to_websocket).await
+								},
+								_ => Ok(()),
 							};
+							match result {
+								Ok(_) => continue,
+								Err(e) => {
+									warn!("error processing event: {:?}", e);
+								}
+							}
 						},
 						_ = shutdown_rx.recv() => {
 							info!("shutting down");
@@ -125,4 +122,149 @@ pub(crate) async fn run(
 		let _ = shutdown_tx.send(());
 	}));
 	Ok(futures)
+}
+
+async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256) -> color_eyre::Result<()> {
+	let executor = api_service.subxt();
+	let ts = executor.get_block_timestamp(url.into(), Some(block_hash)).await;
+	let header = executor
+		.get_block_head(url.into(), Some(block_hash))
+		.await
+		.ok_or(eyre!("Missing block {}", block_hash))?;
+	api_service
+		.storage()
+		.storage_write(
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header.encode()),
+		)
+		.await;
+	Ok(())
+}
+
+async fn process_candidate_change(
+	api_service: &ApiService,
+	change_event: SubxtCandidateEvent,
+	to_websocket: &Sender<WebSocketUpdateEvent>,
+) -> color_eyre::Result<()> {
+	let storage = api_service.storage();
+	match change_event.event_type {
+		SubxtCandidateEventType::Backed => {
+			// Candidate should not exist in our storage
+			let maybe_existing = storage.storage_read(change_event.candidate_hash).await;
+			if let Some(existing) = maybe_existing {
+				let candidate_descriptor: CandidateRecord = existing.into_inner()?;
+				info!(
+					"duplicate candidate found: {}, parachain: {}",
+					change_event.candidate_hash,
+					candidate_descriptor.parachain_id()
+				);
+			} else {
+				// Find the relay parent
+				let maybe_relay_parent = storage.storage_read(change_event.candidate_descriptor.relay_parent).await;
+
+				if let Some(relay_parent) = maybe_relay_parent {
+					let now = get_unix_time_unwrap();
+					let parent: <DefaultConfig as subxt::Config>::Header = relay_parent.into_inner()?;
+					let block_number = parent.number;
+					let candidate_inclusion = CandidateInclusion {
+						relay_parent: change_event.candidate_descriptor.relay_parent,
+						parachain_id: change_event.parachain_id,
+						backed: now,
+						core_idx: None,
+						timedout: None,
+						included: None,
+					};
+					let new_record = CandidateRecord {
+						candidate_inclusion,
+						candidate_first_seen: now,
+						candidate_descriptor: change_event.candidate_descriptor,
+						candidate_disputed: None,
+					};
+					api_service
+						.storage()
+						.storage_write(
+							change_event.candidate_hash,
+							StorageEntry::new_onchain(
+								RecordTime::with_ts(block_number, Duration::from_secs(now.as_secs())),
+								new_record.encode(),
+							),
+						)
+						.await;
+					to_websocket
+						.send(WebSocketUpdateEvent {
+							candidate_hash: change_event.candidate_hash,
+							ts: now,
+							parachain_id: change_event.parachain_id,
+							event: WebSocketEventType::Backed,
+						})
+						.unwrap();
+				} else {
+					return Err(eyre!(
+						"no stored relay parent {} for candidate {}",
+						change_event.candidate_descriptor.relay_parent,
+						change_event.candidate_hash
+					))
+				}
+			}
+		},
+		SubxtCandidateEventType::Included => {
+			let maybe_known_candidate = api_service.storage().storage_read(change_event.candidate_hash).await;
+
+			if let Some(known_candidate) = maybe_known_candidate {
+				let record_time = known_candidate.time();
+				let mut known_candidate: CandidateRecord = known_candidate.into_inner()?;
+				let now = get_unix_time_unwrap();
+				known_candidate.candidate_inclusion.included = Some(now);
+				to_websocket
+					.send(WebSocketUpdateEvent {
+						candidate_hash: change_event.candidate_hash,
+						ts: now,
+						parachain_id: change_event.parachain_id,
+						event: WebSocketEventType::Included(now.saturating_sub(known_candidate.candidate_first_seen)),
+					})
+					.unwrap();
+				api_service
+					.storage()
+					.storage_replace(
+						change_event.candidate_hash,
+						StorageEntry::new_onchain(record_time, known_candidate.encode()),
+					)
+					.await;
+			} else {
+				info!("unknown candidate {} has been included", change_event.candidate_hash);
+			}
+		},
+		SubxtCandidateEventType::TimedOut => {
+			let maybe_known_candidate = api_service.storage().storage_read(change_event.candidate_hash).await;
+
+			if let Some(known_candidate) = maybe_known_candidate {
+				let record_time = known_candidate.time();
+				let mut known_candidate: CandidateRecord = known_candidate.into_inner()?;
+				let now = get_unix_time_unwrap();
+				known_candidate.candidate_inclusion.timedout = Some(now);
+				to_websocket
+					.send(WebSocketUpdateEvent {
+						candidate_hash: change_event.candidate_hash,
+						ts: now,
+						parachain_id: change_event.parachain_id,
+						event: WebSocketEventType::TimedOut(now.saturating_sub(known_candidate.candidate_first_seen)),
+					})
+					.unwrap();
+				api_service
+					.storage()
+					.storage_replace(
+						change_event.candidate_hash,
+						StorageEntry::new_onchain(record_time, known_candidate.encode()),
+					)
+					.await;
+			} else {
+				info!("unknown candidate {} has been timed out", change_event.candidate_hash);
+			}
+		},
+	}
+	Ok(())
+}
+
+fn get_unix_time_unwrap() -> Duration {
+	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }

@@ -13,9 +13,7 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-
-use super::{event_handler::StorageType, records_storage::StorageEntry};
-
+use crate::{collector::candidate_record::CandidateRecord, core::api::ApiService};
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
@@ -27,8 +25,7 @@ use std::{
 	marker::Send,
 	net::SocketAddr,
 	path::PathBuf,
-	sync::Arc,
-	time::{SystemTime, UNIX_EPOCH},
+	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::sp_core::H256;
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -57,7 +54,28 @@ pub struct WebSocketListener {
 	/// Configuration for a listener
 	config: WebSocketListenerConfig,
 	/// Storage to access
-	storage: Arc<StorageType<H256>>,
+	api: ApiService,
+}
+
+/// Defines WebSocket event types
+#[derive(Clone, Copy, Deserialize, Serialize, Debug)]
+pub(crate) enum WebSocketEventType {
+	Backed,
+	Included(Duration),
+	TimedOut(Duration),
+}
+
+/// Handles websocket updates
+#[derive(Clone, Deserialize, Serialize, Debug)]
+pub(crate) struct WebSocketUpdateEvent {
+	/// Candidate hash
+	pub candidate_hash: H256,
+	/// Parachain ID
+	pub parachain_id: u32,
+	/// Timestamp for the event
+	pub ts: Duration,
+	/// The real event
+	pub event: WebSocketEventType,
 }
 
 /// Used to handle requests to obtain candidates
@@ -86,8 +104,8 @@ struct HealthQuery {
 /// Common functions for a listener
 impl WebSocketListener {
 	/// Creates a new socket listener with the specific config
-	pub fn new(config: WebSocketListenerConfig, storage: Arc<StorageType<H256>>) -> Self {
-		Self { config, storage }
+	pub fn new(config: WebSocketListenerConfig, api: ApiService) -> Self {
+		Self { config, api }
 	}
 
 	/// Spawn an async HTTP server
@@ -107,7 +125,7 @@ impl WebSocketListener {
 			.map(Some)
 			.or_else(|_| async { Ok::<(Option<HealthQuery>,), std::convert::Infallible>((None,)) });
 		let health_route = warp::path!("v1" / "health")
-			.and(with_storage(self.storage.clone()))
+			.and(with_api_service(self.api.clone()))
 			.and(opt_ping)
 			.and_then(health_handler);
 
@@ -115,21 +133,19 @@ impl WebSocketListener {
 			.map(Some)
 			.or_else(|_| async { Ok::<(Option<CandidatesQuery>,), std::convert::Infallible>((None,)) });
 		let candidates_route = warp::path!("v1" / "candidates")
-			.and(with_storage(self.storage.clone()))
+			.and(with_api_service(self.api.clone()))
 			.and(opt_candidates)
 			.and_then(candidates_handler);
 
 		let get_candidate_route = warp::path!("v1" / "candidate")
-			.and(with_storage(self.storage.clone()))
+			.and(with_api_service(self.api.clone()))
 			.and(warp::query::<CandidateGetQuery>())
 			.and_then(candidate_get_handler);
-
 		let ws_route = warp::path!("v1" / "ws")
 			.and(warp::ws())
 			.and(with_updates_channel(updates_broadcast))
 			.and(warp::addr::remote())
 			.and_then(ws_handler);
-
 		let routes = health_route
 			.or(candidates_route)
 			.or(get_candidate_route)
@@ -161,10 +177,8 @@ impl WebSocketListener {
 }
 
 // Helper to share storage state
-fn with_storage(
-	storage: Arc<StorageType<H256>>,
-) -> impl Filter<Extract = (Arc<StorageType<H256>>,), Error = Infallible> + Clone {
-	warp::any().map(move || storage.clone())
+fn with_api_service(api: ApiService) -> impl Filter<Extract = (ApiService,), Error = Infallible> + Clone {
+	warp::any().map(move || api.clone())
 }
 
 fn with_updates_channel<T: Send>(
@@ -181,13 +195,13 @@ pub struct HealthReply {
 	pub ts: u64,
 }
 
-async fn health_handler(storage: Arc<StorageType<H256>>, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
-	let storage_locked = storage.lock().await;
+async fn health_handler(api: ApiService, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
+	let storage_size = api.storage().storage_len().await;
 	let ts = match ping {
 		Some(h) => h.ts,
 		None => SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
 	};
-	Ok(warp::reply::json(&HealthReply { candidates_stored: storage_locked.len(), ts }))
+	Ok(warp::reply::json(&HealthReply { candidates_stored: storage_size, ts }))
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
@@ -196,48 +210,21 @@ pub struct CandidatesReply {
 	pub candidates: Vec<H256>,
 }
 
-async fn candidates_handler(
-	storage: Arc<StorageType<H256>>,
-	filter: Option<CandidatesQuery>,
-) -> Result<impl Reply, Rejection> {
-	let storage_locked = storage.lock().await;
-	let records = storage_locked.records();
-	let candidates = if let Some(filter_query) = filter {
-		records
-			.iter()
-			.filter(|(_, value)| {
-				if let Some(parachain_id) = filter_query.parachain_id {
-					parachain_id == value.parachain_id().unwrap_or(0)
-				} else {
-					true
-				}
-			})
-			.filter(|(_, value)| {
-				if let Some(not_before) = filter_query.not_before {
-					not_before <= value.get_time().as_secs()
-				} else {
-					true
-				}
-			})
-			.map(|(key, _)| key)
-			.cloned()
-			.collect::<Vec<_>>()
-	} else {
-		records.keys().cloned().collect::<Vec<_>>()
-	};
+async fn candidates_handler(api: ApiService, _filter: Option<CandidatesQuery>) -> Result<impl Reply, Rejection> {
+	let keys = api.storage().storage_keys().await;
+	// TODO: add filters support somehow...
 
-	Ok(warp::reply::json(&candidates.as_slice()))
+	Ok(warp::reply::json(&keys.as_slice()))
 }
 
-async fn candidate_get_handler(
-	storage: Arc<StorageType<H256>>,
-	candidate_hash: CandidateGetQuery,
-) -> Result<impl Reply, Rejection> {
-	let storage_locked = storage.lock().await;
-	let candidate_record = storage_locked.get(&candidate_hash.hash);
+async fn candidate_get_handler(api: ApiService, candidate_hash: CandidateGetQuery) -> Result<impl Reply, Rejection> {
+	let candidate_record = api.storage().storage_read(candidate_hash.hash).await;
 
 	match candidate_record {
-		Some(rec) => Ok(warp::reply::json(rec).into_response()),
+		Some(rec) => {
+			let rec: CandidateRecord = rec.into_inner().map_err(|_| warp::reject::reject())?;
+			Ok(warp::reply::json(&rec).into_response())
+		},
 		None => Ok(warp::reply::with_status("No such candidate", StatusCode::NOT_FOUND).into_response()),
 	}
 }
