@@ -30,6 +30,7 @@ pub enum RequestType {
 	StorageRead(H256),
 	StorageReplace(H256, StorageEntry),
 	StorageSize,
+	StorageKeys,
 }
 
 #[derive(Debug)]
@@ -42,6 +43,7 @@ pub struct Request {
 pub enum Response {
 	StorageReadResponse(Option<StorageEntry>),
 	StorageSizeResponse(usize),
+	StorageKeysResponse(Vec<H256>),
 }
 pub struct RequestExecutor {
 	to_api: Sender<Request>,
@@ -88,6 +90,19 @@ impl RequestExecutor {
 			Err(err) => panic!("Storage API error {}", err),
 		}
 	}
+
+	/// Returns all keys from a storage
+	pub async fn storage_keys(&self) -> Vec<H256> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { request_type: RequestType::StorageKeys, response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::StorageKeysResponse(value)) => value,
+			Ok(_) => panic!("Storage API error: invalid keys reply"),
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
 }
 
 // A task that handles storage API calls.
@@ -116,6 +131,14 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>, storage_config:
 					.response_sender
 					.expect("no sender provided")
 					.send(Response::StorageSizeResponse(size))
+					.unwrap();
+			},
+			RequestType::StorageKeys => {
+				let keys = the_storage.keys();
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::StorageKeysResponse(keys))
 					.unwrap();
 			},
 		}

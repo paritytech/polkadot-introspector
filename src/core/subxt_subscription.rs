@@ -20,16 +20,20 @@ use async_trait::async_trait;
 use color_eyre::eyre::eyre;
 use futures::{future, StreamExt};
 use log::{error, info};
-use subxt::sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash};
-use subxt::{ClientBuilder, DefaultConfig, PolkadotExtrinsicParams};
+use subxt::{
+	sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
+	ClientBuilder, DefaultConfig, PolkadotExtrinsicParams,
+};
 use tokio::sync::mpsc::{channel, Sender};
 
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
 pub mod polkadot {}
 
-use polkadot::para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut};
-use polkadot::paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut};
-use polkadot::runtime_types::polkadot_primitives::v2::CandidateDescriptor;
+use polkadot::{
+	para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
+	paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut},
+	runtime_types::polkadot_primitives::v2::CandidateDescriptor,
+};
 
 pub struct SubxtWrapper {
 	urls: Vec<String>,

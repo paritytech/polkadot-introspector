@@ -18,12 +18,11 @@
 
 use crate::eyre;
 use codec::{Decode, Encode};
-use std::sync::Weak;
 use std::{
 	borrow::Borrow,
 	collections::{BTreeMap, HashMap},
 	hash::Hash,
-	sync::Arc,
+	sync::{Arc, Weak},
 	time::Duration,
 };
 
@@ -153,7 +152,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 	// TODO: must fail for values with blocks below the pruning threshold.
 	pub fn insert(&mut self, key: K, entry: StorageEntry) {
 		if self.direct_records.contains_key(&key) {
-			return;
+			return
 		}
 		let entry = Arc::new(entry);
 		let block_number = entry.time().block_number();
@@ -210,6 +209,11 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 	/// Size of the storage
 	pub fn len(&self) -> usize {
 		self.direct_records.len()
+	}
+
+	/// Returns all keys in the storage
+	pub fn keys(&self) -> Vec<K> {
+		self.direct_records.keys().cloned().collect()
 	}
 }
 
