@@ -83,6 +83,7 @@ impl StorageEntry {
 		StorageEntry { record_source: RecordSource::Offchain, record_time, data: data.encode() }
 	}
 
+	/// Converts a storage entry into it's original type by decoding from scale codec
 	pub fn into_inner<T: Decode>(self) -> color_eyre::Result<T> {
 		T::decode(&mut self.data.as_slice()).map_err(|e| eyre!("decode error: {:?}", e))
 	}
@@ -108,11 +109,13 @@ impl StorageInfo for StorageEntry {
 }
 
 impl RecordTime {
-	fn block_number(&self) -> BlockNumber {
+	/// Returns the number of the block
+	pub fn block_number(&self) -> BlockNumber {
 		self.block_number
 	}
 
-	fn timestamp(&self) -> Option<Duration> {
+	/// Returns timestamp of the record
+	pub fn timestamp(&self) -> Option<Duration> {
 		self.timestamp
 	}
 }

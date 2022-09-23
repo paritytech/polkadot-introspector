@@ -29,6 +29,7 @@ pub enum RequestType {
 	StorageWrite(H256, StorageEntry),
 	StorageRead(H256),
 	StorageReplace(H256, StorageEntry),
+	StorageSize,
 }
 
 #[derive(Debug)]
@@ -40,6 +41,7 @@ pub struct Request {
 #[derive(Debug)]
 pub enum Response {
 	StorageReadResponse(Option<StorageEntry>),
+	StorageSizeResponse(usize),
 }
 pub struct RequestExecutor {
 	to_api: Sender<Request>,
@@ -69,7 +71,20 @@ impl RequestExecutor {
 
 		match receiver.await {
 			Ok(Response::StorageReadResponse(Some(value))) => Some(value),
-			Ok(Response::StorageReadResponse(None)) => None,
+			Ok(_) => None,
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
+
+	/// Returns number of entries in a storage
+	pub async fn storage_len(&self) -> usize {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { request_type: RequestType::StorageSize, response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::StorageSizeResponse(len)) => len,
+			Ok(_) => panic!("Storage API error: invalid size reply"),
 			Err(err) => panic!("Storage API error {}", err),
 		}
 	}
@@ -94,6 +109,14 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>, storage_config:
 			},
 			RequestType::StorageReplace(key, value) => {
 				the_storage.replace(key, value);
+			},
+			RequestType::StorageSize => {
+				let size = the_storage.len();
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::StorageSizeResponse(size))
+					.unwrap();
 			},
 		}
 	}
