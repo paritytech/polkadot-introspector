@@ -61,6 +61,7 @@ pub struct WebSocketListener {
 #[derive(Clone, Copy, Deserialize, Serialize, Debug)]
 pub(crate) enum WebSocketEventType {
 	Backed,
+	DisputeInitiated(H256),
 	Included(Duration),
 	TimedOut(Duration),
 }

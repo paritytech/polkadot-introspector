@@ -33,7 +33,7 @@ mod ws;
 
 use crate::core::{
 	ApiService, EventConsumerInit, RecordTime, RecordsStorageConfig, StorageEntry, StorageInfo, SubxtCandidateEvent,
-	SubxtCandidateEventType, SubxtEvent,
+	SubxtCandidateEventType, SubxtDispute, SubxtEvent,
 };
 use candidate_record::*;
 use color_eyre::eyre::eyre;
@@ -97,6 +97,9 @@ pub(crate) async fn run(
 								},
 								SubxtEvent::CandidateChanged(change_event) => {
 									process_candidate_change(&api_service, change_event, &to_websocket).await
+								},
+								SubxtEvent::DisputeInitiated(dispute_event) => {
+									process_dispute_initiated(&api_service, dispute_event, &to_websocket).await
 								},
 								_ => Ok(()),
 							};
@@ -262,6 +265,33 @@ async fn process_candidate_change(
 			}
 		},
 	}
+	Ok(())
+}
+
+async fn process_dispute_initiated(
+	api_service: &ApiService,
+	dispute_event: SubxtDispute,
+	to_websocket: &Sender<WebSocketUpdateEvent>,
+) -> color_eyre::Result<()> {
+	let candidate = api_service
+		.storage()
+		.storage_read(dispute_event.candidate_hash)
+		.await
+		.ok_or_else(|| eyre!("unknown candidate disputed"))?;
+	let record_time = candidate.time();
+	let mut candidate: CandidateRecord = candidate.into_inner()?;
+	let now = get_unix_time_unwrap();
+	candidate.candidate_disputed = Some(CandidateDisputed { disputed: now, concluded: None });
+	to_websocket.send(WebSocketUpdateEvent {
+		event: WebSocketEventType::DisputeInitiated(dispute_event.relay_parent_block),
+		candidate_hash: dispute_event.candidate_hash,
+		ts: now,
+		parachain_id: candidate.parachain_id(),
+	})?;
+	api_service
+		.storage()
+		.storage_replace(dispute_event.candidate_hash, StorageEntry::new_onchain(record_time, candidate.encode()))
+		.await;
 	Ok(())
 }
 
