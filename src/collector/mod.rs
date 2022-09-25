@@ -133,7 +133,7 @@ async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256)
 	let header = executor
 		.get_block_head(url.into(), Some(block_hash))
 		.await
-		.ok_or(eyre!("Missing block {}", block_hash))?;
+		.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
 	api_service
 		.storage()
 		.storage_write(
