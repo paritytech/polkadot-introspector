@@ -13,7 +13,10 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-use crate::{collector::candidate_record::CandidateRecord, core::api::ApiService};
+use crate::{
+	collector::candidate_record::CandidateRecord,
+	core::{api::ApiService, SubxtDisputeResult},
+};
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
@@ -58,16 +61,17 @@ pub struct WebSocketListener {
 }
 
 /// Defines WebSocket event types
-#[derive(Clone, Copy, Deserialize, Serialize, Debug)]
+#[derive(Clone, Copy, Serialize, Debug)]
 pub(crate) enum WebSocketEventType {
 	Backed,
 	DisputeInitiated(H256),
+	DisputeConcluded(H256, SubxtDisputeResult),
 	Included(Duration),
 	TimedOut(Duration),
 }
 
 /// Handles websocket updates
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Serialize, Debug)]
 pub(crate) struct WebSocketUpdateEvent {
 	/// Candidate hash
 	pub candidate_hash: H256,

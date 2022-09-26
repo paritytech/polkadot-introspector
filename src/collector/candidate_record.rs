@@ -21,6 +21,7 @@ use serde::{
 };
 use serde_bytes::Bytes;
 
+use crate::core::SubxtDisputeResult;
 use codec::{Decode, Encode};
 use std::{hash::Hash, time::Duration};
 use subxt::sp_core::H256;
@@ -42,30 +43,11 @@ pub struct CandidateInclusion<T: Encode + Decode> {
 	pub relay_parent: T,
 }
 
-/// Outcome of the dispute
-#[derive(Debug, Copy, Clone, Serialize, Encode, Decode)]
-pub enum DisputeOutcome {
-	/// Dispute has not been concluded yet
-	InProgress,
-	/// Dispute has been concluded as invalid
-	Invalid,
-	/// Dispute has beed concluded as valid
-	Agreed,
-	/// Dispute resolution has timed out
-	TimedOut,
-}
-
-impl Default for DisputeOutcome {
-	fn default() -> Self {
-		DisputeOutcome::InProgress
-	}
-}
-
 /// Outcome of the dispute + timestamp
-#[derive(Debug, Default, Clone, Serialize, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Decode, Encode)]
 pub struct DisputeResult {
 	/// The current outcome
-	pub outcome: DisputeOutcome,
+	pub outcome: SubxtDisputeResult,
 	/// Timestamp of a conclusion
 	pub concluded_timestamp: Duration,
 }
@@ -164,18 +146,4 @@ impl CandidateRecord {
 	pub fn parachain_id(&self) -> u32 {
 		self.candidate_inclusion.parachain_id
 	}
-}
-
-/// A type for updates propagation
-#[derive(Clone, Debug, Serialize, Decode, Encode)]
-pub enum CandidateRecordUpdate<T>
-where
-	T: Hash + Serialize + Decode + Encode,
-{
-	/// A candidate has been backed
-	Backed(T),
-	/// A candidate has been included
-	Included(T),
-	/// A candidate has been disputed
-	Disputed(T, DisputeOutcome),
 }

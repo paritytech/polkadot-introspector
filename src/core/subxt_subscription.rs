@@ -17,9 +17,11 @@
 
 use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
 use async_trait::async_trait;
+use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use futures::{future, StreamExt};
 use log::{error, info};
+use serde::Serialize;
 use subxt::{
 	sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
 	ClientBuilder, DefaultConfig, PolkadotExtrinsicParams,
@@ -42,7 +44,7 @@ pub struct SubxtWrapper {
 }
 
 /// Dispute result as seen by subxt event
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Serialize, Decode, Encode)]
 pub enum SubxtDisputeResult {
 	/// Dispute outcome is valid
 	Valid,

@@ -33,7 +33,7 @@ mod ws;
 
 use crate::core::{
 	ApiService, EventConsumerInit, RecordTime, RecordsStorageConfig, StorageEntry, StorageInfo, SubxtCandidateEvent,
-	SubxtCandidateEventType, SubxtDispute, SubxtEvent,
+	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
 };
 use candidate_record::*;
 use color_eyre::eyre::eyre;
@@ -100,6 +100,9 @@ pub(crate) async fn run(
 								},
 								SubxtEvent::DisputeInitiated(dispute_event) => {
 									process_dispute_initiated(&api_service, dispute_event, &to_websocket).await
+								},
+								SubxtEvent::DisputeConcluded(dispute_event, dispute_outcome) => {
+									process_dispute_concluded(&api_service, dispute_event, dispute_outcome, &to_websocket).await
 								},
 								_ => Ok(()),
 							};
@@ -284,6 +287,38 @@ async fn process_dispute_initiated(
 	candidate.candidate_disputed = Some(CandidateDisputed { disputed: now, concluded: None });
 	to_websocket.send(WebSocketUpdateEvent {
 		event: WebSocketEventType::DisputeInitiated(dispute_event.relay_parent_block),
+		candidate_hash: dispute_event.candidate_hash,
+		ts: now,
+		parachain_id: candidate.parachain_id(),
+	})?;
+	api_service
+		.storage()
+		.storage_replace(dispute_event.candidate_hash, StorageEntry::new_onchain(record_time, candidate.encode()))
+		.await;
+	Ok(())
+}
+
+async fn process_dispute_concluded(
+	api_service: &ApiService,
+	dispute_event: SubxtDispute,
+	dispute_outcome: SubxtDisputeResult,
+	to_websocket: &Sender<WebSocketUpdateEvent>,
+) -> color_eyre::Result<()> {
+	let candidate = api_service
+		.storage()
+		.storage_read(dispute_event.candidate_hash)
+		.await
+		.ok_or_else(|| eyre!("unknown candidate disputed"))?;
+	// TODO: query enpoint for the votes + session keys like pc does
+	let record_time = candidate.time();
+	let mut candidate: CandidateRecord = candidate.into_inner()?;
+	let now = get_unix_time_unwrap();
+	candidate.candidate_disputed = Some(CandidateDisputed {
+		disputed: now,
+		concluded: Some(DisputeResult { concluded_timestamp: now, outcome: dispute_outcome }),
+	});
+	to_websocket.send(WebSocketUpdateEvent {
+		event: WebSocketEventType::DisputeConcluded(dispute_event.relay_parent_block, dispute_outcome),
 		candidate_hash: dispute_event.candidate_hash,
 		ts: now,
 		parachain_id: candidate.parachain_id(),
