@@ -147,7 +147,8 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		Self { config, last_block: None, ephemeral_records, direct_records }
 	}
 
-	/// Inserts a record in ephemeral storage.
+	/// Inserts a record in ephemeral storage. This method does not overwrite
+	/// records and just ignores an insertion in case of a duplicate entry.
 	// TODO: must fail for values with blocks below the pruning threshold.
 	pub fn insert(&mut self, key: K, entry: StorageEntry) {
 		if self.direct_records.contains_key(&key) {
@@ -165,6 +166,8 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		self.prune();
 	}
 
+	/// Replaces an **existing** entry in storage with another entry. The existing entry is returned, otherwise,
+	/// no record is inserted.
 	pub fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry> {
 		if !self.direct_records.contains_key(&key) {
 			None
@@ -174,7 +177,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		}
 	}
 
-	// Prune all entries which are older than `self.config.max_blocks` vs current block.
+	/// Prunes all entries which are older than `self.config.max_blocks` vs current block.
 	pub fn prune(&mut self) {
 		let block_count = self.ephemeral_records.len();
 		// Check if the chain has advanced more than maximum allowed blocks.
