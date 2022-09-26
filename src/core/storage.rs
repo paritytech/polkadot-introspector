@@ -20,9 +20,8 @@ use crate::eyre;
 use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
-	collections::{BTreeMap, HashMap},
+	collections::{BTreeMap, HashMap, HashSet},
 	hash::Hash,
-	sync::{Arc, Weak},
 	time::Duration,
 };
 
@@ -135,9 +134,9 @@ pub struct RecordsStorage<K: Hash + Clone> {
 	/// The last block number we've seen. Used to index the storage of all entries.
 	last_block: Option<BlockNumber>,
 	/// Elements with expire dates.
-	ephemeral_records: BTreeMap<BlockNumber, HashMap<K, Weak<StorageEntry>>>,
+	ephemeral_records: BTreeMap<BlockNumber, HashSet<K>>,
 	/// Direct mapping to values.
-	direct_records: HashMap<K, Arc<StorageEntry>>,
+	direct_records: HashMap<K, StorageEntry>,
 }
 
 impl<K: Hash + Clone + Eq> RecordsStorage<K> {
@@ -154,15 +153,14 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		if self.direct_records.contains_key(&key) {
 			return
 		}
-		let entry = Arc::new(entry);
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
-		self.direct_records.insert(key.clone(), entry.clone());
+		self.direct_records.insert(key.clone(), entry);
 
 		self.ephemeral_records
 			.entry(block_number)
 			.or_insert_with(Default::default)
-			.insert(key, Arc::downgrade(&entry));
+			.insert(key);
 
 		self.prune();
 	}
@@ -172,7 +170,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 			None
 		} else {
 			let record = self.direct_records.get_mut(&key).unwrap();
-			Some(std::mem::replace(Arc::make_mut(record), entry))
+			Some(std::mem::replace(record, entry))
 		}
 	}
 
@@ -184,7 +182,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 			// Prune all entries at oldest block
 			let oldest_block = {
 				let (oldest_block, entries) = self.ephemeral_records.iter().next().unwrap();
-				for (key, _) in entries.iter() {
+				for key in entries.iter() {
 					self.direct_records.remove(key);
 				}
 
@@ -196,14 +194,14 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		}
 	}
 
-	/// Gets a value with a specific key
+	/// Gets a value with a specific key (this method copies a value stored)
 	// TODO: think if we need to check max_ttl and initiate expiry on `get` method
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
 		Q: Hash + Eq,
 	{
-		self.direct_records.get(key).cloned().map(|value| (*value).clone())
+		self.direct_records.get(key).cloned()
 	}
 
 	/// Size of the storage
