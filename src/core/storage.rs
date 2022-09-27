@@ -13,15 +13,23 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
+
 //! Ephemeral in memory storage facilities for on-chain/off-chain data.
+//! The storage is designed to store **unique** keys and will return errors when
+//! trying to insert already existing values.
+//! To update the existing entries, this API users should use the `replace` method.
+//! Values are stored as scale encoded byte chunks and are **copied** on calling of the
+//! `get` method. This is done for the API simplicity as the performance is not a
+//! goal here.
 #![allow(dead_code)]
 
+use crate::eyre;
 use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
-	collections::{BTreeMap, HashMap},
+	collections::{BTreeMap, HashMap, HashSet},
+	fmt::Debug,
 	hash::Hash,
-	sync::Arc,
 	time::Duration,
 };
 
@@ -81,8 +89,9 @@ impl StorageEntry {
 		StorageEntry { record_source: RecordSource::Offchain, record_time, data: data.encode() }
 	}
 
-	pub fn into_inner<T: Decode>(self) -> T {
-		T::decode(&mut self.data.as_slice()).unwrap()
+	/// Converts a storage entry into it's original type by decoding from scale codec
+	pub fn into_inner<T: Decode>(self) -> color_eyre::Result<T> {
+		T::decode(&mut self.data.as_slice()).map_err(|e| eyre!("decode error: {:?}", e))
 	}
 }
 
@@ -106,11 +115,13 @@ impl StorageInfo for StorageEntry {
 }
 
 impl RecordTime {
-	fn block_number(&self) -> BlockNumber {
+	/// Returns the number of the block
+	pub fn block_number(&self) -> BlockNumber {
 		self.block_number
 	}
 
-	fn timestamp(&self) -> Option<Duration> {
+	/// Returns timestamp of the record
+	pub fn timestamp(&self) -> Option<Duration> {
 		self.timestamp
 	}
 }
@@ -131,12 +142,12 @@ pub struct RecordsStorage<K: Hash + Clone> {
 	/// The last block number we've seen. Used to index the storage of all entries.
 	last_block: Option<BlockNumber>,
 	/// Elements with expire dates.
-	ephemeral_records: BTreeMap<BlockNumber, HashMap<K, Arc<StorageEntry>>>,
+	ephemeral_records: BTreeMap<BlockNumber, HashSet<K>>,
 	/// Direct mapping to values.
-	direct_records: HashMap<K, Arc<StorageEntry>>,
+	direct_records: HashMap<K, StorageEntry>,
 }
 
-impl<K: Hash + Clone + Eq> RecordsStorage<K> {
+impl<K: Hash + Clone + Eq + Debug> RecordsStorage<K> {
 	/// Creates a new storage with the specified config
 	pub fn new(config: RecordsStorageConfig) -> Self {
 		let ephemeral_records = BTreeMap::new();
@@ -144,26 +155,38 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		Self { config, last_block: None, ephemeral_records, direct_records }
 	}
 
-	/// Inserts a record in ephemeral storage.
+	/// Inserts a record in ephemeral storage. This method does not overwrite
+	/// records and returns an error in case of a duplicate entry.
 	// TODO: must fail for values with blocks below the pruning threshold.
-	pub fn insert(&mut self, key: K, entry: StorageEntry) {
+	pub fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
 		if self.direct_records.contains_key(&key) {
-			return
+			return Err(eyre!("duplicate key: {:?}", key))
 		}
-		let entry = Arc::new(entry);
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
-		self.direct_records.insert(key.clone(), entry.clone());
+		self.direct_records.insert(key.clone(), entry);
 
 		self.ephemeral_records
 			.entry(block_number)
 			.or_insert_with(Default::default)
-			.insert(key, entry);
+			.insert(key);
 
 		self.prune();
+		Ok(())
 	}
 
-	// Prune all entries which are older than `self.config.max_blocks` vs current block.
+	/// Replaces an **existing** entry in storage with another entry. The existing entry is returned, otherwise,
+	/// no record is inserted and `None` is returned to indicate an error
+	pub fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry> {
+		if !self.direct_records.contains_key(&key) {
+			None
+		} else {
+			let record = self.direct_records.get_mut(&key).unwrap();
+			Some(std::mem::replace(record, entry))
+		}
+	}
+
+	/// Prunes all entries which are older than `self.config.max_blocks` vs current block.
 	pub fn prune(&mut self) {
 		let block_count = self.ephemeral_records.len();
 		// Check if the chain has advanced more than maximum allowed blocks.
@@ -171,7 +194,7 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 			// Prune all entries at oldest block
 			let oldest_block = {
 				let (oldest_block, entries) = self.ephemeral_records.iter().next().unwrap();
-				for (key, _value) in entries.iter() {
+				for key in entries.iter() {
 					self.direct_records.remove(key);
 				}
 
@@ -183,19 +206,24 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 		}
 	}
 
-	/// Gets a value with a specific key
+	/// Gets a value with a specific key (this method copies a value stored)
 	// TODO: think if we need to check max_ttl and initiate expiry on `get` method
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
 		Q: Hash + Eq,
 	{
-		self.direct_records.get(key).cloned().map(|value| (*value).clone())
+		self.direct_records.get(key).cloned()
 	}
 
 	/// Size of the storage
 	pub fn len(&self) -> usize {
 		self.direct_records.len()
+	}
+
+	/// Returns all keys in the storage
+	pub fn keys(&self) -> Vec<K> {
+		self.direct_records.keys().cloned().collect()
 	}
 }
 
@@ -219,21 +247,22 @@ mod tests {
 	fn test_it_works() {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
-		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1));
-		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2));
+		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1)).unwrap();
+		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2)).unwrap();
 
 		let a = st.get("key1").unwrap();
 		assert_eq!(a.record_source, RecordSource::Onchain);
-		assert_eq!(a.into_inner::<u32>(), 1);
+		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
 
 		let b = st.get("key100").unwrap();
 		assert_eq!(b.record_source, RecordSource::Offchain);
-		assert_eq!(b.into_inner::<u32>(), 2);
+		assert_eq!(b.into_inner::<u32>().unwrap(), 2);
 		assert_eq!(st.get("key2"), None);
 
 		// This insert prunes prev entries at block #1
-		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100));
-		assert_eq!(st.get("key2").unwrap().into_inner::<u32>(), 100);
+		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100))
+			.unwrap();
+		assert_eq!(st.get("key2").unwrap().into_inner::<u32>().unwrap(), 100);
 
 		assert_eq!(st.get("key1"), None);
 		assert_eq!(st.get("key100"), None);
@@ -244,11 +273,25 @@ mod tests {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 2 });
 
 		for idx in 0..1000 {
-			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx));
-			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx));
+			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx)).unwrap();
 		}
 
 		// 10 keys per block * 2 max blocks.
 		assert_eq!(st.len(), 20);
+	}
+
+	#[test]
+	fn test_duplicate() {
+		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
+
+		st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 1)).unwrap();
+		// Cannot overwrite
+		assert!(st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 2)).is_err());
+		let a = st.get("key").unwrap();
+		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
+		// Can replace
+		st.replace("key".to_owned(), StorageEntry::new_onchain(1.into(), 2)).unwrap();
+		let a = st.get("key").unwrap();
+		assert_eq!(a.into_inner::<u32>().unwrap(), 2);
 	}
 }
