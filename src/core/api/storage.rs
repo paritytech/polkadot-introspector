@@ -120,7 +120,9 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>, storage_config:
 					.unwrap();
 			},
 			RequestType::Write(key, value) => {
-				the_storage.insert(key, value);
+				the_storage
+					.insert(key, value)
+					.unwrap_or_else(|e| panic!("error insertion in storage: {:?}", e));
 			},
 			RequestType::Replace(key, value) => {
 				the_storage.replace(key, value);

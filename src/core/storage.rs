@@ -13,7 +13,14 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
+
 //! Ephemeral in memory storage facilities for on-chain/off-chain data.
+//! The storage is designed to store **unique** keys and will return errors when
+//! trying to insert already existing values.
+//! To update the existing entries, this API users should use the `replace` method.
+//! Values are stored as scale encoded byte chunks and are **copied** on calling of the
+//! `get` method. This is done for the API simplicity as the performance is not a
+//! goal here.
 #![allow(dead_code)]
 
 use crate::eyre;
@@ -21,6 +28,7 @@ use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
 	collections::{BTreeMap, HashMap, HashSet},
+	fmt::Debug,
 	hash::Hash,
 	time::Duration,
 };
@@ -139,7 +147,7 @@ pub struct RecordsStorage<K: Hash + Clone> {
 	direct_records: HashMap<K, StorageEntry>,
 }
 
-impl<K: Hash + Clone + Eq> RecordsStorage<K> {
+impl<K: Hash + Clone + Eq + Debug> RecordsStorage<K> {
 	/// Creates a new storage with the specified config
 	pub fn new(config: RecordsStorageConfig) -> Self {
 		let ephemeral_records = BTreeMap::new();
@@ -148,11 +156,11 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 	}
 
 	/// Inserts a record in ephemeral storage. This method does not overwrite
-	/// records and just ignores an insertion in case of a duplicate entry.
+	/// records and returns an error in case of a duplicate entry.
 	// TODO: must fail for values with blocks below the pruning threshold.
-	pub fn insert(&mut self, key: K, entry: StorageEntry) {
+	pub fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
 		if self.direct_records.contains_key(&key) {
-			return
+			return Err(eyre!("duplicate key: {:?}", key))
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
@@ -164,10 +172,11 @@ impl<K: Hash + Clone + Eq> RecordsStorage<K> {
 			.insert(key);
 
 		self.prune();
+		Ok(())
 	}
 
 	/// Replaces an **existing** entry in storage with another entry. The existing entry is returned, otherwise,
-	/// no record is inserted.
+	/// no record is inserted and `None` is returned to indicate an error
 	pub fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry> {
 		if !self.direct_records.contains_key(&key) {
 			None
@@ -238,8 +247,8 @@ mod tests {
 	fn test_it_works() {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
-		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1));
-		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2));
+		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1)).unwrap();
+		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2)).unwrap();
 
 		let a = st.get("key1").unwrap();
 		assert_eq!(a.record_source, RecordSource::Onchain);
@@ -251,7 +260,8 @@ mod tests {
 		assert_eq!(st.get("key2"), None);
 
 		// This insert prunes prev entries at block #1
-		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100));
+		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100))
+			.unwrap();
 		assert_eq!(st.get("key2").unwrap().into_inner::<u32>().unwrap(), 100);
 
 		assert_eq!(st.get("key1"), None);
@@ -263,8 +273,8 @@ mod tests {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 2 });
 
 		for idx in 0..1000 {
-			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx));
-			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx));
+			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx)).unwrap();
+			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx)).unwrap();
 		}
 
 		// 10 keys per block * 2 max blocks.
@@ -275,13 +285,13 @@ mod tests {
 	fn test_duplicate() {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
-		st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 1));
+		st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 1)).unwrap();
 		// Cannot overwrite
-		st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 2));
+		assert!(st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 2)).is_err());
 		let a = st.get("key").unwrap();
 		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
 		// Can replace
-		st.replace("key".to_owned(), StorageEntry::new_onchain(1.into(), 2));
+		st.replace("key".to_owned(), StorageEntry::new_onchain(1.into(), 2)).unwrap();
 		let a = st.get("key").unwrap();
 		assert_eq!(a.into_inner::<u32>().unwrap(), 2);
 	}
