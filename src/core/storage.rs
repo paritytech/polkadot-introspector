@@ -160,7 +160,7 @@ impl<K: Hash + Clone + Eq + Debug> RecordsStorage<K> {
 	// TODO: must fail for values with blocks below the pruning threshold.
 	pub fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
 		if self.direct_records.contains_key(&key) {
-			return Err(eyre!("duplicate key: {:?}", key))
+			return Err(eyre!("duplicate key: {:?}", key));
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
@@ -273,7 +273,6 @@ mod tests {
 		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 2 });
 
 		for idx in 0..1000 {
-			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx)).unwrap();
 			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx)).unwrap();
 		}
 
