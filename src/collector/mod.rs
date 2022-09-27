@@ -143,7 +143,8 @@ async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256)
 			block_hash,
 			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header.encode()),
 		)
-		.await;
+		.await
+		.unwrap();
 	Ok(())
 }
 
@@ -195,7 +196,8 @@ async fn process_candidate_change(
 								new_record.encode(),
 							),
 						)
-						.await;
+						.await
+						.unwrap();
 					to_websocket
 						.send(WebSocketUpdateEvent {
 							candidate_hash: change_event.candidate_hash,

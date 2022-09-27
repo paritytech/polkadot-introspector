@@ -16,7 +16,10 @@
 //
 #![allow(dead_code)]
 
-use crate::core::storage::{RecordsStorage, RecordsStorageConfig, StorageEntry};
+use crate::{
+	core::storage::{RecordsStorage, RecordsStorageConfig, StorageEntry},
+	eyre,
+};
 use subxt::sp_core::H256;
 use tokio::sync::{
 	mpsc::{Receiver, Sender},
@@ -44,6 +47,7 @@ pub enum Response {
 	StorageReadResponse(Option<StorageEntry>),
 	StorageSizeResponse(usize),
 	StorageKeysResponse(Vec<H256>),
+	StorageStatusResponse(color_eyre::Result<()>),
 }
 pub struct RequestExecutor {
 	to_api: Sender<Request>,
@@ -54,9 +58,15 @@ impl RequestExecutor {
 		RequestExecutor { to_api }
 	}
 	/// Write a value to storage. Panics if API channel is gone.
-	pub async fn storage_write(&self, key: H256, value: StorageEntry) {
-		let request = Request { request_type: RequestType::Write(key, value), response_sender: None };
+	pub async fn storage_write(&self, key: H256, value: StorageEntry) -> color_eyre::Result<()> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { request_type: RequestType::Write(key, value), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
+		match receiver.await {
+			Ok(Response::StorageStatusResponse(res)) => res,
+			Ok(_) => Err(eyre!("invalid response on write command")),
+			Err(err) => panic!("Storage API error {}", err),
+		}
 	}
 
 	/// Replaces a value in storage. Panics if API channel is gone.
@@ -120,12 +130,19 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>, storage_config:
 					.unwrap();
 			},
 			RequestType::Write(key, value) => {
-				the_storage
-					.insert(key, value)
-					.unwrap_or_else(|e| panic!("error insertion in storage: {:?}", e));
+				let res = the_storage.insert(key, value);
+
+				if let Some(sender) = request.response_sender {
+					// A callee wants to know about the errors
+					sender.send(Response::StorageStatusResponse(res)).unwrap();
+				}
 			},
 			RequestType::Replace(key, value) => {
-				the_storage.replace(key, value);
+				let res = the_storage.replace(key, value);
+
+				if let Some(sender) = request.response_sender {
+					sender.send(Response::StorageReadResponse(res)).unwrap();
+				}
 			},
 			RequestType::Size => {
 				let size = the_storage.len();
