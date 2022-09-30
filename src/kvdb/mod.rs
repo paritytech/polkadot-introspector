@@ -27,7 +27,7 @@ use crate::{
 	eyre,
 	kvdb::{paritydb::IntrospectorParityDB, prometheus::KvdbPrometheusOptions, rocksdb::IntrospectorRocksDB},
 };
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use color_eyre::Result;
 use futures::future;
 use log::{error, info};
@@ -85,7 +85,7 @@ pub(crate) struct KvdbDumpOpts {
 	#[clap(long, short = 'p')]
 	keys_prefix: Vec<String>,
 	/// Output directory to use for a dump
-	#[clap(long = "output", short = 'o', parse(from_os_str))]
+	#[clap(long = "output", short = 'o', value_parser)]
 	output: PathBuf,
 	/// Output type
 	#[clap(long, default_value_t)]
@@ -197,7 +197,7 @@ pub struct KvdbOptions {
 	#[clap(long, default_value_t)]
 	output: OutputMode,
 	/// Compress output with snappy
-	#[clap(long, short = 'c', parse(from_flag))]
+	#[clap(long, short = 'c', action = ArgAction::SetTrue)]
 	compress: bool,
 }
 

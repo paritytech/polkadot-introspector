@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use futures::future;
 use log::{error, LevelFilter};
@@ -54,7 +54,7 @@ pub(crate) struct IntrospectorCli {
 	#[clap(subcommand)]
 	pub command: Command,
 	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, parse(from_occurrences))]
+	#[clap(short = 'v', long, action = ArgAction::Count)]
 	pub verbose: i8,
 }
 
