@@ -29,7 +29,7 @@ erased-serde = "0.3.23"
 async-trait = "0.1.57"
 strum = { version = "0.24.1", features = ["derive"] }
 rocksdb = "0.19.0"
-parity-db = "0.4.0"
+parity-db = "0.4.1"
 hex = "0.4.3"
 itertools = "0.10.5"
 snap = "1.0.5"
