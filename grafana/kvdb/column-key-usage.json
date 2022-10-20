@@ -1,13 +1,13 @@
 {
-  "id": 2,
+  "id": 3,
   "gridPos": {
     "h": 8,
     "w": 12,
-    "x": 0,
-    "y": 8
+    "x": 12,
+    "y": 0
   },
   "type": "timeseries",
-  "title": "[${chain}] ${database} per column entry count",
+  "title": "[${chain}] ${database} per column key usage",
   "datasource": {
     "type": "prometheus",
     "uid": "${source}"
@@ -61,7 +61,7 @@
           }
         ]
       },
-      "unit": "short"
+      "unit": "decbytes"
     },
     "overrides": []
   },
@@ -84,7 +84,7 @@
         "uid": "${source}"
       },
       "editorMode": "code",
-      "expr": "avg(introspector_kvdb_elements_count{chain=\"$chain\", container=\"$database\"}) by (column)",
+      "expr": "avg(introspector_kvdb_keys_size{chain=\"$chain\", container=\"$database\"}) by (column)",
       "hide": false,
       "legendFormat": "{{column}}",
       "range": true,
