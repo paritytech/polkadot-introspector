@@ -340,10 +340,9 @@
       },
       {
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": "versi",
+          "value": "versi"
         },
         "datasource": {
           "type": "prometheus",
@@ -367,10 +366,9 @@
       },
       {
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": "parachain-kvdb-introspector",
+          "value": "parachain-kvdb-introspector"
         },
         "datasource": {
           "type": "prometheus",
