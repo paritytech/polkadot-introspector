@@ -95,7 +95,7 @@ pub enum SubxtEvent {
 	/// Conclusion for a dispute
 	DisputeConcluded(SubxtDispute, SubxtDisputeResult),
 	/// Backing, inclusion, time out for a parachain candidate
-	CandidateChanged(SubxtCandidateEvent),
+	CandidateChanged(Box<SubxtCandidateEvent>),
 	/// Anything undecoded
 	RawEvent(<DefaultConfig as subxt::Config>::Hash, subxt::RawEventDetails),
 }
@@ -231,13 +231,22 @@ async fn decode_or_send_raw_event(
 		)
 	} else if is_specific_event::<CandidateBacked>(&event) {
 		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
-		SubxtEvent::CandidateChanged(create_candidate_event(decoded.0.descriptor, SubxtCandidateEventType::Backed))
+		SubxtEvent::CandidateChanged(Box::new(create_candidate_event(
+			decoded.0.descriptor,
+			SubxtCandidateEventType::Backed,
+		)))
 	} else if is_specific_event::<CandidateIncluded>(&event) {
 		let decoded = decode_to_specific_event::<CandidateIncluded>(&event)?;
-		SubxtEvent::CandidateChanged(create_candidate_event(decoded.0.descriptor, SubxtCandidateEventType::Included))
+		SubxtEvent::CandidateChanged(Box::new(create_candidate_event(
+			decoded.0.descriptor,
+			SubxtCandidateEventType::Included,
+		)))
 	} else if is_specific_event::<CandidateTimedOut>(&event) {
 		let decoded = decode_to_specific_event::<CandidateTimedOut>(&event)?;
-		SubxtEvent::CandidateChanged(create_candidate_event(decoded.0.descriptor, SubxtCandidateEventType::TimedOut))
+		SubxtEvent::CandidateChanged(Box::new(create_candidate_event(
+			decoded.0.descriptor,
+			SubxtCandidateEventType::TimedOut,
+		)))
 	} else {
 		SubxtEvent::RawEvent(block_hash, event)
 	};

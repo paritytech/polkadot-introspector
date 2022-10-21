@@ -346,14 +346,14 @@ impl SubxtTracker {
 						.statements
 						.iter()
 						.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
-						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0 as u32))
+						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0))
 						.collect()
 				} else {
 					dispute_info
 						.statements
 						.iter()
 						.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
-						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0 as u32))
+						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0))
 						.collect()
 				};
 				DisputesOutcome {

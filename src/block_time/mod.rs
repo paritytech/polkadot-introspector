@@ -164,8 +164,8 @@ impl BlockTimeMonitor {
 
 		// Remove old data points.
 		let len = values.lock().expect("Bad lock").len();
-		if len > blocks_to_show as usize {
-			values.lock().expect("Bad lock").drain(0..len - (blocks_to_show as usize));
+		if len > blocks_to_show {
+			values.lock().expect("Bad lock").drain(0..len - blocks_to_show);
 		}
 
 		let scaled_values: VecDeque<f64> =
