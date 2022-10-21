@@ -8,6 +8,7 @@
   },
   "type": "timeseries",
   "title": "[${chain}] ${database} per column value usage",
+  "description": "This panel shows the usage of each column value in the database.",
   "datasource": {
     "type": "prometheus",
     "uid": "${source}"

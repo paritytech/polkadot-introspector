@@ -8,6 +8,7 @@
   },
   "type": "timeseries",
   "title": "[${chain}] ${database} per column entry count",
+  "description": "This panel shows the number of entries per column in the database. This is useful to see if the database is growing too large.",
   "datasource": {
     "type": "prometheus",
     "uid": "${source}"
