@@ -96,7 +96,7 @@ pub(crate) async fn run(
 									process_new_head(endpoint.as_str(), &api_service, block_hash).await
 								},
 								SubxtEvent::CandidateChanged(change_event) => {
-									process_candidate_change(&api_service, change_event, &to_websocket).await
+									process_candidate_change(&api_service, *change_event, &to_websocket).await
 								},
 								SubxtEvent::DisputeInitiated(dispute_event) => {
 									process_dispute_initiated(&api_service, dispute_event, &to_websocket).await
