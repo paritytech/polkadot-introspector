@@ -398,7 +398,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Granular Node DB metrics",
+  "title": "KVDB Metrics",
   "uid": "fk14KBGVk",
   "version": 6,
   "weekStart": ""
