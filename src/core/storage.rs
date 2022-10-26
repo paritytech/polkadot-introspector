@@ -27,7 +27,7 @@ use crate::eyre;
 use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
-	collections::{BTreeMap, HashMap, HashSet},
+	collections::{BTreeMap, HashSet},
 	fmt::Debug,
 	hash::Hash,
 	time::Duration,
@@ -136,7 +136,7 @@ pub struct RecordsStorageConfig {
 /// Persistent in-memory storage with expiration and max ttl
 /// This storage has also an associative component allowing to get an element
 /// by hash
-pub struct RecordsStorage<K: Hash + Clone> {
+pub struct RecordsStorage<K: Hash + Ord + Clone> {
 	/// The configuration.
 	config: RecordsStorageConfig,
 	/// The last block number we've seen. Used to index the storage of all entries.
@@ -144,14 +144,14 @@ pub struct RecordsStorage<K: Hash + Clone> {
 	/// Elements with expire dates.
 	ephemeral_records: BTreeMap<BlockNumber, HashSet<K>>,
 	/// Direct mapping to values.
-	direct_records: HashMap<K, StorageEntry>,
+	direct_records: BTreeMap<K, StorageEntry>,
 }
 
-impl<K: Hash + Clone + Eq + Debug> RecordsStorage<K> {
+impl<K: Hash + Ord + Clone + Eq + Debug> RecordsStorage<K> {
 	/// Creates a new storage with the specified config
 	pub fn new(config: RecordsStorageConfig) -> Self {
 		let ephemeral_records = BTreeMap::new();
-		let direct_records = HashMap::new();
+		let direct_records = BTreeMap::new();
 		Self { config, last_block: None, ephemeral_records, direct_records }
 	}
 
@@ -211,7 +211,7 @@ impl<K: Hash + Clone + Eq + Debug> RecordsStorage<K> {
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
-		Q: Hash + Eq,
+		Q: Ord,
 	{
 		self.direct_records.get(key).cloned()
 	}
@@ -224,6 +224,15 @@ impl<K: Hash + Clone + Eq + Debug> RecordsStorage<K> {
 	/// Returns all keys in the storage
 	pub fn keys(&self) -> Vec<K> {
 		self.direct_records.keys().cloned().collect()
+	}
+
+	/// Returns keys starting from a specific prefix (for string keys)
+	pub fn keys_prefix<Q: Sized>(&self, prefix: &Q) -> Vec<K>
+	where
+		K: Borrow<Q>,
+		Q: Ord,
+	{
+		self.direct_records.range(prefix..).map(|(k, _)| k).cloned().collect()
 	}
 }
 
