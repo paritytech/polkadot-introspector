@@ -56,7 +56,7 @@ pub(crate) struct ParachainCommander {
 	opts: ParachainCommanderOptions,
 	node: String,
 	consumer_config: EventConsumerInit<SubxtEvent>,
-	api_service: ApiService,
+	api_service: ApiService<H256>,
 }
 
 impl ParachainCommander {
@@ -92,7 +92,7 @@ impl ParachainCommander {
 		opts: ParachainCommanderOptions,
 		url: String,
 		mut consumer_config: Receiver<SubxtEvent>,
-		api_service: ApiService,
+		api_service: ApiService<H256>,
 	) {
 		// The subxt API request executor.
 		let executor = api_service.subxt();

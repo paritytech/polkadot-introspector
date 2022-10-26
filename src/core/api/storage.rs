@@ -20,7 +20,7 @@ use crate::{
 	core::storage::{RecordsStorage, RecordsStorageConfig, StorageEntry},
 	eyre,
 };
-use subxt::sp_core::H256;
+use std::{fmt::Debug, hash::Hash};
 use tokio::sync::{
 	mpsc::{Receiver, Sender},
 	oneshot,
@@ -28,38 +28,38 @@ use tokio::sync::{
 
 // Storage requests
 #[derive(Clone, Debug)]
-pub enum RequestType {
-	Write(H256, StorageEntry),
-	Read(H256),
-	Replace(H256, StorageEntry),
+pub enum RequestType<K: Ord + Hash + Sized> {
+	Write(K, StorageEntry),
+	Read(K),
+	Replace(K, StorageEntry),
 	Size,
 	Keys,
 }
 
 #[derive(Debug)]
-pub struct Request {
-	pub request_type: RequestType,
-	pub response_sender: Option<oneshot::Sender<Response>>,
+pub struct Request<K: Ord + Hash + Sized> {
+	pub request_type: RequestType<K>,
+	pub response_sender: Option<oneshot::Sender<Response<K>>>,
 }
 
 #[derive(Debug)]
-pub enum Response {
+pub enum Response<K: Ord + Hash + Sized> {
 	StorageReadResponse(Option<StorageEntry>),
 	StorageSizeResponse(usize),
-	StorageKeysResponse(Vec<H256>),
+	StorageKeysResponse(Vec<K>),
 	StorageStatusResponse(color_eyre::Result<()>),
 }
-pub struct RequestExecutor {
-	to_api: Sender<Request>,
+pub struct RequestExecutor<K: Ord + Hash + Sized> {
+	to_api: Sender<Request<K>>,
 }
 
-impl RequestExecutor {
-	pub fn new(to_api: Sender<Request>) -> Self {
+impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
+	pub fn new(to_api: Sender<Request<K>>) -> Self {
 		RequestExecutor { to_api }
 	}
 	/// Write a value to storage. Panics if API channel is gone.
-	pub async fn storage_write(&self, key: H256, value: StorageEntry) -> color_eyre::Result<()> {
-		let (sender, receiver) = oneshot::channel::<Response>();
+	pub async fn storage_write(&self, key: K, value: StorageEntry) -> color_eyre::Result<()> {
+		let (sender, receiver) = oneshot::channel::<Response<K>>();
 		let request = Request { request_type: RequestType::Write(key, value), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 		match receiver.await {
@@ -70,14 +70,14 @@ impl RequestExecutor {
 	}
 
 	/// Replaces a value in storage. Panics if API channel is gone.
-	pub async fn storage_replace(&self, key: H256, value: StorageEntry) {
+	pub async fn storage_replace(&self, key: K, value: StorageEntry) {
 		let request = Request { request_type: RequestType::Replace(key, value), response_sender: None };
 		self.to_api.send(request).await.expect("Channel closed");
 	}
 
 	/// Read a value from storage. Returns `None` if the key is not found.
-	pub async fn storage_read(&self, key: H256) -> Option<StorageEntry> {
-		let (sender, receiver) = oneshot::channel::<Response>();
+	pub async fn storage_read(&self, key: K) -> Option<StorageEntry> {
+		let (sender, receiver) = oneshot::channel::<Response<K>>();
 		let request = Request { request_type: RequestType::Read(key), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
@@ -90,7 +90,7 @@ impl RequestExecutor {
 
 	/// Returns number of entries in a storage
 	pub async fn storage_len(&self) -> usize {
-		let (sender, receiver) = oneshot::channel::<Response>();
+		let (sender, receiver) = oneshot::channel::<Response<K>>();
 		let request = Request { request_type: RequestType::Size, response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
@@ -102,8 +102,8 @@ impl RequestExecutor {
 	}
 
 	/// Returns all keys from a storage
-	pub async fn storage_keys(&self) -> Vec<H256> {
-		let (sender, receiver) = oneshot::channel::<Response>();
+	pub async fn storage_keys(&self) -> Vec<K> {
+		let (sender, receiver) = oneshot::channel::<Response<K>>();
 		let request = Request { request_type: RequestType::Keys, response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
@@ -116,7 +116,10 @@ impl RequestExecutor {
 }
 
 // A task that handles storage API calls.
-pub(crate) async fn api_handler_task(mut api: Receiver<Request>, storage_config: RecordsStorageConfig) {
+pub(crate) async fn api_handler_task<K: Ord + Sized + Hash + Debug + Clone>(
+	mut api: Receiver<Request<K>>,
+	storage_config: RecordsStorageConfig,
+) {
 	// The storage lives here.
 	let mut the_storage = RecordsStorage::new(storage_config);
 

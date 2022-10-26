@@ -130,7 +130,7 @@ pub(crate) async fn run(
 	Ok(futures)
 }
 
-async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256) -> color_eyre::Result<()> {
+async fn process_new_head(url: &str, api_service: &ApiService<H256>, block_hash: H256) -> color_eyre::Result<()> {
 	let executor = api_service.subxt();
 	let ts = executor.get_block_timestamp(url.into(), Some(block_hash)).await;
 	let header = executor
@@ -149,7 +149,7 @@ async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256)
 }
 
 async fn process_candidate_change(
-	api_service: &ApiService,
+	api_service: &ApiService<H256>,
 	change_event: SubxtCandidateEvent,
 	to_websocket: &Sender<WebSocketUpdateEvent>,
 ) -> color_eyre::Result<()> {
@@ -274,7 +274,7 @@ async fn process_candidate_change(
 }
 
 async fn process_dispute_initiated(
-	api_service: &ApiService,
+	api_service: &ApiService<H256>,
 	dispute_event: SubxtDispute,
 	to_websocket: &Sender<WebSocketUpdateEvent>,
 ) -> color_eyre::Result<()> {
@@ -301,7 +301,7 @@ async fn process_dispute_initiated(
 }
 
 async fn process_dispute_concluded(
-	api_service: &ApiService,
+	api_service: &ApiService<H256>,
 	dispute_event: SubxtDispute,
 	dispute_outcome: SubxtDisputeResult,
 	to_websocket: &Sender<WebSocketUpdateEvent>,

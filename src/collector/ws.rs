@@ -57,7 +57,7 @@ pub struct WebSocketListener {
 	/// Configuration for a listener
 	config: WebSocketListenerConfig,
 	/// Storage to access
-	api: ApiService,
+	api: ApiService<H256>,
 }
 
 /// Defines WebSocket event types
@@ -109,7 +109,7 @@ struct HealthQuery {
 /// Common functions for a listener
 impl WebSocketListener {
 	/// Creates a new socket listener with the specific config
-	pub fn new(config: WebSocketListenerConfig, api: ApiService) -> Self {
+	pub fn new(config: WebSocketListenerConfig, api: ApiService<H256>) -> Self {
 		Self { config, api }
 	}
 
@@ -182,7 +182,7 @@ impl WebSocketListener {
 }
 
 // Helper to share storage state
-fn with_api_service(api: ApiService) -> impl Filter<Extract = (ApiService,), Error = Infallible> + Clone {
+fn with_api_service(api: ApiService<H256>) -> impl Filter<Extract = (ApiService<H256>,), Error = Infallible> + Clone {
 	warp::any().map(move || api.clone())
 }
 
@@ -200,7 +200,7 @@ pub struct HealthReply {
 	pub ts: u64,
 }
 
-async fn health_handler(api: ApiService, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
+async fn health_handler(api: ApiService<H256>, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
 	let storage_size = api.storage().storage_len().await;
 	let ts = match ping {
 		Some(h) => h.ts,
@@ -215,14 +215,17 @@ pub struct CandidatesReply {
 	pub candidates: Vec<H256>,
 }
 
-async fn candidates_handler(api: ApiService, _filter: Option<CandidatesQuery>) -> Result<impl Reply, Rejection> {
+async fn candidates_handler(api: ApiService<H256>, _filter: Option<CandidatesQuery>) -> Result<impl Reply, Rejection> {
 	let keys = api.storage().storage_keys().await;
 	// TODO: add filters support somehow...
 
 	Ok(warp::reply::json(&keys.as_slice()))
 }
 
-async fn candidate_get_handler(api: ApiService, candidate_hash: CandidateGetQuery) -> Result<impl Reply, Rejection> {
+async fn candidate_get_handler(
+	api: ApiService<H256>,
+	candidate_hash: CandidateGetQuery,
+) -> Result<impl Reply, Rejection> {
 	let candidate_record = api.storage().storage_read(candidate_hash.hash).await;
 
 	match candidate_record {
