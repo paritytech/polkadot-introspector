@@ -33,7 +33,7 @@ pub enum RequestType<K: Ord + Hash + Sized> {
 	Read(K),
 	Replace(K, StorageEntry),
 	Size,
-	Keys,
+	Keys(Option<K>),
 }
 
 #[derive(Debug)]
@@ -102,9 +102,9 @@ impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
 	}
 
 	/// Returns all keys from a storage
-	pub async fn storage_keys(&self) -> Vec<K> {
+	pub async fn storage_keys(&self, prefix: Option<K>) -> Vec<K> {
 		let (sender, receiver) = oneshot::channel::<Response<K>>();
-		let request = Request { request_type: RequestType::Keys, response_sender: Some(sender) };
+		let request = Request { request_type: RequestType::Keys(prefix), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
@@ -155,8 +155,8 @@ pub(crate) async fn api_handler_task<K: Ord + Sized + Hash + Debug + Clone>(
 					.send(Response::StorageSizeResponse(size))
 					.unwrap();
 			},
-			RequestType::Keys => {
-				let keys = the_storage.keys();
+			RequestType::Keys(maybe_prefix) => {
+				let keys = maybe_prefix.map_or(the_storage.keys(), |prefix| the_storage.keys_prefix(&prefix));
 				request
 					.response_sender
 					.expect("no sender provided")

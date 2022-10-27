@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 use crate::{
-	collector::candidate_record::CandidateRecord,
+	collector::{candidate_record::CandidateRecord, CollectorKey, CANDIDATE_PREFIX},
 	core::{api::ApiService, SubxtDisputeResult},
 };
 use futures::{SinkExt, StreamExt};
@@ -57,7 +57,7 @@ pub struct WebSocketListener {
 	/// Configuration for a listener
 	config: WebSocketListenerConfig,
 	/// Storage to access
-	api: ApiService<H256>,
+	api: ApiService<CollectorKey>,
 }
 
 /// Defines WebSocket event types
@@ -109,12 +109,12 @@ struct HealthQuery {
 /// Common functions for a listener
 impl WebSocketListener {
 	/// Creates a new socket listener with the specific config
-	pub fn new(config: WebSocketListenerConfig, api: ApiService<H256>) -> Self {
+	pub(crate) fn new(config: WebSocketListenerConfig, api: ApiService<CollectorKey>) -> Self {
 		Self { config, api }
 	}
 
 	/// Spawn an async HTTP server
-	pub async fn spawn<T, U>(
+	pub(crate) async fn spawn<T, U>(
 		self,
 		mut shutdown_rx: Receiver<T>,
 		updates_broadcast: Sender<U>,
@@ -182,7 +182,9 @@ impl WebSocketListener {
 }
 
 // Helper to share storage state
-fn with_api_service(api: ApiService<H256>) -> impl Filter<Extract = (ApiService<H256>,), Error = Infallible> + Clone {
+fn with_api_service(
+	api: ApiService<CollectorKey>,
+) -> impl Filter<Extract = (ApiService<CollectorKey>,), Error = Infallible> + Clone {
 	warp::any().map(move || api.clone())
 }
 
@@ -200,7 +202,7 @@ pub struct HealthReply {
 	pub ts: u64,
 }
 
-async fn health_handler(api: ApiService<H256>, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
+async fn health_handler(api: ApiService<CollectorKey>, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
 	let storage_size = api.storage().storage_len().await;
 	let ts = match ping {
 		Some(h) => h.ts,
@@ -215,18 +217,33 @@ pub struct CandidatesReply {
 	pub candidates: Vec<H256>,
 }
 
-async fn candidates_handler(api: ApiService<H256>, _filter: Option<CandidatesQuery>) -> Result<impl Reply, Rejection> {
-	let keys = api.storage().storage_keys().await;
+async fn candidates_handler(
+	api: ApiService<CollectorKey>,
+	_filter: Option<CandidatesQuery>,
+) -> Result<impl Reply, Rejection> {
+	let keys = api
+		.storage()
+		.storage_keys(Some(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: None }))
+		.await;
 	// TODO: add filters support somehow...
 
-	Ok(warp::reply::json(&keys.as_slice()))
+	Ok(warp::reply::json(
+		&keys
+			.into_iter()
+			.filter_map(|collector_key| collector_key.hash)
+			.collect::<Vec<_>>()
+			.as_slice(),
+	))
 }
 
 async fn candidate_get_handler(
-	api: ApiService<H256>,
+	api: ApiService<CollectorKey>,
 	candidate_hash: CandidateGetQuery,
 ) -> Result<impl Reply, Rejection> {
-	let candidate_record = api.storage().storage_read(candidate_hash.hash).await;
+	let candidate_record = api
+		.storage()
+		.storage_read(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(candidate_hash.hash) })
+		.await;
 
 	match candidate_record {
 		Some(rec) => {
