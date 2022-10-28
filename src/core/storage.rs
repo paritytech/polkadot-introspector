@@ -32,8 +32,26 @@ use std::{
 	hash::Hash,
 	time::Duration,
 };
+use subxt::sp_core::H256;
 
 pub type BlockNumber = u32;
+
+/// Used for prefixed search in a storage
+pub trait HasPrefix<PrefixT = Self> {
+	/// Returns whether there is a specified prefix at the start
+	/// The default implementation assumes that there is no prefix at all
+	fn has_prefix(&self, _: &PrefixT) -> bool {
+		false
+	}
+}
+
+/// Hashes do not have prefix
+impl HasPrefix for H256 {}
+impl HasPrefix for String {
+	fn has_prefix(&self, prefix: &String) -> bool {
+		self.starts_with(prefix)
+	}
+}
 
 /// A type to identify the data source.
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
@@ -136,7 +154,7 @@ pub struct RecordsStorageConfig {
 /// Persistent in-memory storage with expiration and max ttl
 /// This storage has also an associative component allowing to get an element
 /// by hash
-pub struct RecordsStorage<K: Hash + Ord + Clone> {
+pub struct RecordsStorage<K: Hash + Ord + Clone + HasPrefix> {
 	/// The configuration.
 	config: RecordsStorageConfig,
 	/// The last block number we've seen. Used to index the storage of all entries.
@@ -147,7 +165,7 @@ pub struct RecordsStorage<K: Hash + Ord + Clone> {
 	direct_records: BTreeMap<K, StorageEntry>,
 }
 
-impl<K: Hash + Ord + Clone + Eq + Debug> RecordsStorage<K> {
+impl<K: Hash + Ord + Clone + Eq + Debug + HasPrefix> RecordsStorage<K> {
 	/// Creates a new storage with the specified config
 	pub fn new(config: RecordsStorageConfig) -> Self {
 		let ephemeral_records = BTreeMap::new();
@@ -226,13 +244,14 @@ impl<K: Hash + Ord + Clone + Eq + Debug> RecordsStorage<K> {
 		self.direct_records.keys().cloned().collect()
 	}
 
-	/// Returns keys starting from a specific prefix (for string keys)
-	pub fn keys_prefix<Q: Sized>(&self, prefix: &Q) -> Vec<K>
-	where
-		K: Borrow<Q>,
-		Q: Ord,
-	{
-		self.direct_records.range(prefix..).map(|(k, _)| k).cloned().collect()
+	/// Returns keys starting from a specific prefix (HasPrefix trait should be meaningful for using this method)
+	pub fn keys_prefix(&self, prefix: &K) -> Vec<K> {
+		self.direct_records
+			.range(prefix..)
+			.map(|(k, _)| k)
+			.take_while(|&key| key.has_prefix(prefix.borrow()))
+			.cloned()
+			.collect()
 	}
 }
 
@@ -249,6 +268,26 @@ mod tests {
 		/// Returns the time when the data was recorded.
 		fn time(&self) -> RecordTime {
 			RecordTime { block_number: self / 10, timestamp: None }
+		}
+	}
+
+	impl HasPrefix for u32 {}
+
+	#[derive(Clone, Ord, Eq, PartialEq, PartialOrd, Debug, Hash)]
+	struct PrefixedKey {
+		prefix: String,
+		data: String,
+	}
+
+	impl PrefixedKey {
+		pub fn new(prefix: &str, data: &str) -> Self {
+			Self { prefix: prefix.to_owned(), data: data.to_owned() }
+		}
+	}
+
+	impl HasPrefix for PrefixedKey {
+		fn has_prefix(&self, other: &Self) -> bool {
+			self.prefix == other.prefix
 		}
 	}
 
@@ -302,5 +341,31 @@ mod tests {
 		st.replace("key".to_owned(), StorageEntry::new_onchain(1.into(), 2)).unwrap();
 		let a = st.get("key").unwrap();
 		assert_eq!(a.into_inner::<u32>().unwrap(), 2);
+	}
+
+	#[test]
+	fn test_prefixes() {
+		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
+
+		st.insert(PrefixedKey::new("aba", "abaa"), StorageEntry::new_onchain(1.into(), 1))
+			.unwrap();
+		st.insert(PrefixedKey::new("aba", "aba"), StorageEntry::new_onchain(1.into(), 1))
+			.unwrap();
+		st.insert(PrefixedKey::new("abc", "aba"), StorageEntry::new_onchain(1.into(), 1))
+			.unwrap();
+		st.insert(PrefixedKey::new("abc", "abaa"), StorageEntry::new_onchain(1.into(), 1))
+			.unwrap();
+		st.insert(PrefixedKey::new("abcd", "aba"), StorageEntry::new_onchain(1.into(), 1))
+			.unwrap();
+
+		let prefixed_search = st.keys_prefix(&PrefixedKey::new("aba", ""));
+		assert_eq!(prefixed_search.len(), 2);
+		assert_eq!(prefixed_search[0], PrefixedKey::new("aba", "aba"));
+		assert_eq!(prefixed_search[1], PrefixedKey::new("aba", "abaa"));
+		// Single key with this prefix
+		let prefixed_search = st.keys_prefix(&PrefixedKey::new("abcd", ""));
+		assert_eq!(prefixed_search.len(), 1);
+		let prefixed_search = st.keys_prefix(&PrefixedKey::new("no", ""));
+		assert_eq!(prefixed_search.len(), 0);
 	}
 }

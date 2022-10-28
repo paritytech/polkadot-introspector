@@ -32,8 +32,8 @@ mod candidate_record;
 mod ws;
 
 use crate::core::{
-	ApiService, EventConsumerInit, RecordTime, RecordsStorageConfig, StorageEntry, StorageInfo, SubxtCandidateEvent,
-	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
+	ApiService, EventConsumerInit, HasPrefix, RecordTime, RecordsStorageConfig, StorageEntry, StorageInfo,
+	SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
 };
 use candidate_record::*;
 use color_eyre::eyre::eyre;
@@ -65,6 +65,12 @@ impl From<CollectorOptions> for WebSocketListenerConfig {
 pub(crate) struct CollectorKey {
 	pub prefix: String,
 	pub hash: Option<H256>,
+}
+
+impl HasPrefix for CollectorKey {
+	fn has_prefix(&self, prefix: &Self) -> bool {
+		self.prefix == prefix.prefix
+	}
 }
 
 pub(crate) const CANDIDATE_PREFIX: &str = "candidate";

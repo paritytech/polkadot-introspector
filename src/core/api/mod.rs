@@ -16,7 +16,7 @@
 //
 #![allow(dead_code)]
 
-use crate::core::{RecordsStorageConfig, MAX_MSG_QUEUE_SIZE};
+use crate::core::{HasPrefix, RecordsStorageConfig, MAX_MSG_QUEUE_SIZE};
 use std::{fmt::Debug, hash::Hash};
 use tokio::sync::mpsc::{channel, Sender};
 
@@ -27,14 +27,14 @@ pub use subxt_wrapper::*;
 
 // Provides access to subxt and storage APIs, more to come.
 #[derive(Clone)]
-pub struct ApiService<K: Ord + Hash> {
+pub struct ApiService<K: Ord + Hash + HasPrefix> {
 	subxt_tx: Sender<subxt_wrapper::Request>,
 	storage_tx: Sender<storage::Request<K>>,
 }
 
 impl<K> ApiService<K>
 where
-	K: Ord + Sized + Hash + Debug + Clone + Send + 'static,
+	K: Ord + Sized + Hash + Debug + Clone + Send + 'static + HasPrefix,
 {
 	pub fn new_with_storage(storage_config: RecordsStorageConfig) -> ApiService<K> {
 		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);

@@ -17,7 +17,7 @@
 #![allow(dead_code)]
 
 use crate::{
-	core::storage::{RecordsStorage, RecordsStorageConfig, StorageEntry},
+	core::storage::{HasPrefix, RecordsStorage, RecordsStorageConfig, StorageEntry},
 	eyre,
 };
 use std::{fmt::Debug, hash::Hash};
@@ -28,7 +28,7 @@ use tokio::sync::{
 
 // Storage requests
 #[derive(Clone, Debug)]
-pub enum RequestType<K: Ord + Hash + Sized> {
+pub enum RequestType<K: Ord + Hash + Sized + HasPrefix> {
 	Write(K, StorageEntry),
 	Read(K),
 	Replace(K, StorageEntry),
@@ -37,23 +37,23 @@ pub enum RequestType<K: Ord + Hash + Sized> {
 }
 
 #[derive(Debug)]
-pub struct Request<K: Ord + Hash + Sized> {
+pub struct Request<K: Ord + Hash + Sized + HasPrefix> {
 	pub request_type: RequestType<K>,
 	pub response_sender: Option<oneshot::Sender<Response<K>>>,
 }
 
 #[derive(Debug)]
-pub enum Response<K: Ord + Hash + Sized> {
+pub enum Response<K: Ord + Hash + Sized + HasPrefix> {
 	StorageReadResponse(Option<StorageEntry>),
 	StorageSizeResponse(usize),
 	StorageKeysResponse(Vec<K>),
 	StorageStatusResponse(color_eyre::Result<()>),
 }
-pub struct RequestExecutor<K: Ord + Hash + Sized> {
+pub struct RequestExecutor<K: Ord + Hash + Sized + HasPrefix> {
 	to_api: Sender<Request<K>>,
 }
 
-impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
+impl<K: Ord + Hash + Sized + Debug + HasPrefix> RequestExecutor<K> {
 	pub fn new(to_api: Sender<Request<K>>) -> Self {
 		RequestExecutor { to_api }
 	}
@@ -116,7 +116,7 @@ impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
 }
 
 // A task that handles storage API calls.
-pub(crate) async fn api_handler_task<K: Ord + Sized + Hash + Debug + Clone>(
+pub(crate) async fn api_handler_task<K: Ord + Sized + Hash + Debug + Clone + HasPrefix>(
 	mut api: Receiver<Request<K>>,
 	storage_config: RecordsStorageConfig,
 ) {
