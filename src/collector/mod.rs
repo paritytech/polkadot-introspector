@@ -67,6 +67,16 @@ pub(crate) struct CollectorKey {
 	pub hash: Option<H256>,
 }
 
+impl CollectorKey {
+	pub(crate) fn new_with_hash(prefix: &str, hash: H256) -> Self {
+		Self { prefix: prefix.into(), hash: Some(hash) }
+	}
+
+	pub(crate) fn new_with_prefix(prefix: &str) -> Self {
+		Self { prefix: prefix.into(), hash: None }
+	}
+}
+
 impl HasPrefix for CollectorKey {
 	fn has_prefix(&self, prefix: &Self) -> bool {
 		self.prefix == prefix.prefix
@@ -160,7 +170,7 @@ async fn process_new_head(
 	api_service
 		.storage()
 		.storage_write(
-			CollectorKey { prefix: HEAD_PREFIX.into(), hash: Some(block_hash) },
+			CollectorKey::new_with_hash(HEAD_PREFIX, block_hash),
 			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header.encode()),
 		)
 		.await
@@ -178,7 +188,7 @@ async fn process_candidate_change(
 		SubxtCandidateEventType::Backed => {
 			// Candidate should not exist in our storage
 			let maybe_existing = storage
-				.storage_read(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(change_event.candidate_hash) })
+				.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash))
 				.await;
 			if let Some(existing) = maybe_existing {
 				let candidate_descriptor: CandidateRecord = existing.into_inner()?;
@@ -190,10 +200,10 @@ async fn process_candidate_change(
 			} else {
 				// Find the relay parent
 				let maybe_relay_parent = storage
-					.storage_read(CollectorKey {
-						prefix: HEAD_PREFIX.into(),
-						hash: Some(change_event.candidate_descriptor.relay_parent),
-					})
+					.storage_read(CollectorKey::new_with_hash(
+						HEAD_PREFIX,
+						change_event.candidate_descriptor.relay_parent,
+					))
 					.await;
 
 				if let Some(relay_parent) = maybe_relay_parent {
@@ -217,7 +227,7 @@ async fn process_candidate_change(
 					api_service
 						.storage()
 						.storage_write(
-							CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(change_event.candidate_hash) },
+							CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash),
 							StorageEntry::new_onchain(
 								RecordTime::with_ts(block_number, Duration::from_secs(now.as_secs())),
 								new_record.encode(),
@@ -245,7 +255,7 @@ async fn process_candidate_change(
 		SubxtCandidateEventType::Included => {
 			let maybe_known_candidate = api_service
 				.storage()
-				.storage_read(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(change_event.candidate_hash) })
+				.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash))
 				.await;
 
 			if let Some(known_candidate) = maybe_known_candidate {
@@ -264,7 +274,7 @@ async fn process_candidate_change(
 				api_service
 					.storage()
 					.storage_replace(
-						CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(change_event.candidate_hash) },
+						CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash),
 						StorageEntry::new_onchain(record_time, known_candidate.encode()),
 					)
 					.await;
@@ -275,7 +285,7 @@ async fn process_candidate_change(
 		SubxtCandidateEventType::TimedOut => {
 			let maybe_known_candidate = api_service
 				.storage()
-				.storage_read(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(change_event.candidate_hash) })
+				.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash))
 				.await;
 
 			if let Some(known_candidate) = maybe_known_candidate {
@@ -294,7 +304,7 @@ async fn process_candidate_change(
 				api_service
 					.storage()
 					.storage_replace(
-						CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(change_event.candidate_hash) },
+						CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash),
 						StorageEntry::new_onchain(record_time, known_candidate.encode()),
 					)
 					.await;
@@ -313,7 +323,7 @@ async fn process_dispute_initiated(
 ) -> color_eyre::Result<()> {
 	let candidate = api_service
 		.storage()
-		.storage_read(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(dispute_event.candidate_hash) })
+		.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash))
 		.await
 		.ok_or_else(|| eyre!("unknown candidate disputed"))?;
 	let record_time = candidate.time();
@@ -329,7 +339,7 @@ async fn process_dispute_initiated(
 	api_service
 		.storage()
 		.storage_replace(
-			CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(dispute_event.candidate_hash) },
+			CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash),
 			StorageEntry::new_onchain(record_time, candidate.encode()),
 		)
 		.await;
@@ -344,7 +354,7 @@ async fn process_dispute_concluded(
 ) -> color_eyre::Result<()> {
 	let candidate = api_service
 		.storage()
-		.storage_read(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(dispute_event.candidate_hash) })
+		.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash))
 		.await
 		.ok_or_else(|| eyre!("unknown candidate disputed"))?;
 	// TODO: query enpoint for the votes + session keys like pc does
@@ -364,7 +374,7 @@ async fn process_dispute_concluded(
 	api_service
 		.storage()
 		.storage_replace(
-			CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(dispute_event.candidate_hash) },
+			CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash),
 			StorageEntry::new_onchain(record_time, candidate.encode()),
 		)
 		.await;

@@ -223,7 +223,7 @@ async fn candidates_handler(
 ) -> Result<impl Reply, Rejection> {
 	let keys = api
 		.storage()
-		.storage_keys(Some(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: None }))
+		.storage_keys_prefix(CollectorKey::new_with_prefix(CANDIDATE_PREFIX))
 		.await;
 	// TODO: add filters support somehow...
 
@@ -242,7 +242,7 @@ async fn candidate_get_handler(
 ) -> Result<impl Reply, Rejection> {
 	let candidate_record = api
 		.storage()
-		.storage_read(CollectorKey { prefix: CANDIDATE_PREFIX.into(), hash: Some(candidate_hash.hash) })
+		.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, candidate_hash.hash))
 		.await;
 
 	match candidate_record {

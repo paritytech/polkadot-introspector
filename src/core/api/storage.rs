@@ -33,7 +33,8 @@ pub enum RequestType<K: Ord + Hash + Sized + HasPrefix> {
 	Read(K),
 	Replace(K, StorageEntry),
 	Size,
-	Keys(Option<K>),
+	Keys,
+	KeysWithPrefix(K),
 }
 
 #[derive(Debug)]
@@ -102,9 +103,22 @@ impl<K: Ord + Hash + Sized + Debug + HasPrefix> RequestExecutor<K> {
 	}
 
 	/// Returns all keys from a storage
-	pub async fn storage_keys(&self, prefix: Option<K>) -> Vec<K> {
+	pub async fn storage_keys(&self) -> Vec<K> {
 		let (sender, receiver) = oneshot::channel::<Response<K>>();
-		let request = Request { request_type: RequestType::Keys(prefix), response_sender: Some(sender) };
+		let request = Request { request_type: RequestType::Keys, response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::StorageKeysResponse(value)) => value,
+			Ok(_) => panic!("Storage API error: invalid keys reply"),
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
+
+	/// Returns keys matching a specific prefix from a storage
+	pub async fn storage_keys_prefix(&self, prefix: K) -> Vec<K> {
+		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let request = Request { request_type: RequestType::KeysWithPrefix(prefix), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
@@ -155,8 +169,16 @@ pub(crate) async fn api_handler_task<K: Ord + Sized + Hash + Debug + Clone + Has
 					.send(Response::StorageSizeResponse(size))
 					.unwrap();
 			},
-			RequestType::Keys(maybe_prefix) => {
-				let keys = maybe_prefix.map_or(the_storage.keys(), |prefix| the_storage.keys_prefix(&prefix));
+			RequestType::Keys => {
+				let keys = the_storage.keys();
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::StorageKeysResponse(keys))
+					.unwrap();
+			},
+			RequestType::KeysWithPrefix(prefix) => {
+				let keys = the_storage.keys_prefix(&prefix);
 				request
 					.response_sender
 					.expect("no sender provided")
