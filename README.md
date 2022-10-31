@@ -137,4 +137,43 @@ OPTIONS:
 
 [^1]: Live mode is currently supported for RocksDB only
 
+#### Deployment guide
 
+Because `polkadot-introspector` is dependent upon a Substrate/Polkadot node, it is important to be aware of how to deploy the introspector alongside a node. The subcommand documentation added above should be enough help to get you started.
+
+#### Kubernetes based deployments
+
+For Kubernetes based deployments of the `polkadot-introspector`, it is important to state that it should be deployed in the same `Pod` as a validator, or collator using the `extraContainers` section in the [public helm chart for Polkadot/Substrate](https://github.com/paritytech/helm-charts/blob/79b8196a9751de50fde21069c9ba4ceebcc858c4/charts/node/values.yaml).
+
+#### Example section
+
+```
+extraContainers:
+  - name: relaychain-kvdb-introspector
+    image: registry/<image-name>:<tag>
+    command: [
+      "polkadot-introspector",
+      "-v",
+      "kvdb",
+      "--db",
+      "/data/chains/testnet-01/db/full",
+      "--db-type",
+      "rocksdb",
+      "prometheus",
+      "--port",
+      "9620"
+    ]
+    resources:
+      limits:
+        memory: "1Gi"
+    ports:
+      - containerPort: 9620
+        name: relay-kvdb-prom
+    volumeMounts:
+      - mountPath: /data
+        name: chain-data
+```
+
+Here the `RocksDB` path is specified as `/data/chains/testnet-01/db/full`. This path must be reachable from the `Pod`. 
+
+Note also that the `prometheus` option is specified. This is useful whenever Prometheus scraping endpoint should be allowed for. The port opened for this purpose is thereafter named `relay-kvdb-prom` which can be used by a Prometheus [`PodMonitor`](https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/design.md#podmonitor) in a separate release. It is worthwhile mentioning that the `extraContainers` field is defined in the [on this line in the node helm chart](https://github.com/paritytech/helm-charts/blob/79b8196a9751de50fde21069c9ba4ceebcc858c4/charts/node/values.yaml#L459), and is added to the node's `StatefulSet`.

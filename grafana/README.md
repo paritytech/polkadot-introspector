@@ -5,10 +5,6 @@ This directory holds different Grafana dashboard JSON models. For details about 
 In case you want to import these dashboards to Grafana, you can do so by following these steps:
 https://grafana.com/docs/grafana/v9.0/dashboards/export-import/. It is worthwhile mentioning that importing dashboards into Grafana requires Editor rights as a Grafana user.
 
-## Monitoring architecture
-
-Polkadot introspector is currently deployed in Versi. Versi is a test network which runs both a relay chain and several parachains in a Kubernetes environment. 
-
 ## Dashboards
 
 This section holds some details on the specific dashboards we have created with Polkadot introspector.
