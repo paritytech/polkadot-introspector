@@ -11,7 +11,7 @@ This section holds some details on the specific dashboards we have created with 
 
 ### KVDB
 
-See [kvbdb.json](./kvdb.json)
+See [kvbdb.json](./models/kvdb.json)
 
 This dashboard defines three panels for:
 
