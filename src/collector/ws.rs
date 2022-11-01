@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 use crate::{
-	collector::{candidate_record::CandidateRecord, CollectorKey, CANDIDATE_PREFIX},
+	collector::{candidate_record::CandidateRecord, CollectorKey, CollectorKeyPrefix},
 	core::{api::ApiService, SubxtDisputeResult},
 };
 use futures::{SinkExt, StreamExt};
@@ -223,7 +223,7 @@ async fn candidates_handler(
 ) -> Result<impl Reply, Rejection> {
 	let keys = api
 		.storage()
-		.storage_keys_prefix(CollectorKey::new_with_prefix(CANDIDATE_PREFIX))
+		.storage_keys_prefix(CollectorKey::new_with_prefix(CollectorKeyPrefix::Candidate))
 		.await;
 	// TODO: add filters support somehow...
 
@@ -242,7 +242,7 @@ async fn candidate_get_handler(
 ) -> Result<impl Reply, Rejection> {
 	let candidate_record = api
 		.storage()
-		.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, candidate_hash.hash))
+		.storage_read(CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, candidate_hash.hash))
 		.await;
 
 	match candidate_record {

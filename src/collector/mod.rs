@@ -60,20 +60,26 @@ impl From<CollectorOptions> for WebSocketListenerConfig {
 	}
 }
 
+#[derive(Clone, Copy, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
+pub(crate) enum CollectorKeyPrefix {
+	Candidate,
+	Head,
+}
+
 /// Used to query storage for multiple hash types
 #[derive(Clone, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) struct CollectorKey {
-	pub prefix: String,
+	pub prefix: CollectorKeyPrefix,
 	pub hash: Option<H256>,
 }
 
 impl CollectorKey {
-	pub(crate) fn new_with_hash(prefix: &str, hash: H256) -> Self {
-		Self { prefix: prefix.into(), hash: Some(hash) }
+	pub(crate) fn new_with_hash(prefix: CollectorKeyPrefix, hash: H256) -> Self {
+		Self { prefix, hash: Some(hash) }
 	}
 
-	pub(crate) fn new_with_prefix(prefix: &str) -> Self {
-		Self { prefix: prefix.into(), hash: None }
+	pub(crate) fn new_with_prefix(prefix: CollectorKeyPrefix) -> Self {
+		Self { prefix, hash: None }
 	}
 }
 
@@ -82,9 +88,6 @@ impl HasPrefix for CollectorKey {
 		self.prefix == prefix.prefix
 	}
 }
-
-pub(crate) const CANDIDATE_PREFIX: &str = "candidate";
-pub(crate) const HEAD_PREFIX: &str = "head";
 
 pub(crate) async fn run(
 	opts: CollectorOptions,
@@ -170,7 +173,7 @@ async fn process_new_head(
 	api_service
 		.storage()
 		.storage_write(
-			CollectorKey::new_with_hash(HEAD_PREFIX, block_hash),
+			CollectorKey::new_with_hash(CollectorKeyPrefix::Head, block_hash),
 			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header.encode()),
 		)
 		.await
@@ -188,7 +191,7 @@ async fn process_candidate_change(
 		SubxtCandidateEventType::Backed => {
 			// Candidate should not exist in our storage
 			let maybe_existing = storage
-				.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash))
+				.storage_read(CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, change_event.candidate_hash))
 				.await;
 			if let Some(existing) = maybe_existing {
 				let candidate_descriptor: CandidateRecord = existing.into_inner()?;
@@ -201,7 +204,7 @@ async fn process_candidate_change(
 				// Find the relay parent
 				let maybe_relay_parent = storage
 					.storage_read(CollectorKey::new_with_hash(
-						HEAD_PREFIX,
+						CollectorKeyPrefix::Head,
 						change_event.candidate_descriptor.relay_parent,
 					))
 					.await;
@@ -227,7 +230,7 @@ async fn process_candidate_change(
 					api_service
 						.storage()
 						.storage_write(
-							CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash),
+							CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, change_event.candidate_hash),
 							StorageEntry::new_onchain(
 								RecordTime::with_ts(block_number, Duration::from_secs(now.as_secs())),
 								new_record.encode(),
@@ -255,7 +258,7 @@ async fn process_candidate_change(
 		SubxtCandidateEventType::Included => {
 			let maybe_known_candidate = api_service
 				.storage()
-				.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash))
+				.storage_read(CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, change_event.candidate_hash))
 				.await;
 
 			if let Some(known_candidate) = maybe_known_candidate {
@@ -274,7 +277,7 @@ async fn process_candidate_change(
 				api_service
 					.storage()
 					.storage_replace(
-						CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash),
+						CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, change_event.candidate_hash),
 						StorageEntry::new_onchain(record_time, known_candidate.encode()),
 					)
 					.await;
@@ -285,7 +288,7 @@ async fn process_candidate_change(
 		SubxtCandidateEventType::TimedOut => {
 			let maybe_known_candidate = api_service
 				.storage()
-				.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash))
+				.storage_read(CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, change_event.candidate_hash))
 				.await;
 
 			if let Some(known_candidate) = maybe_known_candidate {
@@ -304,7 +307,7 @@ async fn process_candidate_change(
 				api_service
 					.storage()
 					.storage_replace(
-						CollectorKey::new_with_hash(CANDIDATE_PREFIX, change_event.candidate_hash),
+						CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, change_event.candidate_hash),
 						StorageEntry::new_onchain(record_time, known_candidate.encode()),
 					)
 					.await;
@@ -323,7 +326,7 @@ async fn process_dispute_initiated(
 ) -> color_eyre::Result<()> {
 	let candidate = api_service
 		.storage()
-		.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash))
+		.storage_read(CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, dispute_event.candidate_hash))
 		.await
 		.ok_or_else(|| eyre!("unknown candidate disputed"))?;
 	let record_time = candidate.time();
@@ -339,7 +342,7 @@ async fn process_dispute_initiated(
 	api_service
 		.storage()
 		.storage_replace(
-			CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash),
+			CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, dispute_event.candidate_hash),
 			StorageEntry::new_onchain(record_time, candidate.encode()),
 		)
 		.await;
@@ -354,7 +357,7 @@ async fn process_dispute_concluded(
 ) -> color_eyre::Result<()> {
 	let candidate = api_service
 		.storage()
-		.storage_read(CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash))
+		.storage_read(CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, dispute_event.candidate_hash))
 		.await
 		.ok_or_else(|| eyre!("unknown candidate disputed"))?;
 	// TODO: query enpoint for the votes + session keys like pc does
@@ -374,7 +377,7 @@ async fn process_dispute_concluded(
 	api_service
 		.storage()
 		.storage_replace(
-			CollectorKey::new_with_hash(CANDIDATE_PREFIX, dispute_event.candidate_hash),
+			CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, dispute_event.candidate_hash),
 			StorageEntry::new_onchain(record_time, candidate.encode()),
 		)
 		.await;
