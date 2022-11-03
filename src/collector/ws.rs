@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 use crate::{
-	collector::{candidate_record::CandidateRecord, CollectorKey, CollectorKeyPrefix},
+	collector::{candidate_record::CandidateRecord, CollectorKey, CollectorPrefixType},
 	core::{api::ApiService, SubxtDisputeResult},
 };
 use futures::{SinkExt, StreamExt};
@@ -219,18 +219,20 @@ pub struct CandidatesReply {
 
 async fn candidates_handler(
 	api: ApiService<CollectorKey>,
-	_filter: Option<CandidatesQuery>,
+	filter: Option<CandidatesQuery>,
 ) -> Result<impl Reply, Rejection> {
 	let keys = api
 		.storage()
-		.storage_keys_prefix(CollectorKey::new_with_prefix(CollectorKeyPrefix::Candidate))
+		.storage_keys_prefix(CollectorKey::new_with_prefix(CollectorPrefixType::Candidate(
+			filter.and_then(|filt| filt.parachain_id),
+		)))
 		.await;
 	// TODO: add filters support somehow...
 
 	Ok(warp::reply::json(
 		&keys
 			.into_iter()
-			.filter_map(|collector_key| collector_key.hash)
+			.map(|collector_key| collector_key.hash)
 			.collect::<Vec<_>>()
 			.as_slice(),
 	))
@@ -242,7 +244,7 @@ async fn candidate_get_handler(
 ) -> Result<impl Reply, Rejection> {
 	let candidate_record = api
 		.storage()
-		.storage_read(CollectorKey::new_with_hash(CollectorKeyPrefix::Candidate, candidate_hash.hash))
+		.storage_read(CollectorKey::new_generic_hash(candidate_hash.hash))
 		.await;
 
 	match candidate_record {
