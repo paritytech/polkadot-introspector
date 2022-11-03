@@ -146,6 +146,8 @@ pub(crate) async fn run(
 		.map(|(endpoint, mut update_channel)| {
 			let mut shutdown_rx = shutdown_tx.subscribe();
 			let to_websocket = to_websocket.clone();
+			// Subscribe to events to have at least one consumer
+			let mut from_websocket = to_websocket.subscribe();
 			let api_service = api_service.clone();
 
 			tokio::spawn(async move {
@@ -180,6 +182,10 @@ pub(crate) async fn run(
 						_ = shutdown_rx.recv() => {
 							info!("shutting down");
 							break;
+						},
+						_ = from_websocket.recv() => {
+							debug!("received own WS update");
+							continue;
 						}
 					}
 				}
