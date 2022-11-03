@@ -55,7 +55,7 @@ pub(crate) struct IntrospectorCli {
 	pub command: Command,
 	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
 	#[clap(short = 'v', long, action = ArgAction::Count)]
-	pub verbose: i8,
+	pub verbose: u8,
 }
 
 #[tokio::main]
