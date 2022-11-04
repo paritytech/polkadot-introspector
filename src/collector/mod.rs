@@ -101,9 +101,8 @@ impl HasPrefix for CollectorKey {
 			CollectorPrefixType::Head => other.prefix == self.prefix,
 			CollectorPrefixType::Candidate(maybe_para) => match other.prefix {
 				CollectorPrefixType::Head => false,
-				CollectorPrefixType::Candidate(maybe_other_para) => {
-					maybe_other_para.is_none() || maybe_para.is_none() || maybe_para == maybe_other_para
-				},
+				CollectorPrefixType::Candidate(maybe_other_para) =>
+					maybe_other_para.is_none() || maybe_para.is_none() || maybe_para == maybe_other_para,
 			},
 		}
 	}
@@ -295,7 +294,7 @@ async fn process_candidate_change(
 						"no stored relay parent {} for candidate {}",
 						change_event.candidate_descriptor.relay_parent,
 						change_event.candidate_hash
-					));
+					))
 				}
 			}
 		},

@@ -28,6 +28,7 @@ use std::{
 	marker::Send,
 	net::SocketAddr,
 	path::PathBuf,
+	str::FromStr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::sp_core::H256;
@@ -96,7 +97,7 @@ struct CandidatesQuery {
 #[derive(Deserialize, Serialize)]
 struct CandidateGetQuery {
 	/// Candidate hash
-	hash: H256,
+	hash: String,
 }
 
 /// Used to handle requests with a health query
@@ -227,7 +228,6 @@ async fn candidates_handler(
 			filter.and_then(|filt| filt.parachain_id),
 		)))
 		.await;
-	// TODO: add filters support somehow...
 
 	Ok(warp::reply::json(
 		&keys
@@ -242,10 +242,8 @@ async fn candidate_get_handler(
 	api: ApiService<CollectorKey>,
 	candidate_hash: CandidateGetQuery,
 ) -> Result<impl Reply, Rejection> {
-	let candidate_record = api
-		.storage()
-		.storage_read(CollectorKey::new_generic_hash(candidate_hash.hash))
-		.await;
+	let decoded_hash = H256::from_str(candidate_hash.hash.as_str()).map_err(|_| warp::reject::reject())?;
+	let candidate_record = api.storage().storage_read(CollectorKey::new_generic_hash(decoded_hash)).await;
 
 	match candidate_record {
 		Some(rec) => {
