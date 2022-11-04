@@ -28,7 +28,7 @@ use tokio::sync::{
 
 // Storage requests
 #[derive(Clone, Debug)]
-pub enum RequestType<K: Ord + Hash + Sized + HasPrefix> {
+pub enum RequestType<K: Ord + Hash + Sized> {
 	Write(K, StorageEntry),
 	Read(K),
 	Replace(K, StorageEntry),
@@ -38,23 +38,23 @@ pub enum RequestType<K: Ord + Hash + Sized + HasPrefix> {
 }
 
 #[derive(Debug)]
-pub struct Request<K: Ord + Hash + Sized + HasPrefix> {
+pub struct Request<K: Ord + Hash + Sized> {
 	pub request_type: RequestType<K>,
 	pub response_sender: Option<oneshot::Sender<Response<K>>>,
 }
 
 #[derive(Debug)]
-pub enum Response<K: Ord + Hash + Sized + HasPrefix> {
+pub enum Response<K: Ord + Hash + Sized> {
 	StorageReadResponse(Option<StorageEntry>),
 	StorageSizeResponse(usize),
 	StorageKeysResponse(Vec<K>),
 	StorageStatusResponse(color_eyre::Result<()>),
 }
-pub struct RequestExecutor<K: Ord + Hash + Sized + HasPrefix> {
+pub struct RequestExecutor<K: Ord + Hash + Sized> {
 	to_api: Sender<Request<K>>,
 }
 
-impl<K: Ord + Hash + Sized + Debug + HasPrefix> RequestExecutor<K> {
+impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
 	pub fn new(to_api: Sender<Request<K>>) -> Self {
 		RequestExecutor { to_api }
 	}
@@ -130,10 +130,64 @@ impl<K: Ord + Hash + Sized + Debug + HasPrefix> RequestExecutor<K> {
 }
 
 // A task that handles storage API calls.
-pub(crate) async fn api_handler_task<K: Ord + Sized + Hash + Debug + Clone + HasPrefix>(
-	mut api: Receiver<Request<K>>,
-	storage_config: RecordsStorageConfig,
-) {
+pub(crate) async fn api_handler_task<K>(mut api: Receiver<Request<K>>, storage_config: RecordsStorageConfig)
+where
+	K: Ord + Sized + Hash + Debug + Clone,
+{
+	// The storage lives here.
+	let mut the_storage = RecordsStorage::new(storage_config);
+
+	while let Some(request) = api.recv().await {
+		match request.request_type {
+			RequestType::Read(key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::StorageReadResponse(the_storage.get(&key)))
+					.unwrap();
+			},
+			RequestType::Write(key, value) => {
+				let res = the_storage.insert(key, value);
+
+				if let Some(sender) = request.response_sender {
+					// A callee wants to know about the errors
+					sender.send(Response::StorageStatusResponse(res)).unwrap();
+				}
+			},
+			RequestType::Replace(key, value) => {
+				let res = the_storage.replace(key, value);
+
+				if let Some(sender) = request.response_sender {
+					sender.send(Response::StorageReadResponse(res)).unwrap();
+				}
+			},
+			RequestType::Size => {
+				let size = the_storage.len();
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::StorageSizeResponse(size))
+					.unwrap();
+			},
+			RequestType::Keys => {
+				let keys = the_storage.keys();
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::StorageKeysResponse(keys))
+					.unwrap();
+			},
+			RequestType::KeysWithPrefix(_) => {
+				unimplemented!()
+			},
+		}
+	}
+}
+
+pub(crate) async fn api_handler_task_prefixed<K>(mut api: Receiver<Request<K>>, storage_config: RecordsStorageConfig)
+where
+	K: Ord + Sized + Hash + Debug + Clone + HasPrefix,
+{
 	// The storage lives here.
 	let mut the_storage = RecordsStorage::new(storage_config);
 

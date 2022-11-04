@@ -32,7 +32,6 @@ use std::{
 	hash::Hash,
 	time::Duration,
 };
-use subxt::sp_core::H256;
 
 pub type BlockNumber = u32;
 
@@ -42,14 +41,6 @@ pub trait HasPrefix<PrefixT = Self> {
 	/// The default implementation assumes that there is no prefix at all
 	fn has_prefix(&self, _: &PrefixT) -> bool {
 		false
-	}
-}
-
-/// Hashes do not have prefix
-impl HasPrefix for H256 {}
-impl HasPrefix for String {
-	fn has_prefix(&self, prefix: &String) -> bool {
-		self.starts_with(prefix)
 	}
 }
 
@@ -154,7 +145,7 @@ pub struct RecordsStorageConfig {
 /// Persistent in-memory storage with expiration and max ttl
 /// This storage has also an associative component allowing to get an element
 /// by hash
-pub struct RecordsStorage<K: Hash + Ord + Clone + HasPrefix> {
+pub struct RecordsStorage<K: Hash + Ord + Clone> {
 	/// The configuration.
 	config: RecordsStorageConfig,
 	/// The last block number we've seen. Used to index the storage of all entries.
@@ -165,7 +156,10 @@ pub struct RecordsStorage<K: Hash + Ord + Clone + HasPrefix> {
 	direct_records: BTreeMap<K, StorageEntry>,
 }
 
-impl<K: Hash + Ord + Clone + Eq + Debug + HasPrefix> RecordsStorage<K> {
+impl<K> RecordsStorage<K>
+where
+	K: Hash + Ord + Clone + Eq + Debug,
+{
 	/// Creates a new storage with the specified config
 	pub fn new(config: RecordsStorageConfig) -> Self {
 		let ephemeral_records = BTreeMap::new();
@@ -243,7 +237,12 @@ impl<K: Hash + Ord + Clone + Eq + Debug + HasPrefix> RecordsStorage<K> {
 	pub fn keys(&self) -> Vec<K> {
 		self.direct_records.keys().cloned().collect()
 	}
+}
 
+impl<K> RecordsStorage<K>
+where
+	K: Hash + Ord + Clone + Eq + Debug + HasPrefix,
+{
 	/// Returns keys starting from a specific prefix (HasPrefix trait should be meaningful for using this method)
 	pub fn keys_prefix(&self, prefix: &K) -> Vec<K> {
 		self.direct_records
@@ -270,8 +269,6 @@ mod tests {
 			RecordTime { block_number: self / 10, timestamp: None }
 		}
 	}
-
-	impl HasPrefix for u32 {}
 
 	#[derive(Clone, Ord, Eq, PartialEq, PartialOrd, Debug, Hash)]
 	struct PrefixedKey {

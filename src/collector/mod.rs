@@ -130,7 +130,7 @@ pub(crate) async fn run(
 	consumer_config: EventConsumerInit<SubxtEvent>,
 ) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 	let api_service =
-		ApiService::new_with_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(1000) });
+		ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(1000) });
 	let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 	let (to_websocket, _) = broadcast::channel(32);
 	let endpoints = opts.nodes.clone().into_iter();
