@@ -129,7 +129,7 @@ impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
 	}
 }
 
-// A task that handles storage API calls.
+/// Creates a task that handles storage API calls (generic version with no prefixes support).
 pub(crate) async fn api_handler_task<K>(mut api: Receiver<Request<K>>, storage_config: RecordsStorageConfig)
 where
 	K: Ord + Sized + Hash + Debug + Clone,
@@ -184,6 +184,7 @@ where
 	}
 }
 
+/// Creates the API handler with prefixes support. `K` must has `HasPrefix` trait
 pub(crate) async fn api_handler_task_prefixed<K>(mut api: Receiver<Request<K>>, storage_config: RecordsStorageConfig)
 where
 	K: Ord + Sized + Hash + Debug + Clone + HasPrefix,
