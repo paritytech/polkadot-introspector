@@ -39,7 +39,7 @@ fn make_temp_dir() -> PathBuf {
 	let mut rng = thread_rng();
 	let suffix: String = (0..20).map(|_| rng.sample(Alphanumeric) as char).collect();
 	let suffix = format!("intro-kvdb-test-{}", suffix);
-	let path = tmpdir.join(&suffix);
+	let path = tmpdir.join(suffix);
 	std::fs::create_dir(&path).unwrap();
 	path
 }
