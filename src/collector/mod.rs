@@ -15,7 +15,6 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use codec::Encode;
 use log::{debug, info, warn};
 use std::{
 	default::Default,
@@ -102,8 +101,9 @@ impl HasPrefix for CollectorKey {
 			CollectorPrefixType::Head => other.prefix == self.prefix,
 			CollectorPrefixType::Candidate(maybe_para) => match other.prefix {
 				CollectorPrefixType::Head => false,
-				CollectorPrefixType::Candidate(maybe_other_para) =>
-					maybe_other_para.is_none() || maybe_para.is_none() || maybe_para == maybe_other_para,
+				CollectorPrefixType::Candidate(maybe_other_para) => {
+					maybe_other_para.is_none() || maybe_para.is_none() || maybe_para == maybe_other_para
+				},
 			},
 		}
 	}
@@ -215,7 +215,7 @@ async fn process_new_head(
 		.storage()
 		.storage_write(
 			CollectorKey::new_relay_chain_block(block_hash),
-			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header.encode()),
+			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header),
 		)
 		.await
 		.unwrap();
@@ -277,7 +277,7 @@ async fn process_candidate_change(
 							),
 							StorageEntry::new_onchain(
 								RecordTime::with_ts(block_number, Duration::from_secs(now.as_secs())),
-								new_record.encode(),
+								new_record,
 							),
 						)
 						.await
@@ -295,7 +295,7 @@ async fn process_candidate_change(
 						"no stored relay parent {} for candidate {}",
 						change_event.candidate_descriptor.relay_parent,
 						change_event.candidate_hash
-					))
+					));
 				}
 			}
 		},
@@ -325,7 +325,7 @@ async fn process_candidate_change(
 					.storage()
 					.storage_replace(
 						CollectorKey::new_parachain_candidate(change_event.candidate_hash, change_event.parachain_id),
-						StorageEntry::new_onchain(record_time, known_candidate.encode()),
+						StorageEntry::new_onchain(record_time, known_candidate),
 					)
 					.await;
 			} else {
@@ -358,7 +358,7 @@ async fn process_candidate_change(
 					.storage()
 					.storage_replace(
 						CollectorKey::new_parachain_candidate(change_event.candidate_hash, change_event.parachain_id),
-						StorageEntry::new_onchain(record_time, known_candidate.encode()),
+						StorageEntry::new_onchain(record_time, known_candidate),
 					)
 					.await;
 			} else {
@@ -393,7 +393,7 @@ async fn process_dispute_initiated(
 		.storage()
 		.storage_replace(
 			CollectorKey::new_generic_hash(dispute_event.candidate_hash),
-			StorageEntry::new_onchain(record_time, candidate.encode()),
+			StorageEntry::new_onchain(record_time, candidate),
 		)
 		.await;
 	Ok(())
@@ -428,7 +428,7 @@ async fn process_dispute_concluded(
 		.storage()
 		.storage_replace(
 			CollectorKey::new_generic_hash(dispute_event.candidate_hash),
-			StorageEntry::new_onchain(record_time, candidate.encode()),
+			StorageEntry::new_onchain(record_time, candidate),
 		)
 		.await;
 	Ok(())
