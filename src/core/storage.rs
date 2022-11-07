@@ -272,6 +272,8 @@ pub trait PrefixedRecordsStorage<K, P> {
 	fn prefixed_keys<PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ) -> Vec<K>
 	where
 		P: Borrow<PQ>;
+	/// Get all prefixes from a storage
+	fn prefixes(&self) -> Vec<P>;
 }
 
 /// Prefixed storage is distinct as it organise data stored using prefixes,
@@ -428,6 +430,10 @@ where
 		} else {
 			vec![]
 		}
+	}
+
+	fn prefixes(&self) -> Vec<P> {
+		self.prefixed_records.keys().cloned().collect()
 	}
 }
 

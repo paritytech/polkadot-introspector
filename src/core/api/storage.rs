@@ -40,21 +40,23 @@ pub enum RequestType<K, P> {
 	ReplacePrefix(P, K, StorageEntry),
 	Size,
 	Keys,
+	Prefixes,
 	KeysWithPrefix(P),
 }
 
 #[derive(Debug)]
 pub struct Request<K, P> {
 	pub request_type: RequestType<K, P>,
-	pub response_sender: Option<oneshot::Sender<Response<K>>>,
+	pub response_sender: Option<oneshot::Sender<Response<K, P>>>,
 }
 
 #[derive(Debug)]
-pub enum Response<K> {
-	StorageReadResponse(Option<StorageEntry>),
-	StorageSizeResponse(usize),
-	StorageKeysResponse(Vec<K>),
-	StorageStatusResponse(color_eyre::Result<()>),
+pub enum Response<K, P> {
+	Read(Option<StorageEntry>),
+	Size(usize),
+	Keys(Vec<K>),
+	Prefixes(Vec<P>),
+	Status(color_eyre::Result<()>),
 }
 pub struct RequestExecutor<K, P> {
 	to_api: Sender<Request<K, P>>,
@@ -70,11 +72,11 @@ where
 	}
 	/// Write a value to storage. Panics if API channel is gone.
 	pub async fn storage_write(&self, key: K, value: StorageEntry) -> color_eyre::Result<()> {
-		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request = Request { request_type: RequestType::Write(key, value), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 		match receiver.await {
-			Ok(Response::StorageStatusResponse(res)) => res,
+			Ok(Response::Status(res)) => res,
 			Ok(_) => Err(eyre!("invalid response on write command")),
 			Err(err) => panic!("Storage API error {}", err),
 		}
@@ -82,12 +84,12 @@ where
 
 	/// Write a value with a prefix to storage. Panics if API channel is gone.
 	pub async fn storage_write_prefixed(&self, prefix: P, key: K, value: StorageEntry) -> color_eyre::Result<()> {
-		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request =
 			Request { request_type: RequestType::WritePrefix(prefix, key, value), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 		match receiver.await {
-			Ok(Response::StorageStatusResponse(res)) => res,
+			Ok(Response::Status(res)) => res,
 			Ok(_) => Err(eyre!("invalid response on write command")),
 			Err(err) => panic!("Storage API error {}", err),
 		}
@@ -107,12 +109,12 @@ where
 
 	/// Read a value from storage. Returns `None` if the key is not found.
 	pub async fn storage_read(&self, key: K) -> Option<StorageEntry> {
-		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request = Request { request_type: RequestType::Read(key), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::StorageReadResponse(Some(value))) => Some(value),
+			Ok(Response::Read(Some(value))) => Some(value),
 			Ok(_) => None,
 			Err(err) => panic!("Storage API error {}", err),
 		}
@@ -120,12 +122,12 @@ where
 
 	/// Read a value from storage at specific prefix. Returns `None` if the key is not found.
 	pub async fn storage_read_prefixed(&self, prefix: P, key: K) -> Option<StorageEntry> {
-		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request = Request { request_type: RequestType::ReadPrefix(prefix, key), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::StorageReadResponse(Some(value))) => Some(value),
+			Ok(Response::Read(Some(value))) => Some(value),
 			Ok(_) => None,
 			Err(err) => panic!("Storage API error {}", err),
 		}
@@ -133,12 +135,12 @@ where
 
 	/// Returns number of entries in a storage
 	pub async fn storage_len(&self) -> usize {
-		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request = Request { request_type: RequestType::Size, response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::StorageSizeResponse(len)) => len,
+			Ok(Response::Size(len)) => len,
 			Ok(_) => panic!("Storage API error: invalid size reply"),
 			Err(err) => panic!("Storage API error {}", err),
 		}
@@ -146,12 +148,12 @@ where
 
 	/// Returns all keys from a storage
 	pub async fn storage_keys(&self) -> Vec<K> {
-		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request = Request { request_type: RequestType::Keys, response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::StorageKeysResponse(value)) => value,
+			Ok(Response::Keys(value)) => value,
 			Ok(_) => panic!("Storage API error: invalid keys reply"),
 			Err(err) => panic!("Storage API error {}", err),
 		}
@@ -159,12 +161,24 @@ where
 
 	/// Returns keys matching a specific prefix from a storage
 	pub async fn storage_keys_prefix(&self, prefix: P) -> Vec<K> {
-		let (sender, receiver) = oneshot::channel::<Response<K>>();
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request = Request { request_type: RequestType::KeysWithPrefix(prefix), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::StorageKeysResponse(value)) => value,
+			Ok(Response::Keys(value)) => value,
+			Ok(_) => panic!("Storage API error: invalid keys reply"),
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
+
+	pub async fn storage_prefixes(&self) -> Vec<P> {
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
+		let request = Request { request_type: RequestType::Prefixes, response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::Prefixes(value)) => value,
 			Ok(_) => panic!("Storage API error: invalid keys reply"),
 			Err(err) => panic!("Storage API error {}", err),
 		}
@@ -185,7 +199,7 @@ where
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageReadResponse(the_storage.get(&key)))
+					.send(Response::Read(the_storage.get(&key)))
 					.unwrap();
 			},
 			RequestType::Write(key, value) => {
@@ -193,14 +207,14 @@ where
 
 				if let Some(sender) = request.response_sender {
 					// A callee wants to know about the errors
-					sender.send(Response::StorageStatusResponse(res)).unwrap();
+					sender.send(Response::Status(res)).unwrap();
 				}
 			},
 			RequestType::Replace(key, value) => {
 				let res = the_storage.replace(&key, value);
 
 				if let Some(sender) = request.response_sender {
-					sender.send(Response::StorageReadResponse(res)).unwrap();
+					sender.send(Response::Read(res)).unwrap();
 				}
 			},
 			RequestType::Size => {
@@ -208,7 +222,7 @@ where
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageSizeResponse(size))
+					.send(Response::Size(size))
 					.unwrap();
 			},
 			RequestType::Keys => {
@@ -216,7 +230,7 @@ where
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageKeysResponse(keys))
+					.send(Response::Keys(keys))
 					.unwrap();
 			},
 			RequestType::KeysWithPrefix(_) => {
@@ -229,6 +243,9 @@ where
 				unimplemented!()
 			},
 			RequestType::ReplacePrefix(_, _, _) => {
+				unimplemented!()
+			},
+			RequestType::Prefixes => {
 				unimplemented!()
 			},
 		}
@@ -252,7 +269,7 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageReadResponse(the_storage.get(&key)))
+					.send(Response::Read(the_storage.get(&key)))
 					.unwrap();
 			},
 			RequestType::Write(key, value) => {
@@ -260,14 +277,14 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 
 				if let Some(sender) = request.response_sender {
 					// A callee wants to know about the errors
-					sender.send(Response::StorageStatusResponse(res)).unwrap();
+					sender.send(Response::Status(res)).unwrap();
 				}
 			},
 			RequestType::Replace(key, value) => {
 				let res = the_storage.replace(&key, value);
 
 				if let Some(sender) = request.response_sender {
-					sender.send(Response::StorageReadResponse(res)).unwrap();
+					sender.send(Response::Read(res)).unwrap();
 				}
 			},
 			RequestType::Size => {
@@ -275,7 +292,7 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageSizeResponse(size))
+					.send(Response::Size(size))
 					.unwrap();
 			},
 			RequestType::Keys => {
@@ -283,7 +300,7 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageKeysResponse(keys))
+					.send(Response::Keys(keys))
 					.unwrap();
 			},
 			RequestType::KeysWithPrefix(prefix) => {
@@ -291,7 +308,15 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageKeysResponse(keys))
+					.send(Response::Keys(keys))
+					.unwrap();
+			},
+			RequestType::Prefixes => {
+				let prefixes = the_storage.prefixes();
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::Prefixes(prefixes))
 					.unwrap();
 			},
 			RequestType::WritePrefix(prefix, key, value) => {
@@ -299,21 +324,21 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 
 				if let Some(sender) = request.response_sender {
 					// A callee wants to know about the errors
-					sender.send(Response::StorageStatusResponse(res)).unwrap();
+					sender.send(Response::Status(res)).unwrap();
 				}
 			},
 			RequestType::ReadPrefix(prefix, key) => {
 				request
 					.response_sender
 					.expect("no sender provided")
-					.send(Response::StorageReadResponse(the_storage.get_prefix(&prefix, &key)))
+					.send(Response::Read(the_storage.get_prefix(&prefix, &key)))
 					.unwrap();
 			},
 			RequestType::ReplacePrefix(prefix, key, value) => {
 				let res = the_storage.replace_prefix(&prefix, &key, value);
 
 				if let Some(sender) = request.response_sender {
-					sender.send(Response::StorageReadResponse(res)).unwrap();
+					sender.send(Response::Read(res)).unwrap();
 				}
 			},
 		}
