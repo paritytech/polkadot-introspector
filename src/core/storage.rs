@@ -27,7 +27,7 @@ use crate::eyre;
 use codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
-	collections::{HashMap, HashSet},
+	collections::{BTreeMap, HashMap, HashSet},
 	fmt::Debug,
 	hash::Hash,
 	time::Duration,
@@ -166,7 +166,7 @@ pub struct HashedPlainRecordsStorage<K: Hash + Clone> {
 	/// The last block number we've seen. Used to index the storage of all entries.
 	last_block: Option<BlockNumber>,
 	/// Elements with expire dates.
-	ephemeral_records: HashMap<BlockNumber, HashSet<K>>,
+	ephemeral_records: BTreeMap<BlockNumber, HashSet<K>>,
 	/// Direct mapping to values.
 	direct_records: HashMap<K, StorageEntry>,
 }
@@ -176,7 +176,7 @@ where
 	K: Hash + Clone + Eq + Debug,
 {
 	fn new(config: RecordsStorageConfig) -> Self {
-		let ephemeral_records = HashMap::new();
+		let ephemeral_records = BTreeMap::new();
 		let direct_records = HashMap::new();
 		Self { config, last_block: None, ephemeral_records, direct_records }
 	}
@@ -289,7 +289,7 @@ pub struct HashedPrefixedRecordsStorage<K: Hash + Clone, P: Hash + Clone> {
 	/// The last block number we've seen. Used to index the storage of all entries.
 	last_block: Option<BlockNumber>,
 	/// Elements with expire dates.
-	ephemeral_records: HashMap<BlockNumber, HashSet<K>>,
+	ephemeral_records: BTreeMap<BlockNumber, HashSet<K>>,
 	/// Direct mapping to values.
 	prefixed_records: HashMap<P, HashMap<K, StorageEntry>>,
 }
@@ -300,7 +300,7 @@ where
 	P: Hash + Clone + Eq + Debug,
 {
 	fn new(config: RecordsStorageConfig) -> Self {
-		let ephemeral_records = HashMap::new();
+		let ephemeral_records = BTreeMap::new();
 		let prefixed_records = HashMap::new();
 		Self { config, last_block: None, ephemeral_records, prefixed_records }
 	}
@@ -457,8 +457,10 @@ mod tests {
 	fn test_it_works() {
 		let mut st = HashedPlainRecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
-		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1)).unwrap();
-		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2)).unwrap();
+		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1_u32))
+			.unwrap();
+		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2_u32))
+			.unwrap();
 
 		let a = st.get("key1").unwrap();
 		assert_eq!(a.record_source, RecordSource::Onchain);
@@ -470,7 +472,7 @@ mod tests {
 		assert_eq!(st.get("key2"), None);
 
 		// This insert prunes prev entries at block #1
-		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100))
+		st.insert("key2".to_owned(), StorageEntry::new_onchain(100.into(), 100_u32))
 			.unwrap();
 		assert_eq!(st.get("key2").unwrap().into_inner::<u32>().unwrap(), 100);
 
