@@ -448,21 +448,9 @@ mod tests {
 		}
 	}
 
-	#[derive(Clone, Ord, Eq, PartialEq, PartialOrd, Debug, Hash)]
-	struct PrefixedKey {
-		prefix: String,
-		data: String,
-	}
-
-	impl PrefixedKey {
-		pub fn new(prefix: &str, data: &str) -> Self {
-			Self { prefix: prefix.to_owned(), data: data.to_owned() }
-		}
-	}
-
 	#[test]
 	fn test_it_works() {
-		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
+		let mut st = HashedPlainRecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
 		st.insert("key1".to_owned(), StorageEntry::new_onchain(1.into(), 1)).unwrap();
 		st.insert("key100".to_owned(), StorageEntry::new_offchain(1.into(), 2)).unwrap();
@@ -487,7 +475,7 @@ mod tests {
 
 	#[test]
 	fn test_prune() {
-		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 2 });
+		let mut st = HashedPlainRecordsStorage::new(RecordsStorageConfig { max_blocks: 2 });
 
 		for idx in 0..1000 {
 			st.insert(idx, StorageEntry::new_onchain((idx / 10).into(), idx)).unwrap();
@@ -499,7 +487,7 @@ mod tests {
 
 	#[test]
 	fn test_duplicate() {
-		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
+		let mut st = HashedPlainRecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
 		st.insert("key".to_owned(), StorageEntry::new_onchain(1.into(), 1)).unwrap();
 		// Cannot overwrite
@@ -507,34 +495,35 @@ mod tests {
 		let a = st.get("key").unwrap();
 		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
 		// Can replace
-		st.replace("key".to_owned(), StorageEntry::new_onchain(1.into(), 2)).unwrap();
+		st.replace("key", StorageEntry::new_onchain(1.into(), 2)).unwrap();
 		let a = st.get("key").unwrap();
 		assert_eq!(a.into_inner::<u32>().unwrap(), 2);
 	}
 
 	#[test]
 	fn test_prefixes() {
-		let mut st = RecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
+		let mut st = HashedPrefixedRecordsStorage::new(RecordsStorageConfig { max_blocks: 1 });
 
-		st.insert(PrefixedKey::new("aba", "abaa"), StorageEntry::new_onchain(1.into(), 1))
+		st.insert_prefix("aba".to_owned(), "abaa".to_owned(), StorageEntry::new_onchain(1.into(), 1))
 			.unwrap();
-		st.insert(PrefixedKey::new("aba", "aba"), StorageEntry::new_onchain(1.into(), 1))
+		st.insert_prefix("aba".to_owned(), "aba".to_owned(), StorageEntry::new_onchain(1.into(), 1))
 			.unwrap();
-		st.insert(PrefixedKey::new("abc", "aba"), StorageEntry::new_onchain(1.into(), 1))
+		st.insert_prefix("abc".to_owned(), "aba".to_owned(), StorageEntry::new_onchain(1.into(), 1))
 			.unwrap();
-		st.insert(PrefixedKey::new("abc", "abaa"), StorageEntry::new_onchain(1.into(), 1))
+		st.insert_prefix("abc".to_owned(), "abaa".to_owned(), StorageEntry::new_onchain(1.into(), 1))
 			.unwrap();
-		st.insert(PrefixedKey::new("abcd", "aba"), StorageEntry::new_onchain(1.into(), 1))
+		st.insert_prefix("abcd".to_owned(), "aba".to_owned(), StorageEntry::new_onchain(1.into(), 1))
 			.unwrap();
 
-		let prefixed_search = st.keys_prefix(&PrefixedKey::new("aba", ""));
+		let mut prefixed_search = st.prefixed_keys("aba");
 		assert_eq!(prefixed_search.len(), 2);
-		assert_eq!(prefixed_search[0], PrefixedKey::new("aba", "aba"));
-		assert_eq!(prefixed_search[1], PrefixedKey::new("aba", "abaa"));
+		prefixed_search.sort();
+		assert_eq!(prefixed_search[0], "aba");
+		assert_eq!(prefixed_search[1], "abaa");
 		// Single key with this prefix
-		let prefixed_search = st.keys_prefix(&PrefixedKey::new("abcd", ""));
+		let prefixed_search = st.prefixed_keys("abcd");
 		assert_eq!(prefixed_search.len(), 1);
-		let prefixed_search = st.keys_prefix(&PrefixedKey::new("no", ""));
+		let prefixed_search = st.prefixed_keys("no");
 		assert_eq!(prefixed_search.len(), 0);
 	}
 }

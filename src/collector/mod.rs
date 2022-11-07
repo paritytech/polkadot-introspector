@@ -238,7 +238,7 @@ async fn process_candidate_change(
 						"no stored relay parent {} for candidate {}",
 						change_event.candidate_descriptor.relay_parent,
 						change_event.candidate_hash
-					));
+					))
 				}
 			}
 		},

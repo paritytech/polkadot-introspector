@@ -281,14 +281,14 @@ where
 						},
 						Err(err) => {
 							warn!("{:?} cannot send data: {:?}", remote.as_ref(), err);
-							return;
+							return
 						},
 					}
 				},
 				Err(err) => {
 					warn!("{:?} update channel error = {:?}", remote.as_ref(), err);
 
-					return;
+					return
 				},
 			}
 		}
