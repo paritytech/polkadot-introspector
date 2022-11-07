@@ -142,7 +142,9 @@ pub trait RecordsStorage<K> {
 	fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()>;
 	/// Replaces an **existing** entry in storage with another entry. The existing entry is returned, otherwise,
 	/// no record is inserted and `None` is returned to indicate an error
-	fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry>;
+	fn replace<Q: ?Sized + Hash + Eq>(&mut self, key: &Q, entry: StorageEntry) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>;
 	/// Prunes all entries which are older than `self.config.max_blocks` vs current block.
 	fn prune(&mut self);
 	/// Gets a value with a specific key (this method copies a value stored)
@@ -182,7 +184,7 @@ where
 	// TODO: must fail for values with blocks below the pruning threshold.
 	fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
 		if self.direct_records.contains_key(&key) {
-			return Err(eyre!("duplicate key: {:?}", key));
+			return Err(eyre!("duplicate key: {:?}", key))
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
@@ -197,11 +199,14 @@ where
 		Ok(())
 	}
 
-	fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry> {
-		if !self.direct_records.contains_key(&key) {
+	fn replace<Q: ?Sized + Hash + Eq>(&mut self, key: &Q, entry: StorageEntry) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+	{
+		if !self.direct_records.contains_key(key) {
 			None
 		} else {
-			let record = self.direct_records.get_mut(&key).unwrap();
+			let record = self.direct_records.get_mut(key).unwrap();
 			Some(std::mem::replace(record, entry))
 		}
 	}
@@ -248,6 +253,16 @@ where
 pub trait PrefixedRecordsStorage<K, P> {
 	/// Insert a prefixed entry to the storage
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()>;
+	/// Replaces a prefixed entry in the storage, both prefix and a key must exist
+	fn replace_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+		&mut self,
+		prefix: &PQ,
+		key: &Q,
+		entry: StorageEntry,
+	) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+		P: Borrow<PQ>;
 	/// Get a key using specific prefix along with the key
 	fn get_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ, key: &Q) -> Option<StorageEntry>
 	where
@@ -290,13 +305,16 @@ where
 
 	// We cannot insert non prefixed key into a prefixed storage
 	fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
-		return Err(eyre!("trying to insert key with no prefix to the prefixed storage: {:?}", key));
+		return Err(eyre!("trying to insert key with no prefix to the prefixed storage: {:?}", key))
 	}
 
-	fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry> {
+	fn replace<Q: ?Sized + Hash + Eq>(&mut self, key: &Q, entry: StorageEntry) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+	{
 		for (_, mut direct_map) in &self.prefixed_records {
-			if let Some(record) = direct_map.get_mut(&key) {
-				return Some(std::mem::replace(record, entry));
+			if let Some(record) = direct_map.get_mut(key) {
+				return Some(std::mem::replace(record, entry))
 			}
 		}
 
@@ -356,7 +374,7 @@ where
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
 		let mut direct_storage = self.prefixed_records.entry(prefix).or_default();
 		if direct_storage.contains_key(&key) {
-			return Err(eyre!("duplicate key: {:?}", key));
+			return Err(eyre!("duplicate key: {:?}", key))
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
@@ -371,13 +389,32 @@ where
 		Ok(())
 	}
 
+	fn replace_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+		&mut self,
+		prefix: &PQ,
+		key: &Q,
+		entry: StorageEntry,
+	) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+		P: Borrow<PQ>,
+	{
+		let mut direct_storage = self.prefixed_records.get_mut(prefix)?;
+		if !direct_storage.contains_key(key) {
+			None
+		} else {
+			let record = direct_storage.get_mut(key).unwrap();
+			Some(std::mem::replace(record, entry))
+		}
+	}
+
 	fn get_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
 		P: Borrow<PQ>,
 	{
 		if let Some(direct_storage) = self.prefixed_records.get(prefix) {
-			return direct_storage.get(key).cloned();
+			return direct_storage.get(key).cloned()
 		}
 
 		None

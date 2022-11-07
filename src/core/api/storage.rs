@@ -37,6 +37,7 @@ pub enum RequestType<K, P> {
 	Read(K),
 	ReadPrefix(P, K),
 	Replace(K, StorageEntry),
+	ReplacePrefix(P, K, StorageEntry),
 	Size,
 	Keys,
 	KeysWithPrefix(P),
@@ -95,6 +96,12 @@ where
 	/// Replaces a value in storage. Panics if API channel is gone.
 	pub async fn storage_replace(&self, key: K, value: StorageEntry) {
 		let request = Request { request_type: RequestType::Replace(key, value), response_sender: None };
+		self.to_api.send(request).await.expect("Channel closed");
+	}
+
+	/// Replaces a value in storage at the specific prefix. Panics if API channel is gone.
+	pub async fn storage_replace_prefix(&self, prefix: P, key: K, value: StorageEntry) {
+		let request = Request { request_type: RequestType::ReplacePrefix(prefix, key, value), response_sender: None };
 		self.to_api.send(request).await.expect("Channel closed");
 	}
 
@@ -190,7 +197,7 @@ where
 				}
 			},
 			RequestType::Replace(key, value) => {
-				let res = the_storage.replace(key, value);
+				let res = the_storage.replace(&key, value);
 
 				if let Some(sender) = request.response_sender {
 					sender.send(Response::StorageReadResponse(res)).unwrap();
@@ -219,6 +226,9 @@ where
 				unimplemented!()
 			},
 			RequestType::ReadPrefix(_, _) => {
+				unimplemented!()
+			},
+			RequestType::ReplacePrefix(_, _, _) => {
 				unimplemented!()
 			},
 		}
@@ -254,7 +264,7 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 				}
 			},
 			RequestType::Replace(key, value) => {
-				let res = the_storage.replace(key, value);
+				let res = the_storage.replace(&key, value);
 
 				if let Some(sender) = request.response_sender {
 					sender.send(Response::StorageReadResponse(res)).unwrap();
@@ -298,6 +308,13 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 					.expect("no sender provided")
 					.send(Response::StorageReadResponse(the_storage.get_prefix(&prefix, &key)))
 					.unwrap();
+			},
+			RequestType::ReplacePrefix(prefix, key, value) => {
+				let res = the_storage.replace_prefix(&prefix, &key, value);
+
+				if let Some(sender) = request.response_sender {
+					sender.send(Response::StorageReadResponse(res)).unwrap();
+				}
 			},
 		}
 	}
