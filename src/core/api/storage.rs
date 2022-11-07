@@ -16,8 +16,9 @@
 //
 #![allow(dead_code)]
 
+use crate::core::{HashedPlainRecordsStorage, HashedPrefixedRecordsStorage};
 use crate::{
-	core::storage::{HasPrefix, RecordsStorage, RecordsStorageConfig, StorageEntry},
+	core::storage::{RecordsStorage, RecordsStorageConfig, StorageEntry},
 	eyre,
 };
 use std::{fmt::Debug, hash::Hash};
@@ -28,8 +29,9 @@ use tokio::sync::{
 
 // Storage requests
 #[derive(Clone, Debug)]
-pub enum RequestType<K: Ord + Hash + Sized> {
+pub enum RequestType<P, K> {
 	Write(K, StorageEntry),
+	WritePrefix(P, K, StorageEntry),
 	Read(K),
 	Replace(K, StorageEntry),
 	Size,
@@ -38,24 +40,24 @@ pub enum RequestType<K: Ord + Hash + Sized> {
 }
 
 #[derive(Debug)]
-pub struct Request<K: Ord + Hash + Sized> {
-	pub request_type: RequestType<K>,
+pub struct Request<P, K> {
+	pub request_type: RequestType<P, K>,
 	pub response_sender: Option<oneshot::Sender<Response<K>>>,
 }
 
 #[derive(Debug)]
-pub enum Response<K: Ord + Hash + Sized> {
+pub enum Response<K: Hash + Sized> {
 	StorageReadResponse(Option<StorageEntry>),
 	StorageSizeResponse(usize),
 	StorageKeysResponse(Vec<K>),
 	StorageStatusResponse(color_eyre::Result<()>),
 }
-pub struct RequestExecutor<K: Ord + Hash + Sized> {
-	to_api: Sender<Request<K>>,
+pub struct RequestExecutor<P, K> {
+	to_api: Sender<Request<P, K>>,
 }
 
-impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
-	pub fn new(to_api: Sender<Request<K>>) -> Self {
+impl<P: Hash + Sized + Debug, K: Hash + Sized + Debug> RequestExecutor<P, K> {
+	pub fn new(to_api: Sender<Request<P, K>>) -> Self {
 		RequestExecutor { to_api }
 	}
 	/// Write a value to storage. Panics if API channel is gone.
@@ -130,12 +132,12 @@ impl<K: Ord + Hash + Sized + Debug> RequestExecutor<K> {
 }
 
 /// Creates a task that handles storage API calls (generic version with no prefixes support).
-pub(crate) async fn api_handler_task<K>(mut api: Receiver<Request<K>>, storage_config: RecordsStorageConfig)
+pub(crate) async fn api_handler_task<K>(mut api: Receiver<Request<(), K>>, storage_config: RecordsStorageConfig)
 where
-	K: Ord + Sized + Hash + Debug + Clone,
+	K: Sized + Hash + Debug + Clone,
 {
 	// The storage lives here.
-	let mut the_storage = RecordsStorage::new(storage_config);
+	let mut the_storage = HashedPlainRecordsStorage::new(storage_config);
 
 	while let Some(request) = api.recv().await {
 		match request.request_type {
@@ -180,17 +182,23 @@ where
 			RequestType::KeysWithPrefix(_) => {
 				unimplemented!()
 			},
+			RequestType::WritePrefix(_, _, _) => {
+				unimplemented!()
+			},
 		}
 	}
 }
 
-/// Creates the API handler with prefixes support. `K` must has `HasPrefix` trait
-pub(crate) async fn api_handler_task_prefixed<K>(mut api: Receiver<Request<K>>, storage_config: RecordsStorageConfig)
-where
-	K: Ord + Sized + Hash + Debug + Clone + HasPrefix,
+/// Creates the API handler with prefixes support.
+pub(crate) async fn api_handler_task_prefixed<P, K>(
+	mut api: Receiver<Request<P, K>>,
+	storage_config: RecordsStorageConfig,
+) where
+	P: Sized + Hash + Debug + Clone,
+	K: Sized + Hash + Debug + Clone,
 {
 	// The storage lives here.
-	let mut the_storage = RecordsStorage::new(storage_config);
+	let mut the_storage = HashedPrefixedRecordsStorage::new(storage_config);
 
 	while let Some(request) = api.recv().await {
 		match request.request_type {
