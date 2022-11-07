@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 use crate::{
-	collector::{candidate_record::CandidateRecord, CollectorKey, CollectorPrefixType},
-	core::{api::ApiService, SubxtDisputeResult},
+	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi},
+	core::SubxtDisputeResult,
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
@@ -58,7 +58,7 @@ pub struct WebSocketListener {
 	/// Configuration for a listener
 	config: WebSocketListenerConfig,
 	/// Storage to access
-	api: ApiService<CollectorKey>,
+	api: CollectorStorageApi,
 }
 
 /// Defines WebSocket event types
@@ -110,7 +110,7 @@ struct HealthQuery {
 /// Common functions for a listener
 impl WebSocketListener {
 	/// Creates a new socket listener with the specific config
-	pub(crate) fn new(config: WebSocketListenerConfig, api: ApiService<CollectorKey>) -> Self {
+	pub(crate) fn new(config: WebSocketListenerConfig, api: CollectorStorageApi) -> Self {
 		Self { config, api }
 	}
 
@@ -184,8 +184,8 @@ impl WebSocketListener {
 
 // Helper to share storage state
 fn with_api_service(
-	api: ApiService<CollectorKey>,
-) -> impl Filter<Extract = (ApiService<CollectorKey>,), Error = Infallible> + Clone {
+	api: CollectorStorageApi,
+) -> impl Filter<Extract = (CollectorStorageApi,), Error = Infallible> + Clone {
 	warp::any().map(move || api.clone())
 }
 
@@ -203,7 +203,7 @@ pub struct HealthReply {
 	pub ts: u64,
 }
 
-async fn health_handler(api: ApiService<CollectorKey>, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
+async fn health_handler(api: CollectorStorageApi, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
 	let storage_size = api.storage().storage_len().await;
 	let ts = match ping {
 		Some(h) => h.ts,
@@ -219,31 +219,25 @@ pub struct CandidatesReply {
 }
 
 async fn candidates_handler(
-	api: ApiService<CollectorKey>,
+	api: CollectorStorageApi,
 	filter: Option<CandidatesQuery>,
 ) -> Result<impl Reply, Rejection> {
-	let keys = api
-		.storage()
-		.storage_keys_prefix(CollectorKey::new_with_prefix(CollectorPrefixType::Candidate(
-			filter.and_then(|filt| filt.parachain_id),
-		)))
-		.await;
+	let keys = if let Some(para_id) = filter.and_then(|filt| filt.parachain_id) {
+		api.storage().storage_keys_prefix(CollectorPrefixType::Candidate(para_id)).await
+	} else {
+		// TODO: Exclude heads
+		api.storage().storage_keys().await
+	};
 
-	Ok(warp::reply::json(
-		&keys
-			.into_iter()
-			.map(|collector_key| collector_key.hash)
-			.collect::<Vec<_>>()
-			.as_slice(),
-	))
+	Ok(warp::reply::json(&keys.into_iter().collect::<Vec<_>>().as_slice()))
 }
 
 async fn candidate_get_handler(
-	api: ApiService<CollectorKey>,
+	api: CollectorStorageApi,
 	candidate_hash: CandidateGetQuery,
 ) -> Result<impl Reply, Rejection> {
 	let decoded_hash = H256::from_str(candidate_hash.hash.as_str()).map_err(|_| warp::reject::reject())?;
-	let candidate_record = api.storage().storage_read(CollectorKey::new_generic_hash(decoded_hash)).await;
+	let candidate_record = api.storage().storage_read(decoded_hash).await;
 
 	match candidate_record {
 		Some(rec) => {
@@ -287,14 +281,14 @@ where
 						},
 						Err(err) => {
 							warn!("{:?} cannot send data: {:?}", remote.as_ref(), err);
-							return
+							return;
 						},
 					}
 				},
 				Err(err) => {
 					warn!("{:?} update channel error = {:?}", remote.as_ref(), err);
 
-					return
+					return;
 				},
 			}
 		}
