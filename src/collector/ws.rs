@@ -225,8 +225,14 @@ async fn candidates_handler(
 	let keys = if let Some(para_id) = filter.and_then(|filt| filt.parachain_id) {
 		api.storage().storage_keys_prefix(CollectorPrefixType::Candidate(para_id)).await
 	} else {
-		// TODO: Exclude heads
-		api.storage().storage_keys().await
+		let mut output: Vec<H256> = vec![];
+		for prefix in api.storage().storage_prefixes().await {
+			if let CollectorPrefixType::Candidate(_) = &prefix {
+				output.extend(api.storage().storage_keys_prefix(prefix).await);
+			}
+		}
+
+		output
 	};
 
 	Ok(warp::reply::json(&keys.into_iter().collect::<Vec<_>>().as_slice()))
