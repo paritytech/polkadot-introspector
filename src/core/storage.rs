@@ -184,7 +184,7 @@ where
 	// TODO: must fail for values with blocks below the pruning threshold.
 	fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
 		if self.direct_records.contains_key(&key) {
-			return Err(eyre!("duplicate key: {:?}", key))
+			return Err(eyre!("duplicate key: {:?}", key));
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
@@ -304,17 +304,17 @@ where
 	}
 
 	// We cannot insert non prefixed key into a prefixed storage
-	fn insert(&mut self, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
-		return Err(eyre!("trying to insert key with no prefix to the prefixed storage: {:?}", key))
+	fn insert(&mut self, key: K, _: StorageEntry) -> color_eyre::Result<()> {
+		return Err(eyre!("trying to insert key with no prefix to the prefixed storage: {:?}", key));
 	}
 
 	fn replace<Q: ?Sized + Hash + Eq>(&mut self, key: &Q, entry: StorageEntry) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
 	{
-		for (_, mut direct_map) in &self.prefixed_records {
+		for (_, direct_map) in &mut self.prefixed_records {
 			if let Some(record) = direct_map.get_mut(key) {
-				return Some(std::mem::replace(record, entry))
+				return Some(std::mem::replace(record, entry));
 			}
 		}
 
@@ -329,7 +329,7 @@ where
 			let oldest_block = {
 				let (oldest_block, entries) = self.ephemeral_records.iter().next().unwrap();
 				for key in entries.iter() {
-					for (_, mut direct_map) in &self.prefixed_records {
+					for (_, direct_map) in &mut self.prefixed_records {
 						direct_map.remove(key);
 					}
 				}
@@ -372,9 +372,9 @@ where
 	P: Hash + Clone + Eq + Debug,
 {
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
-		let mut direct_storage = self.prefixed_records.entry(prefix).or_default();
+		let direct_storage = self.prefixed_records.entry(prefix).or_default();
 		if direct_storage.contains_key(&key) {
-			return Err(eyre!("duplicate key: {:?}", key))
+			return Err(eyre!("duplicate key: {:?}", key));
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
@@ -399,7 +399,7 @@ where
 		K: Borrow<Q>,
 		P: Borrow<PQ>,
 	{
-		let mut direct_storage = self.prefixed_records.get_mut(prefix)?;
+		let direct_storage = self.prefixed_records.get_mut(prefix)?;
 		if !direct_storage.contains_key(key) {
 			None
 		} else {
@@ -414,7 +414,7 @@ where
 		P: Borrow<PQ>,
 	{
 		if let Some(direct_storage) = self.prefixed_records.get(prefix) {
-			return direct_storage.get(key).cloned()
+			return direct_storage.get(key).cloned();
 		}
 
 		None
