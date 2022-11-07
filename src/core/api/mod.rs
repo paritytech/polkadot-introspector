@@ -29,12 +29,28 @@ pub use subxt_wrapper::*;
 #[derive(Clone)]
 pub struct ApiService<K, P = ()> {
 	subxt_tx: Sender<subxt_wrapper::Request>,
-	storage_tx: Sender<storage::Request<P, K>>,
+	storage_tx: Sender<storage::Request<K, P>>,
 }
 
+// Common methods
+impl<K, P> ApiService<K, P>
+where
+	K: Debug,
+	P: Debug,
+{
+	pub fn storage(&self) -> storage::RequestExecutor<K, P> {
+		storage::RequestExecutor::new(self.storage_tx.clone())
+	}
+
+	pub fn subxt(&self) -> subxt_wrapper::RequestExecutor {
+		subxt_wrapper::RequestExecutor::new(self.subxt_tx.clone())
+	}
+}
+
+// Unprefixed storage
 impl<K> ApiService<K, ()>
 where
-	K: Sized + Hash + Debug + Clone + Send + 'static,
+	K: Eq + Sized + Hash + Debug + Clone + Send + 'static,
 {
 	pub fn new_with_storage(storage_config: RecordsStorageConfig) -> ApiService<K> {
 		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);
@@ -45,20 +61,13 @@ where
 
 		Self { subxt_tx, storage_tx }
 	}
-
-	pub fn storage(&self) -> storage::RequestExecutor<(), K> {
-		storage::RequestExecutor::new(self.storage_tx.clone())
-	}
-
-	pub fn subxt(&self) -> subxt_wrapper::RequestExecutor {
-		subxt_wrapper::RequestExecutor::new(self.subxt_tx.clone())
-	}
 }
 
+// Prefixed storage
 impl<K, P> ApiService<K, P>
 where
-	K: Sized + Hash + Debug + Clone + Send + 'static,
-	P: Sized + Hash + Debug + Clone + Send + 'static,
+	K: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
+	P: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
 {
 	pub fn new_with_prefixed_storage(storage_config: RecordsStorageConfig) -> ApiService<K, P> {
 		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);

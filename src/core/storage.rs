@@ -146,7 +146,7 @@ pub trait RecordsStorage<K> {
 	/// Prunes all entries which are older than `self.config.max_blocks` vs current block.
 	fn prune(&mut self);
 	/// Gets a value with a specific key (this method copies a value stored)
-	fn get<Q: ?Sized>(&self, key: &Q) -> Option<StorageEntry>
+	fn get<Q: ?Sized + Hash + Eq>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>;
 	/// Size of the storage
@@ -226,10 +226,9 @@ where
 	}
 
 	// TODO: think if we need to check max_ttl and initiate expiry on `get` method
-	fn get<Q: ?Sized>(&self, key: &Q) -> Option<StorageEntry>
+	fn get<Q: ?Sized + Hash + Eq>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
-		Q: Hash,
 	{
 		self.direct_records.get(key).cloned()
 	}
@@ -246,18 +245,28 @@ where
 /// This trait is used to define a storage that can store items organised in prefixes.
 /// Prefixes are used to group elements by some characteristic. For example, to get
 /// elements that belong to some particular parachain.
-pub trait PrefixedRecordsStorage<P, K> {
+pub trait PrefixedRecordsStorage<K, P> {
 	/// Insert a prefixed entry to the storage
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()>;
+	/// Get a key using specific prefix along with the key
+	fn get_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ, key: &Q) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+		P: Borrow<PQ>;
 	/// Get keys for a specific prefix
-	fn prefixed_keys(&self, prefix: P) -> Vec<K>;
+	fn prefixed_keys<PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ) -> Vec<K>
+	where
+		P: Borrow<PQ>;
 }
 
 /// Prefixed storage is distinct as it organise data stored using prefixes,
 /// for example to store entries for different parachains and relay parents
 /// The keys should be unique in all distinct prefixes, that can be
 /// guaranteed by assuming that K is a cryptographic hash
-pub struct HashedPrefixedRecordsStorage<P: Hash + Clone, K: Hash + Clone> {
+/// This data structure is intended to work with a small and limited number of
+/// prefixes, as it will likely perform a hash lookup per each prefix
+/// when searching for a key in non-prefixed matter
+pub struct HashedPrefixedRecordsStorage<K: Hash + Clone, P: Hash + Clone> {
 	/// The configuration.
 	config: RecordsStorageConfig,
 	/// The last block number we've seen. Used to index the storage of all entries.
@@ -268,10 +277,10 @@ pub struct HashedPrefixedRecordsStorage<P: Hash + Clone, K: Hash + Clone> {
 	prefixed_records: HashMap<P, HashMap<K, StorageEntry>>,
 }
 
-impl<P, K> RecordsStorage<K> for HashedPrefixedRecordsStorage<P, K>
+impl<K, P> RecordsStorage<K> for HashedPrefixedRecordsStorage<K, P>
 where
-	P: Hash + Clone + Eq + Debug,
 	K: Hash + Clone + Eq + Debug,
+	P: Hash + Clone + Eq + Debug,
 {
 	fn new(config: RecordsStorageConfig) -> Self {
 		let ephemeral_records = HashMap::new();
@@ -285,12 +294,13 @@ where
 	}
 
 	fn replace(&mut self, key: K, entry: StorageEntry) -> Option<StorageEntry> {
-		if !self.prefixed_records.contains_key(&key) {
-			None
-		} else {
-			let record = self.prefixed_records.get_mut(&key).unwrap();
-			Some(std::mem::replace(record, entry))
+		for (_, mut direct_map) in &self.prefixed_records {
+			if let Some(record) = direct_map.get_mut(&key) {
+				return Some(std::mem::replace(record, entry));
+			}
 		}
+
+		None
 	}
 
 	fn prune(&mut self) {
@@ -315,10 +325,9 @@ where
 	}
 
 	// TODO: think if we need to check max_ttl and initiate expiry on `get` method
-	fn get<Q: ?Sized>(&self, key: &Q) -> Option<StorageEntry>
+	fn get<Q: ?Sized + Hash + Eq>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
-		Q: Hash,
 	{
 		self.prefixed_records
 			.iter()
@@ -339,16 +348,13 @@ where
 	}
 }
 
-impl<P, K> PrefixedRecordsStorage<P, K> for HashedPrefixedRecordsStorage<P, K>
+impl<K, P> PrefixedRecordsStorage<K, P> for HashedPrefixedRecordsStorage<K, P>
 where
-	P: Hash + Clone + Eq + Debug,
 	K: Hash + Clone + Eq + Debug,
+	P: Hash + Clone + Eq + Debug,
 {
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()> {
-		let direct_storage = self
-			.prefixed_records
-			.get_mut(&prefix)
-			.ok_or(|| Err(eyre!("no such prefix: {:?}", prefix)))?;
+		let mut direct_storage = self.prefixed_records.entry(prefix).or_default();
 		if direct_storage.contains_key(&key) {
 			return Err(eyre!("duplicate key: {:?}", key));
 		}
@@ -365,7 +371,22 @@ where
 		Ok(())
 	}
 
-	fn prefixed_keys(&self, prefix: P) -> Vec<K> {
+	fn get_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ, key: &Q) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+		P: Borrow<PQ>,
+	{
+		if let Some(direct_storage) = self.prefixed_records.get(prefix) {
+			return direct_storage.get(key).cloned();
+		}
+
+		None
+	}
+
+	fn prefixed_keys<PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ) -> Vec<K>
+	where
+		P: Borrow<PQ>,
+	{
 		if let Some(direct_storage) = self.prefixed_records.get(&prefix) {
 			direct_storage.keys().cloned().collect()
 		} else {
