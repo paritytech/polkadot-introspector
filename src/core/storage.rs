@@ -251,9 +251,11 @@ where
 /// Prefixes are used to group elements by some characteristic. For example, to get
 /// elements that belong to some particular parachain.
 pub trait PrefixedRecordsStorage<K, P> {
-	/// Insert a prefixed entry to the storage
+	/// Insert a prefixed entry to the storage, returns a usage Error if trying to insert a duplicate
+	/// key + prefix
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()>;
-	/// Replaces a prefixed entry in the storage, both prefix and a key must exist
+	/// Replaces a prefixed entry in the storage, both prefix and a key must exist,
+	/// returns the old entry on success and None on error
 	fn replace_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
 		&mut self,
 		prefix: &PQ,
