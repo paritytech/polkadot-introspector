@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 use crate::{
-	collector::candidate_record::CandidateRecord,
-	core::{api::ApiService, SubxtDisputeResult},
+	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi},
+	core::SubxtDisputeResult,
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
@@ -28,6 +28,7 @@ use std::{
 	marker::Send,
 	net::SocketAddr,
 	path::PathBuf,
+	str::FromStr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::sp_core::H256;
@@ -57,7 +58,7 @@ pub struct WebSocketListener {
 	/// Configuration for a listener
 	config: WebSocketListenerConfig,
 	/// Storage to access
-	api: ApiService,
+	api: CollectorStorageApi,
 }
 
 /// Defines WebSocket event types
@@ -96,7 +97,7 @@ struct CandidatesQuery {
 #[derive(Deserialize, Serialize)]
 struct CandidateGetQuery {
 	/// Candidate hash
-	hash: H256,
+	hash: String,
 }
 
 /// Used to handle requests with a health query
@@ -109,12 +110,12 @@ struct HealthQuery {
 /// Common functions for a listener
 impl WebSocketListener {
 	/// Creates a new socket listener with the specific config
-	pub fn new(config: WebSocketListenerConfig, api: ApiService) -> Self {
+	pub(crate) fn new(config: WebSocketListenerConfig, api: CollectorStorageApi) -> Self {
 		Self { config, api }
 	}
 
 	/// Spawn an async HTTP server
-	pub async fn spawn<T, U>(
+	pub(crate) async fn spawn<T, U>(
 		self,
 		mut shutdown_rx: Receiver<T>,
 		updates_broadcast: Sender<U>,
@@ -182,7 +183,9 @@ impl WebSocketListener {
 }
 
 // Helper to share storage state
-fn with_api_service(api: ApiService) -> impl Filter<Extract = (ApiService,), Error = Infallible> + Clone {
+fn with_api_service(
+	api: CollectorStorageApi,
+) -> impl Filter<Extract = (CollectorStorageApi,), Error = Infallible> + Clone {
 	warp::any().map(move || api.clone())
 }
 
@@ -200,7 +203,7 @@ pub struct HealthReply {
 	pub ts: u64,
 }
 
-async fn health_handler(api: ApiService, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
+async fn health_handler(api: CollectorStorageApi, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {
 	let storage_size = api.storage().storage_len().await;
 	let ts = match ping {
 		Some(h) => h.ts,
@@ -215,15 +218,32 @@ pub struct CandidatesReply {
 	pub candidates: Vec<H256>,
 }
 
-async fn candidates_handler(api: ApiService, _filter: Option<CandidatesQuery>) -> Result<impl Reply, Rejection> {
-	let keys = api.storage().storage_keys().await;
-	// TODO: add filters support somehow...
+async fn candidates_handler(
+	api: CollectorStorageApi,
+	filter: Option<CandidatesQuery>,
+) -> Result<impl Reply, Rejection> {
+	let keys = if let Some(para_id) = filter.and_then(|filt| filt.parachain_id) {
+		api.storage().storage_keys_prefix(CollectorPrefixType::Candidate(para_id)).await
+	} else {
+		let mut output: Vec<H256> = vec![];
+		for prefix in api.storage().storage_prefixes().await {
+			if let CollectorPrefixType::Candidate(_) = &prefix {
+				output.extend(api.storage().storage_keys_prefix(prefix).await);
+			}
+		}
 
-	Ok(warp::reply::json(&keys.as_slice()))
+		output
+	};
+
+	Ok(warp::reply::json(&keys.into_iter().collect::<Vec<_>>().as_slice()))
 }
 
-async fn candidate_get_handler(api: ApiService, candidate_hash: CandidateGetQuery) -> Result<impl Reply, Rejection> {
-	let candidate_record = api.storage().storage_read(candidate_hash.hash).await;
+async fn candidate_get_handler(
+	api: CollectorStorageApi,
+	candidate_hash: CandidateGetQuery,
+) -> Result<impl Reply, Rejection> {
+	let decoded_hash = H256::from_str(candidate_hash.hash.as_str()).map_err(|_| warp::reject::reject())?;
+	let candidate_record = api.storage().storage_read(decoded_hash).await;
 
 	match candidate_record {
 		Some(rec) => {

@@ -29,6 +29,7 @@ use std::{
 	io::{stdout, Write},
 	sync::{Arc, Mutex},
 };
+use subxt::sp_core::H256;
 use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone, Debug, Parser)]
@@ -75,7 +76,7 @@ pub(crate) struct BlockTimeMonitor {
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
 	consumer_config: EventConsumerInit<SubxtEvent>,
-	api_service: ApiService,
+	api_service: ApiService<H256>,
 }
 
 impl BlockTimeMonitor {
@@ -198,7 +199,7 @@ impl BlockTimeMonitor {
 		values: Arc<Mutex<VecDeque<u64>>>,
 		// TODO: make this a struct.
 		mut consumer_config: Receiver<SubxtEvent>,
-		api_service: ApiService,
+		api_service: ApiService<H256>,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
 		let url = leak_static_str(url);
@@ -269,7 +270,7 @@ async fn populate_view(
 	values: Arc<Mutex<VecDeque<u64>>>,
 	url: &str,
 	cli_opts: BlockTimeCliOptions,
-	api_service: ApiService,
+	api_service: ApiService<H256>,
 ) {
 	let mut prev_ts = 0u64;
 	let blocks_to_fetch = cli_opts.chart_width;

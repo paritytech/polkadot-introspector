@@ -15,10 +15,10 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use codec::Encode;
 use log::{debug, info, warn};
 use std::{
 	default::Default,
+	hash::Hash,
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -60,12 +60,24 @@ impl From<CollectorOptions> for WebSocketListenerConfig {
 	}
 }
 
+/// This type is used to distinguish different keys in the storage
+#[derive(Clone, Copy, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
+pub(crate) enum CollectorPrefixType {
+	/// Candidate prefixed by ParachainId
+	Candidate(u32),
+	/// Relay chain block
+	Head,
+}
+
+/// A type that defines prefix + hash itself
+pub(crate) type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
+
 pub(crate) async fn run(
 	opts: CollectorOptions,
 	consumer_config: EventConsumerInit<SubxtEvent>,
 ) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-	let api_service =
-		ApiService::new_with_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(1000) });
+	let api_service: CollectorStorageApi =
+		ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(1000) });
 	let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 	let (to_websocket, _) = broadcast::channel(32);
 	let endpoints = opts.nodes.clone().into_iter();
@@ -82,6 +94,8 @@ pub(crate) async fn run(
 		.map(|(endpoint, mut update_channel)| {
 			let mut shutdown_rx = shutdown_tx.subscribe();
 			let to_websocket = to_websocket.clone();
+			// Subscribe to events to have at least one consumer
+			let mut from_websocket = to_websocket.subscribe();
 			let api_service = api_service.clone();
 
 			tokio::spawn(async move {
@@ -116,6 +130,10 @@ pub(crate) async fn run(
 						_ = shutdown_rx.recv() => {
 							info!("shutting down");
 							break;
+						},
+						_ = from_websocket.recv() => {
+							debug!("received own WS update");
+							continue;
 						}
 					}
 				}
@@ -130,7 +148,7 @@ pub(crate) async fn run(
 	Ok(futures)
 }
 
-async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256) -> color_eyre::Result<()> {
+async fn process_new_head(url: &str, api_service: &CollectorStorageApi, block_hash: H256) -> color_eyre::Result<()> {
 	let executor = api_service.subxt();
 	let ts = executor.get_block_timestamp(url.into(), Some(block_hash)).await;
 	let header = executor
@@ -139,9 +157,10 @@ async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256)
 		.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
 	api_service
 		.storage()
-		.storage_write(
+		.storage_write_prefixed(
+			CollectorPrefixType::Head,
 			block_hash,
-			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header.encode()),
+			StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header),
 		)
 		.await
 		.unwrap();
@@ -149,7 +168,7 @@ async fn process_new_head(url: &str, api_service: &ApiService, block_hash: H256)
 }
 
 async fn process_candidate_change(
-	api_service: &ApiService,
+	api_service: &CollectorStorageApi,
 	change_event: SubxtCandidateEvent,
 	to_websocket: &Sender<WebSocketUpdateEvent>,
 ) -> color_eyre::Result<()> {
@@ -157,7 +176,12 @@ async fn process_candidate_change(
 	match change_event.event_type {
 		SubxtCandidateEventType::Backed => {
 			// Candidate should not exist in our storage
-			let maybe_existing = storage.storage_read(change_event.candidate_hash).await;
+			let maybe_existing = storage
+				.storage_read_prefixed(
+					CollectorPrefixType::Candidate(change_event.parachain_id),
+					change_event.candidate_hash,
+				)
+				.await;
 			if let Some(existing) = maybe_existing {
 				let candidate_descriptor: CandidateRecord = existing.into_inner()?;
 				info!(
@@ -167,7 +191,9 @@ async fn process_candidate_change(
 				);
 			} else {
 				// Find the relay parent
-				let maybe_relay_parent = storage.storage_read(change_event.candidate_descriptor.relay_parent).await;
+				let maybe_relay_parent = storage
+					.storage_read_prefixed(CollectorPrefixType::Head, change_event.candidate_descriptor.relay_parent)
+					.await;
 
 				if let Some(relay_parent) = maybe_relay_parent {
 					let now = get_unix_time_unwrap();
@@ -189,11 +215,12 @@ async fn process_candidate_change(
 					};
 					api_service
 						.storage()
-						.storage_write(
+						.storage_write_prefixed(
+							CollectorPrefixType::Candidate(change_event.parachain_id),
 							change_event.candidate_hash,
 							StorageEntry::new_onchain(
 								RecordTime::with_ts(block_number, Duration::from_secs(now.as_secs())),
-								new_record.encode(),
+								new_record,
 							),
 						)
 						.await
@@ -216,7 +243,13 @@ async fn process_candidate_change(
 			}
 		},
 		SubxtCandidateEventType::Included => {
-			let maybe_known_candidate = api_service.storage().storage_read(change_event.candidate_hash).await;
+			let maybe_known_candidate = api_service
+				.storage()
+				.storage_read_prefixed(
+					CollectorPrefixType::Candidate(change_event.parachain_id),
+					change_event.candidate_hash,
+				)
+				.await;
 
 			if let Some(known_candidate) = maybe_known_candidate {
 				let record_time = known_candidate.time();
@@ -233,9 +266,10 @@ async fn process_candidate_change(
 					.unwrap();
 				api_service
 					.storage()
-					.storage_replace(
+					.storage_replace_prefix(
+						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
-						StorageEntry::new_onchain(record_time, known_candidate.encode()),
+						StorageEntry::new_onchain(record_time, known_candidate),
 					)
 					.await;
 			} else {
@@ -243,7 +277,13 @@ async fn process_candidate_change(
 			}
 		},
 		SubxtCandidateEventType::TimedOut => {
-			let maybe_known_candidate = api_service.storage().storage_read(change_event.candidate_hash).await;
+			let maybe_known_candidate = api_service
+				.storage()
+				.storage_read_prefixed(
+					CollectorPrefixType::Candidate(change_event.parachain_id),
+					change_event.candidate_hash,
+				)
+				.await;
 
 			if let Some(known_candidate) = maybe_known_candidate {
 				let record_time = known_candidate.time();
@@ -260,9 +300,10 @@ async fn process_candidate_change(
 					.unwrap();
 				api_service
 					.storage()
-					.storage_replace(
+					.storage_replace_prefix(
+						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
-						StorageEntry::new_onchain(record_time, known_candidate.encode()),
+						StorageEntry::new_onchain(record_time, known_candidate),
 					)
 					.await;
 			} else {
@@ -274,7 +315,7 @@ async fn process_candidate_change(
 }
 
 async fn process_dispute_initiated(
-	api_service: &ApiService,
+	api_service: &CollectorStorageApi,
 	dispute_event: SubxtDispute,
 	to_websocket: &Sender<WebSocketUpdateEvent>,
 ) -> color_eyre::Result<()> {
@@ -286,22 +327,27 @@ async fn process_dispute_initiated(
 	let record_time = candidate.time();
 	let mut candidate: CandidateRecord = candidate.into_inner()?;
 	let now = get_unix_time_unwrap();
+	let para_id = candidate.parachain_id();
 	candidate.candidate_disputed = Some(CandidateDisputed { disputed: now, concluded: None });
 	to_websocket.send(WebSocketUpdateEvent {
 		event: WebSocketEventType::DisputeInitiated(dispute_event.relay_parent_block),
 		candidate_hash: dispute_event.candidate_hash,
 		ts: now,
-		parachain_id: candidate.parachain_id(),
+		parachain_id: para_id,
 	})?;
 	api_service
 		.storage()
-		.storage_replace(dispute_event.candidate_hash, StorageEntry::new_onchain(record_time, candidate.encode()))
+		.storage_replace_prefix(
+			CollectorPrefixType::Candidate(para_id),
+			dispute_event.candidate_hash,
+			StorageEntry::new_onchain(record_time, candidate),
+		)
 		.await;
 	Ok(())
 }
 
 async fn process_dispute_concluded(
-	api_service: &ApiService,
+	api_service: &CollectorStorageApi,
 	dispute_event: SubxtDispute,
 	dispute_outcome: SubxtDisputeResult,
 	to_websocket: &Sender<WebSocketUpdateEvent>,
@@ -315,6 +361,7 @@ async fn process_dispute_concluded(
 	let record_time = candidate.time();
 	let mut candidate: CandidateRecord = candidate.into_inner()?;
 	let now = get_unix_time_unwrap();
+	let para_id = candidate.parachain_id();
 	candidate.candidate_disputed = Some(CandidateDisputed {
 		disputed: now,
 		concluded: Some(DisputeResult { concluded_timestamp: now, outcome: dispute_outcome }),
@@ -327,7 +374,11 @@ async fn process_dispute_concluded(
 	})?;
 	api_service
 		.storage()
-		.storage_replace(dispute_event.candidate_hash, StorageEntry::new_onchain(record_time, candidate.encode()))
+		.storage_replace_prefix(
+			CollectorPrefixType::Candidate(para_id),
+			dispute_event.candidate_hash,
+			StorageEntry::new_onchain(record_time, candidate),
+		)
 		.await;
 	Ok(())
 }

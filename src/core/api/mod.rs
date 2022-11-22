@@ -15,7 +15,9 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 #![allow(dead_code)]
+
 use crate::core::{RecordsStorageConfig, MAX_MSG_QUEUE_SIZE};
+use std::{fmt::Debug, hash::Hash};
 use tokio::sync::mpsc::{channel, Sender};
 
 mod storage;
@@ -25,23 +27,18 @@ pub use subxt_wrapper::*;
 
 // Provides access to subxt and storage APIs, more to come.
 #[derive(Clone)]
-pub struct ApiService {
+pub struct ApiService<K, P = ()> {
 	subxt_tx: Sender<subxt_wrapper::Request>,
-	storage_tx: Sender<storage::Request>,
+	storage_tx: Sender<storage::Request<K, P>>,
 }
 
-impl ApiService {
-	pub fn new_with_storage(storage_config: RecordsStorageConfig) -> ApiService {
-		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);
-		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
-
-		tokio::spawn(subxt_wrapper::api_handler_task(subxt_rx));
-		tokio::spawn(storage::api_handler_task(storage_rx, storage_config));
-
-		Self { subxt_tx, storage_tx }
-	}
-
-	pub fn storage(&self) -> storage::RequestExecutor {
+// Common methods
+impl<K, P> ApiService<K, P>
+where
+	K: Debug,
+	P: Debug,
+{
+	pub fn storage(&self) -> storage::RequestExecutor<K, P> {
 		storage::RequestExecutor::new(self.storage_tx.clone())
 	}
 
@@ -50,11 +47,46 @@ impl ApiService {
 	}
 }
 
+// Unprefixed storage
+impl<K> ApiService<K, ()>
+where
+	K: Eq + Sized + Hash + Debug + Clone + Send + 'static,
+{
+	pub fn new_with_storage(storage_config: RecordsStorageConfig) -> ApiService<K> {
+		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);
+		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
+
+		tokio::spawn(subxt_wrapper::api_handler_task(subxt_rx));
+		tokio::spawn(storage::api_handler_task(storage_rx, storage_config));
+
+		Self { subxt_tx, storage_tx }
+	}
+}
+
+// Prefixed storage
+impl<K, P> ApiService<K, P>
+where
+	K: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
+	P: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
+{
+	pub fn new_with_prefixed_storage(storage_config: RecordsStorageConfig) -> ApiService<K, P> {
+		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);
+		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
+
+		tokio::spawn(subxt_wrapper::api_handler_task(subxt_rx));
+		tokio::spawn(storage::api_handler_task_prefixed(storage_rx, storage_config));
+
+		Self { subxt_tx, storage_tx }
+	}
+}
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::core::*;
-	use subxt::sp_runtime::traits::{BlakeTwo256, Hash};
+	use subxt::{
+		sp_core::H256,
+		sp_runtime::traits::{BlakeTwo256, Hash},
+	};
 
 	// Using this node as it allows for more parallel conenctions.
 	const RPC_NODE_URL: &str = "wss://kusama-try-runtime-node.parity-chains.parity.io:443";
@@ -74,7 +106,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn basic_subxt_test() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
 		let subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
@@ -85,7 +117,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn extract_parainherent_data() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
 		let subxt = api.subxt();
 
 		subxt
@@ -96,7 +128,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_scheduled_paras() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
 		let subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
@@ -106,7 +138,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_occupied_cores() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
 		let subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
@@ -116,7 +148,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_backing_groups() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
 		let subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
