@@ -32,6 +32,6 @@ rocksdb = "0.19.0"
 parity-db = "0.4.2"
 hex = "0.4.3"
 itertools = "0.10.5"
-snap = "1.0.5"
+snap = "1.1.0"
 rand = "0.8.5"
 time = { version = "0.3.17", features = ["formatting"] }
