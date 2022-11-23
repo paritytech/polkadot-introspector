@@ -24,7 +24,7 @@ use crate::core::{
 use codec::{Decode, Encode};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
-use log::error;
+use log::{debug, error};
 use std::{
 	fmt,
 	fmt::{Debug, Display},
@@ -85,12 +85,14 @@ pub struct SubxtTracker {
 	last_relay_block_ts: Option<u64>,
 	/// Session tracker
 	session_data: Option<SubxtSessionTracker>,
+	/// Known HRMP channels, indexed by source parachain id
+	inbound_hrmp_channels: Vec<u32>,
 }
 
 impl Display for SubxtTracker {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
+			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),);
 		}
 		self.display_bitfield_propagation(f)?;
 
@@ -183,6 +185,11 @@ impl ParachainBlockTracker for SubxtTracker {
 				.await
 			{
 				self.set_relay_block(header.number, block_hash);
+				let hrmp_channels = self
+					.executor
+					.get_inbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
+					.await;
+				self.update_hrmp_channels(hrmp_channels);
 				let cur_session = self.executor.get_session_index(self.node_rpc_url.clone(), block_hash).await;
 				if let Some(stored_session) = self.get_current_session_index() {
 					if cur_session != stored_session {
@@ -230,6 +237,7 @@ impl SubxtTracker {
 			current_relay_block_ts: None,
 			last_relay_block_ts: None,
 			session_data: None,
+			inbound_hrmp_channels: vec![],
 		}
 	}
 
@@ -283,13 +291,13 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return
+			return;
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return
+			return;
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -403,6 +411,7 @@ impl SubxtTracker {
 
 	/// Updates cashed session with a new one, storing the previous session if needed
 	fn new_session(&mut self, session_index: u32, account_keys: Vec<AccountId32>) {
+		debug!("new session: {}", session_index);
 		if let Some(session_data) = &mut self.session_data {
 			let old_current = std::mem::replace(&mut session_data.current_keys, account_keys);
 			session_data.prev_keys.replace(old_current);
@@ -410,6 +419,11 @@ impl SubxtTracker {
 		} else {
 			self.session_data = Some(SubxtSessionTracker { session_index, current_keys: account_keys, prev_keys: None })
 		}
+	}
+
+	fn update_hrmp_channels(&mut self, channels: Vec<u32>) {
+		debug!("hrmp channels configured: {:?}", &channels);
+		self.inbound_hrmp_channels = channels;
 	}
 
 	fn display_core_assignment(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -426,9 +440,9 @@ impl SubxtTracker {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
 			// Usually this happens at startup, when we miss a core assignment and we do not update
 			// availability before calling this `fn`.
-			if self.current_candidate.max_av_bits > 0 &&
-				self.current_candidate.state != ParachainBlockState::Idle &&
-				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			if self.current_candidate.max_av_bits > 0
+				&& self.current_candidate.state != ParachainBlockState::Idle
+				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
