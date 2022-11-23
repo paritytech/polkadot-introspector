@@ -86,10 +86,14 @@ pub struct SubxtTracker {
 	last_relay_block_ts: Option<u64>,
 	/// Session tracker
 	session_data: Option<SubxtSessionTracker>,
-	/// Known HRMP channels, indexed by source parachain id
+	/// Known inbound HRMP channels, indexed by source parachain id
 	inbound_hrmp_channels: Vec<u32>,
 	/// Inbound hrmp content for the parachain, indexed by sender parachain id
 	inbound_hrmp_messages: BTreeMap<u32, Vec<u8>>,
+	/// Known outbound HRMP channels, indexed by source parachain id
+	outbound_hrmp_channels: Vec<u32>,
+	/// Inbound hrmp content for the parachain, indexed by sender parachain id
+	outbound_hrmp_messages: BTreeMap<u32, Vec<u8>>,
 }
 
 impl Display for SubxtTracker {
@@ -188,19 +192,30 @@ impl ParachainBlockTracker for SubxtTracker {
 				.await
 			{
 				self.set_relay_block(header.number, block_hash);
-				let hrmp_channels = self
+				let inbound_hrmp_channels = self
 					.executor
 					.get_inbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
 					.await;
-				self.update_hrmp_channels(hrmp_channels);
-				self.inbound_hrmp_messages.clear();
+				let outbound_hrmp_channels = self
+					.executor
+					.get_outbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
+					.await;
+				self.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
 
 				for channel in &self.inbound_hrmp_channels {
 					let content = self
 						.executor
-						.get_inbound_hrmp_content(self.node_rpc_url.clone(), block_hash, self.para_id, *channel)
+						.get_hrmp_content(self.node_rpc_url.clone(), block_hash, self.para_id, *channel)
 						.await;
 					self.inbound_hrmp_messages
+						.insert(*channel, content.into_iter().flatten().collect());
+				}
+				for channel in &self.outbound_hrmp_channels {
+					let content = self
+						.executor
+						.get_hrmp_content(self.node_rpc_url.clone(), block_hash, *channel, self.para_id)
+						.await;
+					self.outbound_hrmp_messages
 						.insert(*channel, content.into_iter().flatten().collect());
 				}
 
@@ -253,6 +268,8 @@ impl SubxtTracker {
 			session_data: None,
 			inbound_hrmp_channels: vec![],
 			inbound_hrmp_messages: BTreeMap::new(),
+			outbound_hrmp_channels: vec![],
+			outbound_hrmp_messages: BTreeMap::new(),
 		}
 	}
 
@@ -436,9 +453,12 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_hrmp_channels(&mut self, channels: Vec<u32>) {
-		debug!("hrmp channels configured: {:?}", &channels);
-		self.inbound_hrmp_channels = channels;
+	fn update_hrmp_channels(&mut self, inbound_channels: Vec<u32>, outbound_channels: Vec<u32>) {
+		debug!("hrmp channels configured: {:?} in, {:?} out", &inbound_channels, &outbound_channels);
+		self.inbound_hrmp_channels = inbound_channels;
+		self.outbound_hrmp_channels = outbound_channels;
+		self.inbound_hrmp_messages.clear();
+		self.outbound_hrmp_messages.clear();
 	}
 
 	fn display_core_assignment(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -545,10 +565,23 @@ impl SubxtTracker {
 
 	fn display_hrmp(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let total: usize = self.inbound_hrmp_messages.values().map(|data| data.len()).sum();
-		writeln!(f, "\t👉 Inbound hrmp messages, received {} bytes in total", total)?;
 
-		for (input_parachain, data) in self.inbound_hrmp_messages.iter() {
-			writeln!(f, "\t\t📩 From parachain: {}, {} bytes", input_parachain, data.len())?;
+		if total > 0 {
+			writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
+
+			for (input_parachain, data) in self.inbound_hrmp_messages.iter() {
+				writeln!(f, "\t\t📩 From parachain: {}, {} bytes", input_parachain, data.len())?;
+			}
+		}
+
+		let total: usize = self.outbound_hrmp_messages.values().map(|data| data.len()).sum();
+
+		if total > 0 {
+			writeln!(f, "\t👈 Outbound HRMP messages, sent {} bytes in total", total)?;
+
+			for (output, data) in self.outbound_hrmp_messages.iter() {
+				writeln!(f, "\t\t📩 To parachain: {}, {} bytes", output, data.len())?;
+			}
 		}
 
 		Ok(())
@@ -570,7 +603,9 @@ impl SubxtTracker {
 			self.display_disputes(f)?;
 		}
 
-		if self.inbound_hrmp_messages.values().any(|data| !data.is_empty()) {
+		if self.inbound_hrmp_messages.values().any(|data| !data.is_empty()) ||
+			self.outbound_hrmp_messages.values().any(|data| !data.is_empty())
+		{
 			self.display_hrmp(f)?;
 		}
 

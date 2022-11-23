@@ -70,7 +70,9 @@ pub enum RequestType {
 	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
 	GetInboundHRMPChannels(<DefaultConfig as subxt::Config>::Hash, u32),
 	/// Get data from a specific inbound HRMP channel
-	GetInboundHRMPData(<DefaultConfig as subxt::Config>::Hash, u32, u32),
+	GetHRMPData(<DefaultConfig as subxt::Config>::Hash, u32, u32),
+	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
+	GetOutboundHRMPChannels(<DefaultConfig as subxt::Config>::Hash, u32),
 }
 
 /// The `InherentData` constructed with the subxt API.
@@ -105,9 +107,9 @@ pub enum Response {
 	/// Session keys
 	SessionAccountKeys(Option<Vec<AccountId32>>),
 	/// HRMP channels for some parachain (e.g. who are sending messages to us)
-	HRMPInboundChannels(Vec<u32>),
+	HRMPChannels(Vec<u32>),
 	/// HRMP content for a specific channel
-	HRMPInboundContent(Vec<Vec<u8>>),
+	HRMPContent(Vec<Vec<u8>>),
 }
 
 #[derive(Debug)]
@@ -288,28 +290,48 @@ impl RequestExecutor {
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::HRMPInboundChannels(channels)) => channels,
-			_ => panic!("Expected HRMPInboundChannels, got something else."),
+			Ok(Response::HRMPChannels(channels)) => channels,
+			_ => panic!("Expected HRMPChannels, got something else."),
 		}
 	}
 
-	pub async fn get_inbound_hrmp_content(
+	pub async fn get_outbound_hrmp_channels(
 		&self,
 		url: String,
 		block_hash: <DefaultConfig as subxt::Config>::Hash,
 		para_id: u32,
-		sender_id: u32,
-	) -> Vec<Vec<u8>> {
+	) -> Vec<u32> {
 		let (sender, receiver) = oneshot::channel::<Response>();
 		let request = Request {
 			url,
-			request_type: RequestType::GetInboundHRMPData(block_hash, para_id, sender_id),
+			request_type: RequestType::GetOutboundHRMPChannels(block_hash, para_id),
 			response_sender: sender,
 		};
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
-			Ok(Response::HRMPInboundContent(data)) => data,
+			Ok(Response::HRMPChannels(channels)) => channels,
+			_ => panic!("Expected HRMPChannels, got something else."),
+		}
+	}
+
+	pub async fn get_hrmp_content(
+		&self,
+		url: String,
+		block_hash: <DefaultConfig as subxt::Config>::Hash,
+		receiver_id: u32,
+		sender_id: u32,
+	) -> Vec<Vec<u8>> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request {
+			url,
+			request_type: RequestType::GetHRMPData(block_hash, receiver_id, sender_id),
+			response_sender: sender,
+		};
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::HRMPContent(data)) => data,
 			_ => panic!("Expected HRMPInboundContent, got something else."),
 		}
 	}
@@ -385,8 +407,10 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 					RequestType::GetSessionAccountKeys(session_index) =>
 						subxt_get_session_account_keys(api, session_index).await,
 					RequestType::GetInboundHRMPChannels(hash, para_id) =>
-						subxt_get_hrmp_channels(api, hash, para_id).await,
-					RequestType::GetInboundHRMPData(hash, para_id, sender) =>
+						subxt_get_inbound_hrmp_channels(api, hash, para_id).await,
+					RequestType::GetOutboundHRMPChannels(hash, para_id) =>
+						subxt_get_outbound_hrmp_channels(api, hash, para_id).await,
+					RequestType::GetHRMPData(hash, para_id, sender) =>
 						subxt_get_hrmp_content(api, hash, para_id, sender).await,
 				}
 			} else {
@@ -554,7 +578,7 @@ async fn subxt_get_session_account_keys(
 	Ok(Response::SessionAccountKeys(session_keys))
 }
 
-async fn subxt_get_hrmp_channels(
+async fn subxt_get_inbound_hrmp_channels(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	block_hash: H256,
 	para_id: u32,
@@ -567,25 +591,41 @@ async fn subxt_get_hrmp_channels(
 		.hrmp_ingress_channels_index(&Id(para_id), Some(block_hash))
 		.await
 		.map_err(Error::SubxtError)?;
-	Ok(Response::HRMPInboundChannels(hrmp_channels.into_iter().map(|id| id.0).collect()))
+	Ok(Response::HRMPChannels(hrmp_channels.into_iter().map(|id| id.0).collect()))
+}
+
+async fn subxt_get_outbound_hrmp_channels(
+	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
+	block_hash: H256,
+	para_id: u32,
+) -> Result {
+	use crate::core::api::subxt_wrapper::subxt_runtime_types::polkadot_parachain::primitives::Id;
+
+	let hrmp_channels = api
+		.storage()
+		.hrmp()
+		.hrmp_egress_channels_index(&Id(para_id), Some(block_hash))
+		.await
+		.map_err(Error::SubxtError)?;
+	Ok(Response::HRMPChannels(hrmp_channels.into_iter().map(|id| id.0).collect()))
 }
 
 async fn subxt_get_hrmp_content(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	block_hash: H256,
-	para_id: u32,
+	receiver: u32,
 	sender: u32,
 ) -> Result {
 	use crate::core::api::subxt_wrapper::subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
-	let id = HrmpChannelId { sender: Id(sender), recipient: Id(para_id) };
+	let id = HrmpChannelId { sender: Id(sender), recipient: Id(receiver) };
 	let hrmp_content = api
 		.storage()
 		.hrmp()
 		.hrmp_channel_contents(&id, Some(block_hash))
 		.await
 		.map_err(Error::SubxtError)?;
-	Ok(Response::HRMPInboundContent(hrmp_content.into_iter().map(|hrmp_content| hrmp_content.data).collect()))
+	Ok(Response::HRMPContent(hrmp_content.into_iter().map(|hrmp_content| hrmp_content.data).collect()))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::ChainBlock<DefaultConfig>) -> Result {
