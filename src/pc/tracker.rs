@@ -96,7 +96,7 @@ pub struct SubxtTracker {
 impl Display for SubxtTracker {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),);
+			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 		}
 		self.display_bitfield_propagation(f)?;
 
@@ -301,13 +301,13 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return;
+			return
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return;
+			return
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -455,9 +455,9 @@ impl SubxtTracker {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
 			// Usually this happens at startup, when we miss a core assignment and we do not update
 			// availability before calling this `fn`.
-			if self.current_candidate.max_av_bits > 0
-				&& self.current_candidate.state != ParachainBlockState::Idle
-				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			if self.current_candidate.max_av_bits > 0 &&
+				self.current_candidate.state != ParachainBlockState::Idle &&
+				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				writeln!(
 					f,
@@ -591,8 +591,8 @@ impl SubxtTracker {
 			self.display_disputes(f)?;
 		}
 
-		if self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
-			|| self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
+		if self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
+			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
 		{
 			self.display_hrmp(f)?;
 		}
