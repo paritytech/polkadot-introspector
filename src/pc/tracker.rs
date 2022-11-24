@@ -20,6 +20,7 @@ use crate::core::{
 		RequestExecutor, ValidatorIndex,
 	},
 	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
+	SubxtHrmpChannel,
 };
 use codec::{Decode, Encode};
 use color_eyre::owo_colors::OwoColorize;
@@ -87,13 +88,9 @@ pub struct SubxtTracker {
 	/// Session tracker
 	session_data: Option<SubxtSessionTracker>,
 	/// Known inbound HRMP channels, indexed by source parachain id
-	inbound_hrmp_channels: Vec<u32>,
-	/// Inbound hrmp content for the parachain, indexed by sender parachain id
-	inbound_hrmp_messages: BTreeMap<u32, Vec<u8>>,
+	inbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
 	/// Known outbound HRMP channels, indexed by source parachain id
-	outbound_hrmp_channels: Vec<u32>,
-	/// Inbound hrmp content for the parachain, indexed by sender parachain id
-	outbound_hrmp_messages: BTreeMap<u32, Vec<u8>>,
+	outbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
 }
 
 impl Display for SubxtTracker {
@@ -202,23 +199,6 @@ impl ParachainBlockTracker for SubxtTracker {
 					.await;
 				self.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
 
-				for channel in &self.inbound_hrmp_channels {
-					let content = self
-						.executor
-						.get_hrmp_content(self.node_rpc_url.clone(), block_hash, self.para_id, *channel)
-						.await;
-					self.inbound_hrmp_messages
-						.insert(*channel, content.into_iter().flatten().collect());
-				}
-				for channel in &self.outbound_hrmp_channels {
-					let content = self
-						.executor
-						.get_hrmp_content(self.node_rpc_url.clone(), block_hash, *channel, self.para_id)
-						.await;
-					self.outbound_hrmp_messages
-						.insert(*channel, content.into_iter().flatten().collect());
-				}
-
 				let cur_session = self.executor.get_session_index(self.node_rpc_url.clone(), block_hash).await;
 				if let Some(stored_session) = self.get_current_session_index() {
 					if cur_session != stored_session {
@@ -266,10 +246,8 @@ impl SubxtTracker {
 			current_relay_block_ts: None,
 			last_relay_block_ts: None,
 			session_data: None,
-			inbound_hrmp_channels: vec![],
-			inbound_hrmp_messages: BTreeMap::new(),
-			outbound_hrmp_channels: vec![],
-			outbound_hrmp_messages: BTreeMap::new(),
+			inbound_hrmp_channels: BTreeMap::new(),
+			outbound_hrmp_channels: BTreeMap::new(),
 		}
 	}
 
@@ -453,12 +431,14 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_hrmp_channels(&mut self, inbound_channels: Vec<u32>, outbound_channels: Vec<u32>) {
+	fn update_hrmp_channels(
+		&mut self,
+		inbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
+		outbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
+	) {
 		debug!("hrmp channels configured: {:?} in, {:?} out", &inbound_channels, &outbound_channels);
 		self.inbound_hrmp_channels = inbound_channels;
 		self.outbound_hrmp_channels = outbound_channels;
-		self.inbound_hrmp_messages.clear();
-		self.outbound_hrmp_messages.clear();
 	}
 
 	fn display_core_assignment(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -564,23 +544,31 @@ impl SubxtTracker {
 	}
 
 	fn display_hrmp(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let total: usize = self.inbound_hrmp_messages.values().map(|data| data.len()).sum();
+		let total: u32 = self.inbound_hrmp_channels.values().map(|channel| channel.total_size).sum();
 
 		if total > 0 {
 			writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
 
-			for (input_parachain, data) in self.inbound_hrmp_messages.iter() {
-				writeln!(f, "\t\t📩 From parachain: {}, {} bytes", input_parachain, data.len())?;
+			for (peer_parachain, channel) in &self.inbound_hrmp_channels {
+				writeln!(
+					f,
+					"\t\t📩 From parachain: {}, {} bytes / {} max",
+					peer_parachain, channel.total_size, channel.max_message_size
+				)?;
 			}
 		}
 
-		let total: usize = self.outbound_hrmp_messages.values().map(|data| data.len()).sum();
+		let total: u32 = self.outbound_hrmp_channels.values().map(|channel| channel.total_size).sum();
 
 		if total > 0 {
 			writeln!(f, "\t👈 Outbound HRMP messages, sent {} bytes in total", total)?;
 
-			for (output, data) in self.outbound_hrmp_messages.iter() {
-				writeln!(f, "\t\t📩 To parachain: {}, {} bytes", output, data.len())?;
+			for (peer_parachain, channel) in &self.inbound_hrmp_channels {
+				writeln!(
+					f,
+					"\t\t📩 To parachain: {}, {} bytes / {} max",
+					peer_parachain, channel.total_size, channel.max_message_size
+				)?;
 			}
 		}
 
@@ -603,8 +591,8 @@ impl SubxtTracker {
 			self.display_disputes(f)?;
 		}
 
-		if self.inbound_hrmp_messages.values().any(|data| !data.is_empty()) ||
-			self.outbound_hrmp_messages.values().any(|data| !data.is_empty())
+		if self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
+			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
 		{
 			self.display_hrmp(f)?;
 		}

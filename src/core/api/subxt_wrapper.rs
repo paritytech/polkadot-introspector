@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 // Copyright 2022 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
@@ -27,7 +28,8 @@ use codec::{Compact, Decode, Encode};
 use log::error;
 
 use crate::core::subxt_subscription::polkadot::{
-	runtime_types as subxt_runtime_types, runtime_types::polkadot_primitives as polkadot_rt_primitives,
+	runtime_types as subxt_runtime_types,
+	runtime_types::{polkadot_primitives as polkadot_rt_primitives, polkadot_runtime_parachains::hrmp::HrmpChannel},
 };
 
 pub use subxt_runtime_types::polkadot_runtime::Call as SubxtCall;
@@ -107,7 +109,7 @@ pub enum Response {
 	/// Session keys
 	SessionAccountKeys(Option<Vec<AccountId32>>),
 	/// HRMP channels for some parachain (e.g. who are sending messages to us)
-	HRMPChannels(Vec<u32>),
+	HRMPChannels(BTreeMap<u32, SubxtHrmpChannel>),
 	/// HRMP content for a specific channel
 	HRMPContent(Vec<Vec<u8>>),
 }
@@ -280,7 +282,7 @@ impl RequestExecutor {
 		url: String,
 		block_hash: <DefaultConfig as subxt::Config>::Hash,
 		para_id: u32,
-	) -> Vec<u32> {
+	) -> BTreeMap<u32, SubxtHrmpChannel> {
 		let (sender, receiver) = oneshot::channel::<Response>();
 		let request = Request {
 			url,
@@ -300,7 +302,7 @@ impl RequestExecutor {
 		url: String,
 		block_hash: <DefaultConfig as subxt::Config>::Hash,
 		para_id: u32,
-	) -> Vec<u32> {
+	) -> BTreeMap<u32, SubxtHrmpChannel> {
 		let (sender, receiver) = oneshot::channel::<Response>();
 		let request = Request {
 			url,
@@ -578,12 +580,40 @@ async fn subxt_get_session_account_keys(
 	Ok(Response::SessionAccountKeys(session_keys))
 }
 
+/// A wrapper over subxt HRMP channel configuration
+#[derive(Debug, Clone)]
+pub struct SubxtHrmpChannel {
+	pub max_capacity: u32,
+	pub max_total_size: u32,
+	pub max_message_size: u32,
+	pub msg_count: u32,
+	pub total_size: u32,
+	pub mqc_head: Option<H256>,
+	pub sender_deposit: u128,
+	pub recipient_deposit: u128,
+}
+
+impl From<HrmpChannel> for SubxtHrmpChannel {
+	fn from(channel: HrmpChannel) -> Self {
+		SubxtHrmpChannel {
+			max_capacity: channel.max_capacity,
+			max_total_size: channel.max_total_size,
+			max_message_size: channel.max_message_size,
+			msg_count: channel.msg_count,
+			total_size: channel.total_size,
+			mqc_head: channel.mqc_head,
+			sender_deposit: channel.sender_deposit,
+			recipient_deposit: channel.recipient_deposit,
+		}
+	}
+}
+
 async fn subxt_get_inbound_hrmp_channels(
 	api: &polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>,
 	block_hash: H256,
 	para_id: u32,
 ) -> Result {
-	use crate::core::api::subxt_wrapper::subxt_runtime_types::polkadot_parachain::primitives::Id;
+	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let hrmp_channels = api
 		.storage()
@@ -591,7 +621,19 @@ async fn subxt_get_inbound_hrmp_channels(
 		.hrmp_ingress_channels_index(&Id(para_id), Some(block_hash))
 		.await
 		.map_err(Error::SubxtError)?;
-	Ok(Response::HRMPChannels(hrmp_channels.into_iter().map(|id| id.0).collect()))
+	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
+	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
+		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
+		api.storage()
+			.hrmp()
+			.hrmp_channels(&id, Some(block_hash))
+			.await
+			.map_err(Error::SubxtError)?
+			.map(|hrmp_channel_configuration| {
+				channels_configuration.insert(peer_parachain_id, hrmp_channel_configuration.into())
+			});
+	}
+	Ok(Response::HRMPChannels(channels_configuration))
 }
 
 async fn subxt_get_outbound_hrmp_channels(
@@ -599,7 +641,7 @@ async fn subxt_get_outbound_hrmp_channels(
 	block_hash: H256,
 	para_id: u32,
 ) -> Result {
-	use crate::core::api::subxt_wrapper::subxt_runtime_types::polkadot_parachain::primitives::Id;
+	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let hrmp_channels = api
 		.storage()
@@ -607,7 +649,19 @@ async fn subxt_get_outbound_hrmp_channels(
 		.hrmp_egress_channels_index(&Id(para_id), Some(block_hash))
 		.await
 		.map_err(Error::SubxtError)?;
-	Ok(Response::HRMPChannels(hrmp_channels.into_iter().map(|id| id.0).collect()))
+	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
+	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
+		let id = HrmpChannelId { sender: Id(para_id), recipient: Id(peer_parachain_id) };
+		api.storage()
+			.hrmp()
+			.hrmp_channels(&id, Some(block_hash))
+			.await
+			.map_err(Error::SubxtError)?
+			.map(|hrmp_channel_configuration| {
+				channels_configuration.insert(peer_parachain_id, hrmp_channel_configuration.into())
+			});
+	}
+	Ok(Response::HRMPChannels(channels_configuration))
 }
 
 async fn subxt_get_hrmp_content(
@@ -616,7 +670,7 @@ async fn subxt_get_hrmp_content(
 	receiver: u32,
 	sender: u32,
 ) -> Result {
-	use crate::core::api::subxt_wrapper::subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
+	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let id = HrmpChannelId { sender: Id(sender), recipient: Id(receiver) };
 	let hrmp_content = api
