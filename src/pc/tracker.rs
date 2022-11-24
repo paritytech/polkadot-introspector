@@ -550,11 +550,13 @@ impl SubxtTracker {
 			writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
 
 			for (peer_parachain, channel) in &self.inbound_hrmp_channels {
-				writeln!(
-					f,
-					"\t\t📩 From parachain: {}, {} bytes / {} max",
-					peer_parachain, channel.total_size, channel.max_message_size
-				)?;
+				if channel.total_size > 0 {
+					writeln!(
+						f,
+						"\t\t📩 From parachain: {}, {} bytes / {} max",
+						peer_parachain, channel.total_size, channel.max_message_size
+					)?;
+				}
 			}
 		}
 
@@ -564,11 +566,13 @@ impl SubxtTracker {
 			writeln!(f, "\t👈 Outbound HRMP messages, sent {} bytes in total", total)?;
 
 			for (peer_parachain, channel) in &self.outbound_hrmp_channels {
-				writeln!(
-					f,
-					"\t\t📩 To parachain: {}, {} bytes / {} max",
-					peer_parachain, channel.total_size, channel.max_message_size
-				)?;
+				if channel.total_size > 0 {
+					writeln!(
+						f,
+						"\t\t📩 To parachain: {}, {} bytes / {} max",
+						peer_parachain, channel.total_size, channel.max_message_size
+					)?;
+				}
 			}
 		}
 
