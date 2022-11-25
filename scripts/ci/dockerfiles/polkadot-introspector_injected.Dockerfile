@@ -1,5 +1,6 @@
 FROM docker.io/library/ubuntu:20.04
 
+ARG RUNTIME=polkadot
 ARG VCS_REF
 ARG BUILD_DATE
 
@@ -11,7 +12,9 @@ LABEL description="Docker image for polkadot-introspector" \
 	io.parity.image.created="${BUILD_DATE}" \
 	io.parity.image.documentation="https://github.com/paritytech/polkadot-introspector"
 
-COPY ./artifacts/polkadot-introspector /usr/local/bin
+RUN mkdir -p /polkadot-introspector
+
+COPY ./artifacts /polkadot-introspector
 
 # Temporary installation of certificates
 RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && \
@@ -22,4 +25,4 @@ RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && \
 
 USER polkadot-introspector
 
-ENTRYPOINT ["/usr/local/bin/polkadot-introspector"]
+ENTRYPOINT ["/polkadot-introspector/${RUNTIME}/polkadot-introspector"]
