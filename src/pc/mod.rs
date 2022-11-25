@@ -50,6 +50,9 @@ pub(crate) struct ParachainCommanderOptions {
 	/// Parachain id.
 	#[clap(long)]
 	para_id: u32,
+	/// Run for a number of blocks then stop.
+	#[clap(name = "blocks", long)]
+	block_count: Option<u32>,
 }
 
 pub(crate) struct ParachainCommander {
@@ -108,6 +111,8 @@ impl ParachainCommander {
 		);
 
 		let mut tracker = tracker::SubxtTracker::new(para_id, url, executor);
+		let mut start_block = None;
+		let mut end_block = None;
 
 		// Break if user quits.
 		loop {
@@ -115,9 +120,20 @@ impl ParachainCommander {
 			match recv_result {
 				Ok(event) => match event {
 					SubxtEvent::NewHead(hash) => {
-						let _state = tracker.inject_block(hash).await;
+						let _parablock_info = tracker.inject_block(hash).await;
 						println!("{}", tracker);
 						tracker.maybe_reset_state();
+
+						if start_block.is_none() && opts.block_count.is_some() {
+							start_block = tracker.get_current_relay_block_number();
+							end_block = start_block.map(|block_number| {
+								block_number + opts.block_count.expect("we just checked it above; qed") - 1
+							});
+						}
+
+						if tracker.get_current_relay_block_number() >= end_block {
+							break
+						}
 					},
 					SubxtEvent::DisputeInitiated(dispute) => {
 						info!(

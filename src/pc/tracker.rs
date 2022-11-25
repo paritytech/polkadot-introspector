@@ -237,6 +237,11 @@ impl SubxtTracker {
 		self.current_relay_block = Some((block_number, block_hash));
 	}
 
+	/// Returns the current relay chain block number.
+	pub fn get_current_relay_block_number(&self) -> Option<BlockNumber> {
+		self.current_relay_block.map(|block| block.0)
+	}
+
 	fn get_session_keys(&self, session_index: u32) -> Option<&Vec<AccountId32>> {
 		self.session_data.as_ref().and_then(|session_data| {
 			if session_data.session_index == session_index {
