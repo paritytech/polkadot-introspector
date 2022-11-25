@@ -114,10 +114,14 @@ build:
   <<:                              *docker-env
   <<:                              *collect-artifacts
   script:
-    - time cargo build --release
     - mkdir ./artifacts || echo "dir exists"
-    - cp $CARGO_TARGET_DIR/release/polkadot-introspector ./artifacts/
+    - mkdir ./artifacts/polkadot || echo "dir exists"
+    - mkdir ./artifacts/rococo || echo "dir exists"
 
+    - time cargo build --release --features=polkadot
+    - cp $CARGO_TARGET_DIR/release/polkadot-introspector ./artifacts/polkadot/
+    - time cargo build --release --features=rococo
+    - cp $CARGO_TARGET_DIR/release/polkadot-introspector ./artifacts/rococo/
 #### stage:                       publish
 
 publish-docker:
