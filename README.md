@@ -7,6 +7,25 @@ via a set of tools (for example, [subxt](https://github.com/paritytech/subxt/)).
 
 Depending on the tool, the data source and output might differ. For examples of how this data can be visualised in Grafana, please see the [Grafana dashboards](grafana/README.md) section.
 
+## Building
+
+It is mandatory to specify which `Runtime` the build will target. Currently `Polkadot Introspector` can only build for a single runtime version by enabling one of the features:
+ - `polkadot` (supports both Kusama and Polkadot)
+ - `rococo` (supports Rococo and Versi test networks)
+
+`cargo build --profile=release --features=polkadot`
+
+These features will select which metadata to use for decoding block data. 
+
+## Updating or supporting a new `Runtime`
+Sometimes the `Runtime` version deployed on a network might be newer and incompatible to the metadata 
+bundled in the repo. We can use `subxt` CLI to bring the `Polkadot Introspector` metadata up to date. 
+
+Example for Versi:
+`cargo run --release -p subxt-cli -- metadata --format bytes --url wss://versi-rpc-node-0.parity-versi.parity.io:443 > new_metadata.scale`
+
+Use the output file to replace the older in the `assets` folder then rebuild.
+
 ## Tools available
 
 * [Collector tool](#collector-tool) - observe and monitor runtime events via subxt
@@ -26,7 +45,7 @@ runtime events. The primary goal of this mode is to provide a backend for parach
 * (WIP) Approval votes
 
 ```
-cargo run --release -- \
+cargo run --features="polkadot" --release -- \
     -vvv collector --url wss://rpc.polkadot.io:443 \
     --listen 127.0.0.1:3030
 ```
@@ -49,7 +68,7 @@ In this mode, introspector monitors block production time via different RPC node
 live ASCII charts on the terminal while Prometheus mode exposes an endpoint for scraping the observed block times.
 
 ```
-cargo run --release -- block-time-monitor \
+cargo run --release --features=polkadot -- block-time-monitor \
     --ws=wss://westmint-rpc.polkadot.io:443,wss://wss.moonriver.moonbeam.network:443,wss://statemine-rpc.polkadot.io:443,wss://ws.calamari.systems:443,wss://rpc.polkadot.io:443,wss://kusama-rpc.polkadot.io:443,wss://api.westend.encointer.org:443 \
     cli
 ```

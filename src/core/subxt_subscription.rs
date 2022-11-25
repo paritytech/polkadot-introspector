@@ -28,6 +28,21 @@ use subxt::{
 };
 use tokio::sync::mpsc::{channel, Sender};
 
+#[cfg(all(feature = "rococo", feature = "polkadot", feature = "versi"))]
+compile_error!("`rococo`, `polkadot`, `versi` are mutually exclusive features");
+
+#[cfg(not(any(feature = "rococo", feature = "polkadot", feature = "versi")))]
+compile_error!("Must build with either `rococo`, `polkadot`, `versi` features");
+
+#[cfg(feature = "versi")]
+#[subxt::subxt(runtime_metadata_path = "assets/versi_metadata_v2.scale")]
+pub mod polkadot {}
+
+#[cfg(feature = "rococo")]
+#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata_v2.scale")]
+pub mod polkadot {}
+
+#[cfg(feature = "polkadot")]
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
 pub mod polkadot {}
 
@@ -149,7 +164,7 @@ impl SubxtWrapper {
 						.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>>(
 						);
 					info!("[{}] Connected", url);
-					match api.events().subscribe_finalized().await {
+					match api.events().subscribe().await {
 						Ok(mut sub) => loop {
 							tokio::select! {
 								Some(events) = sub.next() => {
