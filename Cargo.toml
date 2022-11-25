@@ -39,3 +39,4 @@ time = { version = "0.3.17", features = ["formatting"] }
 [features]
 rococo = []
 polkadot = []
+versi = []
