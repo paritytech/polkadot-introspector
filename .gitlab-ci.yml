@@ -86,7 +86,8 @@ clippy:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo +nightly clippy --all-targets -- -D warnings
+    - time cargo +nightly clippy --all-targets --features=polkadot -- -D warnings
+    - time cargo +nightly clippy --all-targets --features=rococo -- -D warnings
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
@@ -95,7 +96,8 @@ check:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo +nightly check --all-targets --all-features --workspace
+    - time cargo +nightly check --all-targets --features=polkadot --workspace
+    - time cargo +nightly check --all-targets --features=rococo --workspace
 
 #### stage:                       test
 
@@ -104,7 +106,8 @@ test:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo test --all-targets --workspace
+    - time cargo test --all-targets --features=polkadot --workspace
+    - time cargo test --all-targets --features=rococo --workspace
 
 #### stage:                       build
 
