@@ -34,7 +34,7 @@ use crate::core::subxt_subscription::polkadot::{
 pub use subxt_runtime_types::rococo_runtime::Call as SubxtCall;
 
 #[cfg(feature = "polkadot")]
-pub use subxt_runtime_types::polkadot_runtime::Call as SubxtCall;
+pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
 
 use std::collections::hash_map::{Entry, HashMap};
 use subxt::{
