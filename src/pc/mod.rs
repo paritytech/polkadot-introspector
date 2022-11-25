@@ -129,7 +129,7 @@ impl ParachainCommander {
 							end_block = start_block.map(|block_number| {
 								block_number + opts.block_count.expect("we just checked it above; qed") - 1
 							});
-						} 
+						}
 
 						if end_block.is_some() && tracker.get_current_relay_block_number() >= end_block {
 							break
