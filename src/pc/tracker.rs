@@ -63,6 +63,38 @@ struct SubxtSessionTracker {
 	prev_keys: Option<Vec<AccountId32>>,
 }
 
+/// A structure that tracks messages (UMP, HRMP, DMP etc)
+pub struct SubxtMessageQueuesTracker {
+	/// Known inbound HRMP channels, indexed by source parachain id
+	pub inbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
+	/// Known outbound HRMP channels, indexed by source parachain id
+	pub outbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
+}
+
+impl SubxtMessageQueuesTracker {
+	/// Create new message queues tracker
+	pub fn new() -> Self {
+		Self { inbound_hrmp_channels: BTreeMap::new(), outbound_hrmp_channels: BTreeMap::new() }
+	}
+
+	/// Update the content of hrmp channels
+	pub fn update_hrmp_channels(
+		&mut self,
+		inbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
+		outbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
+	) {
+		debug!("hrmp channels configured: {:?} in, {:?} out", &inbound_channels, &outbound_channels);
+		self.inbound_hrmp_channels = inbound_channels;
+		self.outbound_hrmp_channels = outbound_channels;
+	}
+
+	/// Returns if there ae
+	pub fn has_hrmp_messages(&self) -> bool {
+		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
+			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
+	}
+}
+
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
 	/// Parachain ID to track.
@@ -87,10 +119,8 @@ pub struct SubxtTracker {
 	last_relay_block_ts: Option<u64>,
 	/// Session tracker
 	session_data: Option<SubxtSessionTracker>,
-	/// Known inbound HRMP channels, indexed by source parachain id
-	inbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
-	/// Known outbound HRMP channels, indexed by source parachain id
-	outbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
+	/// Messages queues status
+	message_queues: SubxtMessageQueuesTracker,
 }
 
 impl Display for SubxtTracker {
@@ -197,7 +227,8 @@ impl ParachainBlockTracker for SubxtTracker {
 					.executor
 					.get_outbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
 					.await;
-				self.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
+				self.message_queues
+					.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
 
 				let cur_session = self.executor.get_session_index(self.node_rpc_url.clone(), block_hash).await;
 				if let Some(stored_session) = self.get_current_session_index() {
@@ -246,8 +277,7 @@ impl SubxtTracker {
 			current_relay_block_ts: None,
 			last_relay_block_ts: None,
 			session_data: None,
-			inbound_hrmp_channels: BTreeMap::new(),
-			outbound_hrmp_channels: BTreeMap::new(),
+			message_queues: SubxtMessageQueuesTracker::new(),
 		}
 	}
 
@@ -431,16 +461,6 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_hrmp_channels(
-		&mut self,
-		inbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
-		outbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
-	) {
-		debug!("hrmp channels configured: {:?} in, {:?} out", &inbound_channels, &outbound_channels);
-		self.inbound_hrmp_channels = inbound_channels;
-		self.outbound_hrmp_channels = outbound_channels;
-	}
-
 	fn display_core_assignment(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if let Some(assigned_core) = self.last_assignment {
 			writeln!(f, "\t- Parachain {} assigned to core index {}", self.para_id, assigned_core)
@@ -544,12 +564,17 @@ impl SubxtTracker {
 	}
 
 	fn display_hrmp(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let total: u32 = self.inbound_hrmp_channels.values().map(|channel| channel.total_size).sum();
+		let total: u32 = self
+			.message_queues
+			.inbound_hrmp_channels
+			.values()
+			.map(|channel| channel.total_size)
+			.sum();
 
 		if total > 0 {
 			writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
 
-			for (peer_parachain, channel) in &self.inbound_hrmp_channels {
+			for (peer_parachain, channel) in &self.message_queues.inbound_hrmp_channels {
 				if channel.total_size > 0 {
 					writeln!(
 						f,
@@ -560,12 +585,17 @@ impl SubxtTracker {
 			}
 		}
 
-		let total: u32 = self.outbound_hrmp_channels.values().map(|channel| channel.total_size).sum();
+		let total: u32 = self
+			.message_queues
+			.outbound_hrmp_channels
+			.values()
+			.map(|channel| channel.total_size)
+			.sum();
 
 		if total > 0 {
 			writeln!(f, "\t👈 Outbound HRMP messages, sent {} bytes in total", total)?;
 
-			for (peer_parachain, channel) in &self.outbound_hrmp_channels {
+			for (peer_parachain, channel) in &self.message_queues.outbound_hrmp_channels {
 				if channel.total_size > 0 {
 					writeln!(
 						f,
@@ -595,9 +625,7 @@ impl SubxtTracker {
 			self.display_disputes(f)?;
 		}
 
-		if self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
-			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
-		{
+		if self.message_queues.has_hrmp_messages() {
 			self.display_hrmp(f)?;
 		}
 
