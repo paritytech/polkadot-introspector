@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //! This module tracks parachain blocks.
+use super::display::{
+	DisputesOutcome, ParaBlockTime, ParachainConsensusEvent, ParachainProgressUpdate, ParachainStats,
+};
 use crate::core::{
 	api::{
 		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
@@ -23,14 +26,8 @@ use crate::core::{
 	SubxtHrmpChannel,
 };
 use codec::{Decode, Encode};
-use color_eyre::owo_colors::OwoColorize;
-use crossterm::style::Stylize;
 use log::{debug, error};
-use std::{
-	collections::BTreeMap,
-	fmt,
-	fmt::{Debug, Display},
-};
+use std::{collections::BTreeMap, fmt, fmt::Debug};
 use subxt::{
 	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
@@ -55,7 +52,7 @@ pub trait ParachainBlockTracker {
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo;
 
 	/// Update current parachain progress.
-	async fn progress(&mut self) -> Option<ParachainProgressUpdate>;
+	fn progress(&mut self) -> Option<ParachainProgressUpdate>;
 }
 
 /// Used to track session data, where we store two subsequent sessions: the current and the previous one
@@ -105,7 +102,7 @@ pub struct SubxtTracker {
 	/// A subxt API wrapper.
 	executor: RequestExecutor,
 	/// The last availability core index the parachain has been assigned to.
-	last_assignment: Option<usize>,
+	last_assignment: Option<u32>,
 	/// The relay chain block number at which the last candidate was backed at.
 	last_backed_at: Option<BlockNumber>,
 	/// Information about current block we track.
@@ -127,111 +124,6 @@ pub struct SubxtTracker {
 	stats: ParachainStats,
 	/// Parachain progress update.
 	update: Option<ParachainProgressUpdate>,
-}
-
-#[derive(Default)]
-/// Parachain block time stats.
-pub struct ParaBlockTime {
-	/// Average block time.
-	avg: u16,
-	/// Max block time.
-	max: u16,
-	/// Min block time.
-	min: u16,
-}
-
-#[derive(Clone, Default)]
-/// Per parachain statistics
-pub struct ParachainStats {
-	/// Parachain id.
-	para_id: u32,
-	/// Number of backed candidates.
-	backed_count: u32,
-	/// Number of skipped slots, where no candidate was backed and availability core
-	/// was free.
-	skipped_slots: u32,
-	/// Number of candidates included.
-	included_count: u32,
-	/// Number of candidates disputed.
-	disputed_count: u32,
-	/// Block time measurements.
-	block_times: ParaBlockTime,
-	/// Number of slow availability events.
-	slow_avail_count: u32,
-	/// Number of low bitfield propagation events.
-	slow_bitfields_count: u32,
-}
-
-// PING google.com (142.250.185.174) 56(84) bytes of data.
-// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=1 ttl=60 time=10.3 ms
-// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=2 ttl=60 time=10.4 ms
-// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=3 ttl=60 time=10.3 ms
-// ^C
-// --- google.com ping statistics ---
-// 3 packets transmitted, 3 received, 0% packet loss, time 2002ms
-// rtt min/avg/max/mdev = 10.297/10.323/10.362/0.027 ms
-
-impl Display for ParachainStats {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(f, "{}", "--- Parachain {} trace statistics ---".to_string().bold().blue())
-	}
-}
-
-#[derive(Clone, Default)]
-pub struct BitfieldsHealth {
-	/// Maximum bitfield count, equal to number of parachain validators.
-	pub max_bitfield_count: u32,
-	/// Current bitfield count in the relay chain block.
-	pub bitfield_count: u32,
-	/// Sum of all bits for a given parachain.
-	pub available_count: u32,
-}
-
-#[derive(Clone, Default)]
-/// Events related to parachain blocks from consensus perspective.
-pub enum ParachainConsensusEvent {
-	/// A core has been assigned to a parachain.
-	CoreAssigned(u32),
-	/// The core is now occupied.
-	CoreOccupied,
-	/// The core is now free.
-	CoreFree,
-	/// A candidate was backed.
-	Backed(H256),
-	/// A candidate was included.
-	Included(H256),
-	/// A dispute has concluded.
-	Disputed(DisputesOutcome),
-	/// No candidate backed.
-	SkippedSlot,
-	/// Candidate not available yet.
-	SlowAvailability,
-	/// Inherent bitfield count is lower than 2/3 of expect.
-	SlowBitfieldPropagation,
-}
-
-#[derive(Clone, Default)]
-/// Contains information about how a parachain has progressed at a given relay
-/// chain block.
-pub struct ParachainProgressUpdate {
-	/// Block timestamp.
-	pub timestamp: u64,
-	/// Relay chain block number.
-	pub block_number: BlockNumber,
-	/// Relay chain block hash.
-	pub block_hash: H256,
-	/// Bitfields health metrics.
-	pub bitfield_health: BitfieldsHealth,
-	/// Consensus events happening for the para under a relay parent.
-	pub events: Vec<ParachainConsensusEvent>,
-}
-
-#[derive(Encode, Decode, Debug, Default)]
-struct DisputesOutcome {
-	candidate: H256,
-	voted_for: u32,
-	voted_against: u32,
-	misbehaving_validators: Vec<(u32, String)>,
 }
 
 /// The parachain block tracking information.
@@ -274,25 +166,28 @@ impl ParachainBlockTracker for SubxtTracker {
 	type RelayChainBlockNumber = BlockNumber;
 	type ParaInherentData = InherentData;
 	type ParachainBlockInfo = ParachainBlockInfo;
+	type ParachainProgressUpdate = ParachainProgressUpdate;
 
-	async fn progress(&mut self) -> Option<ParachainProgressUpdate> {
+	fn progress(&mut self) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_none() {
 			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 			self.update = None;
 			return None
 		}
 
+		let (relay_block_number, relay_block_hash) = self.current_relay_block.expect("Just checked above; qed");
+
 		self.update = Some(ParachainProgressUpdate {
+			para_id: self.para_id,
 			timestamp: self.current_relay_block_ts.unwrap_or_default(),
-			block_number: self.current_relay_block.0,
-			block_hash: self.current_relay_block.1,
+			block_number: relay_block_number,
+			block_hash: relay_block_hash,
 			..Default::default()
 		});
 
 		self.progress_core_assignment();
-		self.update_bitfield_propagation()?;
+		self.update_bitfield_propagation();
 
-		let (relay_block_number, _) = self.current_relay_block.expect("Just checked above; qed");
 		match self.current_candidate.state {
 			ParachainBlockState::Idle => {
 				// writeln!(
@@ -304,6 +199,7 @@ impl ParachainBlockTracker for SubxtTracker {
 				// 	self.para_id,
 				// )?;
 				self.update
+					.as_mut()
 					.map(|update| update.events.push(ParachainConsensusEvent::SkippedSlot));
 				self.stats.skipped_slots += 1;
 			},
@@ -320,6 +216,7 @@ impl ParachainBlockTracker for SubxtTracker {
 					let candidate_hash =
 						BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
 					self.update
+						.as_mut()
 						.map(|update| update.events.push(ParachainConsensusEvent::Backed(candidate_hash)));
 					self.stats.backed_count += 1;
 				}
@@ -328,6 +225,8 @@ impl ParachainBlockTracker for SubxtTracker {
 				self.progress_availability();
 			},
 		}
+
+		self.update.clone()
 	}
 
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo {
@@ -389,7 +288,16 @@ impl SubxtTracker {
 			node_rpc_url,
 			executor,
 			stats: ParachainStats { para_id, ..Default::default() },
-			..Default::default()
+			current_candidate: Default::default(),
+			current_relay_block: None,
+			current_relay_block_ts: None,
+			disputes: Vec::new(),
+			last_assignment: None,
+			last_backed_at: None,
+			last_relay_block_ts: None,
+			message_queues: Default::default(),
+			session_data: None,
+			update: None,
 		}
 	}
 
@@ -578,17 +486,19 @@ impl SubxtTracker {
 		}
 	}
 
+	// TODO: fix this, it is broken, nobody sets this.
 	fn progress_core_assignment(&mut self) {
 		if let Some(assigned_core) = self.last_assignment {
 			// writeln!(f, "\t- Parachain {} assigned to core index {}", self.para_id, assigned_core)
 			self.update
+				.as_mut()
 				.map(|update| update.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core)));
 		}
 	}
 
 	fn update_bitfield_propagation(&mut self) {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
-		if let Some((relay_block_number, _)) = self.current_relay_block {
+		if let Some((_, _)) = self.current_relay_block {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
 			// Usually this happens at startup, when we miss a core assignment and we do not update
 			// availability before calling this `fn`.
@@ -604,17 +514,18 @@ impl SubxtTracker {
 				// 	self.current_candidate.max_av_bits
 				// )?;
 				self.update
+					.as_mut()
 					.map(|update| update.events.push(ParachainConsensusEvent::SlowBitfieldPropagation));
 				self.stats.slow_bitfields_count += 1;
 			}
 		}
 	}
 
-	fn progress_availability(&mut self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn progress_availability(&mut self) {
 		let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
 
 		// Update bitfields health.
-		self.update.map(|update| {
+		self.update.as_mut().map(|update| {
 			update.bitfield_health.max_bitfield_count = self.current_candidate.max_av_bits;
 			update.bitfield_health.available_count = self.current_candidate.current_av_bits;
 			update.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
@@ -633,6 +544,7 @@ impl SubxtTracker {
 				let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
 				let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
 				self.update
+					.as_mut()
 					.map(|update| update.events.push(ParachainConsensusEvent::Included(candidate_hash)));
 				self.stats.included_count += 1;
 			}
@@ -645,6 +557,7 @@ impl SubxtTracker {
 			// 		.yellow(),
 			// )?;
 			self.update
+				.as_mut()
 				.map(|update| update.events.push(ParachainConsensusEvent::SlowAvailability));
 			self.stats.slow_avail_count += 1;
 		}
@@ -664,86 +577,86 @@ impl SubxtTracker {
 	// 	)
 	// }
 
-	fn display_disputes(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(f, "\t👊 Disputes tracked")?;
-		for dispute in &self.disputes {
-			self.stats.disputed_count += 1;
-			if dispute.voted_for < dispute.voted_against {
-				writeln!(
-					f,
-					"\t\t👎 Candidate: {}, resolved invalid; voted for: {}; voted against: {}",
-					format!("{:?}", dispute.candidate).dark_red(),
-					dispute.voted_for,
-					dispute.voted_against
-				)?;
-			} else {
-				writeln!(
-					f,
-					"\t\t👍 Candidate: {}, resolved valid; voted for: {}; voted against: {}",
-					format!("{:?}", dispute.candidate).bright_green(),
-					dispute.voted_for,
-					dispute.voted_against
-				)?;
-			}
+	// fn display_disputes(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	// 	writeln!(f, "\t👊 Disputes tracked")?;
+	// 	for dispute in &self.disputes {
+	// 		self.stats.disputed_count += 1;
+	// 		if dispute.voted_for < dispute.voted_against {
+	// 			writeln!(
+	// 				f,
+	// 				"\t\t👎 Candidate: {}, resolved invalid; voted for: {}; voted against: {}",
+	// 				format!("{:?}", dispute.candidate).dark_red(),
+	// 				dispute.voted_for,
+	// 				dispute.voted_against
+	// 			)?;
+	// 		} else {
+	// 			writeln!(
+	// 				f,
+	// 				"\t\t👍 Candidate: {}, resolved valid; voted for: {}; voted against: {}",
+	// 				format!("{:?}", dispute.candidate).bright_green(),
+	// 				dispute.voted_for,
+	// 				dispute.voted_against
+	// 			)?;
+	// 		}
 
-			if !dispute.misbehaving_validators.is_empty() {
-				for validator in &dispute.misbehaving_validators {
-					writeln!(
-						f,
-						"\t\t\t👹 Validator voted against supermajority: {}",
-						format!("idx: {}, address: {}", validator.0, validator.1).bright_red(),
-					)?;
-				}
-			}
-		}
-		Ok(())
-	}
+	// 		if !dispute.misbehaving_validators.is_empty() {
+	// 			for validator in &dispute.misbehaving_validators {
+	// 				writeln!(
+	// 					f,
+	// 					"\t\t\t👹 Validator voted against supermajority: {}",
+	// 					format!("idx: {}, address: {}", validator.0, validator.1).bright_red(),
+	// 				)?;
+	// 			}
+	// 		}
+	// 	}
+	// 	Ok(())
+	// }
 
-	fn display_hrmp(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let total: u32 = self
-			.message_queues
-			.inbound_hrmp_channels
-			.values()
-			.map(|channel| channel.total_size)
-			.sum();
+	// fn display_hrmp(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	// 	let total: u32 = self
+	// 		.message_queues
+	// 		.inbound_hrmp_channels
+	// 		.values()
+	// 		.map(|channel| channel.total_size)
+	// 		.sum();
 
-		if total > 0 {
-			writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
+	// 	if total > 0 {
+	// 		writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
 
-			for (peer_parachain, channel) in &self.message_queues.inbound_hrmp_channels {
-				if channel.total_size > 0 {
-					writeln!(
-						f,
-						"\t\t📩 From parachain: {}, {} bytes / {} max",
-						peer_parachain, channel.total_size, channel.max_message_size
-					)?;
-				}
-			}
-		}
+	// 		for (peer_parachain, channel) in &self.message_queues.inbound_hrmp_channels {
+	// 			if channel.total_size > 0 {
+	// 				writeln!(
+	// 					f,
+	// 					"\t\t📩 From parachain: {}, {} bytes / {} max",
+	// 					peer_parachain, channel.total_size, channel.max_message_size
+	// 				)?;
+	// 			}
+	// 		}
+	// 	}
 
-		let total: u32 = self
-			.message_queues
-			.outbound_hrmp_channels
-			.values()
-			.map(|channel| channel.total_size)
-			.sum();
+	// 	let total: u32 = self
+	// 		.message_queues
+	// 		.outbound_hrmp_channels
+	// 		.values()
+	// 		.map(|channel| channel.total_size)
+	// 		.sum();
 
-		if total > 0 {
-			writeln!(f, "\t👈 Outbound HRMP messages, sent {} bytes in total", total)?;
+	// 	if total > 0 {
+	// 		writeln!(f, "\t👈 Outbound HRMP messages, sent {} bytes in total", total)?;
 
-			for (peer_parachain, channel) in &self.message_queues.outbound_hrmp_channels {
-				if channel.total_size > 0 {
-					writeln!(
-						f,
-						"\t\t📩 To parachain: {}, {} bytes / {} max",
-						peer_parachain, channel.total_size, channel.max_message_size
-					)?;
-				}
-			}
-		}
+	// 		for (peer_parachain, channel) in &self.message_queues.outbound_hrmp_channels {
+	// 			if channel.total_size > 0 {
+	// 				writeln!(
+	// 					f,
+	// 					"\t\t📩 To parachain: {}, {} bytes / {} max",
+	// 					peer_parachain, channel.total_size, channel.max_message_size
+	// 				)?;
+	// 			}
+	// 		}
+	// 	}
 
-		Ok(())
-	}
+	// 	Ok(())
+	// }
 
 	// fn display_block_info(&self, f: &mut fmt::Formatter) -> fmt::Result {
 	// 	if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
