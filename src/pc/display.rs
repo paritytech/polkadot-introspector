@@ -13,7 +13,7 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-//! This module tracks parachain blocks.
+//! This module defines structures used for tool output.
 use crate::core::api::BlockNumber;
 use codec::{Decode, Encode};
 use crossterm::style::Stylize;
