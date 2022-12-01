@@ -47,10 +47,15 @@ pub trait ParachainBlockTracker {
 	type ParaInherentData;
 	/// The state obtained from processing a block.
 	type ParachainBlockInfo;
+	/// A structure to describe the parachain progress made after processing last relay chain block.
+	type ParachainProgressUpdate;
 
 	/// Injects a new relay chain block into the tracker.
 	/// Blocks must be injected in order.
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo;
+
+	/// Update current parachain progress.
+	async fn progress(&mut self) -> Option<ParachainProgressUpdate>;
 }
 
 /// Used to track session data, where we store two subsequent sessions: the current and the previous one
@@ -63,6 +68,7 @@ struct SubxtSessionTracker {
 	prev_keys: Option<Vec<AccountId32>>,
 }
 
+#[derive(Default)]
 /// A structure that tracks messages (UMP, HRMP, DMP etc)
 pub struct SubxtMessageQueuesTracker {
 	/// Known inbound HRMP channels, indexed by source parachain id
@@ -72,11 +78,6 @@ pub struct SubxtMessageQueuesTracker {
 }
 
 impl SubxtMessageQueuesTracker {
-	/// Create new message queues tracker
-	pub fn new() -> Self {
-		Self { inbound_hrmp_channels: BTreeMap::new(), outbound_hrmp_channels: BTreeMap::new() }
-	}
-
 	/// Update the content of hrmp channels
 	pub fn update_hrmp_channels(
 		&mut self,
@@ -121,45 +122,108 @@ pub struct SubxtTracker {
 	session_data: Option<SubxtSessionTracker>,
 	/// Messages queues status
 	message_queues: SubxtMessageQueuesTracker,
+
+	/// Parachain statistics. Used to print summary at the end of a run.
+	stats: ParachainStats,
+	/// Parachain progress update.
+	update: Option<ParachainProgressUpdate>,
 }
 
-impl Display for SubxtTracker {
+#[derive(Default)]
+/// Parachain block time stats.
+pub struct ParaBlockTime {
+	/// Average block time.
+	avg: u16,
+	/// Max block time.
+	max: u16,
+	/// Min block time.
+	min: u16,
+}
+
+#[derive(Clone, Default)]
+/// Per parachain statistics
+pub struct ParachainStats {
+	/// Parachain id.
+	para_id: u32,
+	/// Number of backed candidates.
+	backed_count: u32,
+	/// Number of skipped slots, where no candidate was backed and availability core
+	/// was free.
+	skipped_slots: u32,
+	/// Number of candidates included.
+	included_count: u32,
+	/// Number of candidates disputed.
+	disputed_count: u32,
+	/// Block time measurements.
+	block_times: ParaBlockTime,
+	/// Number of slow availability events.
+	slow_avail_count: u32,
+	/// Number of low bitfield propagation events.
+	slow_bitfields_count: u32,
+}
+
+// PING google.com (142.250.185.174) 56(84) bytes of data.
+// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=1 ttl=60 time=10.3 ms
+// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=2 ttl=60 time=10.4 ms
+// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=3 ttl=60 time=10.3 ms
+// ^C
+// --- google.com ping statistics ---
+// 3 packets transmitted, 3 received, 0% packet loss, time 2002ms
+// rtt min/avg/max/mdev = 10.297/10.323/10.362/0.027 ms
+
+impl Display for ParachainStats {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		if self.current_relay_block.is_none() {
-			return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
-		}
-		self.display_bitfield_propagation(f)?;
-
-		let (relay_block_number, _) = self.current_relay_block.unwrap();
-		match self.current_candidate.state {
-			ParachainBlockState::Idle => {
-				writeln!(
-					f,
-					"{} for parachain {}, no candidate backed",
-					format!("{} [#{}] SLOW BACKING", self.format_ts(), relay_block_number)
-						.bold()
-						.red(),
-					self.para_id,
-				)?;
-			},
-			ParachainBlockState::Backed => {
-				writeln!(
-					f,
-					"{}",
-					format!("{} [#{}] CANDIDATE BACKED", self.format_ts(), relay_block_number)
-						.bold()
-						.green(),
-				)?;
-			},
-			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
-				self.display_availability(f)?;
-			},
-		}
-
-		self.display_block_info(f)?;
-		self.display_core_assignment(f)?;
-		self.display_core_status(f)
+		writeln!(f, "{}", "--- Parachain {} trace statistics ---".to_string().bold().blue())
 	}
+}
+
+#[derive(Clone, Default)]
+pub struct BitfieldsHealth {
+	/// Maximum bitfield count, equal to number of parachain validators.
+	pub max_bitfield_count: u32,
+	/// Current bitfield count in the relay chain block.
+	pub bitfield_count: u32,
+	/// Sum of all bits for a given parachain.
+	pub available_count: u32,
+}
+
+#[derive(Clone, Default)]
+/// Events related to parachain blocks from consensus perspective.
+pub enum ParachainConsensusEvent {
+	/// A core has been assigned to a parachain.
+	CoreAssigned(u32),
+	/// The core is now occupied.
+	CoreOccupied,
+	/// The core is now free.
+	CoreFree,
+	/// A candidate was backed.
+	Backed(H256),
+	/// A candidate was included.
+	Included(H256),
+	/// A dispute has concluded.
+	Disputed(DisputesOutcome),
+	/// No candidate backed.
+	SkippedSlot,
+	/// Candidate not available yet.
+	SlowAvailability,
+	/// Inherent bitfield count is lower than 2/3 of expect.
+	SlowBitfieldPropagation,
+}
+
+#[derive(Clone, Default)]
+/// Contains information about how a parachain has progressed at a given relay
+/// chain block.
+pub struct ParachainProgressUpdate {
+	/// Block timestamp.
+	pub timestamp: u64,
+	/// Relay chain block number.
+	pub block_number: BlockNumber,
+	/// Relay chain block hash.
+	pub block_hash: H256,
+	/// Bitfields health metrics.
+	pub bitfield_health: BitfieldsHealth,
+	/// Consensus events happening for the para under a relay parent.
+	pub events: Vec<ParachainConsensusEvent>,
 }
 
 #[derive(Encode, Decode, Debug, Default)]
@@ -210,6 +274,61 @@ impl ParachainBlockTracker for SubxtTracker {
 	type RelayChainBlockNumber = BlockNumber;
 	type ParaInherentData = InherentData;
 	type ParachainBlockInfo = ParachainBlockInfo;
+
+	async fn progress(&mut self) -> Option<ParachainProgressUpdate> {
+		if self.current_relay_block.is_none() {
+			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
+			self.update = None;
+			return None
+		}
+
+		self.update = Some(ParachainProgressUpdate {
+			timestamp: self.current_relay_block_ts.unwrap_or_default(),
+			block_number: self.current_relay_block.0,
+			block_hash: self.current_relay_block.1,
+			..Default::default()
+		});
+
+		self.progress_core_assignment();
+		self.update_bitfield_propagation()?;
+
+		let (relay_block_number, _) = self.current_relay_block.expect("Just checked above; qed");
+		match self.current_candidate.state {
+			ParachainBlockState::Idle => {
+				// writeln!(
+				// 	f,
+				// 	"{} for parachain {}, no candidate backed",
+				// 	format!("{} [#{}] SLOW BACKING", self.format_ts(), relay_block_number)
+				// 		.bold()
+				// 		.red(),
+				// 	self.para_id,
+				// )?;
+				self.update
+					.map(|update| update.events.push(ParachainConsensusEvent::SkippedSlot));
+				self.stats.skipped_slots += 1;
+			},
+			ParachainBlockState::Backed => {
+				// writeln!(
+				// 	f,
+				// 	"{}",
+				// 	format!("{} [#{}] CANDIDATE BACKED", self.format_ts(), relay_block_number)
+				// 		.bold()
+				// 		.green(),
+				// )?;
+				if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
+					let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
+					let candidate_hash =
+						BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
+					self.update
+						.map(|update| update.events.push(ParachainConsensusEvent::Backed(candidate_hash)));
+					self.stats.backed_count += 1;
+				}
+			},
+			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
+				self.progress_availability();
+			},
+		}
+	}
 
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo {
 		if let Some(header) = self.executor.get_block_head(self.node_rpc_url.clone(), Some(block_hash)).await {
@@ -269,15 +388,8 @@ impl SubxtTracker {
 			para_id,
 			node_rpc_url,
 			executor,
-			current_candidate: Default::default(),
-			last_assignment: None,
-			last_backed_at: None,
-			current_relay_block: None,
-			disputes: vec![],
-			current_relay_block_ts: None,
-			last_relay_block_ts: None,
-			session_data: None,
-			message_queues: SubxtMessageQueuesTracker::new(),
+			stats: ParachainStats { para_id, ..Default::default() },
+			..Default::default()
 		}
 	}
 
@@ -466,15 +578,15 @@ impl SubxtTracker {
 		}
 	}
 
-	fn display_core_assignment(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn progress_core_assignment(&mut self) {
 		if let Some(assigned_core) = self.last_assignment {
-			writeln!(f, "\t- Parachain {} assigned to core index {}", self.para_id, assigned_core)
-		} else {
-			Ok(())
+			// writeln!(f, "\t- Parachain {} assigned to core index {}", self.para_id, assigned_core)
+			self.update
+				.map(|update| update.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core)));
 		}
 	}
 
-	fn display_bitfield_propagation(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn update_bitfield_propagation(&mut self) {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
 		if let Some((relay_block_number, _)) = self.current_relay_block {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
@@ -484,59 +596,78 @@ impl SubxtTracker {
 				self.current_candidate.state != ParachainBlockState::Idle &&
 				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
-				writeln!(
-					f,
-					"{} bitfield count {}/{}",
-					format!("{} [#{}] SLOW BITFIELD PROPAGATION", self.format_ts(), relay_block_number).dark_red(),
-					self.current_candidate.bitfield_count,
-					self.current_candidate.max_av_bits
-				)?;
+				// writeln!(
+				// 	f,
+				// 	"{} bitfield count {}/{}",
+				// 	format!("{} [#{}] SLOW BITFIELD PROPAGATION", self.format_ts(), relay_block_number).dark_red(),
+				// 	self.current_candidate.bitfield_count,
+				// 	self.current_candidate.max_av_bits
+				// )?;
+				self.update
+					.map(|update| update.events.push(ParachainConsensusEvent::SlowBitfieldPropagation));
+				self.stats.slow_bitfields_count += 1;
 			}
 		}
-
-		Ok(())
 	}
 
-	fn display_availability(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let (relay_block_number, _) = self.current_relay_block.unwrap();
+	fn progress_availability(&mut self, f: &mut fmt::Formatter) -> fmt::Result {
+		let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
+
+		// Update bitfields health.
+		self.update.map(|update| {
+			update.bitfield_health.max_bitfield_count = self.current_candidate.max_av_bits;
+			update.bitfield_health.available_count = self.current_candidate.current_av_bits;
+			update.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
+		});
 
 		// TODO: Availability timeout.
 		if self.current_candidate.current_av_bits > (self.current_candidate.max_av_bits / 3) * 2 {
-			writeln!(
-				f,
-				"{}",
-				format!("{} [#{}] CANDIDATE INCLUDED", self.format_ts(), relay_block_number)
-					.bold()
-					.green(),
-			)?;
+			// writeln!(
+			// 	f,
+			// 	"{}",
+			// 	format!("{} [#{}] CANDIDATE INCLUDED", self.format_ts(), relay_block_number)
+			// 		.bold()
+			// 		.green(),
+			// )?;
+			if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
+				let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
+				let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
+				self.update
+					.map(|update| update.events.push(ParachainConsensusEvent::Included(candidate_hash)));
+				self.stats.included_count += 1;
+			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
-			writeln!(
-				f,
-				"{}",
-				format!("{} [#{}] SLOW AVAILABILITY", self.format_ts(), relay_block_number)
-					.bold()
-					.yellow(),
-			)?;
+			// writeln!(
+			// 	f,
+			// 	"{}",
+			// 	format!("{} [#{}] SLOW AVAILABILITY", self.format_ts(), relay_block_number)
+			// 		.bold()
+			// 		.yellow(),
+			// )?;
+			self.update
+				.map(|update| update.events.push(ParachainConsensusEvent::SlowAvailability));
+			self.stats.slow_avail_count += 1;
 		}
 
-		writeln!(
-			f,
-			"\t🟢 Availability bits: {}/{}",
-			self.current_candidate.current_av_bits, self.current_candidate.max_av_bits
-		)
+		// writeln!(
+		// 	f,
+		// 	"\t🟢 Availability bits: {}/{}",
+		// 	self.current_candidate.current_av_bits, self.current_candidate.max_av_bits
+		// )
 	}
 
-	fn display_core_status(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(
-			f,
-			"\t🥝 Availability core {}",
-			if !self.current_candidate.core_occupied { "FREE" } else { "OCCUPIED" }
-		)
-	}
+	// fn display_core_status(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	// 	writeln!(
+	// 		f,
+	// 		"\t🥝 Availability core {}",
+	// 		if !self.current_candidate.core_occupied { "FREE" } else { "OCCUPIED" }
+	// 	)
+	// }
 
 	fn display_disputes(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		writeln!(f, "\t👊 Disputes tracked")?;
 		for dispute in &self.disputes {
+			self.stats.disputed_count += 1;
 			if dispute.voted_for < dispute.voted_against {
 				writeln!(
 					f,
@@ -614,28 +745,28 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	fn display_block_info(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
-			let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
-			let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
+	// fn display_block_info(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	// 	if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
+	// 		let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
+	// 		let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
 
-			writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
-		}
+	// 		writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
+	// 	}
 
-		if let Some((_, relay_block_hash)) = self.current_relay_block {
-			writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", relay_block_hash).bold())?;
-		}
+	// 	if let Some((_, relay_block_hash)) = self.current_relay_block {
+	// 		writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", relay_block_hash).bold())?;
+	// 	}
 
-		if !self.disputes.is_empty() {
-			self.display_disputes(f)?;
-		}
+	// 	if !self.disputes.is_empty() {
+	// 		self.display_disputes(f)?;
+	// 	}
 
-		if self.message_queues.has_hrmp_messages() {
-			self.display_hrmp(f)?;
-		}
+	// 	if self.message_queues.has_hrmp_messages() {
+	// 		self.display_hrmp(f)?;
+	// 	}
 
-		Ok(())
-	}
+	// 	Ok(())
+	// }
 
 	/// Format the current block inherent timestamp.
 	pub fn format_ts(&self) -> String {
@@ -659,6 +790,11 @@ impl SubxtTracker {
 	/// Returns the current session index if present
 	pub fn get_current_session_index(&self) -> Option<u32> {
 		self.session_data.as_ref().map(|session| session.session_index)
+	}
+
+	/// Returns the stats
+	pub fn summary(&self) -> &ParachainStats {
+		&self.stats
 	}
 }
 
