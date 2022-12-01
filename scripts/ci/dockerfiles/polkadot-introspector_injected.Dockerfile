@@ -14,7 +14,7 @@ LABEL description="Docker image for polkadot-introspector" \
 
 RUN mkdir -p /polkadot-introspector
 
-COPY ./artifacts /polkadot-introspector
+COPY ./artifacts/polkadot /polkadot-introspector
 
 # Temporary installation of certificates
 RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && \
