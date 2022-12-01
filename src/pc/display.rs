@@ -108,10 +108,6 @@ pub struct BitfieldsHealth {
 pub enum ParachainConsensusEvent {
 	/// A core has been assigned to a parachain.
 	CoreAssigned(u32),
-	/// The core is now occupied.
-	CoreOccupied,
-	/// The core is now free.
-	CoreFree,
 	/// A candidate was backed.
 	Backed(H256),
 	/// A candidate was included.
@@ -140,6 +136,8 @@ pub struct ParachainProgressUpdate {
 	pub block_hash: H256,
 	/// Bitfields health metrics.
 	pub bitfield_health: BitfieldsHealth,
+	/// Core occupation.
+	pub core_occupied: bool,
 	/// Consensus events happening for the para under a relay parent.
 	pub events: Vec<ParachainConsensusEvent>,
 }

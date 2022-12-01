@@ -186,6 +186,11 @@ impl ParachainBlockTracker for SubxtTracker {
 		});
 
 		self.progress_core_assignment();
+
+		self.update
+			.as_mut()
+			.map(|update| update.core_occupied = self.current_candidate.core_occupied);
+
 		self.update_bitfield_propagation();
 
 		match self.current_candidate.state {
