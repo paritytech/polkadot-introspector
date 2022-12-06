@@ -10,7 +10,7 @@ color-eyre = "0.6.2"
 clap = {version = "4.0.29", features = ["derive"]}
 codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false, features = ["derive", "full", "bit-vec"] }
 subxt = { git = "https://github.com/paritytech/subxt", rev = "c55b7ba3e34118f61dc51499a0b38262c513aec4" }
-tokio = { version = "1.22.0", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.23.0", features = ["macros", "rt-multi-thread", "signal"] }
 typed-builder = "0.11.0"
 futures = "0.3.25"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
