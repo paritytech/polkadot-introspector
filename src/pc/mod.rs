@@ -38,7 +38,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subxt::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
-mod display;
+mod progress;
 pub(crate) mod stats;
 pub(crate) mod tracker;
 
@@ -137,7 +137,7 @@ impl ParachainCommander {
 						}
 
 						if end_block.is_some() && tracker.get_current_relay_block_number() >= end_block {
-							break
+							break;
 						}
 					},
 					SubxtEvent::DisputeInitiated(dispute) => {

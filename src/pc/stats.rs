@@ -16,9 +16,14 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
+use crossterm::style::Stylize;
 use std::time::Duration;
+use std::{
+	fmt,
+	fmt::{Debug, Display},
+};
 
-pub trait UsableNumber: PartialOrd + PartialEq + Into<f64> + Copy {
+trait UsableNumber: PartialOrd + PartialEq + Into<f64> + Copy {
 	fn max() -> Self;
 	fn min() -> Self;
 }
@@ -43,7 +48,7 @@ usable_number!(f32);
 
 #[derive(Clone)]
 /// Parachain block time stats.
-pub struct AvgBucket<T: UsableNumber> {
+struct AvgBucket<T: UsableNumber> {
 	/// Average time (calculated using CMA).
 	pub avg: f64,
 	/// Max time.
@@ -78,24 +83,24 @@ impl<T: UsableNumber> AvgBucket<T> {
 /// Per parachain statistics
 pub struct ParachainStats {
 	/// Parachain id.
-	pub para_id: u32,
+	para_id: u32,
 	/// Number of backed candidates.
-	pub backed_count: u32,
+	backed_count: u32,
 	/// Number of skipped slots, where no candidate was backed and availability core
 	/// was free.
-	pub skipped_slots: u32,
+	skipped_slots: u32,
 	/// Number of candidates included.
-	pub included_count: u32,
+	included_count: u32,
 	/// Number of candidates disputed.
-	pub disputed_count: u32,
+	disputed_count: u32,
 	/// Block time measurements.
-	pub block_times: AvgBucket<f32>,
+	block_times: AvgBucket<f32>,
 	/// Number of slow availability events.
-	pub slow_avail_count: u32,
+	slow_avail_count: u32,
 	/// Number of low bitfield propagation events.
-	pub low_bitfields_count: u32,
+	low_bitfields_count: u32,
 	/// Number of bitfields being set
-	pub bitfields: AvgBucket<u32>,
+	bitfields: AvgBucket<u32>,
 }
 
 impl ParachainStats {
@@ -140,5 +145,18 @@ impl ParachainStats {
 	/// Update skipped slots count
 	pub fn on_skipped_slot(&mut self) {
 		self.skipped_slots += 1;
+	}
+}
+
+impl Display for ParachainStats {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		writeln!(
+			f,
+			"{}",
+			format!("--- Parachain {} trace statistics ---", self.para_id)
+				.to_string()
+				.bold()
+				.blue()
+		)
 	}
 }

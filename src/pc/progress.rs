@@ -13,7 +13,9 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-//! This module defines structures used for tool output.
+
+//! This module defines structures used for tool progress tracking
+
 use super::stats::ParachainStats;
 use crate::core::api::BlockNumber;
 use codec::{Decode, Encode};
@@ -23,19 +25,6 @@ use std::{
 	fmt::{Debug, Display},
 };
 use subxt::sp_core::H256;
-
-impl Display for ParachainStats {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(
-			f,
-			"{}",
-			format!("--- Parachain {} trace statistics ---", self.para_id)
-				.to_string()
-				.bold()
-				.blue()
-		)
-	}
-}
 
 impl Display for ParachainProgressUpdate {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
