@@ -16,10 +16,11 @@
 
 //! This module defines structures used for tool progress tracking
 
-use super::stats::ParachainStats;
 use crate::core::api::BlockNumber;
 use codec::{Decode, Encode};
+use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use std::fmt::Formatter;
 use std::{
 	fmt::{self, Display},
 	time::Duration,
@@ -52,7 +53,7 @@ pub enum ParachainConsensusEvent {
 	/// Candidate not available yet.
 	SlowAvailability,
 	/// Inherent bitfield count is lower than 2/3 of expect.
-	SlowBitfieldPropagation,
+	SlowBitfieldPropagation(u32, u32),
 }
 
 #[derive(Clone, Default)]
@@ -114,6 +115,70 @@ impl Display for ParachainProgressUpdate {
 
 impl Display for ParachainConsensusEvent {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(f, "nyi!")
+		match self {
+			ParachainConsensusEvent::CoreAssigned(core_id) => {
+				writeln!(f, "\t- Parachain assigned to core index {}", core_id)
+			},
+			ParachainConsensusEvent::Backed(candidate_hash) => {
+				writeln!(f, "{}", "CANDIDATE BACKED".to_string().bold().green())?;
+				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
+			},
+			ParachainConsensusEvent::Included(candidate_hash) => {
+				writeln!(f, "{}", "CANDIDATE INCLUDED".to_string().bold().green())?;
+				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
+			},
+			ParachainConsensusEvent::Disputed(outcome) => {
+				write!(f, "{}", outcome)
+			},
+			ParachainConsensusEvent::SkippedSlot => {
+				writeln!(f, "{}, no candidate backed", format!("SLOW BACKING").bold().red(),)
+			},
+			ParachainConsensusEvent::SlowAvailability => {
+				writeln!(f, "{}", "SLOW AVAILABILITY".to_string().bold().yellow())
+			},
+			ParachainConsensusEvent::SlowBitfieldPropagation(bitfields_count, max_bits) => {
+				writeln!(
+					f,
+					"{} bitfield count {}/{}",
+					format!("SLOW BITFIELD PROPAGATION").dark_red(),
+					bitfields_count,
+					max_bits
+				)
+			},
+		}
+	}
+}
+
+impl Display for DisputesOutcome {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		if self.voted_for < self.voted_against {
+			writeln!(
+				f,
+				"\t\t👎 Candidate: {}, resolved invalid; voted for: {}; voted against: {}",
+				format!("{:?}", self.candidate).dark_red(),
+				self.voted_for,
+				self.voted_against
+			)?;
+		} else {
+			writeln!(
+				f,
+				"\t\t👍 Candidate: {}, resolved valid; voted for: {}; voted against: {}",
+				format!("{:?}", self.candidate).bright_green(),
+				self.voted_for,
+				self.voted_against
+			)?;
+		}
+
+		if !self.misbehaving_validators.is_empty() {
+			for (validator_idx, validator_address) in &self.misbehaving_validators {
+				writeln!(
+					f,
+					"\t\t\t👹 Validator voted against supermajority: {}",
+					format!("idx: {}, address: {}", validator_idx, validator_address).bright_red(),
+				)?;
+			}
+		}
+
+		Ok(())
 	}
 }
