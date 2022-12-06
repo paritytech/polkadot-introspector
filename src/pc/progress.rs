@@ -21,23 +21,10 @@ use crate::core::api::BlockNumber;
 use codec::{Decode, Encode};
 use crossterm::style::Stylize;
 use std::{
-	fmt,
-	fmt::{Debug, Display},
+	fmt::{self, Display},
+	time::Duration,
 };
 use subxt::sp_core::H256;
-
-impl Display for ParachainProgressUpdate {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(
-			f,
-			"{}",
-			format!("--- Parachain {} progress update ---", self.para_id)
-				.to_string()
-				.bold()
-				.blue()
-		)
-	}
-}
 
 #[derive(Clone, Default)]
 pub struct BitfieldsHealth {
@@ -76,6 +63,8 @@ pub struct ParachainProgressUpdate {
 	pub para_id: u32,
 	/// Block timestamp.
 	pub timestamp: u64,
+	/// Previous timestamp
+	pub prev_timestamp: u64,
 	/// Relay chain block number.
 	pub block_number: BlockNumber,
 	/// Relay chain block hash.
@@ -94,4 +83,37 @@ pub struct DisputesOutcome {
 	pub voted_for: u32,
 	pub voted_against: u32,
 	pub misbehaving_validators: Vec<(u32, String)>,
+}
+
+/// Format the current block inherent timestamp.
+fn format_ts(duration: Duration, current_block_ts: u64) -> String {
+	let dt = time::OffsetDateTime::from_unix_timestamp_nanos(current_block_ts as i128 * 1_000_000).unwrap();
+	format!(
+		"{} +{}",
+		dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
+			.expect("Invalid datetime format"),
+		format_args!("{}ms", duration.as_millis())
+	)
+}
+
+impl Display for ParachainProgressUpdate {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"{} [#{}] ",
+			format_ts(Duration::from_millis(self.timestamp.saturating_sub(self.prev_timestamp)), self.timestamp),
+			self.block_number
+		)?;
+		for event in &self.events {
+			event.fmt(f)?;
+		}
+		writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", self.block_hash).bold())?;
+		writeln!(f, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })
+	}
+}
+
+impl Display for ParachainConsensusEvent {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		writeln!(f, "nyi!")
+	}
 }

@@ -17,10 +17,10 @@
 //! This module keep tracks of the statistics for the parachain events
 
 use crossterm::style::Stylize;
-use std::time::Duration;
 use std::{
-	fmt,
-	fmt::{Debug, Display},
+	default::Default,
+	fmt::{self, Display},
+	time::Duration,
 };
 
 trait UsableNumber: PartialOrd + PartialEq + Into<f64> + Copy {
@@ -66,6 +66,7 @@ impl<T: UsableNumber> Default for AvgBucket<T> {
 }
 
 impl<T: UsableNumber> AvgBucket<T> {
+	/// Update counter value using CMA
 	pub fn update(&mut self, new_value: T) {
 		if self.max < new_value {
 			self.max = new_value;
@@ -76,6 +77,20 @@ impl<T: UsableNumber> AvgBucket<T> {
 		self.num_samples += 1;
 		let new_value_float: f64 = new_value.into();
 		self.avg += (new_value_float - self.avg) / self.num_samples as f64;
+	}
+
+	/// Returns counter value
+	pub fn value(&self) -> f64 {
+		if self.num_samples > 0 {
+			self.avg
+		} else {
+			f64::NAN
+		}
+	}
+
+	/// Number of samples
+	pub fn count(&self) -> usize {
+		self.num_samples
 	}
 }
 
@@ -157,6 +172,20 @@ impl Display for ParachainStats {
 				.to_string()
 				.bold()
 				.blue()
-		)
+		)?;
+		writeln!(
+			f,
+			"Average block time: {} seconds ({} blocks processed)",
+			self.block_times.value().to_string().bold(),
+			self.block_times.count()
+		)?;
+		writeln!(f, "Average bitfileds: {}, {} low bitfields count", self.bitfields.value(), self.low_bitfields_count)?;
+		writeln!(
+			f,
+			"Backing stats: {} blocks backed, {} blocks included",
+			self.backed_count.to_string().blue(),
+			self.included_count.to_string().green()
+		)?;
+		writeln!(f, "Disputes: {} candidates disputed", self.disputed_count.to_string().red())
 	}
 }

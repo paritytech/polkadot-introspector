@@ -137,7 +137,7 @@ impl ParachainCommander {
 						}
 
 						if end_block.is_some() && tracker.get_current_relay_block_number() >= end_block {
-							break;
+							break
 						}
 					},
 					SubxtEvent::DisputeInitiated(dispute) => {
@@ -175,6 +175,9 @@ impl ParachainCommander {
 				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			};
 		}
+
+		let stats = tracker.summary();
+		println!("{}", stats);
 	}
 }
 

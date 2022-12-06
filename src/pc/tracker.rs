@@ -29,7 +29,7 @@ use crate::core::{
 };
 use codec::{Decode, Encode};
 use log::{debug, error};
-use std::{collections::BTreeMap, fmt, fmt::Debug};
+use std::{collections::BTreeMap, fmt::Debug};
 use subxt::{
 	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
@@ -90,8 +90,8 @@ impl SubxtMessageQueuesTracker {
 
 	/// Returns if there ae
 	pub fn has_hrmp_messages(&self) -> bool {
-		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
-			|| self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
+		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
+			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
 	}
 }
 
@@ -224,7 +224,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		if self.current_relay_block.is_none() {
 			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 			self.update = None;
-			return None;
+			return None
 		}
 
 		let (relay_block_number, relay_block_hash) = self.current_relay_block.expect("Just checked above; qed");
@@ -232,6 +232,9 @@ impl ParachainBlockTracker for SubxtTracker {
 		self.update = Some(ParachainProgressUpdate {
 			para_id: self.para_id,
 			timestamp: self.current_relay_block_ts.unwrap_or_default(),
+			prev_timestamp: self
+				.last_relay_block_ts
+				.unwrap_or_else(|| self.current_relay_block_ts.unwrap_or_default()),
 			block_number: relay_block_number,
 			block_hash: relay_block_hash,
 			..Default::default()
@@ -365,13 +368,13 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
-			return;
+			return
 		}
 
 		if self.current_candidate.candidate.is_none() {
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return;
+			return
 		}
 
 		// We only process availability if our parachain is assigned to an availability core.
@@ -482,6 +485,7 @@ impl SubxtTracker {
 			self.current_candidate.candidate = None;
 		}
 		self.disputes.clear();
+		self.update = None;
 	}
 
 	/// Updates cashed session with a new one, storing the previous session if needed
@@ -512,9 +516,9 @@ impl SubxtTracker {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
 			// Usually this happens at startup, when we miss a core assignment and we do not update
 			// availability before calling this `fn`.
-			if self.current_candidate.max_av_bits > 0
-				&& self.current_candidate.state != ParachainBlockState::Idle
-				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
+			if self.current_candidate.max_av_bits > 0 &&
+				self.current_candidate.state != ParachainBlockState::Idle &&
+				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
 				// writeln!(
 				// 	f,
@@ -698,20 +702,6 @@ impl SubxtTracker {
 		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
 		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
 		std::time::Duration::from_millis(cur_ts).saturating_sub(std::time::Duration::from_millis(base_ts))
-	}
-	/// Format the current block inherent timestamp.
-	pub fn format_ts(&self) -> String {
-		let duration = self.get_ts();
-		let dt = time::OffsetDateTime::from_unix_timestamp_nanos(
-			self.current_relay_block_ts.unwrap_or_default() as i128 * 1_000_000,
-		)
-		.unwrap();
-		format!(
-			"{} +{}",
-			dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
-				.expect("Invalid datetime format"),
-			format_args!("{}ms", duration.as_millis())
-		)
 	}
 
 	/// Returns the current session index if present
