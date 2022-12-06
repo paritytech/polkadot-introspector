@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //! This module defines structures used for tool output.
+use super::stats::ParachainStats;
 use crate::core::api::BlockNumber;
 use codec::{Decode, Encode};
 use crossterm::style::Stylize;
@@ -22,50 +23,6 @@ use std::{
 	fmt::{Debug, Display},
 };
 use subxt::sp_core::H256;
-
-#[derive(Default, Clone)]
-/// Parachain block time stats.
-pub struct ParaBlockTime {
-	/// Average block time.
-	pub avg: u16,
-	/// Max block time.
-	pub max: u16,
-	/// Min block time.
-	pub min: u16,
-}
-
-#[derive(Clone, Default)]
-/// Per parachain statistics
-pub struct ParachainStats {
-	/// Parachain id.
-	pub para_id: u32,
-	/// Number of backed candidates.
-	pub backed_count: u32,
-	/// Number of skipped slots, where no candidate was backed and availability core
-	/// was free.
-	pub skipped_slots: u32,
-	/// Number of candidates included.
-	pub included_count: u32,
-	/// Number of candidates disputed.
-	pub disputed_count: u32,
-	/// Block time measurements.
-	pub block_times: ParaBlockTime,
-	/// Number of slow availability events.
-	pub slow_avail_count: u32,
-	/// Number of low bitfield propagation events.
-	pub slow_bitfields_count: u32,
-}
-
-// We need something similar to this:
-//
-// PING google.com (142.250.185.174) 56(84) bytes of data.
-// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=1 ttl=60 time=10.3 ms
-// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=2 ttl=60 time=10.4 ms
-// 64 bytes from fra16s51-in-f14.1e100.net (142.250.185.174): icmp_seq=3 ttl=60 time=10.3 ms
-// ^C
-// --- google.com ping statistics ---
-// 3 packets transmitted, 3 received, 0% packet loss, time 2002ms
-// rtt min/avg/max/mdev = 10.297/10.323/10.362/0.027 ms
 
 impl Display for ParachainStats {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

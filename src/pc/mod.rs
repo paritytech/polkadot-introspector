@@ -39,7 +39,9 @@ use subxt::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
 mod display;
-mod tracker;
+pub(crate) mod stats;
+pub(crate) mod tracker;
+
 use tracker::ParachainBlockTracker;
 
 #[derive(Clone, Debug, Parser)]

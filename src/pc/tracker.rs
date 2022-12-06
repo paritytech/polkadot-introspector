@@ -13,9 +13,11 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
+
 //! This module tracks parachain blocks.
-use super::display::{
-	DisputesOutcome, ParaBlockTime, ParachainConsensusEvent, ParachainProgressUpdate, ParachainStats,
+use super::{
+	display::{DisputesOutcome, ParachainConsensusEvent, ParachainProgressUpdate},
+	stats::ParachainStats,
 };
 use crate::core::{
 	api::{
@@ -168,72 +170,6 @@ impl ParachainBlockTracker for SubxtTracker {
 	type ParachainBlockInfo = ParachainBlockInfo;
 	type ParachainProgressUpdate = ParachainProgressUpdate;
 
-	fn progress(&mut self) -> Option<ParachainProgressUpdate> {
-		if self.current_relay_block.is_none() {
-			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
-			self.update = None;
-			return None
-		}
-
-		let (relay_block_number, relay_block_hash) = self.current_relay_block.expect("Just checked above; qed");
-
-		self.update = Some(ParachainProgressUpdate {
-			para_id: self.para_id,
-			timestamp: self.current_relay_block_ts.unwrap_or_default(),
-			block_number: relay_block_number,
-			block_hash: relay_block_hash,
-			..Default::default()
-		});
-
-		self.progress_core_assignment();
-
-		self.update
-			.as_mut()
-			.map(|update| update.core_occupied = self.current_candidate.core_occupied);
-
-		self.update_bitfield_propagation();
-
-		match self.current_candidate.state {
-			ParachainBlockState::Idle => {
-				// writeln!(
-				// 	f,
-				// 	"{} for parachain {}, no candidate backed",
-				// 	format!("{} [#{}] SLOW BACKING", self.format_ts(), relay_block_number)
-				// 		.bold()
-				// 		.red(),
-				// 	self.para_id,
-				// )?;
-				self.update
-					.as_mut()
-					.map(|update| update.events.push(ParachainConsensusEvent::SkippedSlot));
-				self.stats.skipped_slots += 1;
-			},
-			ParachainBlockState::Backed => {
-				// writeln!(
-				// 	f,
-				// 	"{}",
-				// 	format!("{} [#{}] CANDIDATE BACKED", self.format_ts(), relay_block_number)
-				// 		.bold()
-				// 		.green(),
-				// )?;
-				if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
-					let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
-					let candidate_hash =
-						BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
-					self.update
-						.as_mut()
-						.map(|update| update.events.push(ParachainConsensusEvent::Backed(candidate_hash)));
-					self.stats.backed_count += 1;
-				}
-			},
-			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
-				self.progress_availability();
-			},
-		}
-
-		self.update.clone()
-	}
-
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo {
 		if let Some(header) = self.executor.get_block_head(self.node_rpc_url.clone(), Some(block_hash)).await {
 			if let Some(inherent) = self
@@ -283,6 +219,74 @@ impl ParachainBlockTracker for SubxtTracker {
 
 		&self.current_candidate
 	}
+
+	fn progress(&mut self) -> Option<ParachainProgressUpdate> {
+		if self.current_relay_block.is_none() {
+			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
+			self.update = None;
+			return None
+		}
+
+		let (relay_block_number, relay_block_hash) = self.current_relay_block.expect("Just checked above; qed");
+
+		self.update = Some(ParachainProgressUpdate {
+			para_id: self.para_id,
+			timestamp: self.current_relay_block_ts.unwrap_or_default(),
+			block_number: relay_block_number,
+			block_hash: relay_block_hash,
+			..Default::default()
+		});
+
+		self.progress_core_assignment();
+
+		self.update
+			.as_mut()
+			.map(|update| update.core_occupied = self.current_candidate.core_occupied);
+
+		self.update_bitfield_propagation();
+
+		match self.current_candidate.state {
+			ParachainBlockState::Idle => {
+				// writeln!(
+				// 	f,
+				// 	"{} for parachain {}, no candidate backed",
+				// 	format!("{} [#{}] SLOW BACKING", self.format_ts(), relay_block_number)
+				// 		.bold()
+				// 		.red(),
+				// 	self.para_id,
+				// )?;
+				self.update
+					.as_mut()
+					.map(|update| update.events.push(ParachainConsensusEvent::SkippedSlot));
+				self.stats.on_skipped_slot();
+			},
+			ParachainBlockState::Backed => {
+				// writeln!(
+				// 	f,
+				// 	"{}",
+				// 	format!("{} [#{}] CANDIDATE BACKED", self.format_ts(), relay_block_number)
+				// 		.bold()
+				// 		.green(),
+				// )?;
+				if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
+					let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
+					let candidate_hash =
+						BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
+					self.update
+						.as_mut()
+						.map(|update| update.events.push(ParachainConsensusEvent::Backed(candidate_hash)));
+					self.stats.on_backed();
+				}
+			},
+			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
+				self.progress_availability();
+			},
+		}
+
+		self.stats.on_block(self.get_ts());
+
+		self.update.clone()
+	}
 }
 
 impl SubxtTracker {
@@ -292,7 +296,7 @@ impl SubxtTracker {
 			para_id,
 			node_rpc_url,
 			executor,
-			stats: ParachainStats { para_id, ..Default::default() },
+			stats: ParachainStats::new(para_id),
 			current_candidate: Default::default(),
 			current_relay_block: None,
 			current_relay_block_ts: None,
@@ -409,6 +413,7 @@ impl SubxtTracker {
 		self.disputes = disputes
 			.iter()
 			.map(|dispute_info| {
+				self.stats.on_disputed();
 				let session_index = dispute_info.session;
 				let session_info = self.get_session_keys(session_index);
 				// TODO: we would like to distinguish different dispute phases at some point
@@ -521,7 +526,9 @@ impl SubxtTracker {
 				self.update
 					.as_mut()
 					.map(|update| update.events.push(ParachainConsensusEvent::SlowBitfieldPropagation));
-				self.stats.slow_bitfields_count += 1;
+				self.stats.on_bitfields(self.current_candidate.bitfield_count, true);
+			} else {
+				self.stats.on_bitfields(self.current_candidate.bitfield_count, false);
 			}
 		}
 	}
@@ -551,7 +558,7 @@ impl SubxtTracker {
 				self.update
 					.as_mut()
 					.map(|update| update.events.push(ParachainConsensusEvent::Included(candidate_hash)));
-				self.stats.included_count += 1;
+				self.stats.on_included();
 			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
 			// writeln!(
@@ -564,7 +571,7 @@ impl SubxtTracker {
 			self.update
 				.as_mut()
 				.map(|update| update.events.push(ParachainConsensusEvent::SlowAvailability));
-			self.stats.slow_avail_count += 1;
+			self.stats.on_slow_availability();
 		}
 
 		// writeln!(
@@ -686,13 +693,15 @@ impl SubxtTracker {
 	// 	Ok(())
 	// }
 
-	/// Format the current block inherent timestamp.
-	pub fn format_ts(&self) -> String {
+	/// Returns the time for the current block
+	pub fn get_ts(&self) -> std::time::Duration {
 		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
 		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
-		let duration =
-			std::time::Duration::from_millis(cur_ts).saturating_sub(std::time::Duration::from_millis(base_ts));
-
+		std::time::Duration::from_millis(cur_ts).saturating_sub(std::time::Duration::from_millis(base_ts))
+	}
+	/// Format the current block inherent timestamp.
+	pub fn format_ts(&self) -> String {
+		let duration = self.get_ts();
 		let dt = time::OffsetDateTime::from_unix_timestamp_nanos(
 			self.current_relay_block_ts.unwrap_or_default() as i128 * 1_000_000,
 		)
