@@ -20,9 +20,8 @@ use crate::core::api::BlockNumber;
 use codec::{Decode, Encode};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
-use std::fmt::Formatter;
 use std::{
-	fmt::{self, Display},
+	fmt::{self, Display, Formatter},
 	time::Duration,
 };
 use subxt::sp_core::H256;
@@ -131,6 +130,7 @@ impl Display for ParachainConsensusEvent {
 				writeln!(f, "\t🟢 Availability bits: {}/{}", bits_available, max_bits)
 			},
 			ParachainConsensusEvent::Disputed(outcome) => {
+				writeln!(f, "{}", "\t💔 Dispute tracked:".to_string().bold())?;
 				write!(f, "{}", outcome)
 			},
 			ParachainConsensusEvent::SkippedSlot => {
