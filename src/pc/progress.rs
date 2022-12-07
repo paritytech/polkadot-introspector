@@ -100,9 +100,9 @@ fn format_ts(duration: Duration, current_block_ts: u64) -> String {
 
 impl Display for ParachainProgressUpdate {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
+		writeln!(
 			f,
-			"{} [#{}] ",
+			"{} [#{}]",
 			format_ts(Duration::from_millis(self.timestamp.saturating_sub(self.prev_timestamp)), self.timestamp),
 			self.block_number
 		)?;
@@ -121,36 +121,36 @@ impl Display for ParachainConsensusEvent {
 				writeln!(f, "\t- Parachain assigned to core index {}", core_id)
 			},
 			ParachainConsensusEvent::Backed(candidate_hash) => {
-				writeln!(f, "{}", "CANDIDATE BACKED".to_string().bold().green())?;
+				writeln!(f, "\t{}", "CANDIDATE BACKED".to_string().bold().green())?;
 				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
 			},
 			ParachainConsensusEvent::Included(candidate_hash, bits_available, max_bits) => {
-				writeln!(f, "{}", "CANDIDATE INCLUDED".to_string().bold().green())?;
+				writeln!(f, "\t{}", "CANDIDATE INCLUDED".to_string().bold().green())?;
 				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
 				writeln!(f, "\t🟢 Availability bits: {}/{}", bits_available, max_bits)
 			},
 			ParachainConsensusEvent::Disputed(outcome) => {
-				writeln!(f, "{}", "\t💔 Dispute tracked:".to_string().bold())?;
+				writeln!(f, "\t{}", "💔 Dispute tracked:".to_string().bold())?;
 				write!(f, "{}", outcome)
 			},
 			ParachainConsensusEvent::SkippedSlot => {
-				writeln!(f, "{}, no candidate backed", format!("SLOW BACKING").bold().red(),)
+				writeln!(f, "\t{}, no candidate backed", format!("SLOW BACKING").bold().red(),)
 			},
 			ParachainConsensusEvent::SlowAvailability(bits_available, max_bits) => {
-				writeln!(f, "{}", "SLOW AVAILABILITY".to_string().bold().yellow())?;
+				writeln!(f, "\t{}", "SLOW AVAILABILITY".to_string().bold().yellow())?;
 				writeln!(f, "\t🟢 Availability bits: {}/{}", bits_available, max_bits)
 			},
 			ParachainConsensusEvent::SlowBitfieldPropagation(bitfields_count, max_bits) => {
 				writeln!(
 					f,
-					"{} bitfield count {}/{}",
+					"\t{} bitfield count {}/{}",
 					format!("SLOW BITFIELD PROPAGATION").dark_red(),
 					bitfields_count,
 					max_bits
 				)
 			},
 			ParachainConsensusEvent::NewSession(session_index) => {
-				write!(f, "\t✨ New session: {}", session_index)
+				writeln!(f, "\t✨ New session tracked: {}", session_index)
 			},
 		}
 	}

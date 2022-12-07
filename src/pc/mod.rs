@@ -177,7 +177,7 @@ impl ParachainCommander {
 		}
 
 		let stats = tracker.summary();
-		println!("{}", stats);
+		print!("{}", stats);
 	}
 }
 

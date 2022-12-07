@@ -65,6 +65,8 @@ struct SubxtSessionTracker {
 	current_keys: Vec<AccountId32>,
 	/// The previous session (if available)
 	prev_keys: Option<Vec<AccountId32>>,
+	/// A flag that indicates a fresh session
+	fresh_session: bool,
 }
 
 #[derive(Default)]
@@ -111,12 +113,16 @@ pub struct SubxtTracker {
 	current_candidate: ParachainBlockInfo,
 	/// Current relay chain block.
 	current_relay_block: Option<(BlockNumber, H256)>,
+	/// Previous relay chain block
+	previous_relay_block: Option<(BlockNumber, H256)>,
 	/// Disputes information if any disputes are there.
 	disputes: Vec<DisputesOutcome>,
 	/// Current relay chain block timestamp.
 	current_relay_block_ts: Option<u64>,
 	/// Last relay chain block timestamp.
 	last_relay_block_ts: Option<u64>,
+	/// Last included candidate in relay parent number
+	last_included_block: Option<BlockNumber>,
 	/// Session tracker
 	session_data: Option<SubxtSessionTracker>,
 	/// Messages queues status
@@ -241,7 +247,6 @@ impl ParachainBlockTracker for SubxtTracker {
 		});
 
 		self.progress_core_assignment();
-
 		self.update
 			.as_mut()
 			.map(|update| update.core_occupied = self.current_candidate.core_occupied);
@@ -278,6 +283,17 @@ impl ParachainBlockTracker for SubxtTracker {
 			},
 		}
 
+		self.session_data.as_mut().map(|session_data| {
+			if session_data.fresh_session {
+				session_data.fresh_session = false;
+				self.update.as_mut().map(|update| {
+					update
+						.events
+						.push(ParachainConsensusEvent::NewSession(session_data.session_index))
+				});
+			}
+		});
+
 		self.disputes.iter().for_each(|outcome| {
 			self.stats.on_disputed();
 			self.update
@@ -285,8 +301,10 @@ impl ParachainBlockTracker for SubxtTracker {
 				.map(|update| update.events.push(ParachainConsensusEvent::Disputed(outcome.clone())));
 		});
 
-		self.stats.on_block(self.get_ts());
-
+		let last_block_number = self.previous_relay_block.unwrap_or((u32::MAX, H256::zero())).0;
+		if relay_block_number > last_block_number {
+			self.stats.on_block(self.get_ts());
+		}
 		self.update.clone()
 	}
 }
@@ -301,11 +319,13 @@ impl SubxtTracker {
 			stats: ParachainStats::new(para_id),
 			current_candidate: Default::default(),
 			current_relay_block: None,
+			previous_relay_block: None,
 			current_relay_block_ts: None,
 			disputes: Vec::new(),
 			last_assignment: None,
 			last_backed_at: None,
 			last_relay_block_ts: None,
+			last_included_block: None,
 			message_queues: Default::default(),
 			session_data: None,
 			update: None,
@@ -313,6 +333,7 @@ impl SubxtTracker {
 	}
 
 	fn set_relay_block(&mut self, block_number: BlockNumber, block_hash: H256) {
+		self.previous_relay_block = self.current_relay_block;
 		self.current_relay_block = Some((block_number, block_hash));
 	}
 
@@ -493,12 +514,15 @@ impl SubxtTracker {
 			let old_current = std::mem::replace(&mut session_data.current_keys, account_keys);
 			session_data.prev_keys.replace(old_current);
 			session_data.session_index = session_index;
+			session_data.fresh_session = true;
 		} else {
-			self.session_data = Some(SubxtSessionTracker { session_index, current_keys: account_keys, prev_keys: None })
+			self.session_data = Some(SubxtSessionTracker {
+				session_index,
+				current_keys: account_keys,
+				prev_keys: None,
+				fresh_session: true,
+			})
 		}
-		self.update
-			.as_mut()
-			.map(|update| update.events.push(ParachainConsensusEvent::NewSession(session_index)));
 	}
 
 	// TODO: fix this, it is broken, nobody sets this.
@@ -556,7 +580,8 @@ impl SubxtTracker {
 						self.current_candidate.max_av_bits,
 					))
 				});
-				self.stats.on_included();
+				self.stats.on_included(relay_block_number, self.last_included_block);
+				self.last_included_block = Some(relay_block_number);
 			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
 			self.update.as_mut().map(|update| {

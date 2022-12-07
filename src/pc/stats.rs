@@ -108,7 +108,7 @@ pub struct ParachainStats {
 	included_count: u32,
 	/// Number of candidates disputed.
 	disputed_count: u32,
-	/// Block time measurements.
+	/// Block time measurements for relay parent blocks
 	block_times: AvgBucket<f32>,
 	/// Number of slow availability events.
 	slow_avail_count: u32,
@@ -116,6 +116,8 @@ pub struct ParachainStats {
 	low_bitfields_count: u32,
 	/// Number of bitfields being set
 	bitfields: AvgBucket<u32>,
+	/// Average included time in relay parent blocks
+	included_times: AvgBucket<u16>,
 }
 
 impl ParachainStats {
@@ -130,8 +132,13 @@ impl ParachainStats {
 	}
 
 	/// Update included counter
-	pub fn on_included(&mut self) {
+	pub fn on_included(&mut self, relay_parent_number: u32, previous_included: Option<u32>) {
 		self.included_count += 1;
+
+		previous_included.map(|previous_block_number| {
+			self.included_times
+				.update(relay_parent_number.saturating_sub(previous_block_number) as u16);
+		});
 	}
 
 	/// Update disputed counter
@@ -175,9 +182,15 @@ impl Display for ParachainStats {
 		)?;
 		writeln!(
 			f,
-			"Average block time: {} seconds ({} blocks processed)",
+			"Average relay block time: {} seconds ({} blocks processed)",
 			self.block_times.value().to_string().bold(),
 			self.block_times.count()
+		)?;
+		writeln!(
+			f,
+			"Average inclusion time: {} relay parent blocks ({} parachain blocks processed)",
+			self.included_times.value().to_string().bold(),
+			self.included_times.count()
 		)?;
 		writeln!(f, "Average bitfileds: {}, {} low bitfields count", self.bitfields.value(), self.low_bitfields_count)?;
 		writeln!(
