@@ -17,7 +17,7 @@
 //! This module defines structures used for tool progress tracking
 
 use super::tracker::DisputesOutcome;
-use crate::core::api::BlockNumber;
+use crate::core::{api::BlockNumber, SubxtHrmpChannel};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
@@ -55,6 +55,8 @@ pub enum ParachainConsensusEvent {
 	SlowBitfieldPropagation(u32, u32),
 	/// New session occurred
 	NewSession(u32),
+	/// HRMP messages queues for inbound and outbound transfers
+	MessageQueues(Vec<(u32, SubxtHrmpChannel)>, Vec<(u32, SubxtHrmpChannel)>),
 }
 
 #[derive(Clone, Default)]
@@ -126,7 +128,7 @@ impl Display for ParachainConsensusEvent {
 				write!(f, "{}", outcome)
 			},
 			ParachainConsensusEvent::SkippedSlot => {
-				writeln!(f, "\t{}, no candidate backed", format!("SLOW BACKING").bold().red(),)
+				writeln!(f, "\t{}, no candidate backed", "SLOW BACKING".to_string().bold().red(),)
 			},
 			ParachainConsensusEvent::SlowAvailability(bits_available, max_bits) => {
 				writeln!(f, "\t{}", "SLOW AVAILABILITY".to_string().bold().yellow())?;
@@ -136,13 +138,44 @@ impl Display for ParachainConsensusEvent {
 				writeln!(
 					f,
 					"\t{} bitfield count {}/{}",
-					format!("SLOW BITFIELD PROPAGATION").dark_red(),
+					"SLOW BITFIELD PROPAGATION".to_string().dark_red(),
 					bitfields_count,
 					max_bits
 				)
 			},
 			ParachainConsensusEvent::NewSession(session_index) => {
 				writeln!(f, "\t✨ New session tracked: {}", session_index)
+			},
+			ParachainConsensusEvent::MessageQueues(inbound, outbound) => {
+				if !inbound.is_empty() {
+					let total: u32 = inbound.iter().map(|(_, channel)| channel.total_size).sum();
+					writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
+
+					for (peer_parachain, channel) in inbound {
+						if channel.total_size > 0 {
+							writeln!(
+								f,
+								"\t\t📩 From parachain: {}, {} bytes / {} max",
+								peer_parachain, channel.total_size, channel.max_message_size
+							)?;
+						}
+					}
+				}
+				if !outbound.is_empty() {
+					let total: u32 = inbound.iter().map(|(_, channel)| channel.total_size).sum();
+					writeln!(f, "\t👉 Outbound HRMP messages, sent {} bytes in total", total)?;
+
+					for (peer_parachain, channel) in outbound {
+						if channel.total_size > 0 {
+							writeln!(
+								f,
+								"\t\t📩 To parachain: {}, {} bytes / {} max",
+								peer_parachain, channel.total_size, channel.max_message_size
+							)?;
+						}
+					}
+				}
+				Ok(())
 			},
 		}
 	}

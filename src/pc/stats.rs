@@ -147,10 +147,10 @@ impl ParachainStats {
 	pub fn on_included(&mut self, relay_parent_number: u32, previous_included: Option<u32>) {
 		self.included_count += 1;
 
-		previous_included.map(|previous_block_number| {
+		if let Some(previous_block_number) = previous_included {
 			self.included_times
 				.update(relay_parent_number.saturating_sub(previous_block_number) as u16);
-		});
+		}
 	}
 
 	/// Update disputed counter
@@ -170,7 +170,7 @@ impl ParachainStats {
 
 	/// Track block
 	pub fn on_block(&mut self, time: Duration) {
-		self.block_times.update(time.as_secs_f32().into());
+		self.block_times.update(time.as_secs_f32());
 	}
 
 	/// Track bitfields
@@ -194,14 +194,7 @@ impl ParachainStats {
 
 impl Display for ParachainStats {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(
-			f,
-			"{}",
-			format!("--- Parachain {} trace statistics ---", self.para_id)
-				.to_string()
-				.bold()
-				.blue()
-		)?;
+		writeln!(f, "{}", format!("--- Parachain {} trace statistics ---", self.para_id).bold().blue())?;
 		writeln!(
 			f,
 			"Average relay chain block time: {} seconds ({} blocks processed)",
@@ -236,7 +229,7 @@ impl Display for DisputesStats {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"{} disputes tracked, {} concluded valid, {} concluded invalid, {:.1} average misbehaving validators",
+			"{} disputes tracked, {} concluded valid, {} concluded invalid, {} average misbehaving validators",
 			self.disputed_count,
 			self.concluded_valid.to_string().bright_green(),
 			self.concluded_invalid.to_string().bold(),
