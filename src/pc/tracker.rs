@@ -264,13 +264,6 @@ impl ParachainBlockTracker for SubxtTracker {
 				self.stats.on_skipped_slot();
 			},
 			ParachainBlockState::Backed => {
-				// writeln!(
-				// 	f,
-				// 	"{}",
-				// 	format!("{} [#{}] CANDIDATE BACKED", self.format_ts(), relay_block_number)
-				// 		.bold()
-				// 		.green(),
-				// )?;
 				if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
 					let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
 					let candidate_hash =
@@ -498,6 +491,9 @@ impl SubxtTracker {
 		} else {
 			self.session_data = Some(SubxtSessionTracker { session_index, current_keys: account_keys, prev_keys: None })
 		}
+		self.update
+			.as_mut()
+			.map(|update| update.events.push(ParachainConsensusEvent::NewSession(session_index)));
 	}
 
 	// TODO: fix this, it is broken, nobody sets this.
@@ -520,13 +516,6 @@ impl SubxtTracker {
 				&& self.current_candidate.state != ParachainBlockState::Idle
 				&& self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
 			{
-				// writeln!(
-				// 	f,
-				// 	"{} bitfield count {}/{}",
-				// 	format!("{} [#{}] SLOW BITFIELD PROPAGATION", self.format_ts(), relay_block_number).dark_red(),
-				// 	self.current_candidate.bitfield_count,
-				// 	self.current_candidate.max_av_bits
-				// )?;
 				self.update.as_mut().map(|update| {
 					update.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
 						self.current_candidate.bitfield_count,
@@ -552,84 +541,28 @@ impl SubxtTracker {
 
 		// TODO: Availability timeout.
 		if self.current_candidate.current_av_bits > (self.current_candidate.max_av_bits / 3) * 2 {
-			// writeln!(
-			// 	f,
-			// 	"{}",
-			// 	format!("{} [#{}] CANDIDATE INCLUDED", self.format_ts(), relay_block_number)
-			// 		.bold()
-			// 		.green(),
-			// )?;
 			if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
 				let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
 				let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
-				self.update
-					.as_mut()
-					.map(|update| update.events.push(ParachainConsensusEvent::Included(candidate_hash)));
+				self.update.as_mut().map(|update| {
+					update.events.push(ParachainConsensusEvent::Included(
+						candidate_hash,
+						self.current_candidate.current_av_bits,
+						self.current_candidate.max_av_bits,
+					))
+				});
 				self.stats.on_included();
 			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
-			// writeln!(
-			// 	f,
-			// 	"{}",
-			// 	format!("{} [#{}] SLOW AVAILABILITY", self.format_ts(), relay_block_number)
-			// 		.bold()
-			// 		.yellow(),
-			// )?;
-			self.update
-				.as_mut()
-				.map(|update| update.events.push(ParachainConsensusEvent::SlowAvailability));
+			self.update.as_mut().map(|update| {
+				update.events.push(ParachainConsensusEvent::SlowAvailability(
+					self.current_candidate.current_av_bits,
+					self.current_candidate.max_av_bits,
+				))
+			});
 			self.stats.on_slow_availability();
 		}
-
-		// writeln!(
-		// 	f,
-		// 	"\t🟢 Availability bits: {}/{}",
-		// 	self.current_candidate.current_av_bits, self.current_candidate.max_av_bits
-		// )
 	}
-
-	// fn display_core_status(&self, f: &mut fmt::Formatter) -> fmt::Result {
-	// 	writeln!(
-	// 		f,
-	// 		"\t🥝 Availability core {}",
-	// 		if !self.current_candidate.core_occupied { "FREE" } else { "OCCUPIED" }
-	// 	)
-	// }
-
-	// fn display_disputes(&self, f: &mut fmt::Formatter) -> fmt::Result {
-	// 	writeln!(f, "\t👊 Disputes tracked")?;
-	// 	for dispute in &self.disputes {
-	// 		self.stats.disputed_count += 1;
-	// 		if dispute.voted_for < dispute.voted_against {
-	// 			writeln!(
-	// 				f,
-	// 				"\t\t👎 Candidate: {}, resolved invalid; voted for: {}; voted against: {}",
-	// 				format!("{:?}", dispute.candidate).dark_red(),
-	// 				dispute.voted_for,
-	// 				dispute.voted_against
-	// 			)?;
-	// 		} else {
-	// 			writeln!(
-	// 				f,
-	// 				"\t\t👍 Candidate: {}, resolved valid; voted for: {}; voted against: {}",
-	// 				format!("{:?}", dispute.candidate).bright_green(),
-	// 				dispute.voted_for,
-	// 				dispute.voted_against
-	// 			)?;
-	// 		}
-
-	// 		if !dispute.misbehaving_validators.is_empty() {
-	// 			for validator in &dispute.misbehaving_validators {
-	// 				writeln!(
-	// 					f,
-	// 					"\t\t\t👹 Validator voted against supermajority: {}",
-	// 					format!("idx: {}, address: {}", validator.0, validator.1).bright_red(),
-	// 				)?;
-	// 			}
-	// 		}
-	// 	}
-	// 	Ok(())
-	// }
 
 	// fn display_hrmp(&self, f: &mut fmt::Formatter) -> fmt::Result {
 	// 	let total: u32 = self
@@ -672,29 +605,6 @@ impl SubxtTracker {
 	// 				)?;
 	// 			}
 	// 		}
-	// 	}
-
-	// 	Ok(())
-	// }
-
-	// fn display_block_info(&self, f: &mut fmt::Formatter) -> fmt::Result {
-	// 	if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
-	// 		let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
-	// 		let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
-
-	// 		writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
-	// 	}
-
-	// 	if let Some((_, relay_block_hash)) = self.current_relay_block {
-	// 		writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", relay_block_hash).bold())?;
-	// 	}
-
-	// 	if !self.disputes.is_empty() {
-	// 		self.display_disputes(f)?;
-	// 	}
-
-	// 	if self.message_queues.has_hrmp_messages() {
-	// 		self.display_hrmp(f)?;
 	// 	}
 
 	// 	Ok(())

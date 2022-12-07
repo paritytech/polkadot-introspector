@@ -44,16 +44,18 @@ pub enum ParachainConsensusEvent {
 	CoreAssigned(u32),
 	/// A candidate was backed.
 	Backed(H256),
-	/// A candidate was included.
-	Included(H256),
+	/// A candidate was included, including availability bits
+	Included(H256, u32, u32),
 	/// A dispute has concluded.
 	Disputed(DisputesOutcome),
 	/// No candidate backed.
 	SkippedSlot,
-	/// Candidate not available yet.
-	SlowAvailability,
+	/// Candidate not available yet, including availability bits
+	SlowAvailability(u32, u32),
 	/// Inherent bitfield count is lower than 2/3 of expect.
 	SlowBitfieldPropagation(u32, u32),
+	/// New session occurred
+	NewSession(u32),
 }
 
 #[derive(Clone, Default)]
@@ -123,9 +125,10 @@ impl Display for ParachainConsensusEvent {
 				writeln!(f, "{}", "CANDIDATE BACKED".to_string().bold().green())?;
 				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
 			},
-			ParachainConsensusEvent::Included(candidate_hash) => {
+			ParachainConsensusEvent::Included(candidate_hash, bits_available, max_bits) => {
 				writeln!(f, "{}", "CANDIDATE INCLUDED".to_string().bold().green())?;
-				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
+				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
+				writeln!(f, "\t🟢 Availability bits: {}/{}", bits_available, max_bits)
 			},
 			ParachainConsensusEvent::Disputed(outcome) => {
 				write!(f, "{}", outcome)
@@ -133,8 +136,9 @@ impl Display for ParachainConsensusEvent {
 			ParachainConsensusEvent::SkippedSlot => {
 				writeln!(f, "{}, no candidate backed", format!("SLOW BACKING").bold().red(),)
 			},
-			ParachainConsensusEvent::SlowAvailability => {
-				writeln!(f, "{}", "SLOW AVAILABILITY".to_string().bold().yellow())
+			ParachainConsensusEvent::SlowAvailability(bits_available, max_bits) => {
+				writeln!(f, "{}", "SLOW AVAILABILITY".to_string().bold().yellow())?;
+				writeln!(f, "\t🟢 Availability bits: {}/{}", bits_available, max_bits)
 			},
 			ParachainConsensusEvent::SlowBitfieldPropagation(bitfields_count, max_bits) => {
 				writeln!(
@@ -144,6 +148,9 @@ impl Display for ParachainConsensusEvent {
 					bitfields_count,
 					max_bits
 				)
+			},
+			ParachainConsensusEvent::NewSession(session_index) => {
+				write!(f, "\t✨ New session: {}", session_index)
 			},
 		}
 	}
