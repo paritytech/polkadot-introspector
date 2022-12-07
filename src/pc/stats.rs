@@ -16,6 +16,7 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
+use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
 	default::Default,
@@ -182,15 +183,22 @@ impl Display for ParachainStats {
 		)?;
 		writeln!(
 			f,
-			"Average relay block time: {} seconds ({} blocks processed)",
+			"Average relay chain block time: {} seconds ({} blocks processed)",
 			self.block_times.value().to_string().bold(),
 			self.block_times.count()
 		)?;
 		writeln!(
 			f,
-			"Average inclusion time: {} relay parent blocks ({} parachain blocks processed)",
+			"Average parachain block time: {} relay parent blocks ({} parachain blocks processed)",
 			self.included_times.value().to_string().bold(),
 			self.included_times.count()
+		)?;
+		writeln!(
+			f,
+			"Skipped slots: {}, slow availability: {}, slow bitfields propagation: {}",
+			self.skipped_slots.to_string().bright_purple(),
+			self.slow_avail_count.to_string().bright_cyan(),
+			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
 		writeln!(f, "Average bitfileds: {}, {} low bitfields count", self.bitfields.value(), self.low_bitfields_count)?;
 		writeln!(
