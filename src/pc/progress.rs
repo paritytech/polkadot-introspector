@@ -16,8 +16,8 @@
 
 //! This module defines structures used for tool progress tracking
 
+use super::tracker::DisputesOutcome;
 use crate::core::api::BlockNumber;
-use codec::{Decode, Encode};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
@@ -77,14 +77,6 @@ pub struct ParachainProgressUpdate {
 	pub core_occupied: bool,
 	/// Consensus events happening for the para under a relay parent.
 	pub events: Vec<ParachainConsensusEvent>,
-}
-
-#[derive(Encode, Decode, Debug, Default, Clone)]
-pub struct DisputesOutcome {
-	pub candidate: H256,
-	pub voted_for: u32,
-	pub voted_against: u32,
-	pub misbehaving_validators: Vec<(u32, String)>,
 }
 
 /// Format the current block inherent timestamp.

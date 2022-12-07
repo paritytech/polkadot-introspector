@@ -16,11 +16,12 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
+use super::tracker::DisputesOutcome;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
 	default::Default,
-	fmt::{self, Display},
+	fmt::{self, Display, Formatter},
 	time::Duration,
 };
 
@@ -95,6 +96,16 @@ impl<T: UsableNumber> AvgBucket<T> {
 	}
 }
 
+/// Tracker of the disputes
+#[derive(Clone, Default)]
+struct DisputesStats {
+	/// Number of candidates disputed.
+	disputed_count: u32,
+	concluded_valid: u32,
+	concluded_invalid: u32,
+	misbehaving_validators: AvgBucket<u32>,
+}
+
 #[derive(Clone, Default)]
 /// Per parachain statistics
 pub struct ParachainStats {
@@ -107,8 +118,8 @@ pub struct ParachainStats {
 	skipped_slots: u32,
 	/// Number of candidates included.
 	included_count: u32,
-	/// Number of candidates disputed.
-	disputed_count: u32,
+	/// Disputes stats
+	disputes_stats: DisputesStats,
 	/// Block time measurements for relay parent blocks
 	block_times: AvgBucket<f32>,
 	/// Number of slow availability events.
@@ -143,8 +154,18 @@ impl ParachainStats {
 	}
 
 	/// Update disputed counter
-	pub fn on_disputed(&mut self) {
-		self.disputed_count += 1;
+	pub fn on_disputed(&mut self, dispute_outcome: &DisputesOutcome) {
+		self.disputes_stats.disputed_count += 1;
+
+		if dispute_outcome.voted_for > dispute_outcome.voted_against {
+			self.disputes_stats.concluded_valid += 1;
+		} else {
+			self.disputes_stats.concluded_invalid += 1;
+		}
+
+		self.disputes_stats
+			.misbehaving_validators
+			.update(dispute_outcome.misbehaving_validators.len() as u32);
 	}
 
 	/// Track block
@@ -184,13 +205,13 @@ impl Display for ParachainStats {
 		writeln!(
 			f,
 			"Average relay chain block time: {} seconds ({} blocks processed)",
-			self.block_times.value().to_string().bold(),
+			format!("{:.3}", self.block_times.value()).bold(),
 			self.block_times.count()
 		)?;
 		writeln!(
 			f,
 			"Average parachain block time: {} relay parent blocks ({} parachain blocks processed)",
-			self.included_times.value().to_string().bold(),
+			format!("{:.2}", self.included_times.value()).bold(),
 			self.included_times.count()
 		)?;
 		writeln!(
@@ -200,13 +221,26 @@ impl Display for ParachainStats {
 			self.slow_avail_count.to_string().bright_cyan(),
 			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
-		writeln!(f, "Average bitfileds: {}, {} low bitfields count", self.bitfields.value(), self.low_bitfields_count)?;
+		writeln!(f, "Average bitfileds: {:.3}", self.bitfields.value())?;
 		writeln!(
 			f,
 			"Backing stats: {} blocks backed, {} blocks included",
 			self.backed_count.to_string().blue(),
 			self.included_count.to_string().green()
 		)?;
-		writeln!(f, "Disputes: {} candidates disputed", self.disputed_count.to_string().red())
+		writeln!(f, "Disputes stats: {}", self.disputes_stats)
+	}
+}
+
+impl Display for DisputesStats {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"{} disputes tracked, {} concluded valid, {} concluded invalid, {:.1} average misbehaving validators",
+			self.disputed_count,
+			self.concluded_valid.to_string().bright_green(),
+			self.concluded_invalid.to_string().bold(),
+			format!("{:.1}", self.misbehaving_validators.value()).bright_red()
+		)
 	}
 }

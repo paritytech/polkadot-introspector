@@ -16,7 +16,7 @@
 
 //! This module tracks parachain blocks.
 use super::{
-	progress::{DisputesOutcome, ParachainConsensusEvent, ParachainProgressUpdate},
+	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
 	stats::ParachainStats,
 };
 use crate::core::{
@@ -67,6 +67,19 @@ struct SubxtSessionTracker {
 	prev_keys: Option<Vec<AccountId32>>,
 	/// A flag that indicates a fresh session
 	fresh_session: bool,
+}
+
+/// An outcome for a dispute
+#[derive(Encode, Decode, Debug, Default, Clone)]
+pub struct DisputesOutcome {
+	/// Disputed candidate
+	pub candidate: H256,
+	/// Number of validators voted that a candidate is valid
+	pub voted_for: u32,
+	/// Number of validators voted that a candidate is invalid
+	pub voted_against: u32,
+	/// A vector of validators voted against supermajority (index + identify)
+	pub misbehaving_validators: Vec<(u32, String)>,
 }
 
 #[derive(Default)]
@@ -295,7 +308,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		});
 
 		self.disputes.iter().for_each(|outcome| {
-			self.stats.on_disputed();
+			self.stats.on_disputed(outcome);
 			self.update
 				.as_mut()
 				.map(|update| update.events.push(ParachainConsensusEvent::Disputed(outcome.clone())));
