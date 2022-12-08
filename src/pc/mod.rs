@@ -38,7 +38,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subxt::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
-mod tracker;
+mod progress;
+pub(crate) mod stats;
+pub(crate) mod tracker;
+
 use tracker::ParachainBlockTracker;
 
 #[derive(Clone, Debug, Parser)]
@@ -121,7 +124,9 @@ impl ParachainCommander {
 				Ok(event) => match event {
 					SubxtEvent::NewHead(hash) => {
 						let _parablock_info = tracker.inject_block(hash).await;
-						println!("{}", tracker);
+						if let Some(progress) = tracker.progress() {
+							println!("{}", progress);
+						}
 						tracker.maybe_reset_state();
 
 						if start_block.is_none() && opts.block_count.is_some() {
@@ -170,6 +175,9 @@ impl ParachainCommander {
 				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			};
 		}
+
+		let stats = tracker.summary();
+		print!("{}", stats);
 	}
 }
 
