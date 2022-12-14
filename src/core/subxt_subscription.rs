@@ -183,27 +183,24 @@ impl SubxtWrapper {
 				Ok(api) => {
 					info!("[{}] Connected", url);
 					let ret = match subscribe_mode {
-						SubxtSubscriptionMode::SubscribeAll => {
+						SubxtSubscriptionMode::SubscribeAll =>
 							process_subscription_or_stop(&update_channel, api.blocks().subscribe_all(), url.as_str())
-								.await
-						},
-						SubxtSubscriptionMode::SubscribeBest => {
+								.await,
+						SubxtSubscriptionMode::SubscribeBest =>
 							process_subscription_or_stop(&update_channel, api.blocks().subscribe_best(), url.as_str())
-								.await
-						},
-						SubxtSubscriptionMode::SubscribeFinalized => {
+								.await,
+						SubxtSubscriptionMode::SubscribeFinalized =>
 							process_subscription_or_stop(
 								&update_channel,
 								api.blocks().subscribe_finalized(),
 								url.as_str(),
 							)
-							.await
-						},
+							.await,
 					};
 
 					if ret {
 						// Subscription has decided to stop
-						return;
+						return
 					}
 				},
 				Err(err) => {
