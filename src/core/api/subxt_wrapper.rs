@@ -367,7 +367,7 @@ async fn new_client_fn(url: String) -> Option<OnlineClient<PolkadotConfig>> {
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
 				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-				continue;
+				continue
 			},
 		};
 	}
@@ -421,24 +421,20 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 					RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
 					RequestType::GetSessionIndex(hash) => subxt_get_session_index(api, hash).await,
 					RequestType::GetSessionInfo(session_index) => subxt_get_session_info(api, session_index).await,
-					RequestType::GetSessionAccountKeys(session_index) => {
-						subxt_get_session_account_keys(api, session_index).await
-					},
-					RequestType::GetInboundHRMPChannels(hash, para_id) => {
-						subxt_get_inbound_hrmp_channels(api, hash, para_id).await
-					},
-					RequestType::GetOutboundHRMPChannels(hash, para_id) => {
-						subxt_get_outbound_hrmp_channels(api, hash, para_id).await
-					},
-					RequestType::GetHRMPData(hash, para_id, sender) => {
-						subxt_get_hrmp_content(api, hash, para_id, sender).await
-					},
+					RequestType::GetSessionAccountKeys(session_index) =>
+						subxt_get_session_account_keys(api, session_index).await,
+					RequestType::GetInboundHRMPChannels(hash, para_id) =>
+						subxt_get_inbound_hrmp_channels(api, hash, para_id).await,
+					RequestType::GetOutboundHRMPChannels(hash, para_id) =>
+						subxt_get_outbound_hrmp_channels(api, hash, para_id).await,
+					RequestType::GetHRMPData(hash, para_id, sender) =>
+						subxt_get_hrmp_content(api, hash, para_id, sender).await,
 				}
 			} else {
 				// Remove the faulty websocket from connection pool.
 				let _ = connection_pool.remove(&request.url);
 				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-				continue;
+				continue
 			};
 
 			let response = match result {
@@ -448,21 +444,21 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-					continue;
+					continue
 				},
 				Err(Error::DecodeExtrinsicError) => {
 					error!("Decoding extrinsic failed");
 					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-					continue;
+					continue
 				},
 			};
 
 			// We only break in the happy case.
 			let _ = request.response_sender.send(response);
 			timeout_task.abort();
-			break;
+			break
 		}
 	}
 }
@@ -511,14 +507,14 @@ fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeEx
 	//   - signature: emitted `ParaInherent` must be unsigned.
 	//   - extrinsic data
 	if data.is_empty() {
-		return Err(DecodeExtrinsicError::EarlyEof);
+		return Err(DecodeExtrinsicError::EarlyEof)
 	}
 
 	let is_signed = data[0] & 0b1000_0000 != 0;
 	let version = data[0] & 0b0111_1111;
 	*data = &data[1..];
 	if is_signed || version != 4 {
-		return Err(DecodeExtrinsicError::Unsupported);
+		return Err(DecodeExtrinsicError::Unsupported)
 	}
 
 	SubxtCall::decode(data).map_err(DecodeExtrinsicError::CodecError)
