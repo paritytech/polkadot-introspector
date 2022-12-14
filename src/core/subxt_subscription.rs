@@ -77,16 +77,16 @@ pub enum SubxtDisputeResult {
 #[derive(strum::Display, Debug, Clone, Copy, clap::ValueEnum)]
 pub enum SubxtSubscriptionMode {
 	/// Subscribe to all blocks
-	SubscribeAll,
+	All,
 	/// Subscribe to the best chain
-	SubscribeBest,
+	Best,
 	/// Subscribe to finalized blocks
-	SubscribeFinalized,
+	Finalized,
 }
 
 impl Default for SubxtSubscriptionMode {
 	fn default() -> Self {
-		SubxtSubscriptionMode::SubscribeAll
+		SubxtSubscriptionMode::All
 	}
 }
 
@@ -183,13 +183,13 @@ impl SubxtWrapper {
 				Ok(api) => {
 					info!("[{}] Connected", url);
 					let ret = match subscribe_mode {
-						SubxtSubscriptionMode::SubscribeAll =>
+						SubxtSubscriptionMode::All =>
 							process_subscription_or_stop(&update_channel, api.blocks().subscribe_all(), url.as_str())
 								.await,
-						SubxtSubscriptionMode::SubscribeBest =>
+						SubxtSubscriptionMode::Best =>
 							process_subscription_or_stop(&update_channel, api.blocks().subscribe_best(), url.as_str())
 								.await,
-						SubxtSubscriptionMode::SubscribeFinalized =>
+						SubxtSubscriptionMode::Finalized =>
 							process_subscription_or_stop(
 								&update_channel,
 								api.blocks().subscribe_finalized(),
