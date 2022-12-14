@@ -30,7 +30,7 @@ use crate::core::{
 use codec::{Decode, Encode};
 use log::{debug, error};
 use std::{collections::BTreeMap, fmt::Debug};
-use subxt::{
+use subxt::ext::{
 	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
 };

@@ -22,7 +22,7 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::sp_core::H256;
+use subxt::ext::sp_core::H256;
 use tokio::{
 	signal,
 	sync::{broadcast, mpsc::Receiver},
@@ -37,7 +37,7 @@ use crate::core::{
 };
 use candidate_record::*;
 use color_eyre::eyre::eyre;
-use subxt::DefaultConfig;
+use subxt::PolkadotConfig;
 use tokio::sync::broadcast::Sender;
 use ws::*;
 
@@ -197,7 +197,7 @@ async fn process_candidate_change(
 
 				if let Some(relay_parent) = maybe_relay_parent {
 					let now = get_unix_time_unwrap();
-					let parent: <DefaultConfig as subxt::Config>::Header = relay_parent.into_inner()?;
+					let parent: <PolkadotConfig as subxt::Config>::Header = relay_parent.into_inner()?;
 					let block_number = parent.number;
 					let candidate_inclusion = CandidateInclusion {
 						relay_parent: change_event.candidate_descriptor.relay_parent,

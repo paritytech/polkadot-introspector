@@ -29,7 +29,7 @@ use std::{
 	io::{stdout, Write},
 	sync::{Arc, Mutex},
 };
-use subxt::sp_core::H256;
+use subxt::ext::sp_core::H256;
 use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone, Debug, Parser)]

@@ -35,7 +35,7 @@ use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::info;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use subxt::sp_core::H256;
+use subxt::ext::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
 mod progress;

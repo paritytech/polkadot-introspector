@@ -23,8 +23,8 @@ use futures::{future, StreamExt};
 use log::{error, info};
 use serde::Serialize;
 use subxt::{
-	sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
-	ClientBuilder, DefaultConfig, PolkadotExtrinsicParams,
+	ext::sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
+	OnlineClient, PolkadotConfig,
 };
 use tokio::sync::mpsc::{channel, Sender};
 
@@ -73,9 +73,9 @@ pub enum SubxtDisputeResult {
 #[derive(Debug, Clone)]
 pub struct SubxtDispute {
 	/// Relay chain block where a dispute has taken place
-	pub relay_parent_block: <DefaultConfig as subxt::Config>::Hash,
+	pub relay_parent_block: <PolkadotConfig as subxt::Config>::Hash,
 	/// Specific candidate being disputed about
-	pub candidate_hash: <DefaultConfig as subxt::Config>::Hash,
+	pub candidate_hash: <PolkadotConfig as subxt::Config>::Hash,
 }
 
 #[derive(Debug)]
@@ -92,9 +92,9 @@ pub enum SubxtCandidateEventType {
 #[derive(Debug)]
 pub struct SubxtCandidateEvent {
 	/// Result of candidate receipt hashing
-	pub candidate_hash: <DefaultConfig as subxt::Config>::Hash,
+	pub candidate_hash: <PolkadotConfig as subxt::Config>::Hash,
 	/// Full candidate receipt if needed
-	pub candidate_descriptor: CandidateDescriptor<<DefaultConfig as subxt::Config>::Hash>,
+	pub candidate_descriptor: CandidateDescriptor<<PolkadotConfig as subxt::Config>::Hash>,
 	/// The parachain id
 	pub parachain_id: u32,
 	/// The event type
@@ -104,7 +104,7 @@ pub struct SubxtCandidateEvent {
 #[derive(Debug)]
 pub enum SubxtEvent {
 	/// New relay chain head
-	NewHead(<DefaultConfig as subxt::Config>::Hash),
+	NewHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// Dispute for a specific candidate hash
 	DisputeInitiated(SubxtDispute),
 	/// Conclusion for a dispute
@@ -112,7 +112,7 @@ pub enum SubxtEvent {
 	/// Backing, inclusion, time out for a parachain candidate
 	CandidateChanged(Box<SubxtCandidateEvent>),
 	/// Anything undecoded
-	RawEvent(<DefaultConfig as subxt::Config>::Hash, subxt::RawEventDetails),
+	RawEvent(<PolkadotConfig as subxt::Config>::Hash, subxt::events::EventDetails),
 }
 
 #[async_trait]
@@ -158,18 +158,16 @@ impl SubxtWrapper {
 	// Per consumer
 	async fn run_per_node(update_channel: Sender<SubxtEvent>, url: String) {
 		loop {
-			match ClientBuilder::new().set_url(url.clone()).build().await {
+			match OnlineClient::<PolkadotConfig>::from_url(url.clone()).await {
 				Ok(api) => {
-					let api = api
-						.to_runtime_api::<polkadot::RuntimeApi<DefaultConfig, PolkadotExtrinsicParams<DefaultConfig>>>(
-						);
 					info!("[{}] Connected", url);
-					match api.events().subscribe().await {
+					match api.blocks().subscribe_all().await {
 						Ok(mut sub) => loop {
 							tokio::select! {
-								Some(events) = sub.next() => {
-									let events = events.unwrap();
-									let hash = events.block_hash();
+								Some(block) = sub.next() => {
+									let block = block.unwrap();
+									let events = block.events().await.unwrap();
+									let hash = block.hash();
 									info!("[{}] Block imported ({:?})", url, &hash);
 
 									if let Err(e) = update_channel.send(SubxtEvent::NewHead(hash)).await {
@@ -177,7 +175,7 @@ impl SubxtWrapper {
 										return;
 									}
 
-									for event in events.iter_raw() {
+									for event in events.iter() {
 										let event = event.unwrap();
 										decode_or_send_raw_event(hash, event.clone(), &update_channel).await.unwrap()
 									}
@@ -219,8 +217,8 @@ impl SubxtWrapper {
 }
 
 async fn decode_or_send_raw_event(
-	block_hash: <DefaultConfig as subxt::Config>::Hash,
-	event: subxt::events::RawEventDetails,
+	block_hash: <PolkadotConfig as subxt::Config>::Hash,
+	event: subxt::events::EventDetails,
 	update_channel: &Sender<SubxtEvent>,
 ) -> color_eyre::Result<()> {
 	use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
@@ -272,18 +270,20 @@ async fn decode_or_send_raw_event(
 		.map_err(|e| eyre!("cannot send to the channel: {:?}", e))
 }
 
-fn is_specific_event<E: subxt::Event>(raw_event: &subxt::events::RawEventDetails) -> bool {
-	E::is_event(raw_event.pallet.as_str(), raw_event.variant.as_str())
+fn is_specific_event<E: subxt::events::StaticEvent>(raw_event: &subxt::events::EventDetails) -> bool {
+	E::is_event(raw_event.pallet_name(), raw_event.variant_name())
 }
 
-fn decode_to_specific_event<E: subxt::Event>(raw_event: &subxt::events::RawEventDetails) -> color_eyre::Result<E> {
+fn decode_to_specific_event<E: subxt::events::StaticEvent>(
+	raw_event: &subxt::events::EventDetails,
+) -> color_eyre::Result<E> {
 	raw_event
 		.as_event()
 		.map_err(|e| {
 			eyre!(
 				"cannot decode event pallet {}, variant {}: {:?}",
-				raw_event.pallet.as_str(),
-				raw_event.variant.as_str(),
+				raw_event.pallet_name(),
+				raw_event.variant_name(),
 				e
 			)
 		})
@@ -291,15 +291,15 @@ fn decode_to_specific_event<E: subxt::Event>(raw_event: &subxt::events::RawEvent
 			maybe_event.ok_or_else(|| {
 				eyre!(
 					"cannot decode event pallet {}, variant {}: no event found",
-					raw_event.pallet.as_str(),
-					raw_event.variant.as_str(),
+					raw_event.pallet_name(),
+					raw_event.variant_name(),
 				)
 			})
 		})
 }
 
 fn create_candidate_event(
-	candidate_descriptor: CandidateDescriptor<<DefaultConfig as subxt::Config>::Hash>,
+	candidate_descriptor: CandidateDescriptor<<PolkadotConfig as subxt::Config>::Hash>,
 	event_type: SubxtCandidateEventType,
 ) -> SubxtCandidateEvent {
 	let candidate_hash = BlakeTwo256::hash_of(&candidate_descriptor);

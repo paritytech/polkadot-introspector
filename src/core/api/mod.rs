@@ -83,7 +83,7 @@ where
 mod tests {
 	use super::*;
 	use crate::core::*;
-	use subxt::{
+	use subxt::ext::{
 		sp_core::H256,
 		sp_runtime::traits::{BlakeTwo256, Hash},
 	};
