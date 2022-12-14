@@ -54,7 +54,7 @@ use polkadot::{
 
 pub struct SubxtWrapper {
 	urls: Vec<String>,
-	/// One sender per consumer per url.
+	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<SubxtEvent>>>,
 }
 

@@ -21,11 +21,11 @@
 //! This trades off control of behavior of errors in favor of simplicity and readability.
 //!
 //! TODO(ASAP): create issues for all below:
-//! TODO: retry logic needs to be improved - exponential backoff, cli options
+//! TODO: retry logic needs to be improved - exponential backoff, CLI options
 //! TODO: integration tests for polkadot/parachains.
 //! TODO: move prometheus into a module.
-//! TODO: decouple the Request/Responses from the subxt definitions.
-//! TODO: expose storage via event/api. Build a new event source such that new tools
+//! TODO: decouple the Request/Responses from the SUBXT definitions.
+//! TODO: expose storage via events API. Build a new event source such that new tools
 //! can be built by combining existing ones by listening to storage update events.
 
 pub mod api;

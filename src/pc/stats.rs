@@ -51,7 +51,7 @@ usable_number!(f32);
 #[derive(Clone)]
 /// Parachain block time stats.
 struct AvgBucket<T: UsableNumber> {
-	/// Average time (calculated using CMA).
+	/// Average time (calculated using `CMA`: cumulative moving average).
 	pub avg: f64,
 	/// Max time.
 	pub max: T,
@@ -68,7 +68,7 @@ impl<T: UsableNumber> Default for AvgBucket<T> {
 }
 
 impl<T: UsableNumber> AvgBucket<T> {
-	/// Update counter value using CMA
+	/// Update counter value
 	pub fn update(&mut self, new_value: T) {
 		if self.max < new_value {
 			self.max = new_value;

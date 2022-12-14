@@ -97,7 +97,7 @@ pub type InherentData = polkadot_rt_primitives::v2::InherentData<
 pub enum Response {
 	/// A timestamp.
 	Timestamp(u64),
-	/// A block heahder.
+	/// A block header.
 	MaybeHead(Option<<DefaultConfig as subxt::Config>::Header>),
 	/// A full block.
 	MaybeBlock(Option<subxt::rpc::ChainBlock<DefaultConfig>>),

@@ -40,7 +40,7 @@ use warp::{
 	Filter, Rejection, Reply,
 };
 
-/// Structure for a WebSocket builder
+/// Structure for a Web-Socket builder
 #[derive(TypedBuilder, Clone, Debug)]
 pub struct WebSocketListenerConfig {
 	/// Address to listen on
@@ -48,12 +48,12 @@ pub struct WebSocketListenerConfig {
 	/// Private key for SSL HTTP server
 	#[builder(default)]
 	privkey: Option<PathBuf>,
-	/// X509 certificate for HTTP server
+	/// SSL certificate for HTTP server
 	#[builder(default)]
 	cert: Option<PathBuf>,
 }
 
-/// Starts a ws listener given the config
+/// Starts a Web-Socket listener given the config
 pub struct WebSocketListener {
 	/// Configuration for a listener
 	config: WebSocketListenerConfig,
@@ -61,7 +61,7 @@ pub struct WebSocketListener {
 	api: CollectorStorageApi,
 }
 
-/// Defines WebSocket event types
+/// Defines Web-Socket event types
 #[derive(Clone, Copy, Serialize, Debug)]
 pub(crate) enum WebSocketEventType {
 	Backed,

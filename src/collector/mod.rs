@@ -63,7 +63,7 @@ impl From<CollectorOptions> for WebSocketListenerConfig {
 /// This type is used to distinguish different keys in the storage
 #[derive(Clone, Copy, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) enum CollectorPrefixType {
-	/// Candidate prefixed by ParachainId
+	/// Candidate prefixed by Parachain-Id
 	Candidate(u32),
 	/// Relay chain block
 	Head,

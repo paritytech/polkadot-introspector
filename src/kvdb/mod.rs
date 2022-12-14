@@ -56,7 +56,7 @@ pub(crate) struct KvdbUsageOpts {
 	keys_prefix: Vec<String>,
 }
 
-/// Specific options for the decode_keys subcommand
+/// Specific options for the `decode_keys` subcommand
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct KvdbKeysOpts {

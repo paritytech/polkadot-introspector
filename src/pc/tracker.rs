@@ -92,7 +92,7 @@ pub struct SubxtMessageQueuesTracker {
 }
 
 impl SubxtMessageQueuesTracker {
-	/// Update the content of hrmp channels
+	/// Update the content of HRMP channels
 	pub fn update_hrmp_channels(
 		&mut self,
 		inbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
@@ -103,7 +103,7 @@ impl SubxtMessageQueuesTracker {
 		self.outbound_hrmp_channels = outbound_channels;
 	}
 
-	/// Returns if there are hrmp messages in any direction
+	/// Returns if there are HRMP messages in any direction
 	pub fn has_hrmp_messages(&self) -> bool {
 		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
 			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
@@ -161,7 +161,7 @@ pub struct ParachainBlockInfo {
 	max_av_bits: u32,
 	/// The current number of observed availability bits set to 1.
 	current_av_bits: u32,
-	/// Parachain availability core asignment information.
+	/// Parachain availability core assignment information.
 	assigned_core: Option<u32>,
 	/// Core occupation status.
 	core_occupied: bool,

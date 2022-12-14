@@ -157,7 +157,7 @@ pub trait RecordsStorage<K> {
 	fn keys(&self) -> Vec<K>;
 }
 
-/// Persistent in-memory storage with expiration and max ttl
+/// Persistent in-memory storage with expiration and max TTL
 /// This storage has also an associative component allowing to get an element
 /// by hash
 pub struct HashedPlainRecordsStorage<K: Hash + Clone> {
@@ -247,7 +247,7 @@ where
 	}
 }
 
-/// This trait is used to define a storage that can store items organised in prefixes.
+/// This trait is used to define a storage that can store items organized in prefixes.
 /// Prefixes are used to group elements by some characteristic. For example, to get
 /// elements that belong to some particular parachain.
 pub trait PrefixedRecordsStorage<K, P> {

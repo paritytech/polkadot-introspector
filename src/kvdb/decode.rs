@@ -18,10 +18,10 @@
 //! format string. Format string can currently include plain strings, and one or
 //! more percent encoding values, such as `%i`. Currently, this module supports the
 //! following percent strings:
-//! - %i - big endian i32 value
-//! - %t - big endian u64 value (timestamp)
-//! - %h - blake2b hash represented as hex string
-//! - %s<d> - string of length `d` (for example `%s10` represents a string of size 10)
+//! - `%i` - big endian `i32` value
+//! - `%t` - big endian `u64` value (or a timestamp)
+//! - `%h` - blake2 hash represented as hex string
+//! - `%s<d>` - string of length `d` (for example `%s10` represents a string of size 10)
 
 use crate::kvdb::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};

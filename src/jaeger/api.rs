@@ -25,10 +25,10 @@ use typed_builder::TypedBuilder;
 use super::primitives::*;
 
 /// `/api/traces`
-/// Params:
-///     limit: specify how many to return
-///     service: Where did the trace originate
-///     prettyPrint: Make JSON nice
+/// Parameters:
+///     `limit`: specify how many to return
+///     `service`: Where did the trace originate
+///     `prettyPrint`: Make JSON nice
 const TRACES_ENDPOINT: &str = "/api/traces";
 /// `/api/services`
 ///     returns services reporting to the jaeger agent
@@ -39,7 +39,7 @@ const HTTP_UA: &str = "polkadot-introspector";
 
 /// Main API exported module
 pub struct JaegerApi {
-	/// Cached urls for frequent requests
+	/// Cached URLs for frequent requests
 	traces_url: reqwest::Url,
 	services_url: reqwest::Url,
 	/// Async HTTP client

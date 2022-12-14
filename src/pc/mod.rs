@@ -21,7 +21,7 @@
 //! - backing and availability health metrics for all parachains
 //! - TODO: backing group information - validator addresses
 //! - TODO: parachain block times measured in relay chain blocks
-//! - TODO: parachain XCM tput
+//! - TODO: parachain XCM throughput
 //! - TODO: parachain code size
 //!
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
@@ -47,7 +47,7 @@ use tracker::ParachainBlockTracker;
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct ParachainCommanderOptions {
-	/// Websocket url of a relay chain node.
+	/// Web-Socket URLs of a relay chain node.
 	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
 	pub node: String,
 	/// Parachain id.

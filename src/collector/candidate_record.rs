@@ -103,7 +103,7 @@ where
 pub struct CandidateRecord {
 	/// Candidate receipt (if observed)
 	pub candidate_descriptor: polkadot_rt_primitives::CandidateDescriptor<H256>,
-	/// The time we first observed a candidate since UnixEpoch
+	/// The time we first observed a candidate since Unix Epoch
 	pub candidate_first_seen: Duration,
 	/// Inclusion data
 	pub candidate_inclusion: CandidateInclusion<H256>,

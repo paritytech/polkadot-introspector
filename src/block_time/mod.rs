@@ -43,10 +43,10 @@ pub(crate) enum BlockTimeMode {
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct BlockTimeOptions {
-	/// Websockets url of a substrate nodes.
+	/// Websockets URLs of a substrate nodes.
 	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://westmint-rpc.polkadot.io:443")]
 	pub nodes: Vec<String>,
-	/// Mode of running - cli/prometheus.
+	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
 	mode: BlockTimeMode,
 }

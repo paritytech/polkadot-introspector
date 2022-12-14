@@ -89,7 +89,7 @@ pub(crate) struct JaegerOptions {
 	/// Pretty print output of the commands (pretty by default)
 	#[clap(long, default_value = "pretty")]
 	output: OutputMode,
-	/// Mode of running - cli/prometheus.
+	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
 	mode: JaegerMode,
 }
