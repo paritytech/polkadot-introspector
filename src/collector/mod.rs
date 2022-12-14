@@ -53,7 +53,7 @@ pub(crate) struct CollectorOptions {
 	#[clap(short = 'l', long = "listen", default_value = "0.0.0.0:3030")]
 	listen_addr: SocketAddr,
 	/// Defines subscription mode
-	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
+	#[clap(short = 's', long = "subscribe-to", default_value_t, value_enum)]
 	pub subscribe_mode: SubxtSubscriptionMode,
 }
 
