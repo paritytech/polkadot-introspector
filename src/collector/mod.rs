@@ -33,7 +33,7 @@ mod ws;
 
 use crate::core::{
 	ApiService, EventConsumerInit, RecordTime, RecordsStorageConfig, StorageEntry, StorageInfo, SubxtCandidateEvent,
-	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
+	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent, SubxtSubscriptionMode,
 };
 use candidate_record::*;
 use color_eyre::eyre::eyre;
@@ -52,6 +52,9 @@ pub(crate) struct CollectorOptions {
 	/// WS listen address to bind to
 	#[clap(short = 'l', long = "listen", default_value = "0.0.0.0:3030")]
 	listen_addr: SocketAddr,
+	/// Defines subscription mode
+	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
+	pub subscribe_mode: SubxtSubscriptionMode,
 }
 
 impl From<CollectorOptions> for WebSocketListenerConfig {

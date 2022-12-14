@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent};
+use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent, SubxtSubscriptionMode};
 use clap::Parser;
 use colored::Colorize;
 use crossterm::{
@@ -49,6 +49,9 @@ pub(crate) struct BlockTimeOptions {
 	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
 	mode: BlockTimeMode,
+	/// Defines subscription mode
+	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
+	pub subscribe_mode: SubxtSubscriptionMode,
 }
 
 #[derive(Clone, Debug, Parser, Default)]

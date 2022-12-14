@@ -19,12 +19,14 @@ use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
 use async_trait::async_trait;
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
-use futures::{future, StreamExt};
+use futures::{future, Stream, StreamExt};
 use log::{error, info};
 use serde::Serialize;
+use std::{future::Future, pin::Pin};
 use subxt::{
+	blocks::Block,
 	ext::sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
-	OnlineClient, PolkadotConfig,
+	Error, OnlineClient, PolkadotConfig,
 };
 use tokio::sync::mpsc::{channel, Sender};
 
@@ -56,6 +58,8 @@ pub struct SubxtWrapper {
 	urls: Vec<String>,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<SubxtEvent>>>,
+	/// Mode of subscription
+	subscribe_mode: SubxtSubscriptionMode,
 }
 
 /// Dispute result as seen by subxt event
@@ -67,6 +71,23 @@ pub enum SubxtDisputeResult {
 	Invalid,
 	/// Dispute has been timed out
 	TimedOut,
+}
+
+/// How to subscribe to subxt blocks
+#[derive(strum::Display, Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SubxtSubscriptionMode {
+	/// Subscribe to all blocks
+	SubscribeAll,
+	/// Subscribe to the best chain
+	SubscribeBest,
+	/// Subscribe to finalized blocks
+	SubscribeFinalized,
+}
+
+impl Default for SubxtSubscriptionMode {
+	fn default() -> Self {
+		SubxtSubscriptionMode::SubscribeAll
+	}
 }
 
 /// A helper structure to keep track of a dispute and it's relay parent
@@ -140,7 +161,7 @@ impl EventStream for SubxtWrapper {
 		let futures = self
 			.consumers
 			.into_iter()
-			.map(|update_channels| Self::run_per_consumer(update_channels, self.urls.clone()));
+			.map(|update_channels| Self::run_per_consumer(update_channels, self.urls.clone(), self.subscribe_mode));
 
 		let mut flat_futures = futures.flatten().collect::<Vec<_>>();
 		flat_futures.extend(tasks);
@@ -151,47 +172,39 @@ impl EventStream for SubxtWrapper {
 }
 
 impl SubxtWrapper {
-	pub fn new(urls: Vec<String>) -> SubxtWrapper {
-		SubxtWrapper { urls, consumers: Vec::new() }
+	pub fn new(urls: Vec<String>, subscribe_mode: SubxtSubscriptionMode) -> SubxtWrapper {
+		SubxtWrapper { urls, consumers: Vec::new(), subscribe_mode }
 	}
 
 	// Per consumer
-	async fn run_per_node(update_channel: Sender<SubxtEvent>, url: String) {
+	async fn run_per_node(update_channel: Sender<SubxtEvent>, url: String, subscribe_mode: SubxtSubscriptionMode) {
 		loop {
 			match OnlineClient::<PolkadotConfig>::from_url(url.clone()).await {
 				Ok(api) => {
 					info!("[{}] Connected", url);
-					match api.blocks().subscribe_all().await {
-						Ok(mut sub) => loop {
-							tokio::select! {
-								Some(block) = sub.next() => {
-									let block = block.unwrap();
-									let events = block.events().await.unwrap();
-									let hash = block.hash();
-									info!("[{}] Block imported ({:?})", url, &hash);
-
-									if let Err(e) = update_channel.send(SubxtEvent::NewHead(hash)).await {
-										info!("Event consumer has terminated: {:?}, shutting down", e);
-										return;
-									}
-
-									for event in events.iter() {
-										let event = event.unwrap();
-										decode_or_send_raw_event(hash, event.clone(), &update_channel).await.unwrap()
-									}
-								},
-								_ = tokio::signal::ctrl_c() => {
-									return;
-								}
-							};
+					let ret = match subscribe_mode {
+						SubxtSubscriptionMode::SubscribeAll => {
+							process_subscription_or_stop(&update_channel, api.blocks().subscribe_all(), url.as_str())
+								.await
 						},
-						Err(err) => {
-							error!("[{}] Disconnected ({:?}) ", url, err);
-							// TODO (sometime): Add exponential backoff.
-							tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-							info!("[{}] retrying connection ... ", url);
+						SubxtSubscriptionMode::SubscribeBest => {
+							process_subscription_or_stop(&update_channel, api.blocks().subscribe_best(), url.as_str())
+								.await
+						},
+						SubxtSubscriptionMode::SubscribeFinalized => {
+							process_subscription_or_stop(
+								&update_channel,
+								api.blocks().subscribe_finalized(),
+								url.as_str(),
+							)
+							.await
 						},
 					};
+
+					if ret {
+						// Subscription has decided to stop
+						return;
+					}
 				},
 				Err(err) => {
 					error!("[{}] Disconnected ({:?}) ", url, err);
@@ -207,13 +220,63 @@ impl SubxtWrapper {
 	fn run_per_consumer(
 		update_channels: Vec<Sender<SubxtEvent>>,
 		urls: Vec<String>,
+		subscribe_mode: SubxtSubscriptionMode,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()
 			.zip(urls.into_iter())
-			.map(|(update_channel, url)| tokio::spawn(Self::run_per_node(update_channel, url)))
+			.map(|(update_channel, url)| tokio::spawn(Self::run_per_node(update_channel, url, subscribe_mode)))
 			.collect()
 	}
+}
+
+// Subxt does not export this type but it is needed to specify future output
+type BlockStream<T> = Pin<Box<dyn Stream<Item = Result<T, Error>> + Send>>;
+
+// Process subscription to a specific block types (e.g. all, best, finalized) and returns `true`
+// if a caller's loop should be terminated.
+async fn process_subscription_or_stop<Sub, Client>(
+	update_channel: &Sender<SubxtEvent>,
+	subscription: Sub,
+	url: &str,
+) -> bool
+where
+	Sub: Future<Output = Result<BlockStream<Block<PolkadotConfig, Client>>, Error>> + Send + 'static,
+	Client: subxt::client::OnlineClientT<PolkadotConfig> + Send + Sync + 'static,
+{
+	match subscription.await {
+		Ok(mut sub) => loop {
+			tokio::select! {
+				Some(block) = sub.next() => {
+					let block = block.unwrap();
+					let events = block.events().await.unwrap();
+					let hash = block.hash();
+					info!("[{}] Block imported ({:?})", url, &hash);
+
+					if let Err(e) = update_channel.send(SubxtEvent::NewHead(hash)).await {
+						info!("Event consumer has terminated: {:?}, shutting down", e);
+						return true;
+					}
+
+					for event in events.iter() {
+						let event = event.unwrap();
+						decode_or_send_raw_event(hash, event.clone(), update_channel).await.unwrap()
+					}
+				},
+				_ = tokio::signal::ctrl_c() => {
+					return true;
+				}
+			};
+		},
+		Err(err) => {
+			error!("[{}] Disconnected ({:?}) ", url, err);
+			// TODO (sometime): Add exponential backoff.
+			tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+			info!("[{}] retrying connection ... ", url);
+		},
+	};
+
+	false
 }
 
 async fn decode_or_send_raw_event(
