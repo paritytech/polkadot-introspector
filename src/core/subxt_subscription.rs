@@ -86,7 +86,7 @@ pub enum SubxtSubscriptionMode {
 
 impl Default for SubxtSubscriptionMode {
 	fn default() -> Self {
-		SubxtSubscriptionMode::All
+		SubxtSubscriptionMode::Best
 	}
 }
 
