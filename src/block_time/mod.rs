@@ -184,11 +184,11 @@ impl BlockTimeMonitor {
 				Config::default().with_height(opts.chart_height as u32).with_caption(format!(
 					"[DATA: {}] [LAST: {}] [AVG: {}] [MIN: {}] [MAX: {}] [ {} ]",
 					blocks_to_show.to_string().bold(),
-					format!("{:.2}", last).bright_purple().underline(),
-					format!("{:.2}", avg).white().bold(),
-					format!("{:.2}", min).green().bold(),
-					format!("{:.2}", max).red().bold(),
-					format!("Block production latency via '{}'", uri).yellow(),
+					format!("{last:.2}").bright_purple().underline(),
+					format!("{avg:.2}").white().bold(),
+					format!("{min:.2}").green().bold(),
+					format!("{max:.2}").red().bold(),
+					format!("Block production latency via '{uri}'").yellow(),
 				)),
 			)
 			.as_bytes(),

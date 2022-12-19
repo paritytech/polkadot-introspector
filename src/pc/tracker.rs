@@ -338,10 +338,10 @@ impl ParachainBlockTracker for SubxtTracker {
 
 impl SubxtTracker {
 	/// Constructor.
-	pub fn new(para_id: u32, node_rpc_url: String, executor: RequestExecutor) -> Self {
+	pub fn new(para_id: u32, node_rpc_url: &str, executor: RequestExecutor) -> Self {
 		Self {
 			para_id,
-			node_rpc_url,
+			node_rpc_url: node_rpc_url.to_owned(),
 			executor,
 			stats: ParachainStats::new(para_id),
 			current_candidate: Default::default(),
