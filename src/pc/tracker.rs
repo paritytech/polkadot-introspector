@@ -25,11 +25,14 @@ use crate::core::{
 		RequestExecutor, ValidatorIndex,
 	},
 	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
-	SubxtHrmpChannel,
+	SubxtDisputeResult, SubxtHrmpChannel,
 };
 use codec::{Decode, Encode};
-use log::{debug, error};
-use std::{collections::BTreeMap, fmt::Debug};
+use log::{debug, error, info};
+use std::{
+	collections::{BTreeMap, HashMap},
+	fmt::Debug,
+};
 use subxt::ext::{
 	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
@@ -48,6 +51,8 @@ pub trait ParachainBlockTracker {
 	type ParachainBlockInfo;
 	/// A structure to describe the parachain progress made after processing last relay chain block.
 	type ParachainProgressUpdate;
+	/// A structure to describe dispute outcome
+	type DisputeOutcome;
 
 	/// Injects a new relay chain block into the tracker.
 	/// Blocks must be injected in order.
@@ -55,6 +60,9 @@ pub trait ParachainBlockTracker {
 
 	/// Update current parachain progress.
 	fn progress(&mut self) -> Option<ParachainProgressUpdate>;
+
+	/// Inject disputes resolution results from the tracked events
+	fn inject_disputes_events(&mut self, disputes_tracked: &HashMap<Self::RelayChainBlockHash, Self::DisputeOutcome>);
 }
 
 /// Used to track session data, where we store two subsequent sessions: the current and the previous one
@@ -70,10 +78,12 @@ struct SubxtSessionTracker {
 }
 
 /// An outcome for a dispute
-#[derive(Encode, Decode, Debug, Default, Clone)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct DisputesOutcome {
 	/// Disputed candidate
 	pub candidate: H256,
+	/// The real outcome
+	pub outcome: SubxtDisputeResult,
 	/// Number of validators voted that a candidate is valid
 	pub voted_for: u32,
 	/// Number of validators voted that a candidate is invalid
@@ -188,6 +198,7 @@ impl ParachainBlockTracker for SubxtTracker {
 	type ParaInherentData = InherentData;
 	type ParachainBlockInfo = ParachainBlockInfo;
 	type ParachainProgressUpdate = ParachainProgressUpdate;
+	type DisputeOutcome = SubxtDisputeResult;
 
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo {
 		if let Some(header) = self.executor.get_block_head(self.node_rpc_url.clone(), Some(block_hash)).await {
@@ -334,6 +345,24 @@ impl ParachainBlockTracker for SubxtTracker {
 		}
 		self.update.clone()
 	}
+
+	fn inject_disputes_events(&mut self, disputes_tracked: &HashMap<Self::RelayChainBlockHash, Self::DisputeOutcome>) {
+		self.disputes.retain_mut(|dispute| -> bool {
+			if let Some(observed_dispute) = disputes_tracked.get(&dispute.candidate) {
+				if dispute.outcome != *observed_dispute {
+					info!(
+						"Dispute for candidate {:?}: calculated outcome: {:?} is not equal to observed outcome: {:?}",
+						&dispute.candidate, dispute.outcome, observed_dispute
+					);
+					dispute.outcome = *observed_dispute;
+				}
+
+				return true
+			}
+
+			false
+		});
+	}
 }
 
 impl SubxtTracker {
@@ -473,7 +502,10 @@ impl SubxtTracker {
 					.count() as u32;
 				let voted_against = dispute_info.statements.len() as u32 - voted_for;
 
-				let misbehaving_validators = if voted_for > voted_against {
+				let outcome =
+					if voted_for > voted_against { SubxtDisputeResult::Valid } else { SubxtDisputeResult::Invalid };
+
+				let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
 					dispute_info
 						.statements
 						.iter()
@@ -492,6 +524,7 @@ impl SubxtTracker {
 					candidate: dispute_info.candidate_hash.0,
 					voted_for,
 					voted_against,
+					outcome,
 					misbehaving_validators,
 				}
 			})

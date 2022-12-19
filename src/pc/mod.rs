@@ -132,6 +132,7 @@ impl ParachainCommander {
 			match recv_result {
 				Ok(event) => match event {
 					SubxtEvent::NewHead(hash) => {
+						tracker.inject_disputes_events(&recent_disputes_concluded);
 						if let Some(progress) = tracker.progress() {
 							println!("{}", progress);
 						}
@@ -153,9 +154,9 @@ impl ParachainCommander {
 					SubxtEvent::DisputeInitiated(dispute) => {
 						info!(
 							"{}: relay parent: {:?}, candidate: {:?}",
+							"Dispute initiated".to_string().dark_red(),
 							dispute.relay_parent_block,
 							dispute.candidate_hash,
-							"Dispute initiated".to_string().dark_red(),
 						);
 						recent_disputes_unconcluded.insert(dispute.candidate_hash, get_unix_time_unwrap());
 					},

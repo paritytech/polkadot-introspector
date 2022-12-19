@@ -63,7 +63,7 @@ pub struct SubxtWrapper {
 }
 
 /// Dispute result as seen by subxt event
-#[derive(Debug, Clone, Copy, Serialize, Decode, Encode)]
+#[derive(Debug, Clone, Copy, Serialize, Decode, Encode, PartialEq, Eq)]
 pub enum SubxtDisputeResult {
 	/// Dispute outcome is valid
 	Valid,
