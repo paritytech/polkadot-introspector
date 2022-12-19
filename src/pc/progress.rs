@@ -17,7 +17,7 @@
 //! This module defines structures used for tool progress tracking
 
 use super::tracker::DisputesOutcome;
-use crate::core::{api::BlockNumber, SubxtHrmpChannel};
+use crate::core::{api::BlockNumber, SubxtDisputeResult, SubxtHrmpChannel};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
@@ -183,22 +183,40 @@ impl Display for ParachainConsensusEvent {
 
 impl Display for DisputesOutcome {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		if self.voted_for < self.voted_against {
-			writeln!(
-				f,
-				"\t\t👎 Candidate: {}, resolved invalid; voted for: {}; voted against: {}",
-				format!("{:?}", self.candidate).dark_red(),
-				self.voted_for,
-				self.voted_against
-			)?;
-		} else {
-			writeln!(
-				f,
-				"\t\t👍 Candidate: {}, resolved valid; voted for: {}; voted against: {}",
-				format!("{:?}", self.candidate).bright_green(),
-				self.voted_for,
-				self.voted_against
-			)?;
+		let resolved_time = self
+			.resolve_time
+			.map_or_else(|| "after unknown number of blocks".to_owned(), |diff| format!("after {diff} blocks"));
+		match self.outcome {
+			SubxtDisputeResult::Invalid => {
+				writeln!(
+					f,
+					"\t\t👎 Candidate: {}, resolved invalid ({}); voted for: {}; voted against: {}",
+					format!("{:?}", self.candidate).dark_red(),
+					resolved_time,
+					self.voted_for,
+					self.voted_against
+				)?;
+			},
+			SubxtDisputeResult::Valid => {
+				writeln!(
+					f,
+					"\t\t👍 Candidate: {}, resolved valid ({}); voted for: {}; voted against: {}",
+					format!("{:?}", self.candidate).bright_green(),
+					resolved_time,
+					self.voted_for,
+					self.voted_against
+				)?;
+			},
+			SubxtDisputeResult::TimedOut => {
+				writeln!(
+					f,
+					"\t\t⁉️ Candidate: {}, dispute resolution has been timed out {}; voted for: {}; voted against: {}",
+					format!("{:?}", self.candidate).bright_green(),
+					resolved_time,
+					self.voted_for,
+					self.voted_against
+				)?;
+			},
 		}
 
 		if !self.misbehaving_validators.is_empty() {

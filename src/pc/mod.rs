@@ -34,10 +34,7 @@ use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::info;
-use std::{
-	collections::HashMap,
-	time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, time::Duration};
 use subxt::ext::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
@@ -109,10 +106,10 @@ impl ParachainCommander {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
 		let para_id = opts.para_id;
-		// Track disputes that are unconcluded
-		let mut recent_disputes_unconcluded: HashMap<H256, Duration> = HashMap::new();
+		// Track disputes that are unconcluded, value is the relay parent block number
+		let mut recent_disputes_unconcluded: HashMap<H256, u32> = HashMap::new();
 		// Keep concluded disputes per block
-		let mut recent_disputes_concluded: HashMap<H256, SubxtDisputeResult> = HashMap::new();
+		let mut recent_disputes_concluded: HashMap<H256, (SubxtDisputeResult, Option<u32>)> = HashMap::new();
 
 		let mut tracker = tracker::SubxtTracker::new(para_id, url.as_str(), executor);
 		let mut start_block = None;
@@ -158,7 +155,10 @@ impl ParachainCommander {
 							dispute.relay_parent_block,
 							dispute.candidate_hash,
 						);
-						recent_disputes_unconcluded.insert(dispute.candidate_hash, get_unix_time_unwrap());
+						recent_disputes_unconcluded.insert(
+							dispute.candidate_hash,
+							tracker.get_current_relay_block_number().unwrap_or_default(),
+						);
 					},
 					SubxtEvent::DisputeConcluded(dispute, outcome) => {
 						let str_outcome = match outcome {
@@ -167,15 +167,14 @@ impl ParachainCommander {
 							SubxtDisputeResult::TimedOut => format!("{}", "timedout".to_string().dark_red()),
 						};
 						let noticed_dispute = recent_disputes_unconcluded.remove(&dispute.candidate_hash);
-						let resolve_time = if let Some(noticed) = noticed_dispute {
-							get_unix_time_unwrap().saturating_sub(noticed)
-						} else {
-							Duration::from_millis(0)
-						};
-						recent_disputes_concluded.insert(dispute.candidate_hash, outcome);
+						let resolved_block_number = tracker.get_current_relay_block_number().unwrap_or_default();
+						let resolved_time = noticed_dispute
+							.map(|initiated_block| resolved_block_number.saturating_sub(initiated_block));
+
+						recent_disputes_concluded.insert(dispute.candidate_hash, (outcome, resolved_time));
 						info!(
 							"{}: relay parent: {:?}, candidate: {:?}, result: {}",
-							format!("Dispute concluded in {}ms", resolve_time.as_millis()).bright_green(),
+							format!("Dispute concluded in {:?} blocks", resolved_time).bright_green(),
 							dispute.relay_parent_block,
 							dispute.candidate_hash,
 							str_outcome,
@@ -191,8 +190,4 @@ impl ParachainCommander {
 		let stats = tracker.summary();
 		print!("{}", stats);
 	}
-}
-
-fn get_unix_time_unwrap() -> Duration {
-	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }

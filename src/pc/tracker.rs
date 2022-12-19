@@ -62,7 +62,10 @@ pub trait ParachainBlockTracker {
 	fn progress(&mut self) -> Option<ParachainProgressUpdate>;
 
 	/// Inject disputes resolution results from the tracked events
-	fn inject_disputes_events(&mut self, disputes_tracked: &HashMap<Self::RelayChainBlockHash, Self::DisputeOutcome>);
+	fn inject_disputes_events(
+		&mut self,
+		disputes_tracked: &HashMap<Self::RelayChainBlockHash, (Self::DisputeOutcome, Option<u32>)>,
+	);
 }
 
 /// Used to track session data, where we store two subsequent sessions: the current and the previous one
@@ -90,6 +93,8 @@ pub struct DisputesOutcome {
 	pub voted_against: u32,
 	/// A vector of validators voted against supermajority (index + identify)
 	pub misbehaving_validators: Vec<(u32, String)>,
+	/// How many blocks have passed since DisputeInitiated event
+	pub resolve_time: Option<u32>,
 }
 
 #[derive(Default)]
@@ -346,16 +351,20 @@ impl ParachainBlockTracker for SubxtTracker {
 		self.update.clone()
 	}
 
-	fn inject_disputes_events(&mut self, disputes_tracked: &HashMap<Self::RelayChainBlockHash, Self::DisputeOutcome>) {
+	fn inject_disputes_events(
+		&mut self,
+		disputes_tracked: &HashMap<Self::RelayChainBlockHash, (Self::DisputeOutcome, Option<u32>)>,
+	) {
 		self.disputes.retain_mut(|dispute| -> bool {
 			if let Some(observed_dispute) = disputes_tracked.get(&dispute.candidate) {
-				if dispute.outcome != *observed_dispute {
+				if dispute.outcome != observed_dispute.0 {
 					info!(
 						"Dispute for candidate {:?}: calculated outcome: {:?} is not equal to observed outcome: {:?}",
-						&dispute.candidate, dispute.outcome, observed_dispute
+						&dispute.candidate, dispute.outcome, observed_dispute.0
 					);
-					dispute.outcome = *observed_dispute;
+					dispute.outcome = observed_dispute.0;
 				}
+				dispute.resolve_time = observed_dispute.1;
 
 				return true
 			}
@@ -526,6 +535,7 @@ impl SubxtTracker {
 					voted_against,
 					outcome,
 					misbehaving_validators,
+					resolve_time: None,
 				}
 			})
 			.collect();
