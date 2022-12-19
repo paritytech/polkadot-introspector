@@ -103,7 +103,10 @@ struct DisputesStats {
 	disputed_count: u32,
 	concluded_valid: u32,
 	concluded_invalid: u32,
+	/// Average count of validators that voted against supermajority
 	misbehaving_validators: AvgBucket<u32>,
+	/// Average resolution time in blocks
+	resolution_time: AvgBucket<u32>,
 }
 
 #[derive(Clone, Default)]
@@ -166,6 +169,10 @@ impl ParachainStats {
 		self.disputes_stats
 			.misbehaving_validators
 			.update(dispute_outcome.misbehaving_validators.len() as u32);
+
+		if let Some(diff) = dispute_outcome.resolve_time {
+			self.disputes_stats.resolution_time.update(diff);
+		}
 	}
 
 	/// Track block
@@ -229,10 +236,11 @@ impl Display for DisputesStats {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"{} disputes tracked, {} concluded valid, {} concluded invalid, {} average misbehaving validators",
+			"{} disputes tracked, {} concluded valid, {} concluded invalid, {} blocks average resolution time, {} average misbehaving validators",
 			self.disputed_count,
 			self.concluded_valid.to_string().bright_green(),
 			self.concluded_invalid.to_string().bold(),
+			format!("{:.2}", self.resolution_time.value()).bold(),
 			format!("{:.1}", self.misbehaving_validators.value()).bright_red()
 		)
 	}
