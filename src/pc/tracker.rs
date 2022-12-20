@@ -369,6 +369,8 @@ impl ParachainBlockTracker for SubxtTracker {
 				return true
 			}
 
+			info!("Dispute for candidate {:?} is not seen via events, remove it", &dispute.candidate);
+
 			false
 		});
 	}
