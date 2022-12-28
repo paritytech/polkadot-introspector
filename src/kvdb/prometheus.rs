@@ -20,12 +20,16 @@ use color_eyre::Result;
 use log::{error, info, trace};
 use prometheus_endpoint::{prometheus::IntGaugeVec, Opts, Registry};
 use rand::{thread_rng, Rng};
+use std::net::ToSocketAddrs;
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub struct KvdbPrometheusOptions {
-	/// Prometheus endpoint port.
-	#[clap(long, default_value = "65432")]
+	/// Address to bind Prometheus listener
+	#[clap(short = 'a', long = "address", default_value = "127.0.0.1")]
+	address: String,
+	/// Port to bind Prometheus listener
+	#[clap(short = 'p', long = "port", default_value = "65432")]
 	port: u16,
 	/// Database poll timeout (default, once per 5 minutes).
 	#[clap(long, default_value = "300.0")]
@@ -50,18 +54,18 @@ pub async fn run_prometheus_endpoint_with_db<D: IntrospectorKvdb + Send + Sync +
 ) -> Result<Vec<tokio::task::JoinHandle<()>>> {
 	let prometheus_registry = Registry::new_custom(Some("introspector".into()), None)?;
 	let metrics = register_metrics(&prometheus_registry);
-	let socket_addr =
-		std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), prometheus_opts.port);
+	let socket_addr_str = format!("{}:{}", prometheus_opts.address, prometheus_opts.port);
 	let mut futures: Vec<tokio::task::JoinHandle<()>> = vec![];
-	futures.push(tokio::spawn(async move {
-		prometheus_endpoint::init_prometheus(socket_addr, prometheus_registry)
-			.await
-			.unwrap()
-	}));
+	for addr in socket_addr_str.to_socket_addrs()? {
+		let prometheus_registry = prometheus_registry.clone();
+		futures.push(tokio::spawn(async move {
+			prometheus_endpoint::init_prometheus(addr, prometheus_registry).await.unwrap()
+		}));
+	}
+
 	futures.push(tokio::spawn(async move {
 		update_db(db, metrics, prometheus_opts).await;
 	}));
-	info!("Starting prometheus node on {:?}", socket_addr);
 
 	Ok(futures)
 }
