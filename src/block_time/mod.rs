@@ -70,7 +70,7 @@ pub(crate) struct BlockTimeCliOptions {
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct BlockTimePrometheusOptions {
 	/// Address to bind Prometheus listener
-	#[clap(short = 'a', long = "address", default_value = "127.0.0.1")]
+	#[clap(short = 'a', long = "address", default_value = "0.0.0.0")]
 	address: String,
 	/// Port to bind Prometheus listener
 	#[clap(short = 'p', long = "port", default_value = "65432")]
