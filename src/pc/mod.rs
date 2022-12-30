@@ -34,31 +34,51 @@ use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::info;
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, default::Default, time::Duration};
 use subxt::ext::sp_core::H256;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
 mod progress;
+pub(crate) mod prometheus;
 pub(crate) mod stats;
 pub(crate) mod tracker;
 
+use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use tracker::ParachainBlockTracker;
+
+#[derive(Clone, Debug, Parser)]
+#[clap(rename_all = "kebab-case")]
+pub(crate) enum ParachainCommanderMode {
+	/// CLI chart mode.
+	Cli,
+	/// Prometheus endpoint mode.
+	Prometheus(ParachainCommanderPrometheusOptions),
+}
+
+impl Default for ParachainCommanderMode {
+	fn default() -> Self {
+		ParachainCommanderMode::Cli
+	}
+}
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct ParachainCommanderOptions {
 	/// Web-Socket URLs of a relay chain node.
-	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
+	#[clap(name = "ws", global(true), long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
 	pub node: String,
 	/// Parachain id.
-	#[clap(long)]
+	#[clap(long, global(true))]
 	para_id: u32,
 	/// Run for a number of blocks then stop.
-	#[clap(name = "blocks", long)]
+	#[clap(name = "blocks", long, global(true))]
 	block_count: Option<u32>,
 	/// Defines subscription mode
-	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
+	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum, global(true))]
 	pub subscribe_mode: SubxtSubscriptionMode,
+	/// Mode of running - CLI/Prometheus.
+	#[clap(subcommand)]
+	mode: Option<ParachainCommanderMode>,
 }
 
 pub(crate) struct ParachainCommander {
@@ -66,6 +86,7 @@ pub(crate) struct ParachainCommander {
 	node: String,
 	consumer_config: EventConsumerInit<SubxtEvent>,
 	api_service: ApiService<H256>,
+	metrics: Metrics,
 }
 
 impl ParachainCommander {
@@ -77,12 +98,20 @@ impl ParachainCommander {
 		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 });
 		let node = opts.node.clone();
 
-		Ok(ParachainCommander { opts, node, consumer_config, api_service })
+		Ok(ParachainCommander { opts, node, consumer_config, api_service, metrics: Default::default() })
 	}
 
 	// Spawn the UI and subxt tasks and return their futures.
-	pub(crate) async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	pub(crate) async fn run(mut self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
+
+		let mut output_futures = vec![];
+
+		if let Some(ParachainCommanderMode::Prometheus(ref prometheus_opts)) = self.opts.mode {
+			let (metrics, endpoint_future) = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
+			output_futures.extend(endpoint_future.into_iter());
+			self.metrics = metrics;
+		}
 
 		let watcher_future = tokio::spawn(Self::watch_node(
 			self.opts.clone(),
@@ -90,9 +119,12 @@ impl ParachainCommander {
 			// There is only one update channel (we only follow one RPC node).
 			consumer_channels.into_iter().next().unwrap(),
 			self.api_service,
+			self.metrics,
 		));
 
-		Ok(vec![watcher_future])
+		output_futures.push(watcher_future);
+
+		Ok(output_futures)
 	}
 
 	// This is the main loop for our subxt subscription.
@@ -102,6 +134,7 @@ impl ParachainCommander {
 		url: String,
 		mut consumer_config: Receiver<SubxtEvent>,
 		api_service: ApiService<H256>,
+		metrics: Metrics,
 	) {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
@@ -130,8 +163,10 @@ impl ParachainCommander {
 				Ok(event) => match event {
 					SubxtEvent::NewHead(hash) => {
 						tracker.inject_disputes_events(&recent_disputes_concluded);
-						if let Some(progress) = tracker.progress() {
-							println!("{}", progress);
+						if let Some(progress) = tracker.progress(&metrics) {
+							if matches!(opts.mode, Some(ParachainCommanderMode::Cli)) {
+								println!("{}", progress);
+							}
 						}
 						tracker.maybe_reset_state();
 						recent_disputes_concluded.clear();
@@ -188,6 +223,10 @@ impl ParachainCommander {
 		}
 
 		let stats = tracker.summary();
-		print!("{}", stats);
+		if matches!(opts.mode, Some(ParachainCommanderMode::Cli)) {
+			print!("{}", stats);
+		} else {
+			info!("{}", stats);
+		}
 	}
 }

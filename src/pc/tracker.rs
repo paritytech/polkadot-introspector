@@ -17,6 +17,7 @@
 //! This module tracks parachain blocks.
 use super::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
+	prometheus::Metrics,
 	stats::ParachainStats,
 };
 use crate::core::{
@@ -59,7 +60,7 @@ pub trait ParachainBlockTracker {
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo;
 
 	/// Update current parachain progress.
-	fn progress(&mut self) -> Option<ParachainProgressUpdate>;
+	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
 
 	/// Inject disputes resolution results from the tracked events
 	fn inject_disputes_events(
@@ -255,7 +256,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		&self.current_candidate
 	}
 
-	fn progress(&mut self) -> Option<ParachainProgressUpdate> {
+	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_none() {
 			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 			self.update = None;
@@ -280,7 +281,7 @@ impl ParachainBlockTracker for SubxtTracker {
 			update.core_occupied = self.current_candidate.core_occupied;
 		}
 
-		self.update_bitfield_propagation();
+		self.update_bitfield_propagation(metrics);
 
 		match self.current_candidate.state {
 			ParachainBlockState::Idle => {
@@ -288,6 +289,7 @@ impl ParachainBlockTracker for SubxtTracker {
 					update.events.push(ParachainConsensusEvent::SkippedSlot);
 				}
 				self.stats.on_skipped_slot();
+				metrics.on_skipped_slot(self.para_id);
 			},
 			ParachainBlockState::Backed =>
 				if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
@@ -298,9 +300,10 @@ impl ParachainBlockTracker for SubxtTracker {
 						update.events.push(ParachainConsensusEvent::Backed(candidate_hash));
 					}
 					self.stats.on_backed();
+					metrics.on_backed(self.para_id);
 				},
 			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
-				self.progress_availability();
+				self.progress_availability(metrics);
 			},
 		}
 
@@ -317,6 +320,7 @@ impl ParachainBlockTracker for SubxtTracker {
 
 		self.disputes.iter().for_each(|outcome| {
 			self.stats.on_disputed(outcome);
+			metrics.on_disputed(outcome, self.para_id);
 			if let Some(update) = self.update.as_mut() {
 				update.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
 			}
@@ -346,7 +350,9 @@ impl ParachainBlockTracker for SubxtTracker {
 
 		let last_block_number = self.previous_relay_block.unwrap_or((u32::MAX, H256::zero())).0;
 		if relay_block_number > last_block_number {
-			self.stats.on_block(self.get_ts());
+			let tm = self.get_ts();
+			self.stats.on_block(tm);
+			metrics.on_block(tm.as_secs_f64(), self.para_id);
 		}
 		self.update.clone()
 	}
@@ -606,7 +612,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_bitfield_propagation(&mut self) {
+	fn update_bitfield_propagation(&mut self, metrics: &Metrics) {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
 		if let Some((_, _)) = self.current_relay_block {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
@@ -623,13 +629,15 @@ impl SubxtTracker {
 					))
 				}
 				self.stats.on_bitfields(self.current_candidate.bitfield_count, true);
+				metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
 			} else {
 				self.stats.on_bitfields(self.current_candidate.bitfield_count, false);
+				metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
 			}
 		}
 	}
 
-	fn progress_availability(&mut self) {
+	fn progress_availability(&mut self, metrics: &Metrics) {
 		let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
 
 		// Update bitfields health.
@@ -652,6 +660,7 @@ impl SubxtTracker {
 					));
 				}
 				self.stats.on_included(relay_block_number, self.last_included_block);
+				metrics.on_included(relay_block_number, self.last_included_block, self.para_id);
 				self.last_included_block = Some(relay_block_number);
 			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
@@ -662,6 +671,7 @@ impl SubxtTracker {
 				));
 			}
 			self.stats.on_slow_availability();
+			metrics.on_slow_availability(self.para_id);
 		}
 	}
 
