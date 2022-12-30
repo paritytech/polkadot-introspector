@@ -108,9 +108,7 @@ impl ParachainCommander {
 		let mut output_futures = vec![];
 
 		if let Some(ParachainCommanderMode::Prometheus(ref prometheus_opts)) = self.opts.mode {
-			let (metrics, endpoint_future) = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
-			output_futures.extend(endpoint_future.into_iter());
-			self.metrics = metrics;
+			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
 		let watcher_future = tokio::spawn(Self::watch_node(

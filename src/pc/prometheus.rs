@@ -153,21 +153,16 @@ impl Metrics {
 	}
 }
 
-pub async fn run_prometheus_endpoint(
-	prometheus_opts: &ParachainCommanderPrometheusOptions,
-) -> Result<(Metrics, Vec<tokio::task::JoinHandle<()>>)> {
+pub async fn run_prometheus_endpoint(prometheus_opts: &ParachainCommanderPrometheusOptions) -> Result<Metrics> {
 	let prometheus_registry = Registry::new_custom(Some("introspector".into()), None)?;
 	let metrics = register_metrics(&prometheus_registry)?;
 	let socket_addr_str = format!("{}:{}", prometheus_opts.address, prometheus_opts.port);
-	let mut futures: Vec<tokio::task::JoinHandle<()>> = vec![];
 	for addr in socket_addr_str.to_socket_addrs()? {
 		let prometheus_registry = prometheus_registry.clone();
-		futures.push(tokio::spawn(async move {
-			prometheus_endpoint::init_prometheus(addr, prometheus_registry).await.unwrap()
-		}));
+		tokio::spawn(prometheus_endpoint::init_prometheus(addr, prometheus_registry));
 	}
 
-	Ok((metrics, futures))
+	Ok(metrics)
 }
 
 fn register_metrics(registry: &Registry) -> Result<Metrics> {
