@@ -192,7 +192,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		resolution_time: prometheus_endpoint::register(
 			HistogramVec::new(
-				HistogramOpts::new("pc_block_time", "Block time for parachain measurements for relay parent blocks")
+				HistogramOpts::new("pc_disputed_resolve_time", "Dispute resolution time in relay parent blocks")
 					.buckets(HISTOGRAM_TIME_BUCKETS.into()),
 				&["parachain_id"],
 			)?,

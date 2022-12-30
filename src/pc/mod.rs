@@ -65,16 +65,16 @@ impl Default for ParachainCommanderMode {
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct ParachainCommanderOptions {
 	/// Web-Socket URLs of a relay chain node.
-	#[clap(name = "ws", global(true), long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
+	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
 	pub node: String,
 	/// Parachain id.
-	#[clap(long, global(true))]
+	#[clap(long)]
 	para_id: u32,
 	/// Run for a number of blocks then stop.
-	#[clap(name = "blocks", long, global(true))]
+	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
 	/// Defines subscription mode
-	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum, global(true))]
+	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
 	pub subscribe_mode: SubxtSubscriptionMode,
 	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
