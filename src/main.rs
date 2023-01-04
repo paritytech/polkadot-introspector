@@ -20,12 +20,10 @@ use futures::future;
 use log::{error, LevelFilter};
 
 use block_time::BlockTimeOptions;
-use collector::CollectorOptions;
 use jaeger::JaegerOptions;
 use pc::ParachainCommanderOptions;
 
 mod block_time;
-mod collector;
 mod core;
 mod jaeger;
 mod kvdb;
@@ -38,8 +36,6 @@ use crate::{core::EventStream, kvdb::KvdbOptions};
 enum Command {
 	/// Observe block times using an RPC node
 	BlockTimeMonitor(BlockTimeOptions),
-	/// Run in the collector mode
-	Collector(CollectorOptions),
 	/// Examine jaeger traces
 	Jaeger(JaegerOptions),
 	/// Examine key-value database for both relay chain and parachains
@@ -77,15 +73,6 @@ async fn main() -> color_eyre::Result<()> {
 		.try_init()?;
 
 	match opts.command {
-		Command::Collector(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone(), opts.subscribe_mode);
-			let collector_consumer_init = core.create_consumer();
-
-			match collector::run(opts, collector_consumer_init).await {
-				Ok(futures) => core.run(futures).await?,
-				Err(err) => error!("FATAL: cannot start collector: {}", err),
-			}
-		},
 		Command::BlockTimeMonitor(opts) => {
 			let mut core = core::SubxtWrapper::new(opts.nodes.clone(), opts.subscribe_mode);
 			let block_time_consumer_init = core.create_consumer();
