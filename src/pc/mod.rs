@@ -76,7 +76,7 @@ pub(crate) struct ParachainCommanderOptions {
 	/// Defines subscription mode
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
 	pub subscribe_mode: SubxtSubscriptionMode,
-	/// Mode of running - CLI/Prometheus.
+	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
 	#[clap(subcommand)]
 	mode: Option<ParachainCommanderMode>,
 }

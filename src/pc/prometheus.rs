@@ -57,7 +57,7 @@ struct MetricsInner {
 	/// Disputes stats
 	disputes_stats: DisputesMetrics,
 	/// Block time measurements for relay parent blocks
-	block_times: HistogramVec,
+	relay_block_times: HistogramVec,
 	/// Number of slow availability events.
 	slow_avail_count: IntCounterVec,
 	/// Number of low bitfield propagation events.
@@ -65,15 +65,16 @@ struct MetricsInner {
 	/// Number of bitfields being set
 	bitfields: IntGaugeVec,
 	/// Average candidate inclusion time measured in relay chain blocks.
-	included_times: HistogramVec,
+	para_block_times: HistogramVec,
 }
 
 /// Parachain commander prometheus metrics
 #[derive(Default, Clone)]
 pub struct Metrics(Option<MetricsInner>);
 
-const HISTOGRAM_TIME_BUCKETS: &[f64] =
-	&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 15.0, 25.0, 35.0, 50.0];
+const HISTOGRAM_TIME_BUCKETS_BLOCKS: &[f64] =
+	&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0, 25.0, 35.0, 50.0];
+const HISTOGRAM_TIME_BUCKETS_SECONDS: &[f64] = &[3.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 48.0, 60.0, 90.0, 120.0];
 
 impl Metrics {
 	pub(crate) fn on_backed(&self, para_id: u32) {
@@ -84,7 +85,10 @@ impl Metrics {
 
 	pub(crate) fn on_block(&self, time: f64, para_id: u32) {
 		if let Some(metrics) = &self.0 {
-			metrics.block_times.with_label_values(&[&para_id.to_string()[..]]).observe(time);
+			metrics
+				.relay_block_times
+				.with_label_values(&[&para_id.to_string()[..]])
+				.observe(time);
 		}
 	}
 
@@ -145,7 +149,7 @@ impl Metrics {
 
 			if let Some(previous_block_number) = previous_included {
 				metrics
-					.included_times
+					.para_block_times
 					.with_label_values(&[&para_str[..]])
 					.observe(relay_parent_number.saturating_sub(previous_block_number) as f64);
 			}
@@ -188,7 +192,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		resolution_time: prometheus_endpoint::register(
 			HistogramVec::new(
 				HistogramOpts::new("pc_disputed_resolve_time", "Dispute resolution time in relay parent blocks")
-					.buckets(HISTOGRAM_TIME_BUCKETS.into()),
+					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
 			)?,
 			registry,
@@ -214,10 +218,10 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			registry,
 		)?,
 		disputes_stats,
-		block_times: prometheus_endpoint::register(
+		relay_block_times: prometheus_endpoint::register(
 			HistogramVec::new(
-				HistogramOpts::new("pc_block_time", "Relay chain block time measured in seconds")
-					.buckets(HISTOGRAM_TIME_BUCKETS.into()),
+				HistogramOpts::new("pc_relay_block_time", "Relay chain block time measured in seconds")
+					.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
 				&["parachain_id"],
 			)?,
 			registry,
@@ -240,10 +244,10 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			IntGaugeVec::new(Opts::new("pc_bitfields_count", "Number of bitfields"), &["parachain_id"]).unwrap(),
 			registry,
 		)?,
-		included_times: prometheus_endpoint::register(
+		para_block_times: prometheus_endpoint::register(
 			HistogramVec::new(
-				HistogramOpts::new("pc_included_time", "Parachain block time measured in relay chain blocks.")
-					.buckets(HISTOGRAM_TIME_BUCKETS.into()),
+				HistogramOpts::new("pc_para_block_time", "Parachain block time measured in relay chain blocks.")
+					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
 			)?,
 			registry,
