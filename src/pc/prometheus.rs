@@ -64,7 +64,7 @@ struct MetricsInner {
 	low_bitfields_count: IntCounterVec,
 	/// Number of bitfields being set
 	bitfields: IntGaugeVec,
-	/// Average included time in relay parent blocks
+	/// Average candidate inclusion time measured in relay chain blocks.
 	included_times: HistogramVec,
 }
 
@@ -216,7 +216,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		disputes_stats,
 		block_times: prometheus_endpoint::register(
 			HistogramVec::new(
-				HistogramOpts::new("pc_block_time", "Block time for parachain measurements for relay parent blocks")
+				HistogramOpts::new("pc_block_time", "Relay chain block time measured in seconds")
 					.buckets(HISTOGRAM_TIME_BUCKETS.into()),
 				&["parachain_id"],
 			)?,
@@ -224,14 +224,14 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		slow_avail_count: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new("pc_slow_available_count", "Number of slow availability events"),
+				Opts::new("pc_slow_available_count", "Number of slow availability events. We consider it slow when the relay chain block bitfield entries amounts to less than 2/3 one bits for the availability core to which the parachain is assigned"),
 				&["parachain_id"],
 			)?,
 			registry,
 		)?,
 		low_bitfields_count: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new("pc_low_bitfields_count", "Number of low bitfields events"),
+				Opts::new("pc_low_bitfields_count", "Number of low bitfields count events. This happens when a block author received the signed bitfields from less than 2/3 of the para validators"),
 				&["parachain_id"],
 			)?,
 			registry,
@@ -242,7 +242,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		included_times: prometheus_endpoint::register(
 			HistogramVec::new(
-				HistogramOpts::new("pc_included_time", "Average included time in relay parent blocks")
+				HistogramOpts::new("pc_included_time", "Parachain block time measured in relay chain blocks.")
 					.buckets(HISTOGRAM_TIME_BUCKETS.into()),
 				&["parachain_id"],
 			)?,
