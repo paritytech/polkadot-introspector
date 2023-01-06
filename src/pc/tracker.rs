@@ -94,7 +94,7 @@ pub struct DisputesOutcome {
 	pub voted_against: u32,
 	/// A vector of validators voted against supermajority (index + identify)
 	pub misbehaving_validators: Vec<(u32, String)>,
-	/// How many blocks have passed since DisputeInitiated event
+	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
 	pub resolve_time: Option<u32>,
 }
 
