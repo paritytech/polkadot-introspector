@@ -27,7 +27,9 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtDisputeResult, SubxtEvent};
+use crate::core::{
+	api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtDisputeResult, SubxtEvent, SubxtSubscriptionMode,
+};
 use std::collections::HashMap;
 
 use clap::Parser;
@@ -56,6 +58,9 @@ pub(crate) struct ParachainCommanderOptions {
 	/// Run for a number of blocks then stop.
 	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
+	/// Defines subscription mode
+	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
+	pub subscribe_mode: SubxtSubscriptionMode,
 }
 
 pub(crate) struct ParachainCommander {
