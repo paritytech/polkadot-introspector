@@ -225,7 +225,7 @@ impl SubxtWrapper {
 // Subxt does not export this type but it is needed to specify future output
 type BlockStream<T> = Pin<Box<dyn Stream<Item = Result<T, Error>> + Send>>;
 
-// Process subscription to a specific block types (e.g. all, best, finalized) and returns `true`
+// Process subscription to a specific block types (e.g. best, finalized) and returns `true`
 // if a caller's loop should be terminated.
 async fn process_subscription_or_stop<Sub, Client>(
 	update_channel: &Sender<SubxtEvent>,
