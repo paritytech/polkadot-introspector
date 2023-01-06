@@ -27,6 +27,7 @@ use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
 	collections::VecDeque,
 	io::{stdout, Write},
+	net::ToSocketAddrs,
 	sync::{Arc, Mutex},
 };
 use subxt::ext::sp_core::H256;
@@ -68,8 +69,11 @@ pub(crate) struct BlockTimeCliOptions {
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct BlockTimePrometheusOptions {
-	/// Prometheus endpoint port.
-	#[clap(long, default_value = "65432")]
+	/// Address to bind Prometheus listener
+	#[clap(short = 'a', long = "address", default_value = "0.0.0.0")]
+	address: String,
+	/// Port to bind Prometheus listener
+	#[clap(short = 'p', long = "port", default_value = "65432")]
 	port: u16,
 }
 
@@ -101,12 +105,10 @@ impl BlockTimeMonitor {
 				let prometheus_registry = Registry::new_custom(Some("introspector".into()), None)?;
 				let block_time_metric = Some(register_metric(&prometheus_registry));
 
-				let socket_addr = std::net::SocketAddr::new(
-					std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-					prometheus_opts.port,
-				);
-				tokio::spawn(prometheus_endpoint::init_prometheus(socket_addr, prometheus_registry));
-
+				let socket_addr_str = format!("{}:{}", prometheus_opts.address, prometheus_opts.port);
+				socket_addr_str.to_socket_addrs()?.for_each(|addr| {
+					tokio::spawn(prometheus_endpoint::init_prometheus(addr, prometheus_registry.clone()));
+				});
 				Ok(BlockTimeMonitor { values, opts, block_time_metric, endpoints, consumer_config, api_service })
 			},
 			BlockTimeMode::Cli(_) =>
