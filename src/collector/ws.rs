@@ -115,14 +115,14 @@ impl WebSocketListener {
 	}
 
 	/// Spawn an async HTTP server
-	pub(crate) async fn spawn<T, U>(
+	pub(crate) async fn spawn<Shutdown, Update>(
 		self,
-		mut shutdown_rx: Receiver<T>,
-		updates_broadcast: Sender<U>,
-	) -> Result<(), Box<dyn Error + Sync + Send>>
+		mut shutdown_rx: Receiver<Shutdown>,
+		updates_broadcast: Sender<Update>,
+	) -> Result<(), Box<dyn Error>>
 	where
-		T: Send + Sync + 'static + Clone,
-		U: Send + Sync + 'static + Clone + Serialize + Debug,
+		Shutdown: Send + Sync + 'static + Clone,
+		Update: Send + Sync + 'static + Clone + Serialize + Debug,
 	{
 		let has_sane_tls = self.config.privkey.is_some() && self.config.cert.is_some();
 

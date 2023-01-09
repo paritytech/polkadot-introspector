@@ -17,6 +17,7 @@
 //! This module tracks parachain blocks.
 use super::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
+	prometheus::Metrics,
 	stats::ParachainStats,
 };
 use crate::core::{
@@ -25,11 +26,14 @@ use crate::core::{
 		RequestExecutor, ValidatorIndex,
 	},
 	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
-	SubxtHrmpChannel,
+	SubxtDisputeResult, SubxtHrmpChannel,
 };
 use codec::{Decode, Encode};
-use log::{debug, error};
-use std::{collections::BTreeMap, fmt::Debug};
+use log::{debug, error, info};
+use std::{
+	collections::{BTreeMap, HashMap},
+	fmt::Debug,
+};
 use subxt::ext::{
 	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
@@ -48,13 +52,21 @@ pub trait ParachainBlockTracker {
 	type ParachainBlockInfo;
 	/// A structure to describe the parachain progress made after processing last relay chain block.
 	type ParachainProgressUpdate;
+	/// A structure to describe dispute outcome
+	type DisputeOutcome;
 
 	/// Injects a new relay chain block into the tracker.
 	/// Blocks must be injected in order.
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo;
 
 	/// Update current parachain progress.
-	fn progress(&mut self) -> Option<ParachainProgressUpdate>;
+	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
+
+	/// Inject disputes resolution results from the tracked events
+	fn inject_disputes_events(
+		&mut self,
+		disputes_tracked: &HashMap<Self::RelayChainBlockHash, (Self::DisputeOutcome, Option<u32>)>,
+	);
 }
 
 /// Used to track session data, where we store two subsequent sessions: the current and the previous one
@@ -70,16 +82,20 @@ struct SubxtSessionTracker {
 }
 
 /// An outcome for a dispute
-#[derive(Encode, Decode, Debug, Default, Clone)]
-pub struct DisputesOutcome {
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct DisputesTracker {
 	/// Disputed candidate
 	pub candidate: H256,
+	/// The real outcome
+	pub outcome: SubxtDisputeResult,
 	/// Number of validators voted that a candidate is valid
 	pub voted_for: u32,
 	/// Number of validators voted that a candidate is invalid
 	pub voted_against: u32,
 	/// A vector of validators voted against supermajority (index + identify)
 	pub misbehaving_validators: Vec<(u32, String)>,
+	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
+	pub resolve_time: Option<u32>,
 }
 
 #[derive(Default)]
@@ -129,7 +145,7 @@ pub struct SubxtTracker {
 	/// Previous relay chain block
 	previous_relay_block: Option<(BlockNumber, H256)>,
 	/// Disputes information if any disputes are there.
-	disputes: Vec<DisputesOutcome>,
+	disputes: Vec<DisputesTracker>,
 	/// Current relay chain block timestamp.
 	current_relay_block_ts: Option<u64>,
 	/// Last relay chain block timestamp.
@@ -188,6 +204,7 @@ impl ParachainBlockTracker for SubxtTracker {
 	type ParaInherentData = InherentData;
 	type ParachainBlockInfo = ParachainBlockInfo;
 	type ParachainProgressUpdate = ParachainProgressUpdate;
+	type DisputeOutcome = SubxtDisputeResult;
 
 	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo {
 		if let Some(header) = self.executor.get_block_head(self.node_rpc_url.clone(), Some(block_hash)).await {
@@ -239,7 +256,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		&self.current_candidate
 	}
 
-	fn progress(&mut self) -> Option<ParachainProgressUpdate> {
+	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_none() {
 			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 			self.update = None;
@@ -264,7 +281,7 @@ impl ParachainBlockTracker for SubxtTracker {
 			update.core_occupied = self.current_candidate.core_occupied;
 		}
 
-		self.update_bitfield_propagation();
+		self.update_bitfield_propagation(metrics);
 
 		match self.current_candidate.state {
 			ParachainBlockState::Idle => {
@@ -272,6 +289,7 @@ impl ParachainBlockTracker for SubxtTracker {
 					update.events.push(ParachainConsensusEvent::SkippedSlot);
 				}
 				self.stats.on_skipped_slot();
+				metrics.on_skipped_slot(self.para_id);
 			},
 			ParachainBlockState::Backed =>
 				if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
@@ -282,9 +300,10 @@ impl ParachainBlockTracker for SubxtTracker {
 						update.events.push(ParachainConsensusEvent::Backed(candidate_hash));
 					}
 					self.stats.on_backed();
+					metrics.on_backed(self.para_id);
 				},
 			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
-				self.progress_availability();
+				self.progress_availability(metrics);
 			},
 		}
 
@@ -301,6 +320,7 @@ impl ParachainBlockTracker for SubxtTracker {
 
 		self.disputes.iter().for_each(|outcome| {
 			self.stats.on_disputed(outcome);
+			metrics.on_disputed(outcome, self.para_id);
 			if let Some(update) = self.update.as_mut() {
 				update.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
 			}
@@ -330,18 +350,44 @@ impl ParachainBlockTracker for SubxtTracker {
 
 		let last_block_number = self.previous_relay_block.unwrap_or((u32::MAX, H256::zero())).0;
 		if relay_block_number > last_block_number {
-			self.stats.on_block(self.get_ts());
+			let tm = self.get_ts();
+			self.stats.on_block(tm);
+			metrics.on_block(tm.as_secs_f64(), self.para_id);
 		}
 		self.update.clone()
+	}
+
+	fn inject_disputes_events(
+		&mut self,
+		disputes_tracked: &HashMap<Self::RelayChainBlockHash, (Self::DisputeOutcome, Option<u32>)>,
+	) {
+		self.disputes.retain_mut(|dispute| -> bool {
+			if let Some(observed_dispute) = disputes_tracked.get(&dispute.candidate) {
+				if dispute.outcome != observed_dispute.0 {
+					info!(
+						"Dispute for candidate {:?}: calculated outcome: {:?} is not equal to observed outcome: {:?}",
+						&dispute.candidate, dispute.outcome, observed_dispute.0
+					);
+					dispute.outcome = observed_dispute.0;
+				}
+				dispute.resolve_time = observed_dispute.1;
+
+				return true
+			}
+
+			info!("Dispute for candidate {:?} is not seen via events, remove it", &dispute.candidate);
+
+			false
+		});
 	}
 }
 
 impl SubxtTracker {
 	/// Constructor.
-	pub fn new(para_id: u32, node_rpc_url: String, executor: RequestExecutor) -> Self {
+	pub fn new(para_id: u32, node_rpc_url: &str, executor: RequestExecutor) -> Self {
 		Self {
 			para_id,
-			node_rpc_url,
+			node_rpc_url: node_rpc_url.to_owned(),
 			executor,
 			stats: ParachainStats::new(para_id),
 			current_candidate: Default::default(),
@@ -473,7 +519,10 @@ impl SubxtTracker {
 					.count() as u32;
 				let voted_against = dispute_info.statements.len() as u32 - voted_for;
 
-				let misbehaving_validators = if voted_for > voted_against {
+				let outcome =
+					if voted_for > voted_against { SubxtDisputeResult::Valid } else { SubxtDisputeResult::Invalid };
+
+				let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
 					dispute_info
 						.statements
 						.iter()
@@ -488,11 +537,13 @@ impl SubxtTracker {
 						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0))
 						.collect()
 				};
-				DisputesOutcome {
+				DisputesTracker {
 					candidate: dispute_info.candidate_hash.0,
 					voted_for,
 					voted_against,
+					outcome,
 					misbehaving_validators,
+					resolve_time: None,
 				}
 			})
 			.collect();
@@ -561,7 +612,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_bitfield_propagation(&mut self) {
+	fn update_bitfield_propagation(&mut self, metrics: &Metrics) {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
 		if let Some((_, _)) = self.current_relay_block {
 			// If `max_av_bits` is not set do not check for bitfield propagation.
@@ -578,13 +629,15 @@ impl SubxtTracker {
 					))
 				}
 				self.stats.on_bitfields(self.current_candidate.bitfield_count, true);
+				metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
 			} else {
 				self.stats.on_bitfields(self.current_candidate.bitfield_count, false);
+				metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
 			}
 		}
 	}
 
-	fn progress_availability(&mut self) {
+	fn progress_availability(&mut self, metrics: &Metrics) {
 		let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
 
 		// Update bitfields health.
@@ -607,6 +660,7 @@ impl SubxtTracker {
 					));
 				}
 				self.stats.on_included(relay_block_number, self.last_included_block);
+				metrics.on_included(relay_block_number, self.last_included_block, self.para_id);
 				self.last_included_block = Some(relay_block_number);
 			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
@@ -617,6 +671,7 @@ impl SubxtTracker {
 				));
 			}
 			self.stats.on_slow_availability();
+			metrics.on_slow_availability(self.para_id);
 		}
 	}
 
