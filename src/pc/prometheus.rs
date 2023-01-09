@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::pc::tracker::DisputesOutcome;
+use crate::pc::tracker::DisputesTracker;
 use clap::Parser;
 use color_eyre::Result;
 use prometheus_endpoint::{
@@ -117,7 +117,7 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_disputed(&self, dispute_outcome: &DisputesOutcome, para_id: u32) {
+	pub(crate) fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics.disputes_stats.disputed_count.with_label_values(&[&para_str[..]]).inc();

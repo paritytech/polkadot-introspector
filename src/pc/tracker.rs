@@ -83,7 +83,7 @@ struct SubxtSessionTracker {
 
 /// An outcome for a dispute
 #[derive(Encode, Decode, Debug, Clone)]
-pub struct DisputesOutcome {
+pub struct DisputesTracker {
 	/// Disputed candidate
 	pub candidate: H256,
 	/// The real outcome
@@ -145,7 +145,7 @@ pub struct SubxtTracker {
 	/// Previous relay chain block
 	previous_relay_block: Option<(BlockNumber, H256)>,
 	/// Disputes information if any disputes are there.
-	disputes: Vec<DisputesOutcome>,
+	disputes: Vec<DisputesTracker>,
 	/// Current relay chain block timestamp.
 	current_relay_block_ts: Option<u64>,
 	/// Last relay chain block timestamp.
@@ -537,7 +537,7 @@ impl SubxtTracker {
 						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0))
 						.collect()
 				};
-				DisputesOutcome {
+				DisputesTracker {
 					candidate: dispute_info.candidate_hash.0,
 					voted_for,
 					voted_against,

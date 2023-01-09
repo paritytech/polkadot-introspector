@@ -16,7 +16,7 @@
 
 //! This module defines structures used for tool progress tracking
 
-use super::tracker::DisputesOutcome;
+use super::tracker::DisputesTracker;
 use crate::core::{api::BlockNumber, SubxtDisputeResult, SubxtHrmpChannel};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
@@ -46,7 +46,7 @@ pub enum ParachainConsensusEvent {
 	/// A candidate was included, including availability bits
 	Included(H256, u32, u32),
 	/// A dispute has concluded.
-	Disputed(DisputesOutcome),
+	Disputed(DisputesTracker),
 	/// No candidate backed.
 	SkippedSlot,
 	/// Candidate not available yet, including availability bits
@@ -181,7 +181,7 @@ impl Display for ParachainConsensusEvent {
 	}
 }
 
-impl Display for DisputesOutcome {
+impl Display for DisputesTracker {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		let resolved_time = self
 			.resolve_time

@@ -16,7 +16,7 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
-use super::tracker::DisputesOutcome;
+use super::tracker::DisputesTracker;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
@@ -157,7 +157,7 @@ impl ParachainStats {
 	}
 
 	/// Update disputed counter
-	pub fn on_disputed(&mut self, dispute_outcome: &DisputesOutcome) {
+	pub fn on_disputed(&mut self, dispute_outcome: &DisputesTracker) {
 		self.disputes_stats.disputed_count += 1;
 
 		if dispute_outcome.voted_for > dispute_outcome.voted_against {
