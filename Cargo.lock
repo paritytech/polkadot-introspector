@@ -2334,9 +2334,9 @@ dependencies = [
 
 [[package]]
 name = "rasciigraph"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10f9690d7e935db7c1475554993ec7162d11a83fae5261be2d9191294a31ac82"
+checksum = "89a3273d76a0cdbb09ecead2f6007d6d169211f3c9c6dd30cd8a2e8175adcb74"
 
 [[package]]
 name = "redox_syscall"
