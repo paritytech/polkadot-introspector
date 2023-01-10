@@ -29,6 +29,7 @@
 //! can be built by combining existing ones by listening to storage update events.
 
 pub mod api;
+pub mod collector;
 pub mod constants;
 pub mod consumer;
 pub mod storage;

@@ -13,9 +13,9 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-use crate::{
+use crate::core::{
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi},
-	core::SubxtDisputeResult,
+	SubxtDisputeResult,
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
@@ -116,7 +116,7 @@ impl WebSocketListener {
 
 	/// Spawn an async HTTP server
 	pub(crate) async fn spawn<Shutdown, Update>(
-		self,
+		&self,
 		mut shutdown_rx: Receiver<Shutdown>,
 		updates_broadcast: Sender<Update>,
 	) -> Result<(), Box<dyn Error>>
@@ -161,8 +161,8 @@ impl WebSocketListener {
 		let server = warp::serve(routes);
 
 		if has_sane_tls {
-			let privkey = fs::read(self.config.privkey.unwrap()).expect("cannot read privkey file");
-			let cert = fs::read(self.config.cert.unwrap()).expect("cannot read privkey file");
+			let privkey = fs::read(self.config.privkey.as_ref().unwrap()).expect("cannot read privkey file");
+			let cert = fs::read(self.config.cert.as_ref().unwrap()).expect("cannot read privkey file");
 			let tls_server = server.tls().cert(cert).key(privkey);
 			// TODO: understand why there is no `try_bind_with_graceful_shutdown` for TLSServer in Warp
 			let (_, server_fut) = tls_server.bind_with_graceful_shutdown(self.config.listen_addr, async move {

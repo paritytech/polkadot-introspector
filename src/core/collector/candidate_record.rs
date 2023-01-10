@@ -101,8 +101,6 @@ where
 /// Stores tracking data for a candidate
 #[derive(Debug, Serialize, Encode, Decode)]
 pub struct CandidateRecord {
-	/// Candidate receipt (if observed)
-	pub candidate_descriptor: polkadot_rt_primitives::CandidateDescriptor<H256>,
 	/// The time we first observed a candidate since Unix Epoch
 	pub candidate_first_seen: Duration,
 	/// Inclusion data
@@ -134,13 +132,6 @@ impl CandidateRecord {
 			let concluded = disp.concluded.as_ref()?;
 			concluded.concluded_timestamp.checked_sub(disp.disputed)
 		})
-	}
-
-	/// Returns a relay parent for a specific candidate
-	#[allow(dead_code)]
-	pub fn relay_parent(&self) -> H256 {
-		let descriptor = &self.candidate_descriptor;
-		descriptor.relay_parent
 	}
 
 	pub fn parachain_id(&self) -> u32 {

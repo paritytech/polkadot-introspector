@@ -43,7 +43,7 @@ where
 	}
 
 	pub fn subxt(&self) -> subxt_wrapper::RequestExecutor {
-		subxt_wrapper::RequestExecutor::new(self.subxt_tx.clone())
+		RequestExecutor::new(self.subxt_tx.clone())
 	}
 }
 
