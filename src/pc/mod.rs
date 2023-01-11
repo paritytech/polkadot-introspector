@@ -36,14 +36,11 @@ use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::info;
-use std::{collections::HashMap, default::Default};
+use std::{collections::HashMap, default::Default, time::Duration};
 use subxt::ext::sp_core::H256;
-use tokio::{
-	signal,
-	sync::{
-		broadcast::{self, Receiver as BroadcastReceiver},
-		mpsc::Receiver,
-	},
+use tokio::sync::{
+	broadcast::Sender as BroadcastSender,
+	mpsc::{error::TryRecvError, Receiver},
 };
 
 mod progress;
@@ -114,31 +111,25 @@ impl ParachainCommander {
 	}
 
 	// Spawn the UI and subxt tasks and return their futures.
-	pub(crate) async fn run(mut self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	pub(crate) async fn run(
+		mut self,
+		shutdown_tx: &BroadcastSender<()>,
+	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
 		if let Some(ParachainCommanderMode::Prometheus(ref prometheus_opts)) = self.opts.mode {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
-		let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-		self.collector.spawn(&shutdown_tx).await?;
+		self.collector.spawn(shutdown_tx).await?;
 
-		output_futures.push(tokio::spawn(async move {
-			signal::ctrl_c().await.unwrap();
-			let _ = shutdown_tx.send(());
-		}));
-
-		let watcher_future = tokio::spawn(self.watch_node(shutdown_rx));
-
-		output_futures.push(watcher_future);
-
+		output_futures.push(tokio::spawn(self.watch_node()));
 		Ok(output_futures)
 	}
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node(self, mut shutdown_rx: BroadcastReceiver<()>) {
+	async fn watch_node(self) {
 		// The subxt API request executor.
 		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
 		let mut consumer_channels = consumer_channels.into_iter().next().unwrap();
@@ -167,8 +158,8 @@ impl ParachainCommander {
 		);
 
 		loop {
-			tokio::select! {
-				Some(event) = consumer_channels.recv() => {
+			match consumer_channels.try_recv() {
+				Ok(event) => {
 					self.collector.process_subxt_event(&event).await.unwrap();
 					match event {
 						SubxtEvent::NewHead(hash) => {
@@ -225,13 +216,11 @@ impl ParachainCommander {
 								str_outcome,
 							);
 						},
-						_ => {}
+						_ => {},
 					}
 				},
-				_ = shutdown_rx.recv() => {
-					info!("shutting down");
-					break;
-				},
+				Err(TryRecvError::Disconnected) => break,
+				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			}
 		}
 
