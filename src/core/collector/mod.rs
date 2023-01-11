@@ -335,15 +335,12 @@ impl Collector {
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed {
 			disputed: now,
-			concluded: Some(DisputeResult { concluded_timestamp: now, outcome: dispute_outcome.clone() }),
+			concluded: Some(DisputeResult { concluded_timestamp: now, outcome: *dispute_outcome }),
 		});
 		self.to_websocket.as_ref().map(|to_websocket| {
 			to_websocket
 				.send(WebSocketUpdateEvent {
-					event: WebSocketEventType::DisputeConcluded(
-						dispute_event.relay_parent_block,
-						dispute_outcome.clone(),
-					),
+					event: WebSocketEventType::DisputeConcluded(dispute_event.relay_parent_block, *dispute_outcome),
 					candidate_hash: dispute_event.candidate_hash,
 					ts: now,
 					parachain_id: candidate.parachain_id(),
