@@ -99,13 +99,14 @@ pub(crate) struct ParachainCommander {
 
 impl ParachainCommander {
 	pub(crate) fn new(
-		opts: ParachainCommanderOptions,
+		mut opts: ParachainCommanderOptions,
 		consumer_config: EventConsumerInit<SubxtEvent>,
 	) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 });
 		let node = opts.node.clone();
 		let collector = Collector::new(node.as_str(), opts.collector_opts.clone());
+		opts.mode = opts.mode.or(Some(ParachainCommanderMode::Cli));
 
 		Ok(ParachainCommander { opts, node, consumer_config, api_service, collector, metrics: Default::default() })
 	}
@@ -160,7 +161,9 @@ impl ParachainCommander {
 		loop {
 			match consumer_channels.try_recv() {
 				Ok(event) => {
-					self.collector.process_subxt_event(&event).await.unwrap();
+					if let Err(e) = self.collector.process_subxt_event(&event).await {
+						info!("collector service could not process event: {}", e);
+					}
 					match event {
 						SubxtEvent::NewHead(hash) => {
 							tracker.inject_disputes_events(&recent_disputes_concluded);
