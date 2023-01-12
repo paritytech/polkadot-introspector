@@ -135,6 +135,32 @@ where
 		}
 	}
 
+	/// Delete a value from storage. Returns `None` if the key is not found.
+	pub async fn storage_delete(&self, key: K) -> Option<StorageEntry> {
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
+		let request = Request { request_type: RequestType::Delete(key), response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::Read(Some(value))) => Some(value),
+			Ok(_) => None,
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
+
+	/// Delete a value from storage at specific prefix. Returns `None` if the key is not found.
+	pub async fn storage_delete_prefixed(&self, prefix: P, key: K) -> Option<StorageEntry> {
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
+		let request = Request { request_type: RequestType::DeletePrefix(prefix, key), response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::Read(Some(value))) => Some(value),
+			Ok(_) => None,
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
+
 	/// Returns number of entries in a storage
 	pub async fn storage_len(&self) -> usize {
 		let (sender, receiver) = oneshot::channel::<Response<K, P>>();

@@ -55,6 +55,8 @@ pub enum CollectorPrefixType {
 	Candidate(u32),
 	/// Relay chain block
 	Head,
+	/// Session data, keyed by session hash (blake2b(session_index))
+	Session,
 }
 
 /// A type that defines prefix + hash itself
@@ -115,15 +117,53 @@ impl Collector {
 			.get_block_head(self.endpoint.clone(), Some(block_hash))
 			.await
 			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
+		let block_number = header.number;
 		self.api_service
 			.storage()
 			.storage_write_prefixed(
 				CollectorPrefixType::Head,
 				block_hash,
-				StorageEntry::new_onchain(RecordTime::with_ts(header.number, Duration::from_secs(ts)), header),
+				StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), header),
 			)
 			.await
 			.unwrap();
+		let cur_session = executor.get_session_index(self.endpoint.clone(), block_hash).await;
+		let cur_session_hash = H256::from_slice(&cur_session.to_be_bytes()[..]);
+		let maybe_existing_session = self
+			.api_service
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::Session, cur_session_hash)
+			.await;
+		if maybe_existing_session.is_none() {
+			// New session, need to store it's data
+			debug!("new session: {}, hash: {}", cur_session, cur_session_hash);
+			let accounts_keys = executor
+				.get_session_account_keys(self.endpoint.clone(), cur_session)
+				.await
+				.ok_or_else(|| eyre!("Missing account keys for session {}", cur_session))?;
+			self.api_service
+				.storage()
+				.storage_write_prefixed(
+					CollectorPrefixType::Session,
+					cur_session_hash,
+					StorageEntry::new_persistent(
+						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
+						accounts_keys,
+					),
+				)
+				.await?;
+			// Remove old session with the index `cur_session - 2` ignoring possible errors
+			if cur_session > 1 {
+				let prev_session = cur_session.saturating_sub(2);
+				let prev_session_hash = H256::from_slice(&prev_session.to_be_bytes()[..]);
+
+				let _ = self
+					.api_service
+					.storage()
+					.storage_delete_prefixed(CollectorPrefixType::Session, prev_session_hash)
+					.await;
+			}
+		}
 		Ok(())
 	}
 
