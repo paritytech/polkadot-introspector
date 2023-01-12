@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use log::info;
+use log::{debug, info};
 use std::{
 	hash::Hash,
 	net::SocketAddr,

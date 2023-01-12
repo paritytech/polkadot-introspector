@@ -36,6 +36,8 @@ pub enum RequestType<K, P> {
 	WritePrefix(P, K, StorageEntry),
 	Read(K),
 	ReadPrefix(P, K),
+	Delete(K),
+	DeletePrefix(P, K),
 	Replace(K, StorageEntry),
 	ReplacePrefix(P, K, StorageEntry),
 	Size,
@@ -202,6 +204,13 @@ where
 					.send(Response::Read(the_storage.get(&key)))
 					.unwrap();
 			},
+			RequestType::Delete(key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::Read(the_storage.delete(&key)))
+					.unwrap();
+			},
 			RequestType::Write(key, value) => {
 				let res = the_storage.insert(key, value);
 
@@ -242,6 +251,9 @@ where
 			RequestType::ReadPrefix(_, _) => {
 				unimplemented!()
 			},
+			RequestType::DeletePrefix(_, _) => {
+				unimplemented!()
+			},
 			RequestType::ReplacePrefix(_, _, _) => {
 				unimplemented!()
 			},
@@ -270,6 +282,13 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 					.response_sender
 					.expect("no sender provided")
 					.send(Response::Read(the_storage.get(&key)))
+					.unwrap();
+			},
+			RequestType::Delete(key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::Read(the_storage.delete(&key)))
 					.unwrap();
 			},
 			RequestType::Write(key, value) => {
@@ -332,6 +351,13 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 					.response_sender
 					.expect("no sender provided")
 					.send(Response::Read(the_storage.get_prefix(&prefix, &key)))
+					.unwrap();
+			},
+			RequestType::DeletePrefix(prefix, key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::Read(the_storage.delete_prefix(&prefix, &key)))
 					.unwrap();
 			},
 			RequestType::ReplacePrefix(prefix, key, value) => {
