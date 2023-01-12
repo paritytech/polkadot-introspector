@@ -33,8 +33,12 @@ use tokio::sync::{
 	mpsc::{channel, Sender},
 };
 
-#[cfg(all(feature = "rococo", feature = "polkadot", feature = "versi"))]
-compile_error!("`rococo`, `polkadot`, `versi` are mutually exclusive features");
+#[cfg(all(feature = "rococo", feature = "polkadot"))]
+compile_error!("`rococo` and `polkadot` are mutually exclusive features");
+#[cfg(all(feature = "rococo", feature = "versi"))]
+compile_error!("`rococo` and `versi` are mutually exclusive features");
+#[cfg(all(feature = "versi", feature = "polkadot"))]
+compile_error!("`versi` and `polkadot` are mutually exclusive features");
 
 #[cfg(not(any(feature = "rococo", feature = "polkadot", feature = "versi")))]
 compile_error!("Must build with either `rococo`, `polkadot`, `versi` features");
