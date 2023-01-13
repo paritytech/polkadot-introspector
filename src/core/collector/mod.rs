@@ -23,7 +23,13 @@ use std::{
 };
 
 use color_eyre::eyre::eyre;
-use subxt::{ext::sp_core::H256, PolkadotConfig};
+use subxt::{
+	ext::{
+		sp_core::{Hasher, H256},
+		sp_runtime::traits::BlakeTwo256,
+	},
+	PolkadotConfig,
+};
 use tokio::sync::broadcast::{self, Sender};
 
 mod candidate_record;
@@ -128,7 +134,7 @@ impl Collector {
 			.await
 			.unwrap();
 		let cur_session = executor.get_session_index(self.endpoint.clone(), block_hash).await;
-		let cur_session_hash = H256::from_slice(&cur_session.to_be_bytes()[..]);
+		let cur_session_hash = BlakeTwo256::hash(&cur_session.to_be_bytes()[..]);
 		let maybe_existing_session = self
 			.api_service
 			.storage()
@@ -155,7 +161,7 @@ impl Collector {
 			// Remove old session with the index `cur_session - 2` ignoring possible errors
 			if cur_session > 1 {
 				let prev_session = cur_session.saturating_sub(2);
-				let prev_session_hash = H256::from_slice(&prev_session.to_be_bytes()[..]);
+				let prev_session_hash = BlakeTwo256::hash(&prev_session.to_be_bytes()[..]);
 
 				let _ = self
 					.api_service
