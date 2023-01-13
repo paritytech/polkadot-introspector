@@ -38,7 +38,7 @@ pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
 pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
 
 #[cfg(feature = "versi")]
-pub use subxt_runtime_types::rococo_runtime::Call as SubxtCall;
+pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
 
 use std::{
 	collections::hash_map::{Entry, HashMap},
