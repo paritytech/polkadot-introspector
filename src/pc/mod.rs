@@ -130,7 +130,7 @@ impl ParachainCommander {
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node(self) {
+	async fn watch_node(mut self) {
 		// The subxt API request executor.
 		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
 		let mut consumer_channels = consumer_channels.into_iter().next().unwrap();

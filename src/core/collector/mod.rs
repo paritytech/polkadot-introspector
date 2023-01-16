@@ -17,6 +17,8 @@
 use clap::Parser;
 use log::{debug, info};
 use std::{
+	collections::BTreeMap,
+	default::Default,
 	hash::Hash,
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
@@ -30,7 +32,7 @@ use subxt::{
 	},
 	PolkadotConfig,
 };
-use tokio::sync::broadcast::{self, Sender};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
 mod candidate_record;
 mod ws;
@@ -68,11 +70,35 @@ pub enum CollectorPrefixType {
 /// A type that defines prefix + hash itself
 pub(crate) type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
 
+/// The current state of the collector, used to detect forks and track candidates
+/// and other events without query storage
+#[derive(Default)]
+struct CollectorState {
+	/// The current block number
+	current_relay_chain_block_number: u32,
+	/// A list of hashes at this height (e.g. if we see forks)
+	current_relay_chain_block_hashes: Vec<H256>,
+	/// A list of candidates seen, indexed by parachain id
+	candidates_seen: BTreeMap<u32, Vec<H256>>,
+}
+
+/// Handles collector updates
+#[derive(Clone, Debug)]
+pub struct CollectorUpdateEvent {
+	pub relay_parent_number: <PolkadotConfig as subxt::Config>::BlockNumber,
+	pub relay_parent_hashes: Vec<H256>,
+	pub para_id: u32,
+	pub candidates_seen: Vec<H256>,
+}
+
 pub struct Collector {
 	api_service: CollectorStorageApi,
 	ws_listener: Option<WebSocketListener>,
 	to_websocket: Option<Sender<WebSocketUpdateEvent>>,
 	endpoint: String,
+	subscribe_channels: BTreeMap<u32, Vec<Sender<CollectorUpdateEvent>>>,
+	broadcast_channels: Vec<Sender<CollectorUpdateEvent>>,
+	state: CollectorState,
 }
 
 impl Collector {
@@ -87,7 +113,15 @@ impl Collector {
 		} else {
 			None
 		};
-		Self { api_service, ws_listener, to_websocket: None, endpoint: endpoint.to_owned() }
+		Self {
+			api_service,
+			ws_listener,
+			to_websocket: None,
+			endpoint: endpoint.to_owned(),
+			subscribe_channels: Default::default(),
+			state: Default::default(),
+			broadcast_channels: Default::default(),
+		}
 	}
 
 	/// Spawns a collector futures (e.g. websocket server)
@@ -105,7 +139,7 @@ impl Collector {
 	}
 
 	/// Process a next subxt event
-	pub async fn process_subxt_event(&self, event: &SubxtEvent) -> color_eyre::Result<()> {
+	pub async fn process_subxt_event(&mut self, event: &SubxtEvent) -> color_eyre::Result<()> {
 		match event {
 			SubxtEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
 			SubxtEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
@@ -116,7 +150,65 @@ impl Collector {
 		}
 	}
 
-	async fn process_new_head(&self, block_hash: H256) -> color_eyre::Result<()> {
+	/// Subscribe for parachain updates
+	pub async fn subscribe_parachain_updates(
+		&mut self,
+		para_id: u32,
+	) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
+		let (sender, receiver) = broadcast::channel(32);
+		self.subscribe_channels.entry(para_id).or_insert(vec![]).push(sender);
+
+		Ok(receiver)
+	}
+
+	fn update_state(
+		&mut self,
+		block_number: <PolkadotConfig as subxt::Config>::BlockNumber,
+		block_hash: H256,
+	) -> color_eyre::Result<()> {
+		for (para_id, channels) in self.subscribe_channels.iter_mut() {
+			let candidates = self.state.candidates_seen.get(para_id);
+
+			if let Some(candidates) = candidates {
+				for channel in channels {
+					channel.send(CollectorUpdateEvent {
+						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
+						relay_parent_number: self.state.current_relay_chain_block_number,
+						candidates_seen: candidates.clone(),
+						para_id: *para_id,
+					})?;
+				}
+			} else {
+				for channel in channels {
+					channel.send(CollectorUpdateEvent {
+						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
+						relay_parent_number: self.state.current_relay_chain_block_number,
+						candidates_seen: vec![],
+						para_id: *para_id,
+					})?;
+				}
+			}
+		}
+
+		for broadcast_channel in self.broadcast_channels.iter_mut() {
+			for (para_id, candidates) in self.state.candidates_seen.iter() {
+				broadcast_channel.send(CollectorUpdateEvent {
+					relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
+					relay_parent_number: self.state.current_relay_chain_block_number,
+					candidates_seen: candidates.clone(),
+					para_id: *para_id,
+				})?;
+			}
+		}
+
+		self.state.candidates_seen.clear();
+		self.state.current_relay_chain_block_hashes.clear();
+		self.state.current_relay_chain_block_number = block_number;
+		self.state.current_relay_chain_block_hashes.push(block_hash);
+		Ok(())
+	}
+
+	async fn process_new_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
 		let executor = self.api_service.subxt();
 		let ts = executor.get_block_timestamp(self.endpoint.clone(), Some(block_hash)).await;
 		let header = executor
@@ -124,6 +216,20 @@ impl Collector {
 			.await
 			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
 		let block_number = header.number;
+
+		if block_number > self.state.current_relay_chain_block_number {
+			self.update_state(block_number, block_hash)?;
+		} else if block_number == self.state.current_relay_chain_block_number {
+			// A fork or a block number 0
+			self.state.current_relay_chain_block_hashes.push(block_hash);
+		} else {
+			return Err(eyre!(
+				"Invalid block number: {}, {} is known in the state",
+				block_number,
+				self.state.current_relay_chain_block_number
+			))
+		}
+
 		self.api_service
 			.storage()
 			.storage_write_prefixed(
