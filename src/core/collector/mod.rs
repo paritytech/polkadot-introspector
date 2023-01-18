@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::{
 	collections::BTreeMap,
 	default::Default,
@@ -32,7 +32,10 @@ use subxt::{
 	},
 	PolkadotConfig,
 };
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::{
+	broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender},
+	mpsc::{error::TryRecvError, Receiver as MspcReceiver},
+};
 
 mod candidate_record;
 mod ws;
@@ -65,6 +68,8 @@ pub enum CollectorPrefixType {
 	Head,
 	/// Session data, keyed by session hash (blake2b(session_index))
 	Session,
+	/// Inherent data (more expensive to store, so good to have it shared)
+	InherentData,
 }
 
 /// A type that defines prefix + hash itself
@@ -82,22 +87,33 @@ struct CollectorState {
 	candidates_seen: BTreeMap<u32, Vec<H256>>,
 }
 
+/// Provides collector new head events split by parachain
+#[derive(Clone, Debug)]
+pub struct NewHeadEvent {
+	/// Relay parent block number
+	pub relay_parent_number: <PolkadotConfig as subxt::Config>::BlockNumber,
+	/// Relay parent block hash (or hashes in case of the forks)
+	pub relay_parent_hashes: Vec<H256>,
+	/// The target parachain id (used for broadcasting events)
+	pub para_id: u32,
+	/// Candidates seen for this relay chain block that belong to the target parachain
+	pub candidates_seen: Vec<H256>,
+}
+
 /// Handles collector updates
 #[derive(Clone, Debug)]
-pub struct CollectorUpdateEvent {
-	pub relay_parent_number: <PolkadotConfig as subxt::Config>::BlockNumber,
-	pub relay_parent_hashes: Vec<H256>,
-	pub para_id: u32,
-	pub candidates_seen: Vec<H256>,
+pub enum CollectorUpdateEvent {
+	NewHead(NewHeadEvent),
+	Termination,
 }
 
 pub struct Collector {
 	api_service: CollectorStorageApi,
 	ws_listener: Option<WebSocketListener>,
-	to_websocket: Option<Sender<WebSocketUpdateEvent>>,
+	to_websocket: Option<BroadcastSender<WebSocketUpdateEvent>>,
 	endpoint: String,
-	subscribe_channels: BTreeMap<u32, Vec<Sender<CollectorUpdateEvent>>>,
-	broadcast_channels: Vec<Sender<CollectorUpdateEvent>>,
+	subscribe_channels: BTreeMap<u32, Vec<BroadcastSender<CollectorUpdateEvent>>>,
+	broadcast_channels: Vec<BroadcastSender<CollectorUpdateEvent>>,
 	state: CollectorState,
 }
 
@@ -125,7 +141,7 @@ impl Collector {
 	}
 
 	/// Spawns a collector futures (e.g. websocket server)
-	pub async fn spawn(&mut self, shutdown_tx: &Sender<()>) -> color_eyre::Result<()> {
+	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<()> {
 		if let Some(ws_listener) = &self.ws_listener {
 			let (to_websocket, _) = broadcast::channel(32);
 			ws_listener
@@ -136,6 +152,28 @@ impl Collector {
 		}
 
 		Ok(())
+	}
+
+	/// Process async channels in the endless loop
+	pub async fn run_with_consumer_channel(
+		mut self,
+		mut consumer_channel: MspcReceiver<SubxtEvent>,
+	) -> tokio::task::JoinHandle<()> {
+		tokio::spawn(async move {
+			loop {
+				match consumer_channel.try_recv() {
+					Ok(event) =>
+						if let Err(e) = self.process_subxt_event(&event).await {
+							info!("collector service could not process event: {}", e);
+						},
+					Err(TryRecvError::Disconnected) => {
+						self.broadcast_event(CollectorUpdateEvent::Termination).await.unwrap();
+						break
+					},
+					Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
+				}
+			}
+		})
 	}
 
 	/// Process a next subxt event
@@ -154,11 +192,16 @@ impl Collector {
 	pub async fn subscribe_parachain_updates(
 		&mut self,
 		para_id: u32,
-	) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
+	) -> color_eyre::Result<BroadcastReceiver<CollectorUpdateEvent>> {
 		let (sender, receiver) = broadcast::channel(32);
 		self.subscribe_channels.entry(para_id).or_insert(vec![]).push(sender);
 
 		Ok(receiver)
+	}
+
+	/// Returns API endpoint for storage and request executor
+	pub fn api(&self) -> CollectorStorageApi {
+		self.api_service.clone()
 	}
 
 	fn update_state(
@@ -171,33 +214,33 @@ impl Collector {
 
 			if let Some(candidates) = candidates {
 				for channel in channels {
-					channel.send(CollectorUpdateEvent {
+					channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
 						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
 						relay_parent_number: self.state.current_relay_chain_block_number,
 						candidates_seen: candidates.clone(),
 						para_id: *para_id,
-					})?;
+					}))?;
 				}
 			} else {
 				for channel in channels {
-					channel.send(CollectorUpdateEvent {
+					channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
 						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
 						relay_parent_number: self.state.current_relay_chain_block_number,
 						candidates_seen: vec![],
 						para_id: *para_id,
-					})?;
+					}))?;
 				}
 			}
 		}
 
 		for broadcast_channel in self.broadcast_channels.iter_mut() {
 			for (para_id, candidates) in self.state.candidates_seen.iter() {
-				broadcast_channel.send(CollectorUpdateEvent {
+				broadcast_channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
 					relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
 					relay_parent_number: self.state.current_relay_chain_block_number,
 					candidates_seen: candidates.clone(),
 					para_id: *para_id,
-				})?;
+				}))?;
 			}
 		}
 
@@ -205,6 +248,21 @@ impl Collector {
 		self.state.current_relay_chain_block_hashes.clear();
 		self.state.current_relay_chain_block_number = block_number;
 		self.state.current_relay_chain_block_hashes.push(block_hash);
+		Ok(())
+	}
+
+	/// Send event to all open channels
+	async fn broadcast_event(&mut self, event: CollectorUpdateEvent) -> color_eyre::Result<()> {
+		for (_, channels) in self.subscribe_channels.iter_mut() {
+			for channel in channels {
+				channel.send(event.clone())?;
+			}
+		}
+
+		for broadcast_channel in self.broadcast_channels.iter_mut() {
+			broadcast_channel.send(event.clone())?;
+		}
+
 		Ok(())
 	}
 
@@ -276,6 +334,29 @@ impl Collector {
 					.await;
 			}
 		}
+
+		let inherent_data = self
+			.api_service
+			.subxt()
+			.extract_parainherent_data(self.endpoint.clone(), Some(block_hash))
+			.await;
+
+		if let Some(inherent_data) = inherent_data {
+			self.api_service
+				.storage()
+				.storage_write_prefixed(
+					CollectorPrefixType::InherentData,
+					block_hash,
+					StorageEntry::new_onchain(
+						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
+						inherent_data,
+					),
+				)
+				.await?;
+		} else {
+			warn!("cannot get inherent data for block number {} ({})", block_number, block_hash);
+		}
+
 		Ok(())
 	}
 
