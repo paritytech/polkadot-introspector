@@ -24,6 +24,7 @@ use std::{
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use subxt::{
 	ext::{
@@ -70,10 +71,22 @@ pub enum CollectorPrefixType {
 	Session,
 	/// Inherent data (more expensive to store, so good to have it shared)
 	InherentData,
+	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
+	Dispute(u32),
 }
 
 /// A type that defines prefix + hash itself
 pub(crate) type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
+
+/// A structure used to track disputes progress
+#[derive(Clone, Debug, Encode, Decode)]
+pub struct DisputeInfo {
+	pub initiated: <PolkadotConfig as subxt::Config>::BlockNumber,
+	pub dispute: SubxtDispute,
+	pub parachain_id: u32,
+	pub outcome: Option<SubxtDisputeResult>,
+	pub concluded: Option<<PolkadotConfig as subxt::Config>::BlockNumber>,
+}
 
 /// The current state of the collector, used to detect forks and track candidates
 /// and other events without query storage
@@ -85,6 +98,8 @@ struct CollectorState {
 	current_relay_chain_block_hashes: Vec<H256>,
 	/// A list of candidates seen, indexed by parachain id
 	candidates_seen: BTreeMap<u32, Vec<H256>>,
+	/// A list of disputes seen, indexed by parachain id
+	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
 }
 
 /// Provides collector new head events split by parachain

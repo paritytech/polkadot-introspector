@@ -28,19 +28,18 @@
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
 use crate::core::{
-	api::ApiService,
 	collector::{Collector, CollectorOptions},
-	EventConsumerInit, RecordsStorageConfig, SubxtDisputeResult, SubxtEvent, SubxtSubscriptionMode,
+	EventConsumerInit, SubxtDisputeResult, SubxtEvent, SubxtSubscriptionMode,
 };
 use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::info;
-use std::{collections::HashMap, default::Default, time::Duration};
+use std::{collections::HashMap, default::Default};
 use subxt::ext::sp_core::H256;
 use tokio::sync::{
-	broadcast::Sender as BroadcastSender,
-	mpsc::{error::TryRecvError, Receiver},
+	broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender},
+	mpsc::Receiver,
 };
 
 mod progress;
@@ -48,6 +47,7 @@ pub(crate) mod prometheus;
 pub(crate) mod stats;
 pub(crate) mod tracker;
 
+use crate::core::collector::CollectorUpdateEvent;
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use tracker::ParachainBlockTracker;
 
@@ -92,7 +92,6 @@ pub(crate) struct ParachainCommander {
 	opts: ParachainCommanderOptions,
 	node: String,
 	consumer_config: EventConsumerInit<SubxtEvent>,
-	api_service: ApiService<H256>,
 	collector: Collector,
 	metrics: Metrics,
 }
@@ -103,15 +102,14 @@ impl ParachainCommander {
 		consumer_config: EventConsumerInit<SubxtEvent>,
 	) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
-		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 });
 		let node = opts.node.clone();
 		let collector = Collector::new(node.as_str(), opts.collector_opts.clone());
 		opts.mode = opts.mode.or(Some(ParachainCommanderMode::Cli));
 
-		Ok(ParachainCommander { opts, node, consumer_config, api_service, collector, metrics: Default::default() })
+		Ok(ParachainCommander { opts, node, consumer_config, collector, metrics: Default::default() })
 	}
 
-	// Spawn the UI and subxt tasks and return their futures.
+	/// Spawn the UI and subxt tasks and return their futures.
 	pub(crate) async fn run(
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
@@ -124,26 +122,32 @@ impl ParachainCommander {
 
 		self.collector.spawn(shutdown_tx).await?;
 
-		output_futures.push(tokio::spawn(self.watch_node()));
+		let para_id = self.opts.para_id;
+
+		let mut from_collector = self.collector.subscribe_parachain_updates(para_id).await?;
+		output_futures.push(tokio::spawn(self.watch_node(from_collector)));
 		Ok(output_futures)
 	}
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node(mut self) {
+	async fn watch_node(mut self, mut from_collector: BroadcastReceiver<CollectorUpdateEvent>) {
+		let api_service = self.collector.api();
 		// The subxt API request executor.
-		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
-		let mut consumer_channels = consumer_channels.into_iter().next().unwrap();
-		let executor = self.api_service.subxt();
+		let executor = api_service.subxt();
+		let storage = api_service.storage();
 		let para_id = self.opts.para_id;
 		// Track disputes that are unconcluded, value is the relay parent block number
 		let mut recent_disputes_unconcluded: HashMap<H256, u32> = HashMap::new();
 		// Keep concluded disputes per block
 		let mut recent_disputes_concluded: HashMap<H256, (SubxtDisputeResult, Option<u32>)> = HashMap::new();
-
 		let mut tracker = tracker::SubxtTracker::new(para_id, self.node.as_str(), executor);
-		let mut start_block = None;
-		let mut end_block = None;
+
+		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
+		let collector_fut = self
+			.collector
+			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
+			.await;
 
 		println!(
 			"{} will trace parachain {} on {}",
@@ -159,71 +163,23 @@ impl ParachainCommander {
 		);
 
 		loop {
-			match consumer_channels.try_recv() {
-				Ok(event) => {
-					if let Err(e) = self.collector.process_subxt_event(&event).await {
-						info!("collector service could not process event: {}", e);
-					}
-					match event {
-						SubxtEvent::NewHead(hash) => {
-							tracker.inject_disputes_events(&recent_disputes_concluded);
+			tokio::select! {
+				Ok(update_event) = from_collector.recv() => {
+					match update_event {
+						CollectorUpdateEvent::NewHead(new_head) => {
 							if let Some(progress) = tracker.progress(&self.metrics) {
 								if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
 									println!("{}", progress);
 								}
 							}
 							tracker.maybe_reset_state();
-							recent_disputes_concluded.clear();
-							let _parablock_info = tracker.inject_block(hash).await;
-
-							if start_block.is_none() && self.opts.block_count.is_some() {
-								start_block = tracker.get_current_relay_block_number();
-								end_block = start_block.map(|block_number| {
-									block_number + self.opts.block_count.expect("we just checked it above; qed") - 1
-								});
-							}
-
-							if end_block.is_some() && tracker.get_current_relay_block_number() >= end_block {
-								break
-							}
+							//tracker.inject_block(new_head).await;
 						},
-						SubxtEvent::DisputeInitiated(dispute) => {
-							info!(
-								"{}: relay parent: {:?}, candidate: {:?}",
-								"Dispute initiated".to_string().dark_red(),
-								dispute.relay_parent_block,
-								dispute.candidate_hash,
-							);
-							recent_disputes_unconcluded.insert(
-								dispute.candidate_hash,
-								tracker.get_current_relay_block_number().unwrap_or_default(),
-							);
-						},
-						SubxtEvent::DisputeConcluded(dispute, outcome) => {
-							let str_outcome = match outcome {
-								SubxtDisputeResult::Valid => format!("{}", "valid 👍".to_string().green()),
-								SubxtDisputeResult::Invalid => format!("{}", "invalid 👎".to_string().dark_yellow()),
-								SubxtDisputeResult::TimedOut => format!("{}", "timedout".to_string().dark_red()),
-							};
-							let noticed_dispute = recent_disputes_unconcluded.remove(&dispute.candidate_hash);
-							let resolved_block_number = tracker.get_current_relay_block_number().unwrap_or_default();
-							let resolved_time = noticed_dispute
-								.map(|initiated_block| resolved_block_number.saturating_sub(initiated_block));
-
-							recent_disputes_concluded.insert(dispute.candidate_hash, (outcome, resolved_time));
-							info!(
-								"{}: relay parent: {:?}, candidate: {:?}, result: {}",
-								format!("Dispute concluded in {:?} blocks", resolved_time).bright_green(),
-								dispute.relay_parent_block,
-								dispute.candidate_hash,
-								str_outcome,
-							);
-						},
-						_ => {},
+						CollectorUpdateEvent::Termination => {
+							break;
+						}
 					}
 				},
-				Err(TryRecvError::Disconnected) => break,
-				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			}
 		}
 

@@ -96,7 +96,7 @@ impl Default for SubxtSubscriptionMode {
 }
 
 /// A helper structure to keep track of a dispute and it's relay parent
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct SubxtDispute {
 	/// Relay chain block where a dispute has taken place
 	pub relay_parent_block: <PolkadotConfig as subxt::Config>::Hash,
