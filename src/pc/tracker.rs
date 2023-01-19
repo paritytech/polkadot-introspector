@@ -25,15 +25,13 @@ use crate::core::{
 		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
 		RequestExecutor, ValidatorIndex,
 	},
+	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, NewHeadEvent},
 	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 	SubxtDisputeResult, SubxtHrmpChannel,
 };
 use codec::{Decode, Encode};
-use log::{debug, error, info};
-use std::{
-	collections::{BTreeMap, HashMap},
-	fmt::Debug,
-};
+use log::{debug, error};
+use std::{collections::BTreeMap, fmt::Debug};
 use subxt::ext::{
 	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
@@ -43,7 +41,7 @@ use subxt::ext::{
 #[async_trait::async_trait]
 pub trait ParachainBlockTracker {
 	/// The relay chain block hash
-	type RelayChainBlockHash;
+	type RelayChainNewHead;
 	/// The relay chain block type.
 	type RelayChainBlockNumber;
 	/// The parachain inherent data.
@@ -57,28 +55,10 @@ pub trait ParachainBlockTracker {
 
 	/// Injects a new relay chain block into the tracker.
 	/// Blocks must be injected in order.
-	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo;
+	async fn inject_block(&mut self, block_hash: Self::RelayChainNewHead) -> &Self::ParachainBlockInfo;
 
 	/// Update current parachain progress.
 	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
-
-	/// Inject disputes resolution results from the tracked events
-	fn inject_disputes_events(
-		&mut self,
-		disputes_tracked: &HashMap<Self::RelayChainBlockHash, (Self::DisputeOutcome, Option<u32>)>,
-	);
-}
-
-/// Used to track session data, where we store two subsequent sessions: the current and the previous one
-struct SubxtSessionTracker {
-	/// The current session index
-	session_index: u32,
-	/// The current session info
-	current_keys: Vec<AccountId32>,
-	/// The previous session (if available)
-	prev_keys: Option<Vec<AccountId32>>,
-	/// A flag that indicates a fresh session
-	fresh_session: bool,
 }
 
 /// An outcome for a dispute
@@ -134,6 +114,8 @@ pub struct SubxtTracker {
 	node_rpc_url: String,
 	/// A subxt API wrapper.
 	executor: RequestExecutor,
+	/// API to access collector's storage
+	api: CollectorStorageApi,
 	/// The last availability core index the parachain has been assigned to.
 	last_assignment: Option<u32>,
 	/// The relay chain block number at which the last candidate was backed at.
@@ -152,8 +134,6 @@ pub struct SubxtTracker {
 	last_relay_block_ts: Option<u64>,
 	/// Last included candidate in relay parent number
 	last_included_block: Option<BlockNumber>,
-	/// Session tracker
-	session_data: Option<SubxtSessionTracker>,
 	/// Messages queues status
 	message_queues: SubxtMessageQueuesTracker,
 
@@ -199,58 +179,58 @@ enum ParachainBlockState {
 
 #[async_trait::async_trait]
 impl ParachainBlockTracker for SubxtTracker {
-	type RelayChainBlockHash = H256;
+	type RelayChainNewHead = NewHeadEvent;
 	type RelayChainBlockNumber = BlockNumber;
 	type ParaInherentData = InherentData;
 	type ParachainBlockInfo = ParachainBlockInfo;
 	type ParachainProgressUpdate = ParachainProgressUpdate;
 	type DisputeOutcome = SubxtDisputeResult;
 
-	async fn inject_block(&mut self, block_hash: Self::RelayChainBlockHash) -> &Self::ParachainBlockInfo {
-		if let Some(header) = self.executor.get_block_head(self.node_rpc_url.clone(), Some(block_hash)).await {
-			if let Some(inherent) = self
-				.executor
-				.extract_parainherent_data(self.node_rpc_url.clone(), Some(block_hash))
+	async fn inject_block(&mut self, update_event: Self::RelayChainNewHead) -> &Self::ParachainBlockInfo {
+		let mut candidates_info: Vec<CandidateRecord> = Vec::with_capacity(update_event.candidates_seen.len());
+
+		for candidate_hash in update_event.candidates_seen {
+			if let Some(candidate_record_entry) = self
+				.api
+				.storage()
+				.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), candidate_hash)
 				.await
 			{
-				self.set_relay_block(header.number, block_hash);
+				candidates_info.push(candidate_record_entry.into_inner().unwrap());
+			}
+		}
+
+		// Include only those relay parents, for which we have at least one candidate event
+		for block_fork in update_event.relay_parent_hashes.iter().filter(|relay_hash| {
+			candidates_info
+				.iter()
+				.any(|candidate| candidate.candidate_inclusion.relay_parent == **relay_hash)
+		}) {
+			let inherent_data = self
+				.api
+				.storage()
+				.storage_read_prefixed(CollectorPrefixType::InherentData, *block_fork)
+				.await;
+
+			if let Some(inherent_data) = inherent_data {
+				let inherent: InherentData = inherent_data.into_inner().unwrap();
+				self.set_relay_block(update_event.relay_parent_number, *block_fork);
+
 				let inbound_hrmp_channels = self
 					.executor
-					.get_inbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
+					.get_inbound_hrmp_channels(self.node_rpc_url.clone(), *block_fork, self.para_id)
 					.await;
 				let outbound_hrmp_channels = self
 					.executor
-					.get_outbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
+					.get_outbound_hrmp_channels(self.node_rpc_url.clone(), *block_fork, self.para_id)
 					.await;
 				self.message_queues
 					.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
-
-				let cur_session = self.executor.get_session_index(self.node_rpc_url.clone(), block_hash).await;
-				if let Some(stored_session) = self.get_current_session_index() {
-					if cur_session != stored_session {
-						self.new_session(
-							cur_session,
-							self.executor
-								.get_session_account_keys(self.node_rpc_url.clone(), cur_session)
-								.await
-								.unwrap(),
-						)
-					}
-				} else {
-					self.new_session(
-						cur_session,
-						self.executor
-							.get_session_account_keys(self.node_rpc_url.clone(), cur_session)
-							.await
-							.unwrap(),
-					)
-				}
-				self.on_inherent_data(block_hash, header.number, inherent).await;
+				self.on_inherent_data(*block_fork, update_event.relay_parent_number, inherent)
+					.await;
 			} else {
-				error!("Failed to get inherent data for {:?}", block_hash);
+				error!("Failed to get inherent data for {:?}", *block_fork);
 			}
-		} else {
-			error!("Failed to get block header for {:?}", block_hash);
 		}
 
 		&self.current_candidate
@@ -307,17 +287,6 @@ impl ParachainBlockTracker for SubxtTracker {
 			},
 		}
 
-		if let Some(session_data) = self.session_data.as_mut() {
-			if session_data.fresh_session {
-				session_data.fresh_session = false;
-				if let Some(update) = self.update.as_mut() {
-					update
-						.events
-						.push(ParachainConsensusEvent::NewSession(session_data.session_index));
-				}
-			}
-		};
-
 		self.disputes.iter().for_each(|outcome| {
 			self.stats.on_disputed(outcome);
 			metrics.on_disputed(outcome, self.para_id);
@@ -356,39 +325,16 @@ impl ParachainBlockTracker for SubxtTracker {
 		}
 		self.update.clone()
 	}
-
-	fn inject_disputes_events(
-		&mut self,
-		disputes_tracked: &HashMap<Self::RelayChainBlockHash, (Self::DisputeOutcome, Option<u32>)>,
-	) {
-		self.disputes.retain_mut(|dispute| -> bool {
-			if let Some(observed_dispute) = disputes_tracked.get(&dispute.candidate) {
-				if dispute.outcome != observed_dispute.0 {
-					info!(
-						"Dispute for candidate {:?}: calculated outcome: {:?} is not equal to observed outcome: {:?}",
-						&dispute.candidate, dispute.outcome, observed_dispute.0
-					);
-					dispute.outcome = observed_dispute.0;
-				}
-				dispute.resolve_time = observed_dispute.1;
-
-				return true
-			}
-
-			info!("Dispute for candidate {:?} is not seen via events, remove it", &dispute.candidate);
-
-			false
-		});
-	}
 }
 
 impl SubxtTracker {
 	/// Constructor.
-	pub fn new(para_id: u32, node_rpc_url: &str, executor: RequestExecutor) -> Self {
+	pub fn new(para_id: u32, node_rpc_url: &str, executor: RequestExecutor, api: CollectorStorageApi) -> Self {
 		Self {
 			para_id,
 			node_rpc_url: node_rpc_url.to_owned(),
 			executor,
+			api,
 			stats: ParachainStats::new(para_id),
 			current_candidate: Default::default(),
 			current_relay_block: None,
@@ -400,7 +346,6 @@ impl SubxtTracker {
 			last_relay_block_ts: None,
 			last_included_block: None,
 			message_queues: Default::default(),
-			session_data: None,
 			update: None,
 		}
 	}
@@ -410,21 +355,18 @@ impl SubxtTracker {
 		self.current_relay_block = Some((block_number, block_hash));
 	}
 
-	/// Returns the current relay chain block number.
-	pub fn get_current_relay_block_number(&self) -> Option<BlockNumber> {
-		self.current_relay_block.map(|block| block.0)
-	}
-
-	fn get_session_keys(&self, session_index: u32) -> Option<&Vec<AccountId32>> {
-		self.session_data.as_ref().and_then(|session_data| {
-			if session_data.session_index == session_index {
-				Some(&session_data.current_keys)
-			} else if session_data.session_index - 1 == session_index {
-				session_data.prev_keys.as_ref()
-			} else {
-				None
-			}
-		})
+	async fn get_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
+		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
+		if let Some(session_entry) = self
+			.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::Session, session_hash)
+			.await
+		{
+			Some(session_entry.into_inner().unwrap())
+		} else {
+			None
+		}
 	}
 
 	// Parse inherent data and update state.
@@ -456,7 +398,7 @@ impl SubxtTracker {
 		}
 
 		if !data.disputes.is_empty() {
-			self.update_disputes(&data.disputes[..]);
+			self.update_disputes(&data.disputes[..]).await;
 		}
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
@@ -505,48 +447,46 @@ impl SubxtTracker {
 		self.current_candidate.core_occupied = occupied_cores[core as usize].is_some();
 	}
 
-	fn update_disputes(&mut self, disputes: &[DisputeStatementSet]) {
-		self.disputes = disputes
-			.iter()
-			.map(|dispute_info| {
-				let session_index = dispute_info.session;
-				let session_info = self.get_session_keys(session_index);
-				// TODO: we would like to distinguish different dispute phases at some point
-				let voted_for = dispute_info
+	async fn update_disputes(&mut self, disputes: &[DisputeStatementSet]) {
+		self.disputes = Vec::with_capacity(disputes.len());
+		for dispute_info in disputes {
+			let session_index = dispute_info.session;
+			let session_info = self.get_session_keys(session_index).await;
+			// TODO: we would like to distinguish different dispute phases at some point
+			let voted_for = dispute_info
+				.statements
+				.iter()
+				.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+				.count() as u32;
+			let voted_against = dispute_info.statements.len() as u32 - voted_for;
+
+			let outcome =
+				if voted_for > voted_against { SubxtDisputeResult::Valid } else { SubxtDisputeResult::Invalid };
+
+			let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
+				dispute_info
+					.statements
+					.iter()
+					.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
+					.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
+					.collect()
+			} else {
+				dispute_info
 					.statements
 					.iter()
 					.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
-					.count() as u32;
-				let voted_against = dispute_info.statements.len() as u32 - voted_for;
-
-				let outcome =
-					if voted_for > voted_against { SubxtDisputeResult::Valid } else { SubxtDisputeResult::Invalid };
-
-				let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
-					dispute_info
-						.statements
-						.iter()
-						.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
-						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0))
-						.collect()
-				} else {
-					dispute_info
-						.statements
-						.iter()
-						.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
-						.map(|(_, idx, _)| extract_validator_address(session_info, idx.0))
-						.collect()
-				};
-				DisputesTracker {
-					candidate: dispute_info.candidate_hash.0,
-					voted_for,
-					voted_against,
-					outcome,
-					misbehaving_validators,
-					resolve_time: None,
-				}
-			})
-			.collect();
+					.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
+					.collect()
+			};
+			self.disputes.push(DisputesTracker {
+				candidate: dispute_info.candidate_hash.0,
+				voted_for,
+				voted_against,
+				outcome,
+				misbehaving_validators,
+				resolve_time: None,
+			});
+		}
 	}
 
 	fn update_availability(
@@ -583,24 +523,6 @@ impl SubxtTracker {
 		}
 		self.disputes.clear();
 		self.update = None;
-	}
-
-	/// Updates cashed session with a new one, storing the previous session if needed
-	fn new_session(&mut self, session_index: u32, account_keys: Vec<AccountId32>) {
-		debug!("new session: {}", session_index);
-		if let Some(session_data) = &mut self.session_data {
-			let old_current = std::mem::replace(&mut session_data.current_keys, account_keys);
-			session_data.prev_keys.replace(old_current);
-			session_data.session_index = session_index;
-			session_data.fresh_session = true;
-		} else {
-			self.session_data = Some(SubxtSessionTracker {
-				session_index,
-				current_keys: account_keys,
-				prev_keys: None,
-				fresh_session: true,
-			})
-		}
 	}
 
 	// TODO: fix this, it is broken, nobody sets this.
@@ -680,11 +602,6 @@ impl SubxtTracker {
 		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
 		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
 		std::time::Duration::from_millis(cur_ts).saturating_sub(std::time::Duration::from_millis(base_ts))
-	}
-
-	/// Returns the current session index if present
-	pub fn get_current_session_index(&self) -> Option<u32> {
-		self.session_data.as_ref().map(|session| session.session_index)
 	}
 
 	/// Returns the stats

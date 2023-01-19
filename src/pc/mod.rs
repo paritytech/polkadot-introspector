@@ -29,14 +29,13 @@
 
 use crate::core::{
 	collector::{Collector, CollectorOptions},
-	EventConsumerInit, SubxtDisputeResult, SubxtEvent, SubxtSubscriptionMode,
+	EventConsumerInit, SubxtEvent, SubxtSubscriptionMode,
 };
 use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::info;
-use std::{collections::HashMap, default::Default};
-use subxt::ext::sp_core::H256;
+use std::default::Default;
 use tokio::sync::{
 	broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender},
 	mpsc::Receiver,
@@ -124,27 +123,22 @@ impl ParachainCommander {
 
 		let para_id = self.opts.para_id;
 
-		let mut from_collector = self.collector.subscribe_parachain_updates(para_id).await?;
+		let from_collector = self.collector.subscribe_parachain_updates(para_id).await?;
 		output_futures.push(tokio::spawn(self.watch_node(from_collector)));
 		Ok(output_futures)
 	}
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node(mut self, mut from_collector: BroadcastReceiver<CollectorUpdateEvent>) {
+	async fn watch_node(self, mut from_collector: BroadcastReceiver<CollectorUpdateEvent>) {
 		let api_service = self.collector.api();
 		// The subxt API request executor.
 		let executor = api_service.subxt();
-		let storage = api_service.storage();
 		let para_id = self.opts.para_id;
-		// Track disputes that are unconcluded, value is the relay parent block number
-		let mut recent_disputes_unconcluded: HashMap<H256, u32> = HashMap::new();
-		// Keep concluded disputes per block
-		let mut recent_disputes_concluded: HashMap<H256, (SubxtDisputeResult, Option<u32>)> = HashMap::new();
-		let mut tracker = tracker::SubxtTracker::new(para_id, self.node.as_str(), executor);
+		let mut tracker = tracker::SubxtTracker::new(para_id, self.node.as_str(), executor, api_service);
 
 		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
-		let collector_fut = self
+		let _collector_fut = self
 			.collector
 			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
 			.await;
@@ -173,7 +167,7 @@ impl ParachainCommander {
 								}
 							}
 							tracker.maybe_reset_state();
-							//tracker.inject_block(new_head).await;
+							tracker.inject_block(new_head).await;
 						},
 						CollectorUpdateEvent::Termination => {
 							break;

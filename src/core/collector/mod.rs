@@ -38,7 +38,7 @@ use tokio::sync::{
 	mpsc::{error::TryRecvError, Receiver as MspcReceiver},
 };
 
-mod candidate_record;
+pub mod candidate_record;
 mod ws;
 
 use crate::core::{
@@ -113,6 +113,8 @@ pub struct NewHeadEvent {
 	pub para_id: u32,
 	/// Candidates seen for this relay chain block that belong to the target parachain
 	pub candidates_seen: Vec<H256>,
+	/// Disputes concluded in these blocks
+	pub disputes_concluded: Vec<DisputeInfo>,
 }
 
 /// Handles collector updates
@@ -226,34 +228,39 @@ impl Collector {
 	) -> color_eyre::Result<()> {
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {
 			let candidates = self.state.candidates_seen.get(para_id);
+			let disputes_concluded = self.state.disputes_seen.get(para_id).map(|disputes_seen| {
+				disputes_seen
+					.iter()
+					.filter(|dispute_info| dispute_info.concluded.is_some())
+					.cloned()
+					.collect::<Vec<_>>()
+			});
 
-			if let Some(candidates) = candidates {
-				for channel in channels {
-					channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
-						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
-						relay_parent_number: self.state.current_relay_chain_block_number,
-						candidates_seen: candidates.clone(),
-						para_id: *para_id,
-					}))?;
-				}
-			} else {
-				for channel in channels {
-					channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
-						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
-						relay_parent_number: self.state.current_relay_chain_block_number,
-						candidates_seen: vec![],
-						para_id: *para_id,
-					}))?;
-				}
+			for channel in channels {
+				channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
+					relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
+					relay_parent_number: self.state.current_relay_chain_block_number,
+					candidates_seen: candidates.cloned().unwrap_or_default(),
+					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
+					para_id: *para_id,
+				}))?;
 			}
 		}
 
 		for broadcast_channel in self.broadcast_channels.iter_mut() {
 			for (para_id, candidates) in self.state.candidates_seen.iter() {
+				let disputes_concluded = self.state.disputes_seen.get(para_id).map(|disputes_seen| {
+					disputes_seen
+						.iter()
+						.filter(|dispute_info| dispute_info.concluded.is_some())
+						.cloned()
+						.collect::<Vec<_>>()
+				});
 				broadcast_channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
 					relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
 					relay_parent_number: self.state.current_relay_chain_block_number,
 					candidates_seen: candidates.clone(),
+					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 					para_id: *para_id,
 				}))?;
 			}
