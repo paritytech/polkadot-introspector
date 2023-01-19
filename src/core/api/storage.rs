@@ -104,7 +104,7 @@ where
 	}
 
 	/// Replaces a value in storage at the specific prefix. Panics if API channel is gone.
-	pub async fn storage_replace_prefix(&self, prefix: P, key: K, value: StorageEntry) {
+	pub async fn storage_replace_prefixed(&self, prefix: P, key: K, value: StorageEntry) {
 		let request = Request { request_type: RequestType::ReplacePrefix(prefix, key, value), response_sender: None };
 		self.to_api.send(request).await.expect("Channel closed");
 	}
@@ -387,7 +387,7 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 					.unwrap();
 			},
 			RequestType::ReplacePrefix(prefix, key, value) => {
-				let res = the_storage.replace_prefix(&prefix, &key, value);
+				let res = the_storage.replace_prefixed(&prefix, &key, value);
 
 				if let Some(sender) = request.response_sender {
 					sender.send(Response::Read(res)).unwrap();

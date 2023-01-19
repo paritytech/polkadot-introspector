@@ -479,7 +479,7 @@ impl Collector {
 					});
 					self.api_service
 						.storage()
-						.storage_replace_prefix(
+						.storage_replace_prefixed(
 							CollectorPrefixType::Candidate(change_event.parachain_id),
 							change_event.candidate_hash,
 							StorageEntry::new_onchain(record_time, known_candidate),
@@ -518,7 +518,7 @@ impl Collector {
 					});
 					self.api_service
 						.storage()
-						.storage_replace_prefix(
+						.storage_replace_prefixed(
 							CollectorPrefixType::Candidate(change_event.parachain_id),
 							change_event.candidate_hash,
 							StorageEntry::new_onchain(record_time, known_candidate),
@@ -532,13 +532,14 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn process_dispute_initiated(&self, dispute_event: &SubxtDispute) -> color_eyre::Result<()> {
+	async fn process_dispute_initiated(&mut self, dispute_event: &SubxtDispute) -> color_eyre::Result<()> {
 		let candidate = self
 			.api_service
 			.storage()
 			.storage_read(dispute_event.candidate_hash)
 			.await
 			.ok_or_else(|| eyre!("unknown candidate disputed"))?;
+
 		let record_time = candidate.time();
 		let mut candidate: CandidateRecord = candidate.into_inner()?;
 		let now = get_unix_time_unwrap();
@@ -554,19 +555,46 @@ impl Collector {
 				})
 				.unwrap()
 		});
+
+		// Fill and write dispute info structure
+		let dispute_info = DisputeInfo {
+			dispute: dispute_event.clone(),
+			initiated: self.state.current_relay_chain_block_number,
+			concluded: None,
+			parachain_id: candidate.parachain_id(),
+			outcome: None,
+		};
+
+		self.state
+			.disputes_seen
+			.entry(candidate.parachain_id())
+			.or_default()
+			.push(dispute_info.clone());
+
 		self.api_service
 			.storage()
-			.storage_replace_prefix(
+			.storage_write_prefixed(
+				CollectorPrefixType::Dispute(para_id),
+				dispute_event.candidate_hash,
+				StorageEntry::new_onchain(record_time, dispute_info),
+			)
+			.await?;
+
+		// Update candidate
+		self.api_service
+			.storage()
+			.storage_replace_prefixed(
 				CollectorPrefixType::Candidate(para_id),
 				dispute_event.candidate_hash,
 				StorageEntry::new_onchain(record_time, candidate),
 			)
 			.await;
+
 		Ok(())
 	}
 
 	async fn process_dispute_concluded(
-		&self,
+		&mut self,
 		dispute_event: &SubxtDispute,
 		dispute_outcome: &SubxtDisputeResult,
 	) -> color_eyre::Result<()> {
@@ -577,7 +605,7 @@ impl Collector {
 			.await
 			.ok_or_else(|| eyre!("unknown candidate disputed"))?;
 		// TODO: query endpoint for the votes + session keys like pc does
-		let record_time = candidate.time();
+		let record_time = RecordTime::from(self.state.current_relay_chain_block_number);
 		let mut candidate: CandidateRecord = candidate.into_inner()?;
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
@@ -595,9 +623,42 @@ impl Collector {
 				})
 				.unwrap()
 		});
+
+		let dispute_info_entry = self
+			.api_service
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::Dispute(para_id), dispute_event.candidate_hash)
+			.await;
+
+		if let Some(dispute_info_entry) = dispute_info_entry {
+			let mut dispute_info: DisputeInfo = dispute_info_entry.into_inner()?;
+			dispute_info.outcome = Some(*dispute_outcome);
+			dispute_info.concluded = Some(self.state.current_relay_chain_block_number);
+
+			self.state
+				.disputes_seen
+				.entry(candidate.parachain_id())
+				.or_default()
+				.push(dispute_info.clone());
+
+			self.api_service
+				.storage()
+				.storage_replace_prefixed(
+					CollectorPrefixType::Dispute(para_id),
+					dispute_event.candidate_hash,
+					StorageEntry::new_onchain(record_time, dispute_info),
+				)
+				.await;
+		} else {
+			warn!(
+				"dispute for candidate {} is concluded without being seen (parachain id = {})",
+				dispute_event.candidate_hash, para_id
+			);
+		}
+
 		self.api_service
 			.storage()
-			.storage_replace_prefix(
+			.storage_replace_prefixed(
 				CollectorPrefixType::Candidate(para_id),
 				dispute_event.candidate_hash,
 				StorageEntry::new_onchain(record_time, candidate),

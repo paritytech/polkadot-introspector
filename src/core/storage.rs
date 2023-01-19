@@ -277,7 +277,7 @@ pub trait PrefixedRecordsStorage<K, P> {
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()>;
 	/// Replaces a prefixed entry in the storage, both prefix and a key must exist,
 	/// returns the old entry on success and None on error
-	fn replace_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+	fn replace_prefixed<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
 		&mut self,
 		prefix: &PQ,
 		key: &Q,
@@ -435,7 +435,7 @@ where
 		Ok(())
 	}
 
-	fn replace_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+	fn replace_prefixed<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
 		&mut self,
 		prefix: &PQ,
 		key: &Q,
