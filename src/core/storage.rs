@@ -35,9 +35,9 @@ use std::{
 
 pub type BlockNumber = u32;
 
-/// A type to identify the data source.
+/// A type to identify the record type
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-pub enum RecordSource {
+pub enum RecordType {
 	/// For onchain data.
 	Onchain,
 	/// For offchain data.
@@ -70,8 +70,8 @@ impl RecordTime {
 /// An generic storage entry representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageEntry {
-	/// The source of the data.
-	record_source: RecordSource,
+	/// The type of the data.
+	record_type: RecordType,
 	/// Time index when data was recorded.
 	/// All entries will have a block number. For offchain data, this is estimated based on the
 	/// timestamp, or otherwise it needs to be set to the latest known block.
@@ -83,17 +83,17 @@ pub struct StorageEntry {
 impl StorageEntry {
 	/// Creates a new storage entry for onchain data.
 	pub fn new_onchain<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
-		StorageEntry { record_source: RecordSource::Onchain, record_time, data: data.encode() }
+		StorageEntry { record_type: RecordType::Onchain, record_time, data: data.encode() }
 	}
 
 	/// Creates a new storage entry for onchain data.
 	pub fn new_offchain<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
-		StorageEntry { record_source: RecordSource::Offchain, record_time, data: data.encode() }
+		StorageEntry { record_type: RecordType::Offchain, record_time, data: data.encode() }
 	}
 
 	/// Creates a new persistent storage entry
 	pub fn new_persistent<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
-		StorageEntry { record_source: RecordSource::Persistent, record_time, data: data.encode() }
+		StorageEntry { record_type: RecordType::Persistent, record_time, data: data.encode() }
 	}
 
 	/// Converts a storage entry into it's original type by decoding from scale codec
@@ -104,16 +104,16 @@ impl StorageEntry {
 
 /// A required trait to implement for storing records.
 pub trait StorageInfo {
-	/// Returns the source of the data.
-	fn source(&self) -> RecordSource;
+	/// Returns the type of the data.
+	fn record_type(&self) -> RecordType;
 	/// Returns the time when the data was recorded.
 	fn time(&self) -> RecordTime;
 }
 
 impl StorageInfo for StorageEntry {
 	/// Returns the source of the data.
-	fn source(&self) -> RecordSource {
-		self.record_source
+	fn record_type(&self) -> RecordType {
+		self.record_type
 	}
 	/// Returns the time when the data was recorded.
 	fn time(&self) -> RecordTime {
@@ -199,7 +199,7 @@ where
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
-		let is_persistent = entry.record_source == RecordSource::Persistent;
+		let is_persistent = entry.record_type == RecordType::Persistent;
 		self.direct_records.insert(key.clone(), entry);
 
 		if !is_persistent {
@@ -504,8 +504,8 @@ mod tests {
 
 	impl StorageInfo for u32 {
 		/// Returns the source of the data.
-		fn source(&self) -> RecordSource {
-			RecordSource::Onchain
+		fn record_type(&self) -> RecordType {
+			RecordType::Onchain
 		}
 
 		/// Returns the time when the data was recorded.
@@ -524,11 +524,11 @@ mod tests {
 			.unwrap();
 
 		let a = st.get("key1").unwrap();
-		assert_eq!(a.record_source, RecordSource::Onchain);
+		assert_eq!(a.record_type, RecordType::Onchain);
 		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
 
 		let b = st.get("key100").unwrap();
-		assert_eq!(b.record_source, RecordSource::Offchain);
+		assert_eq!(b.record_type, RecordType::Offchain);
 		assert_eq!(b.into_inner::<u32>().unwrap(), 2);
 		assert_eq!(st.get("key2"), None);
 
