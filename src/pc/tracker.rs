@@ -56,6 +56,8 @@ pub trait ParachainBlockTracker {
 	/// Injects a new relay chain block into the tracker.
 	/// Blocks must be injected in order.
 	async fn inject_block(&mut self, block_hash: Self::RelayChainNewHead) -> &Self::ParachainBlockInfo;
+	/// Called when a new session is observed
+	async fn new_session(&mut self, new_session_index: u32);
 
 	/// Update current parachain progress.
 	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
@@ -236,6 +238,12 @@ impl ParachainBlockTracker for SubxtTracker {
 		&self.current_candidate
 	}
 
+	async fn new_session(&mut self, new_session_index: u32) {
+		if let Some(update) = self.update.as_mut() {
+			update.events.push(ParachainConsensusEvent::NewSession(new_session_index));
+		}
+	}
+
 	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_none() {
 			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
@@ -357,16 +365,11 @@ impl SubxtTracker {
 
 	async fn get_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
 		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
-		if let Some(session_entry) = self
-			.api
+		self.api
 			.storage()
 			.storage_read_prefixed(CollectorPrefixType::Session, session_hash)
 			.await
-		{
-			Some(session_entry.into_inner().unwrap())
-		} else {
-			None
-		}
+			.map(|session_entry| session_entry.into_inner().unwrap())
 	}
 
 	// Parse inherent data and update state.

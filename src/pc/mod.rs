@@ -169,6 +169,9 @@ impl ParachainCommander {
 							tracker.maybe_reset_state();
 							tracker.inject_block(new_head).await;
 						},
+						CollectorUpdateEvent::NewSession(idx) => {
+							tracker.new_session(idx).await;
+						},
 						CollectorUpdateEvent::Termination => {
 							break;
 						}

@@ -17,6 +17,7 @@
 use clap::Parser;
 use log::{debug, info, warn};
 use std::{
+	cmp::Ordering,
 	collections::BTreeMap,
 	default::Default,
 	hash::Hash,
@@ -100,6 +101,8 @@ struct CollectorState {
 	candidates_seen: BTreeMap<u32, Vec<H256>>,
 	/// A list of disputes seen, indexed by parachain id
 	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
+	/// A current session index
+	current_session_index: u32,
 }
 
 /// Provides collector new head events split by parachain
@@ -120,7 +123,11 @@ pub struct NewHeadEvent {
 /// Handles collector updates
 #[derive(Clone, Debug)]
 pub enum CollectorUpdateEvent {
+	/// Occurs on new block processing with the information about the previous block
 	NewHead(NewHeadEvent),
+	/// Occurs on a new session
+	NewSession(u32),
+	/// Occurs when collector is disconnected and is about to terminate
 	Termination,
 }
 
@@ -211,7 +218,7 @@ impl Collector {
 		para_id: u32,
 	) -> color_eyre::Result<BroadcastReceiver<CollectorUpdateEvent>> {
 		let (sender, receiver) = broadcast::channel(32);
-		self.subscribe_channels.entry(para_id).or_insert(vec![]).push(sender);
+		self.subscribe_channels.entry(para_id).or_default().push(sender);
 
 		Ok(receiver)
 	}
@@ -297,17 +304,20 @@ impl Collector {
 			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
 		let block_number = header.number;
 
-		if block_number > self.state.current_relay_chain_block_number {
-			self.update_state(block_number, block_hash)?;
-		} else if block_number == self.state.current_relay_chain_block_number {
-			// A fork or a block number 0
-			self.state.current_relay_chain_block_hashes.push(block_hash);
-		} else {
-			return Err(eyre!(
-				"Invalid block number: {}, {} is known in the state",
-				block_number,
-				self.state.current_relay_chain_block_number
-			))
+		match block_number.cmp(&self.state.current_relay_chain_block_number) {
+			Ordering::Greater => {
+				self.update_state(block_number, block_hash)?;
+			},
+			Ordering::Equal => {
+				// A fork
+				self.state.current_relay_chain_block_hashes.push(block_hash);
+			},
+			Ordering::Less =>
+				return Err(eyre!(
+					"Invalid block number: {}, {} is known in the state",
+					block_number,
+					self.state.current_relay_chain_block_number
+				)),
 		}
 
 		self.api_service
@@ -355,6 +365,11 @@ impl Collector {
 					.storage_delete_prefixed(CollectorPrefixType::Session, prev_session_hash)
 					.await;
 			}
+		}
+
+		if self.state.current_session_index != cur_session {
+			self.state.current_session_index = cur_session;
+			self.broadcast_event(CollectorUpdateEvent::NewSession(cur_session)).await?;
 		}
 
 		let inherent_data = self
