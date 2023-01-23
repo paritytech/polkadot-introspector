@@ -424,14 +424,13 @@ impl Collector {
 						)
 						.await;
 
-					if let Some(relay_parent) = maybe_relay_parent {
+					if let Some(_relay_parent) = maybe_relay_parent {
 						let now = get_unix_time_unwrap();
-						let parent: <PolkadotConfig as subxt::Config>::Header = relay_parent.into_inner()?;
-						let block_number = parent.number;
-						let candidate_inclusion = CandidateInclusion {
+						let relay_block_number = self.state.current_relay_chain_block_number;
+						let candidate_inclusion = CandidateInclusionRecord {
 							relay_parent: change_event.candidate_descriptor.relay_parent,
 							parachain_id: change_event.parachain_id,
-							backed: now,
+							backed: relay_block_number,
 							core_idx: None,
 							timedout: None,
 							included: None,
@@ -446,10 +445,7 @@ impl Collector {
 							.storage_write_prefixed(
 								CollectorPrefixType::Candidate(change_event.parachain_id),
 								change_event.candidate_hash,
-								StorageEntry::new_onchain(
-									RecordTime::with_ts(block_number, Duration::from_secs(now.as_secs())),
-									new_record,
-								),
+								StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), new_record),
 							)
 							.await
 							.unwrap();
@@ -483,10 +479,10 @@ impl Collector {
 					.await;
 
 				if let Some(known_candidate) = maybe_known_candidate {
-					let record_time = known_candidate.time();
-					let mut known_candidate: CandidateRecord = known_candidate.into_inner()?;
 					let now = get_unix_time_unwrap();
-					known_candidate.candidate_inclusion.included = Some(now);
+					let relay_block_number = self.state.current_relay_chain_block_number;
+					let mut known_candidate: CandidateRecord = known_candidate.into_inner()?;
+					known_candidate.candidate_inclusion.included = Some(relay_block_number);
 					self.to_websocket.as_ref().map(|to_websocket| {
 						to_websocket
 							.send(WebSocketUpdateEvent {
@@ -504,7 +500,7 @@ impl Collector {
 						.storage_replace_prefixed(
 							CollectorPrefixType::Candidate(change_event.parachain_id),
 							change_event.candidate_hash,
-							StorageEntry::new_onchain(record_time, known_candidate),
+							StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), known_candidate),
 						)
 						.await;
 				} else {
@@ -522,10 +518,10 @@ impl Collector {
 					.await;
 
 				if let Some(known_candidate) = maybe_known_candidate {
-					let record_time = known_candidate.time();
 					let mut known_candidate: CandidateRecord = known_candidate.into_inner()?;
 					let now = get_unix_time_unwrap();
-					known_candidate.candidate_inclusion.timedout = Some(now);
+					let relay_block_number = self.state.current_relay_chain_block_number;
+					known_candidate.candidate_inclusion.timedout = Some(relay_block_number);
 					self.to_websocket.as_ref().map(|to_websocket| {
 						to_websocket
 							.send(WebSocketUpdateEvent {
@@ -543,7 +539,7 @@ impl Collector {
 						.storage_replace_prefixed(
 							CollectorPrefixType::Candidate(change_event.parachain_id),
 							change_event.candidate_hash,
-							StorageEntry::new_onchain(record_time, known_candidate),
+							StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), known_candidate),
 						)
 						.await;
 				} else {
@@ -562,11 +558,12 @@ impl Collector {
 			.await
 			.ok_or_else(|| eyre!("unknown candidate disputed"))?;
 
+		let relay_block_number = self.state.current_relay_chain_block_number;
 		let record_time = candidate.time();
 		let mut candidate: CandidateRecord = candidate.into_inner()?;
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
-		candidate.candidate_disputed = Some(CandidateDisputed { disputed: now, concluded: None });
+		candidate.candidate_disputed = Some(CandidateDisputed { disputed: relay_block_number, concluded: None });
 		self.to_websocket.as_ref().map(|to_websocket| {
 			to_websocket
 				.send(WebSocketUpdateEvent {
@@ -632,8 +629,11 @@ impl Collector {
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed {
-			disputed: now,
-			concluded: Some(DisputeResult { concluded_timestamp: now, outcome: *dispute_outcome }),
+			disputed: self.state.current_relay_chain_block_number,
+			concluded: Some(DisputeResult {
+				concluded_block: self.state.current_relay_chain_block_number,
+				outcome: *dispute_outcome,
+			}),
 		});
 		self.to_websocket.as_ref().map(|to_websocket| {
 			to_websocket
