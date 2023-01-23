@@ -35,9 +35,9 @@ use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use log::info;
-use std::default::Default;
+use std::{default::Default, time::Duration};
 use tokio::sync::{
-	broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender},
+	broadcast::{error::TryRecvError, Receiver as BroadcastReceiver, Sender as BroadcastSender},
 	mpsc::Receiver,
 };
 
@@ -157,25 +157,26 @@ impl ParachainCommander {
 		);
 
 		loop {
-			tokio::select! {
-				Ok(update_event) = from_collector.recv() => {
-					match update_event {
-						CollectorUpdateEvent::NewHead(new_head) => {
-							if let Some(progress) = tracker.progress(&self.metrics) {
-								if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-									println!("{}", progress);
-								}
+			match from_collector.try_recv() {
+				Ok(update_event) => match update_event {
+					CollectorUpdateEvent::NewHead(new_head) => {
+						tracker.inject_block(new_head).await;
+						if let Some(progress) = tracker.progress(&self.metrics) {
+							if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+								println!("{}", progress);
 							}
-							tracker.maybe_reset_state();
-							tracker.inject_block(new_head).await;
-						},
-						CollectorUpdateEvent::NewSession(idx) => {
-							tracker.new_session(idx).await;
-						},
-						CollectorUpdateEvent::Termination => {
-							break;
 						}
-					}
+						tracker.maybe_reset_state();
+					},
+					CollectorUpdateEvent::NewSession(idx) => {
+						tracker.new_session(idx).await;
+					},
+					CollectorUpdateEvent::Termination => break,
+				},
+				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(500)).await,
+				Err(_) => {
+					info!("Input channel has been closed");
+					break
 				},
 			}
 		}
