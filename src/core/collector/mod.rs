@@ -397,7 +397,7 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn process_candidate_change(&self, change_event: &SubxtCandidateEvent) -> color_eyre::Result<()> {
+	async fn process_candidate_change(&mut self, change_event: &SubxtCandidateEvent) -> color_eyre::Result<()> {
 		let storage = self.api_service.storage();
 		match change_event.event_type {
 			SubxtCandidateEventType::Backed => {
@@ -409,11 +409,12 @@ impl Collector {
 					)
 					.await;
 				if let Some(existing) = maybe_existing {
-					let candidate_descriptor: CandidateRecord = existing.into_inner()?;
+					let candidate_record: CandidateRecord = existing.into_inner()?;
 					info!(
-						"duplicate candidate found: {}, parachain: {}",
+						"duplicate candidate found: {}; relay parent: {}, parachain: {}",
 						change_event.candidate_hash,
-						candidate_descriptor.parachain_id()
+						candidate_record.candidate_inclusion.relay_parent,
+						candidate_record.parachain_id()
 					);
 				} else {
 					// Find the relay parent
@@ -449,6 +450,11 @@ impl Collector {
 							)
 							.await
 							.unwrap();
+						self.state
+							.candidates_seen
+							.entry(change_event.parachain_id)
+							.or_default()
+							.push(change_event.candidate_hash);
 						self.to_websocket.as_ref().map(|to_websocket| {
 							to_websocket
 								.send(WebSocketUpdateEvent {
@@ -495,6 +501,11 @@ impl Collector {
 							})
 							.unwrap()
 					});
+					self.state
+						.candidates_seen
+						.entry(change_event.parachain_id)
+						.or_default()
+						.push(change_event.candidate_hash);
 					self.api_service
 						.storage()
 						.storage_replace_prefixed(
@@ -534,6 +545,11 @@ impl Collector {
 							})
 							.unwrap()
 					});
+					self.state
+						.candidates_seen
+						.entry(change_event.parachain_id)
+						.or_default()
+						.push(change_event.candidate_hash);
 					self.api_service
 						.storage()
 						.storage_replace_prefixed(
