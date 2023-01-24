@@ -159,15 +159,16 @@ impl ParachainCommander {
 		loop {
 			match from_collector.try_recv() {
 				Ok(update_event) => match update_event {
-					CollectorUpdateEvent::NewHead(new_head) => {
-						tracker.inject_block(new_head).await;
-						if let Some(progress) = tracker.progress(&self.metrics) {
-							if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-								println!("{}", progress);
+					CollectorUpdateEvent::NewHead(new_head) =>
+						for relay_fork in &new_head.relay_parent_hashes {
+							tracker.inject_block(*relay_fork, new_head.relay_parent_number).await;
+							if let Some(progress) = tracker.progress(&self.metrics) {
+								if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+									println!("{}", progress);
+								}
 							}
-						}
-						tracker.maybe_reset_state();
-					},
+							tracker.maybe_reset_state();
+						},
 					CollectorUpdateEvent::NewSession(idx) => {
 						tracker.new_session(idx).await;
 					},

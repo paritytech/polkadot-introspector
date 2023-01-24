@@ -79,6 +79,8 @@ pub struct ParachainProgressUpdate {
 	pub core_occupied: bool,
 	/// Consensus events happening for the para under a relay parent.
 	pub events: Vec<ParachainConsensusEvent>,
+	/// If we are in the fork chain, then this flag will be `true`
+	pub is_fork: bool,
 }
 
 /// Format the current block inherent timestamp.
@@ -94,12 +96,21 @@ fn format_ts(duration: Duration, current_block_ts: u64) -> String {
 
 impl Display for ParachainProgressUpdate {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		writeln!(
-			f,
-			"{} [#{}]",
-			format_ts(Duration::from_millis(self.timestamp.saturating_sub(self.prev_timestamp)), self.timestamp),
-			self.block_number
-		)?;
+		if self.is_fork {
+			writeln!(
+				f,
+				"{} [#{}, fork]",
+				format_ts(Duration::from_millis(self.timestamp.saturating_sub(self.prev_timestamp)), self.timestamp),
+				self.block_number
+			)?;
+		} else {
+			writeln!(
+				f,
+				"{} [#{}]",
+				format_ts(Duration::from_millis(self.timestamp.saturating_sub(self.prev_timestamp)), self.timestamp),
+				self.block_number
+			)?;
+		}
 		for event in &self.events {
 			event.fmt(f)?;
 		}

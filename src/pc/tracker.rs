@@ -25,7 +25,7 @@ use crate::core::{
 		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
 		RequestExecutor, ValidatorIndex,
 	},
-	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, NewHeadEvent},
+	collector::{CollectorPrefixType, CollectorStorageApi},
 	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 	SubxtDisputeResult, SubxtHrmpChannel,
 };
@@ -55,7 +55,11 @@ pub trait ParachainBlockTracker {
 
 	/// Injects a new relay chain block into the tracker.
 	/// Blocks must be injected in order.
-	async fn inject_block(&mut self, block_hash: Self::RelayChainNewHead) -> &Self::ParachainBlockInfo;
+	async fn inject_block(
+		&mut self,
+		block_hash: Self::RelayChainNewHead,
+		block_number: Self::RelayChainBlockNumber,
+	) -> &Self::ParachainBlockInfo;
 	/// Called when a new session is observed
 	async fn new_session(&mut self, new_session_index: u32);
 
@@ -181,58 +185,42 @@ enum ParachainBlockState {
 
 #[async_trait::async_trait]
 impl ParachainBlockTracker for SubxtTracker {
-	type RelayChainNewHead = NewHeadEvent;
+	type RelayChainNewHead = H256;
 	type RelayChainBlockNumber = BlockNumber;
 	type ParaInherentData = InherentData;
 	type ParachainBlockInfo = ParachainBlockInfo;
 	type ParachainProgressUpdate = ParachainProgressUpdate;
 	type DisputeOutcome = SubxtDisputeResult;
 
-	async fn inject_block(&mut self, update_event: Self::RelayChainNewHead) -> &Self::ParachainBlockInfo {
-		let mut candidates_info: Vec<CandidateRecord> = Vec::with_capacity(update_event.candidates_seen.len());
+	async fn inject_block(
+		&mut self,
+		block_hash: Self::RelayChainNewHead,
+		block_number: Self::RelayChainBlockNumber,
+	) -> &Self::ParachainBlockInfo {
+		let is_fork = block_number == self.current_relay_block.unwrap_or((0, H256::zero())).0;
+		let inherent_data = self
+			.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
+			.await;
 
-		for candidate_hash in update_event.candidates_seen {
-			if let Some(candidate_record_entry) = self
-				.api
-				.storage()
-				.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), candidate_hash)
-				.await
-			{
-				candidates_info.push(candidate_record_entry.into_inner().unwrap());
-			}
-		}
+		if let Some(inherent_data) = inherent_data {
+			let inherent: InherentData = inherent_data.into_inner().unwrap();
+			self.set_relay_block(block_number, block_hash);
 
-		// Include only those relay parents, for which we have at least one candidate event
-		for block_fork in update_event.relay_parent_hashes.iter().filter(|relay_hash| {
-			candidates_info
-				.iter()
-				.any(|candidate| candidate.candidate_inclusion.relay_parent == **relay_hash)
-		}) {
-			let inherent_data = self
-				.api
-				.storage()
-				.storage_read_prefixed(CollectorPrefixType::InherentData, *block_fork)
+			let inbound_hrmp_channels = self
+				.executor
+				.get_inbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
 				.await;
-
-			if let Some(inherent_data) = inherent_data {
-				let inherent: InherentData = inherent_data.into_inner().unwrap();
-				self.set_relay_block(update_event.relay_parent_number, *block_fork);
-
-				let inbound_hrmp_channels = self
-					.executor
-					.get_inbound_hrmp_channels(self.node_rpc_url.clone(), *block_fork, self.para_id)
-					.await;
-				let outbound_hrmp_channels = self
-					.executor
-					.get_outbound_hrmp_channels(self.node_rpc_url.clone(), *block_fork, self.para_id)
-					.await;
-				self.message_queues
-					.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
-				self.on_inherent_data(*block_fork, update_event.relay_parent_number, inherent)
-					.await;
-			} else {
-				error!("Failed to get inherent data for {:?}", *block_fork);
-			}
+			let outbound_hrmp_channels = self
+				.executor
+				.get_outbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
+				.await;
+			self.message_queues
+				.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
+			self.on_inherent_data(block_hash, block_number, inherent, is_fork).await;
+		} else {
+			error!("Failed to get inherent data for {:?}", block_hash);
 		}
 
 		&self.current_candidate
@@ -252,6 +240,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		}
 
 		let (relay_block_number, relay_block_hash) = self.current_relay_block.expect("Just checked above; qed");
+		let is_fork = relay_block_number == self.previous_relay_block.unwrap_or((0, H256::zero())).0;
 
 		self.update = Some(ParachainProgressUpdate {
 			para_id: self.para_id,
@@ -261,6 +250,7 @@ impl ParachainBlockTracker for SubxtTracker {
 				.unwrap_or_else(|| self.current_relay_block_ts.unwrap_or_default()),
 			block_number: relay_block_number,
 			block_hash: relay_block_hash,
+			is_fork,
 			..Default::default()
 		});
 
@@ -373,7 +363,13 @@ impl SubxtTracker {
 	}
 
 	// Parse inherent data and update state.
-	async fn on_inherent_data(&mut self, block_hash: H256, block_number: BlockNumber, data: InherentData) {
+	async fn on_inherent_data(
+		&mut self,
+		block_hash: H256,
+		block_number: BlockNumber,
+		data: InherentData,
+		is_fork: bool,
+	) {
 		let core_assignments = self.executor.get_scheduled_paras(self.node_rpc_url.clone(), block_hash).await;
 		let backed_candidates = data.backed_candidates;
 		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.clone(), block_hash).await;
@@ -385,7 +381,11 @@ impl SubxtTracker {
 			.collect::<Vec<AvailabilityBitfield>>();
 
 		self.current_candidate.bitfield_count = bitfields.len() as u32;
-		self.last_relay_block_ts = self.current_relay_block_ts;
+
+		if !is_fork {
+			self.last_relay_block_ts = self.current_relay_block_ts;
+		}
+
 		self.current_relay_block_ts = Some(
 			self.executor
 				.get_block_timestamp(self.node_rpc_url.clone(), Some(block_hash))
