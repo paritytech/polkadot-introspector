@@ -31,7 +31,7 @@ use crate::core::{
 };
 use codec::{Decode, Encode};
 use log::{debug, error};
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{collections::BTreeMap, default::Default, fmt::Debug};
 use subxt::ext::{
 	sp_core::{crypto::AccountId32, H256},
 	sp_runtime::traits::{BlakeTwo256, Hash},
@@ -82,6 +82,17 @@ pub struct DisputesTracker {
 	pub misbehaving_validators: Vec<(u32, String)>,
 	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
 	pub resolve_time: Option<u32>,
+}
+
+/// Used to track forks of the relay chain
+#[derive(Debug, Clone)]
+struct ForkTracker {
+	#[allow(dead_code)]
+	relay_hash: H256,
+	#[allow(dead_code)]
+	relay_number: u32,
+	backed_candidate: Option<H256>,
+	included_candidate: Option<H256>,
 }
 
 #[derive(Default)]
@@ -147,6 +158,8 @@ pub struct SubxtTracker {
 	stats: ParachainStats,
 	/// Parachain progress update.
 	update: Option<ParachainProgressUpdate>,
+	/// Current forks recorded
+	relay_forks: Vec<ForkTracker>,
 }
 
 /// The parachain block tracking information.
@@ -155,6 +168,8 @@ pub struct SubxtTracker {
 pub struct ParachainBlockInfo {
 	/// The candidate information as observed during backing
 	candidate: Option<BackedCandidate<H256>>,
+	/// Candidate hash
+	candidate_hash: Option<H256>,
 	/// The current state.
 	state: ParachainBlockState,
 	/// The number of signed bitfields.
@@ -270,10 +285,7 @@ impl ParachainBlockTracker for SubxtTracker {
 				metrics.on_skipped_slot(self.para_id);
 			},
 			ParachainBlockState::Backed =>
-				if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
-					let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
-					let candidate_hash =
-						BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
+				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
 					if let Some(update) = self.update.as_mut() {
 						update.events.push(ParachainConsensusEvent::Backed(candidate_hash));
 					}
@@ -345,6 +357,7 @@ impl SubxtTracker {
 			last_included_block: None,
 			message_queues: Default::default(),
 			update: None,
+			relay_forks: vec![],
 		}
 	}
 
@@ -384,7 +397,15 @@ impl SubxtTracker {
 
 		if !is_fork {
 			self.last_relay_block_ts = self.current_relay_block_ts;
+			self.relay_forks.clear();
 		}
+
+		self.relay_forks.push(ForkTracker {
+			relay_hash: block_hash,
+			relay_number: block_number,
+			included_candidate: None,
+			backed_candidate: None,
+		});
 
 		self.current_relay_block_ts = Some(
 			self.executor
@@ -406,12 +427,28 @@ impl SubxtTracker {
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
 		if candidate_backed {
+			if let Some(current_fork) = self.relay_forks.last_mut() {
+				current_fork.backed_candidate = Some(
+					self.current_candidate
+						.candidate_hash
+						.expect("checked in candidate_backed, qed."),
+				);
+			}
 			return
 		}
 
-		if self.current_candidate.candidate.is_none() {
+		if self.current_candidate.candidate.is_none() &&
+			self.relay_forks
+				.iter()
+				.all(|fork| fork.backed_candidate.is_none() && fork.included_candidate.is_none())
+		{
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
+			return
+		}
+
+		if self.current_candidate.state == ParachainBlockState::Included {
+			// Already included a candidate, the current block is likely a fork
 			return
 		}
 
@@ -429,7 +466,11 @@ impl SubxtTracker {
 		// Update the curent state if a candiate was backed for this para.
 		if let Some(index) = candidate_index {
 			self.current_candidate.state = ParachainBlockState::Backed;
-			self.current_candidate.candidate = Some(backed_candidates.remove(index));
+			let backed_candidate = backed_candidates.remove(index);
+			let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
+			self.current_candidate.candidate_hash =
+				Some(BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash)));
+			self.current_candidate.candidate = Some(backed_candidate);
 			self.last_backed_at = Some(block_number);
 
 			true
@@ -515,6 +556,8 @@ impl SubxtTracker {
 		// Check availability and update state accordingly.
 		if avail_bits > (all_bits.len() as u32 / 3) * 2 {
 			self.current_candidate.state = ParachainBlockState::Included;
+			self.relay_forks.last_mut().expect("must have relay fork").included_candidate =
+				Some(self.current_candidate.candidate_hash.expect("must have candidate"));
 		}
 	}
 
@@ -523,6 +566,7 @@ impl SubxtTracker {
 		if self.current_candidate.state == ParachainBlockState::Included {
 			self.current_candidate.state = ParachainBlockState::Idle;
 			self.current_candidate.candidate = None;
+			self.current_candidate.candidate_hash = None;
 		}
 		self.disputes.clear();
 		self.update = None;
@@ -574,9 +618,7 @@ impl SubxtTracker {
 
 		// TODO: Availability timeout.
 		if self.current_candidate.current_av_bits > (self.current_candidate.max_av_bits / 3) * 2 {
-			if let Some(backed_candidate) = self.current_candidate.candidate.as_ref() {
-				let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
-				let candidate_hash = BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash));
+			if let Some(candidate_hash) = self.current_candidate.candidate_hash {
 				if let Some(update) = self.update.as_mut() {
 					update.events.push(ParachainConsensusEvent::Included(
 						candidate_hash,

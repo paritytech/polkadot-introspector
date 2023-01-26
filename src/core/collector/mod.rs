@@ -409,6 +409,7 @@ impl Collector {
 					)
 					.await;
 				if let Some(existing) = maybe_existing {
+					// This can happen on forks easily
 					let candidate_record: CandidateRecord = existing.into_inner()?;
 					info!(
 						"duplicate candidate found: {}; relay parent: {}, parachain: {}",
@@ -467,9 +468,10 @@ impl Collector {
 						});
 					} else {
 						return Err(eyre!(
-							"no stored relay parent {} for candidate {}",
+							"no stored relay parent {} for candidate {}, parachain id: {}",
 							change_event.candidate_descriptor.relay_parent,
-							change_event.candidate_hash
+							change_event.candidate_hash,
+							change_event.parachain_id
 						))
 					}
 				}
@@ -515,7 +517,10 @@ impl Collector {
 						)
 						.await;
 				} else {
-					info!("unknown candidate {} has been included", change_event.candidate_hash);
+					info!(
+						"unknown candidate {} has been included, parachain: {}",
+						change_event.candidate_hash, change_event.parachain_id
+					);
 				}
 			},
 			SubxtCandidateEventType::TimedOut => {
@@ -559,7 +564,10 @@ impl Collector {
 						)
 						.await;
 				} else {
-					info!("unknown candidate {} has been timed out", change_event.candidate_hash);
+					info!(
+						"unknown candidate {} has been timed out, parachain: {}",
+						change_event.candidate_hash, change_event.parachain_id
+					);
 				}
 			},
 		}
