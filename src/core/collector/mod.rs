@@ -43,8 +43,8 @@ pub mod candidate_record;
 mod ws;
 
 use crate::core::{
-	ApiService, RecordTime, RecordsStorageConfig, StorageEntry, StorageInfo, SubxtCandidateEvent,
-	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
+	ApiService, RecordTime, RecordsStorageConfig, StorageEntry, SubxtCandidateEvent, SubxtCandidateEventType,
+	SubxtDispute, SubxtDisputeResult, SubxtEvent,
 };
 
 use candidate_record::*;
@@ -66,6 +66,8 @@ pub struct CollectorOptions {
 pub enum CollectorPrefixType {
 	/// Candidate prefixed by Parachain-Id
 	Candidate(u32),
+	/// A mapping to find out parachain id by candidate hash (e.g. when we don't know the parachain)
+	CandidatesParachains,
 	/// Relay chain block
 	Head,
 	/// Session data, keyed by session hash (blake2b(session_index))
@@ -303,6 +305,13 @@ impl Collector {
 			.await
 			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
 		let block_number = header.number;
+		info!(
+			"imported new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
+			block_hash,
+			block_number,
+			self.state.current_relay_chain_block_number,
+			self.state.current_relay_chain_block_hashes
+		);
 
 		match block_number.cmp(&self.state.current_relay_chain_block_number) {
 			Ordering::Greater => {
@@ -418,6 +427,22 @@ impl Collector {
 						candidate_record.parachain_id()
 					);
 				} else {
+					let now = get_unix_time_unwrap();
+					// Append to the all candidates
+					info!(
+						"stored candidate backed: {:?}, parachain: {}",
+						change_event.candidate_hash, change_event.parachain_id
+					);
+					storage
+						.storage_write_prefixed(
+							CollectorPrefixType::CandidatesParachains,
+							change_event.candidate_hash,
+							StorageEntry::new_onchain(
+								RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
+								change_event.parachain_id,
+							),
+						)
+						.await?;
 					// Find the relay parent
 					let maybe_relay_parent = storage
 						.storage_read_prefixed(
@@ -427,7 +452,6 @@ impl Collector {
 						.await;
 
 					if let Some(_relay_parent) = maybe_relay_parent {
-						let now = get_unix_time_unwrap();
 						let relay_block_number = self.state.current_relay_chain_block_number;
 						let candidate_inclusion = CandidateInclusionRecord {
 							relay_parent: change_event.candidate_descriptor.relay_parent,
@@ -468,7 +492,7 @@ impl Collector {
 						});
 					} else {
 						return Err(eyre!(
-							"no stored relay parent {} for candidate {}, parachain id: {}",
+							"no stored relay parent {:?} for candidate {:?}, parachain id: {}",
 							change_event.candidate_descriptor.relay_parent,
 							change_event.candidate_hash,
 							change_event.parachain_id
@@ -518,7 +542,7 @@ impl Collector {
 						.await;
 				} else {
 					info!(
-						"unknown candidate {} has been included, parachain: {}",
+						"unknown candidate {:?} has been included, parachain: {}",
 						change_event.candidate_hash, change_event.parachain_id
 					);
 				}
@@ -565,7 +589,7 @@ impl Collector {
 						.await;
 				} else {
 					info!(
-						"unknown candidate {} has been timed out, parachain: {}",
+						"unknown candidate {:?} has been timed out, parachain: {}",
 						change_event.candidate_hash, change_event.parachain_id
 					);
 				}
@@ -574,17 +598,28 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn process_dispute_initiated(&mut self, dispute_event: &SubxtDispute) -> color_eyre::Result<()> {
+	async fn find_candidate_by_hash(&self, candidate_hash: H256) -> Option<CandidateRecord> {
+		let para_id = self
+			.api_service
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::CandidatesParachains, candidate_hash)
+			.await?;
+		let para_id: u32 = para_id.into_inner().unwrap();
 		let candidate = self
 			.api_service
 			.storage()
-			.storage_read(dispute_event.candidate_hash)
+			.storage_read_prefixed(CollectorPrefixType::Candidate(para_id), candidate_hash)
+			.await?;
+		Some(candidate.into_inner().unwrap())
+	}
+
+	async fn process_dispute_initiated(&mut self, dispute_event: &SubxtDispute) -> color_eyre::Result<()> {
+		let mut candidate = self
+			.find_candidate_by_hash(dispute_event.candidate_hash)
 			.await
-			.ok_or_else(|| eyre!("unknown candidate disputed"))?;
+			.ok_or_else(|| eyre!("unknown candidate disputed: {:?}", dispute_event.candidate_hash))?;
 
 		let relay_block_number = self.state.current_relay_chain_block_number;
-		let record_time = candidate.time();
-		let mut candidate: CandidateRecord = candidate.into_inner()?;
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed { disputed: relay_block_number, concluded: None });
@@ -619,7 +654,10 @@ impl Collector {
 			.storage_write_prefixed(
 				CollectorPrefixType::Dispute(para_id),
 				dispute_event.candidate_hash,
-				StorageEntry::new_onchain(record_time, dispute_info),
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
+					dispute_info,
+				),
 			)
 			.await?;
 
@@ -629,7 +667,10 @@ impl Collector {
 			.storage_replace_prefixed(
 				CollectorPrefixType::Candidate(para_id),
 				dispute_event.candidate_hash,
-				StorageEntry::new_onchain(record_time, candidate),
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
+					candidate,
+				),
 			)
 			.await;
 
@@ -641,16 +682,13 @@ impl Collector {
 		dispute_event: &SubxtDispute,
 		dispute_outcome: &SubxtDisputeResult,
 	) -> color_eyre::Result<()> {
-		let candidate = self
-			.api_service
-			.storage()
-			.storage_read(dispute_event.candidate_hash)
+		let mut candidate = self
+			.find_candidate_by_hash(dispute_event.candidate_hash)
 			.await
-			.ok_or_else(|| eyre!("unknown candidate disputed"))?;
+			.ok_or_else(|| eyre!("unknown candidate dispute concluded: {:?}", dispute_event.candidate_hash))?;
 		// TODO: query endpoint for the votes + session keys like pc does
-		let record_time = RecordTime::from(self.state.current_relay_chain_block_number);
-		let mut candidate: CandidateRecord = candidate.into_inner()?;
 		let now = get_unix_time_unwrap();
+		let record_time = RecordTime::with_ts(self.state.current_relay_chain_block_number, now);
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed {
 			disputed: self.state.current_relay_chain_block_number,
