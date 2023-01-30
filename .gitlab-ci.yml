@@ -19,6 +19,7 @@ variables:
   CARGO_INCREMENTAL:               0
   CI_IMAGE:                        "paritytech/ci-linux:production"
   BUILDAH_IMAGE:                   "quay.io/buildah/stable:v1.27"
+  CARGO_TARGET_DIR:                "target"
 
 .publish-refs:                     &publish-refs
   rules:
