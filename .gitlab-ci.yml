@@ -19,7 +19,6 @@ variables:
   CARGO_INCREMENTAL:               0
   CI_IMAGE:                        "paritytech/ci-linux:production"
   BUILDAH_IMAGE:                   "quay.io/buildah/stable:v1.27"
-  CARGO_TARGET_DIR:                "target"
 
 .publish-refs:                     &publish-refs
   rules:
@@ -117,9 +116,9 @@ build:
     - mkdir ./artifacts/polkadot || echo "dir exists"
     - mkdir ./artifacts/rococo || echo "dir exists"
     - time cargo build --release --features=polkadot
-    - cp $CARGO_TARGET_DIR/release/polkadot-introspector ./artifacts/polkadot/
+    - cp target/release/polkadot-introspector ./artifacts/polkadot/
     - time cargo build --release --features=rococo
-    - cp $CARGO_TARGET_DIR/release/polkadot-introspector ./artifacts/rococo/
+    - cp target/release/polkadot-introspector ./artifacts/rococo/
 
 # test that image can be built
 build-docker:
