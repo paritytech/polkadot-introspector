@@ -447,14 +447,11 @@ impl SubxtTracker {
 			return
 		}
 
-		if self.current_candidate.state == ParachainBlockState::Included {
-			// Already included a candidate, the current block is likely a fork
-			return
-		}
-
-		// We only process availability if our parachain is assigned to an availability core.
-		if let Some(assigned_core) = self.current_candidate.assigned_core {
-			self.update_availability(assigned_core, bitfields, validator_groups);
+		if self.current_candidate.state == ParachainBlockState::Backed {
+			// We only process availability if our parachain is assigned to an availability core.
+			if let Some(assigned_core) = self.current_candidate.assigned_core {
+				self.update_availability(assigned_core, bitfields, validator_groups);
+			}
 		}
 	}
 
