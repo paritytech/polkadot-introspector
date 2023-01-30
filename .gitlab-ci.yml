@@ -17,7 +17,6 @@ variables:
   GIT_STRATEGY:                    fetch
   GIT_DEPTH:                       100
   CARGO_INCREMENTAL:               0
-  CARGO_TARGET_DIR:                "/ci-cache/${CI_PROJECT_NAME}/targets/${CI_COMMIT_REF_NAME}/${CI_JOB_NAME}"
   CI_IMAGE:                        "paritytech/ci-linux:production"
   BUILDAH_IMAGE:                   "quay.io/buildah/stable:v1.27"
 
@@ -39,28 +38,19 @@ variables:
   rules:
     - if: $CI_COMMIT_REF_NAME =~ /^[0-9]+$/                         # PRs
 
-.collect-artifacts:                &collect-artifacts
-  artifacts:
-    name:                          "${CI_JOB_NAME}_${CI_COMMIT_REF_NAME}"
-    when:                          on_success
-    expire_in:                     1 days
-    paths:
-      - artifacts/
-
 .rust-info-script:                 &rust-info-script
   - rustup show
   - cargo --version
   - rustup +nightly show
   - cargo +nightly --version
   - bash --version
-  - sccache -s
 
 .docker-env:                       &docker-env
   image:                           "${CI_IMAGE}"
   before_script:
     - *rust-info-script
   tags:
-    - linux-docker
+    - linux-docker-vm-c2
 
 .kubernetes-env:                   &kubernetes-env
   image:                           "${CI_IMAGE}"
@@ -125,7 +115,6 @@ build:
     - mkdir ./artifacts || echo "dir exists"
     - mkdir ./artifacts/polkadot || echo "dir exists"
     - mkdir ./artifacts/rococo || echo "dir exists"
-
     - time cargo build --release --features=polkadot
     - cp $CARGO_TARGET_DIR/release/polkadot-introspector ./artifacts/polkadot/
     - time cargo build --release --features=rococo
