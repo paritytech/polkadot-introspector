@@ -323,18 +323,21 @@ async fn decode_or_send_raw_event(
 	} else if is_specific_event::<CandidateBacked>(&event) {
 		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
 		SubxtEvent::CandidateChanged(Box::new(create_candidate_event(
+			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			SubxtCandidateEventType::Backed,
 		)))
 	} else if is_specific_event::<CandidateIncluded>(&event) {
 		let decoded = decode_to_specific_event::<CandidateIncluded>(&event)?;
 		SubxtEvent::CandidateChanged(Box::new(create_candidate_event(
+			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			SubxtCandidateEventType::Included,
 		)))
 	} else if is_specific_event::<CandidateTimedOut>(&event) {
 		let decoded = decode_to_specific_event::<CandidateTimedOut>(&event)?;
 		SubxtEvent::CandidateChanged(Box::new(create_candidate_event(
+			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			SubxtCandidateEventType::TimedOut,
 		)))
@@ -377,10 +380,11 @@ fn decode_to_specific_event<E: subxt::events::StaticEvent>(
 }
 
 fn create_candidate_event(
+	commitments_hash: <PolkadotConfig as subxt::Config>::Hash,
 	candidate_descriptor: CandidateDescriptor<<PolkadotConfig as subxt::Config>::Hash>,
 	event_type: SubxtCandidateEventType,
 ) -> SubxtCandidateEvent {
-	let candidate_hash = BlakeTwo256::hash_of(&candidate_descriptor);
+	let candidate_hash = BlakeTwo256::hash_of(&(&candidate_descriptor, commitments_hash));
 	let parachain_id = candidate_descriptor.para_id.0;
 	SubxtCandidateEvent { event_type, candidate_descriptor, parachain_id, candidate_hash }
 }
