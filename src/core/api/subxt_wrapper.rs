@@ -482,6 +482,7 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 				Ok(response) => response,
 				Err(Error::SubxtError(err)) => {
 					error!("subxt call error: {:?}, request: {:?}", err, request.request_type);
+					// TODO: this is not true for the unfinalized subscription mode and must be fixed via total rework!
 					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;

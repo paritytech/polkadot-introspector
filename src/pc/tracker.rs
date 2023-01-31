@@ -25,7 +25,7 @@ use crate::core::{
 		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
 		RequestExecutor, ValidatorIndex,
 	},
-	collector::{CollectorPrefixType, CollectorStorageApi},
+	collector::{CollectorPrefixType, CollectorStorageApi, DisputeInfo},
 	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 	SubxtDisputeResult, SubxtHrmpChannel,
 };
@@ -491,42 +491,56 @@ impl SubxtTracker {
 	async fn update_disputes(&mut self, disputes: &[DisputeStatementSet]) {
 		self.disputes = Vec::with_capacity(disputes.len());
 		for dispute_info in disputes {
-			let session_index = dispute_info.session;
-			let session_info = self.get_session_keys(session_index).await;
-			// TODO: we would like to distinguish different dispute phases at some point
-			let voted_for = dispute_info
-				.statements
-				.iter()
-				.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
-				.count() as u32;
-			let voted_against = dispute_info.statements.len() as u32 - voted_for;
-
-			let outcome =
-				if voted_for > voted_against { SubxtDisputeResult::Valid } else { SubxtDisputeResult::Invalid };
-
-			let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
-				dispute_info
-					.statements
-					.iter()
-					.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
-					.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
-					.collect()
-			} else {
-				dispute_info
+			let stored_dispute = self
+				.api
+				.storage()
+				.storage_read_prefixed(CollectorPrefixType::Dispute(self.para_id), dispute_info.candidate_hash.0)
+				.await;
+			if let Some(stored_dispute) = stored_dispute.map(|entry| -> DisputeInfo { entry.into_inner().unwrap() }) {
+				let session_index = dispute_info.session;
+				let session_info = self.get_session_keys(session_index).await;
+				// TODO: we would like to distinguish different dispute phases at some point
+				let voted_for = dispute_info
 					.statements
 					.iter()
 					.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
-					.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
-					.collect()
-			};
-			self.disputes.push(DisputesTracker {
-				candidate: dispute_info.candidate_hash.0,
-				voted_for,
-				voted_against,
-				outcome,
-				misbehaving_validators,
-				resolve_time: None,
-			});
+					.count() as u32;
+				let voted_against = dispute_info.statements.len() as u32 - voted_for;
+
+				let outcome = stored_dispute.outcome.expect("disputes must be resolved before tracking");
+
+				let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
+					dispute_info
+						.statements
+						.iter()
+						.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
+						.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
+						.collect()
+				} else {
+					dispute_info
+						.statements
+						.iter()
+						.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+						.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
+						.collect()
+				};
+				self.disputes.push(DisputesTracker {
+					candidate: dispute_info.candidate_hash.0,
+					voted_for,
+					voted_against,
+					outcome,
+					misbehaving_validators,
+					resolve_time: Some(
+						stored_dispute
+							.concluded
+							.expect("dispute must be concluded")
+							.saturating_sub(stored_dispute.initiated),
+					),
+				});
+			} else {
+				// Not relevant dispute
+				continue
+			}
 		}
 	}
 
