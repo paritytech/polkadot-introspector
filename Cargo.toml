@@ -12,7 +12,7 @@ codec = { package = "parity-scale-codec", version = "3.2.1", default-features = 
 subxt = { git = "https://github.com/paritytech/subxt", rev = "v0.25.0" }
 tokio = { version = "1.25.0", features = ["macros", "rt-multi-thread", "signal"] }
 typed-builder = "0.12.0"
-futures = "0.3.25"
+futures = "0.3.26"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
 warp = { version = "0.3.3", features = ["tls"] }
 reqwest = { version = "0.11.14" }
