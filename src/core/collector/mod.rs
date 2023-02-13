@@ -70,8 +70,8 @@ pub enum CollectorPrefixType {
 	CandidatesParachains,
 	/// Relay chain block
 	Head,
-	/// Session data, keyed by session hash (blake2b(session_index))
-	Session,
+	/// Validators account keys keyed by session index hash (blake2b(session_index))
+	AccountKeys,
 	/// Inherent data (more expensive to store, so good to have it shared)
 	InherentData,
 	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
@@ -114,11 +114,11 @@ pub struct NewHeadEvent {
 	pub relay_parent_number: <PolkadotConfig as subxt::Config>::BlockNumber,
 	/// Relay parent block hash (or hashes in case of the forks)
 	pub relay_parent_hashes: Vec<H256>,
-	/// The target parachain id (used for broadcasting events)
+	/// The parachain id (used for broadcasting events)
 	pub para_id: u32,
-	/// Candidates seen for this relay chain block that belong to the target parachain
+	/// Candidates seen for this relay chain block that belong to the specific `para_id`
 	pub candidates_seen: Vec<H256>,
-	/// Disputes concluded in these blocks
+	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
 }
 
@@ -146,7 +146,7 @@ pub struct Collector {
 impl Collector {
 	pub fn new(endpoint: &str, opts: CollectorOptions) -> Self {
 		let api_service: CollectorStorageApi =
-			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(1000) });
+			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) });
 		let ws_listener = if let Some(listen_addr) = opts.listen_addr {
 			let ws_listener_config = WebSocketListenerConfig::builder().listen_addr(listen_addr).build();
 			let ws_listener = WebSocketListener::new(ws_listener_config, api_service.clone());
@@ -343,7 +343,7 @@ impl Collector {
 		let maybe_existing_session = self
 			.api_service
 			.storage()
-			.storage_read_prefixed(CollectorPrefixType::Session, cur_session_hash)
+			.storage_read_prefixed(CollectorPrefixType::AccountKeys, cur_session_hash)
 			.await;
 		if maybe_existing_session.is_none() {
 			// New session, need to store it's data
@@ -355,7 +355,7 @@ impl Collector {
 			self.api_service
 				.storage()
 				.storage_write_prefixed(
-					CollectorPrefixType::Session,
+					CollectorPrefixType::AccountKeys,
 					cur_session_hash,
 					StorageEntry::new_persistent(
 						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
@@ -371,7 +371,7 @@ impl Collector {
 				let _ = self
 					.api_service
 					.storage()
-					.storage_delete_prefixed(CollectorPrefixType::Session, prev_session_hash)
+					.storage_delete_prefixed(CollectorPrefixType::AccountKeys, prev_session_hash)
 					.await;
 			}
 		}

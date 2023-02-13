@@ -370,7 +370,7 @@ impl SubxtTracker {
 		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
 		self.api
 			.storage()
-			.storage_read_prefixed(CollectorPrefixType::Session, session_hash)
+			.storage_read_prefixed(CollectorPrefixType::AccountKeys, session_hash)
 			.await
 			.map(|session_entry| session_entry.into_inner().unwrap())
 	}
