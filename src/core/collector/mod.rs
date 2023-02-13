@@ -68,8 +68,8 @@ pub enum CollectorPrefixType {
 	Candidate(u32),
 	/// A mapping to find out parachain id by candidate hash (e.g. when we don't know the parachain)
 	CandidatesParachains,
-	/// Relay chain block
-	Head,
+	/// Relay chain block header
+	RelayBlockHeader,
 	/// Validators account keys keyed by session index hash (blake2b(session_index))
 	AccountKeys,
 	/// Inherent data (more expensive to store, so good to have it shared)
@@ -332,7 +332,7 @@ impl Collector {
 		self.api_service
 			.storage()
 			.storage_write_prefixed(
-				CollectorPrefixType::Head,
+				CollectorPrefixType::RelayBlockHeader,
 				block_hash,
 				StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), header),
 			)
@@ -446,7 +446,7 @@ impl Collector {
 					// Find the relay parent
 					let maybe_relay_parent = storage
 						.storage_read_prefixed(
-							CollectorPrefixType::Head,
+							CollectorPrefixType::RelayBlockHeader,
 							change_event.candidate_descriptor.relay_parent,
 						)
 						.await;
