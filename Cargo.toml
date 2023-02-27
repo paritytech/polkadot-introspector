@@ -34,7 +34,7 @@ hex = "0.4.3"
 itertools = "0.10.5"
 snap = "1.1.0"
 rand = "0.8.5"
-time = { version = "0.3.19", features = ["formatting"] }
+time = { version = "0.3.20", features = ["formatting"] }
 
 [features]
 #default = ["versi"]
