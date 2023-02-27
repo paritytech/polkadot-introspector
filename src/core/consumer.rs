@@ -17,7 +17,7 @@
 //! Event consumer traits and types. Abstracts on-chain/off-chain event streams and
 //! APIs for RPC nodes and internal storage.
 use async_trait::async_trait;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{broadcast::Sender as BroadcastSender, mpsc::Receiver};
 
 #[async_trait]
 pub trait EventStream {
@@ -25,7 +25,11 @@ pub trait EventStream {
 
 	fn create_consumer(&mut self) -> EventConsumerInit<Self::Event>;
 	/// Run the main event loop.
-	async fn run(self, tasks: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()>;
+	async fn run(
+		self,
+		tasks: Vec<tokio::task::JoinHandle<()>>,
+		shutdown_tx: BroadcastSender<()>,
+	) -> color_eyre::Result<()>;
 }
 
 #[derive(Debug)]

@@ -36,6 +36,8 @@ pub enum RequestType<K, P> {
 	WritePrefix(P, K, StorageEntry),
 	Read(K),
 	ReadPrefix(P, K),
+	Delete(K),
+	DeletePrefix(P, K),
 	Replace(K, StorageEntry),
 	ReplacePrefix(P, K, StorageEntry),
 	Size,
@@ -102,7 +104,7 @@ where
 	}
 
 	/// Replaces a value in storage at the specific prefix. Panics if API channel is gone.
-	pub async fn storage_replace_prefix(&self, prefix: P, key: K, value: StorageEntry) {
+	pub async fn storage_replace_prefixed(&self, prefix: P, key: K, value: StorageEntry) {
 		let request = Request { request_type: RequestType::ReplacePrefix(prefix, key, value), response_sender: None };
 		self.to_api.send(request).await.expect("Channel closed");
 	}
@@ -124,6 +126,32 @@ where
 	pub async fn storage_read_prefixed(&self, prefix: P, key: K) -> Option<StorageEntry> {
 		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
 		let request = Request { request_type: RequestType::ReadPrefix(prefix, key), response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::Read(Some(value))) => Some(value),
+			Ok(_) => None,
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
+
+	/// Delete a value from storage. Returns `None` if the key is not found.
+	pub async fn storage_delete(&self, key: K) -> Option<StorageEntry> {
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
+		let request = Request { request_type: RequestType::Delete(key), response_sender: Some(sender) };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::Read(Some(value))) => Some(value),
+			Ok(_) => None,
+			Err(err) => panic!("Storage API error {}", err),
+		}
+	}
+
+	/// Delete a value from storage at specific prefix. Returns `None` if the key is not found.
+	pub async fn storage_delete_prefixed(&self, prefix: P, key: K) -> Option<StorageEntry> {
+		let (sender, receiver) = oneshot::channel::<Response<K, P>>();
+		let request = Request { request_type: RequestType::DeletePrefix(prefix, key), response_sender: Some(sender) };
 		self.to_api.send(request).await.expect("Channel closed");
 
 		match receiver.await {
@@ -202,6 +230,13 @@ where
 					.send(Response::Read(the_storage.get(&key)))
 					.unwrap();
 			},
+			RequestType::Delete(key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::Read(the_storage.delete(&key)))
+					.unwrap();
+			},
 			RequestType::Write(key, value) => {
 				let res = the_storage.insert(key, value);
 
@@ -242,6 +277,9 @@ where
 			RequestType::ReadPrefix(_, _) => {
 				unimplemented!()
 			},
+			RequestType::DeletePrefix(_, _) => {
+				unimplemented!()
+			},
 			RequestType::ReplacePrefix(_, _, _) => {
 				unimplemented!()
 			},
@@ -270,6 +308,13 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 					.response_sender
 					.expect("no sender provided")
 					.send(Response::Read(the_storage.get(&key)))
+					.unwrap();
+			},
+			RequestType::Delete(key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::Read(the_storage.delete(&key)))
 					.unwrap();
 			},
 			RequestType::Write(key, value) => {
@@ -334,8 +379,15 @@ pub(crate) async fn api_handler_task_prefixed<K, P>(
 					.send(Response::Read(the_storage.get_prefix(&prefix, &key)))
 					.unwrap();
 			},
+			RequestType::DeletePrefix(prefix, key) => {
+				request
+					.response_sender
+					.expect("no sender provided")
+					.send(Response::Read(the_storage.delete_prefix(&prefix, &key)))
+					.unwrap();
+			},
 			RequestType::ReplacePrefix(prefix, key, value) => {
-				let res = the_storage.replace_prefix(&prefix, &key, value);
+				let res = the_storage.replace_prefixed(&prefix, &key, value);
 
 				if let Some(sender) = request.response_sender {
 					sender.send(Response::Read(res)).unwrap();

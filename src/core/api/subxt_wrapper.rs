@@ -88,7 +88,48 @@ pub enum RequestType {
 // Required after subxt changes that removed Debug trait from the generated structures
 impl Debug for RequestType {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "Subxt request")
+		let description = match self {
+			RequestType::GetBlockTimestamp(h) => {
+				format!("get block timestamp: {:?}", h)
+			},
+			RequestType::GetHead(h) => {
+				format!("get head: {:?}", h)
+			},
+			RequestType::GetBlock(h) => {
+				format!("get block: {:?}", h)
+			},
+			RequestType::ExtractParaInherent(block) => {
+				format!("get inherent for block number: {:?}", block.header.number)
+			},
+			RequestType::GetScheduledParas(h) => {
+				format!("get scheduled paras: {:?}", h)
+			},
+			RequestType::GetOccupiedCores(h) => {
+				format!("get occupied cores: {:?}", h)
+			},
+			RequestType::GetBackingGroups(h) => {
+				format!("get backing groups: {:?}", h)
+			},
+			RequestType::GetSessionIndex(h) => {
+				format!("get session index: {:?}", h)
+			},
+			RequestType::GetSessionInfo(id) => {
+				format!("get session info: {:?}", id)
+			},
+			RequestType::GetSessionAccountKeys(id) => {
+				format!("get session account keys: {:?}", id)
+			},
+			RequestType::GetInboundHRMPChannels(h, para_id) => {
+				format!("get inbound channels: {:?}; para id: {}", h, para_id)
+			},
+			RequestType::GetHRMPData(h, src, dst) => {
+				format!("get hrmp content: {:?}; src: {}; dst: {}", h, src, dst)
+			},
+			RequestType::GetOutboundHRMPChannels(h, para_id) => {
+				format!("get outbount channels: {:?}; para id: {}", h, para_id)
+			},
+		};
+		write!(f, "Subxt request: {}", description)
 	}
 }
 
@@ -440,7 +481,8 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 			let response = match result {
 				Ok(response) => response,
 				Err(Error::SubxtError(err)) => {
-					error!("subxt call error: {:?}", err);
+					error!("subxt call error: {:?}, request: {:?}", err, request.request_type);
+					// TODO: this is not true for the unfinalized subscription mode and must be fixed via total rework!
 					// Always retry for subxt errors (most of them are transient).
 					let _ = connection_pool.remove(&request.url);
 					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;

@@ -18,14 +18,13 @@ use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use futures::future;
 use log::{error, LevelFilter};
+use tokio::{signal, sync::broadcast};
 
 use block_time::BlockTimeOptions;
-use collector::CollectorOptions;
 use jaeger::JaegerOptions;
 use pc::ParachainCommanderOptions;
 
 mod block_time;
-mod collector;
 mod core;
 mod jaeger;
 mod kvdb;
@@ -38,8 +37,6 @@ use crate::{core::EventStream, kvdb::KvdbOptions};
 enum Command {
 	/// Observe block times using an RPC node
 	BlockTimeMonitor(BlockTimeOptions),
-	/// Run in the collector mode
-	Collector(CollectorOptions),
 	/// Examine jaeger traces
 	Jaeger(JaegerOptions),
 	/// Examine key-value database for both relay chain and parachains
@@ -77,21 +74,20 @@ async fn main() -> color_eyre::Result<()> {
 		.try_init()?;
 
 	match opts.command {
-		Command::Collector(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone(), opts.subscribe_mode);
-			let collector_consumer_init = core.create_consumer();
-
-			match collector::run(opts, collector_consumer_init).await {
-				Ok(futures) => core.run(futures).await?,
-				Err(err) => error!("FATAL: cannot start collector: {}", err),
-			}
-		},
 		Command::BlockTimeMonitor(opts) => {
 			let mut core = core::SubxtWrapper::new(opts.nodes.clone(), opts.subscribe_mode);
 			let block_time_consumer_init = core.create_consumer();
+			let (shutdown_tx, _) = broadcast::channel(1);
 
 			match block_time::BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
-				Ok(futures) => core.run(futures).await?,
+				Ok(mut futures) => {
+					let shutdown_tx_cpy = shutdown_tx.clone();
+					futures.push(tokio::spawn(async move {
+						signal::ctrl_c().await.unwrap();
+						let _ = shutdown_tx_cpy.send(());
+					}));
+					core.run(futures, shutdown_tx.clone()).await?
+				},
 				Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
 			}
 		},
@@ -116,9 +112,17 @@ async fn main() -> color_eyre::Result<()> {
 		Command::ParachainCommander(opts) => {
 			let mut core = core::SubxtWrapper::new(vec![opts.node.clone()], opts.subscribe_mode);
 			let consumer_init = core.create_consumer();
+			let (shutdown_tx, _) = broadcast::channel(1);
 
-			match pc::ParachainCommander::new(opts, consumer_init)?.run().await {
-				Ok(futures) => core.run(futures).await?,
+			match pc::ParachainCommander::new(opts, consumer_init)?.run(&shutdown_tx).await {
+				Ok(mut futures) => {
+					let shutdown_tx_cpy = shutdown_tx.clone();
+					futures.push(tokio::spawn(async move {
+						signal::ctrl_c().await.unwrap();
+						let _ = shutdown_tx_cpy.send(());
+					}));
+					core.run(futures, shutdown_tx.clone()).await?
+				},
 				Err(err) => error!("FATAL: cannot start parachain commander: {}", err),
 			}
 		},

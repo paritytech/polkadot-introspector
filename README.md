@@ -29,30 +29,9 @@ Use the output file to replace the older in the `assets` folder then rebuild.
 
 ## Tools available
 
-* [Collector tool](#collector-tool) - observe and monitor runtime events via subxt
 * [Block time monitor](#block-time-monitor) - display the current block time in the substrate based network
 * [KVDB tool](#kvdb-introspection-tool) - inspect key-value database used by parachains or the relay chain
 * [Parachain commander](#parachain-commander) - Parachain progress monitoring and debugging utility
-
-### Collector tool
-
-In the collector mode, introspector connects to one or multiple (WIP) polkadot validators to observe
-runtime events. The primary goal of this mode is to provide a backend for parachain candidates introspection including the following:
-
-* Candidates baking and inclusion time
-* Possible disputes and outcomes
-* Link to the relay chain
-* (WIP) Availability distribution
-* (WIP) Approval votes
-
-```
-cargo run --features="polkadot" --release -- \
-    -vvv collector --url wss://rpc.polkadot.io:443 \
-    --listen 127.0.0.1:3030
-```
-
-The collector provides both websocket API for subscription to the runtime events filtered and the
-historical data API to obtain and query the existing state.
 
 ### Parachain commander
 A parachain progress monitor and debugger which uses `on-chain` data to trace parachain candidates during backing and inclusion.

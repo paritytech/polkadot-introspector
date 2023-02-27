@@ -35,13 +35,15 @@ use std::{
 
 pub type BlockNumber = u32;
 
-/// A type to identify the data source.
+/// A type to identify the record type
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-pub enum RecordSource {
+pub enum RecordType {
 	/// For onchain data.
 	Onchain,
 	/// For offchain data.
 	Offchain,
+	/// For persistent data (not pruned automatically)
+	Persistent,
 }
 
 /// A type to represent record timing information.
@@ -68,8 +70,8 @@ impl RecordTime {
 /// An generic storage entry representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageEntry {
-	/// The source of the data.
-	record_source: RecordSource,
+	/// The type of the data.
+	record_type: RecordType,
 	/// Time index when data was recorded.
 	/// All entries will have a block number. For offchain data, this is estimated based on the
 	/// timestamp, or otherwise it needs to be set to the latest known block.
@@ -81,12 +83,17 @@ pub struct StorageEntry {
 impl StorageEntry {
 	/// Creates a new storage entry for onchain data.
 	pub fn new_onchain<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
-		StorageEntry { record_source: RecordSource::Onchain, record_time, data: data.encode() }
+		StorageEntry { record_type: RecordType::Onchain, record_time, data: data.encode() }
 	}
 
 	/// Creates a new storage entry for onchain data.
 	pub fn new_offchain<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
-		StorageEntry { record_source: RecordSource::Offchain, record_time, data: data.encode() }
+		StorageEntry { record_type: RecordType::Offchain, record_time, data: data.encode() }
+	}
+
+	/// Creates a new persistent storage entry
+	pub fn new_persistent<T: Encode>(record_time: RecordTime, data: T) -> StorageEntry {
+		StorageEntry { record_type: RecordType::Persistent, record_time, data: data.encode() }
 	}
 
 	/// Converts a storage entry into it's original type by decoding from scale codec
@@ -97,16 +104,16 @@ impl StorageEntry {
 
 /// A required trait to implement for storing records.
 pub trait StorageInfo {
-	/// Returns the source of the data.
-	fn source(&self) -> RecordSource;
+	/// Returns the type of the data.
+	fn record_type(&self) -> RecordType;
 	/// Returns the time when the data was recorded.
 	fn time(&self) -> RecordTime;
 }
 
 impl StorageInfo for StorageEntry {
 	/// Returns the source of the data.
-	fn source(&self) -> RecordSource {
-		self.record_source
+	fn record_type(&self) -> RecordType {
+		self.record_type
 	}
 	/// Returns the time when the data was recorded.
 	fn time(&self) -> RecordTime {
@@ -151,6 +158,10 @@ pub trait RecordsStorage<K> {
 	fn get<Q: ?Sized + Hash + Eq>(&self, key: &Q) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>;
+	/// Delete a value with a specific key (this method copies returns a copy of the deleted element if found)
+	fn delete<Q: ?Sized + Hash + Eq>(&mut self, key: &Q) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>;
 	/// Size of the storage
 	fn len(&self) -> usize;
 	/// Returns all keys in the storage
@@ -188,12 +199,15 @@ where
 		}
 		let block_number = entry.time().block_number();
 		self.last_block = Some(block_number);
+		let is_persistent = entry.record_type == RecordType::Persistent;
 		self.direct_records.insert(key.clone(), entry);
 
-		self.ephemeral_records
-			.entry(block_number)
-			.or_insert_with(Default::default)
-			.insert(key);
+		if !is_persistent {
+			self.ephemeral_records
+				.entry(block_number)
+				.or_insert_with(Default::default)
+				.insert(key);
+		}
 
 		self.prune();
 		Ok(())
@@ -238,6 +252,13 @@ where
 		self.direct_records.get(key).cloned()
 	}
 
+	fn delete<Q: ?Sized + Hash + Eq>(&mut self, key: &Q) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+	{
+		self.direct_records.remove(key)
+	}
+
 	fn len(&self) -> usize {
 		self.direct_records.len()
 	}
@@ -256,7 +277,7 @@ pub trait PrefixedRecordsStorage<K, P> {
 	fn insert_prefix(&mut self, prefix: P, key: K, entry: StorageEntry) -> color_eyre::Result<()>;
 	/// Replaces a prefixed entry in the storage, both prefix and a key must exist,
 	/// returns the old entry on success and None on error
-	fn replace_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+	fn replace_prefixed<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
 		&mut self,
 		prefix: &PQ,
 		key: &Q,
@@ -267,6 +288,15 @@ pub trait PrefixedRecordsStorage<K, P> {
 		P: Borrow<PQ>;
 	/// Get a key using specific prefix along with the key
 	fn get_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ, key: &Q) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+		P: Borrow<PQ>;
+	/// Remove a key using specific prefix along with the key
+	fn delete_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+		&mut self,
+		prefix: &PQ,
+		key: &Q,
+	) -> Option<StorageEntry>
 	where
 		K: Borrow<Q>,
 		P: Borrow<PQ>;
@@ -356,6 +386,19 @@ where
 			.find_map(|(_, direct_map)| direct_map.get(key).cloned())
 	}
 
+	fn delete<Q: ?Sized + Hash + Eq>(&mut self, key: &Q) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+	{
+		for (_, direct_map) in self.prefixed_records.iter_mut() {
+			if direct_map.contains_key(key) {
+				return direct_map.remove(key)
+			}
+		}
+
+		None
+	}
+
 	fn len(&self) -> usize {
 		self.prefixed_records.values().map(|direct_map| direct_map.len()).sum()
 	}
@@ -392,7 +435,7 @@ where
 		Ok(())
 	}
 
-	fn replace_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+	fn replace_prefixed<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
 		&mut self,
 		prefix: &PQ,
 		key: &Q,
@@ -423,6 +466,22 @@ where
 		None
 	}
 
+	fn delete_prefix<Q: ?Sized + Hash + Eq, PQ: ?Sized + Hash + Eq>(
+		&mut self,
+		prefix: &PQ,
+		key: &Q,
+	) -> Option<StorageEntry>
+	where
+		K: Borrow<Q>,
+		P: Borrow<PQ>,
+	{
+		if let Some(direct_storage) = self.prefixed_records.get_mut(prefix) {
+			return direct_storage.remove(key)
+		}
+
+		None
+	}
+
 	fn prefixed_keys<PQ: ?Sized + Hash + Eq>(&self, prefix: &PQ) -> Vec<K>
 	where
 		P: Borrow<PQ>,
@@ -445,8 +504,8 @@ mod tests {
 
 	impl StorageInfo for u32 {
 		/// Returns the source of the data.
-		fn source(&self) -> RecordSource {
-			RecordSource::Onchain
+		fn record_type(&self) -> RecordType {
+			RecordType::Onchain
 		}
 
 		/// Returns the time when the data was recorded.
@@ -465,11 +524,11 @@ mod tests {
 			.unwrap();
 
 		let a = st.get("key1").unwrap();
-		assert_eq!(a.record_source, RecordSource::Onchain);
+		assert_eq!(a.record_type, RecordType::Onchain);
 		assert_eq!(a.into_inner::<u32>().unwrap(), 1);
 
 		let b = st.get("key100").unwrap();
-		assert_eq!(b.record_source, RecordSource::Offchain);
+		assert_eq!(b.record_type, RecordType::Offchain);
 		assert_eq!(b.into_inner::<u32>().unwrap(), 2);
 		assert_eq!(st.get("key2"), None);
 
@@ -480,6 +539,22 @@ mod tests {
 
 		assert_eq!(st.get("key1"), None);
 		assert_eq!(st.get("key100"), None);
+
+		// This insert prunes prev entries at block #100
+		st.insert("key3".to_owned(), StorageEntry::new_persistent(200.into(), 100_u32))
+			.unwrap();
+		assert_eq!(st.get("key3").unwrap().into_inner::<u32>().unwrap(), 100);
+		// Persistent record do not invalidate normal ones
+		assert_eq!(st.get("key2").unwrap().into_inner::<u32>().unwrap(), 100);
+		st.insert("key4".to_owned(), StorageEntry::new_onchain(300.into(), 100_u32))
+			.unwrap();
+		st.insert("key5".to_owned(), StorageEntry::new_onchain(400.into(), 100_u32))
+			.unwrap();
+		// Persistent key must persist, non-persistent should be wiped
+		assert_eq!(st.get("key2"), None);
+		assert_eq!(st.get("key3").unwrap().into_inner::<u32>().unwrap(), 100);
+		assert_eq!(st.delete("key3").unwrap().into_inner::<u32>().unwrap(), 100);
+		assert_eq!(st.get("key3"), None);
 	}
 
 	#[test]
