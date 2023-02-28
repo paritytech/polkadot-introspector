@@ -24,7 +24,7 @@ use serde_bytes::Bytes;
 use crate::core::SubxtDisputeResult;
 use codec::{Decode, Encode};
 use std::{hash::Hash, time::Duration};
-use subxt::ext::sp_core::H256;
+use subxt::utils::H256;
 
 /// Tracks candidate inclusion as seen by a node(s)
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]

@@ -32,9 +32,9 @@ use crate::core::{
 use codec::{Decode, Encode};
 use log::{debug, error};
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
-use subxt::ext::{
-	sp_core::{crypto::AccountId32, H256},
-	sp_runtime::traits::{BlakeTwo256, Hash},
+use subxt::{
+	config::{substrate::BlakeTwo256, Hasher},
+	utils::{AccountId32, H256},
 };
 
 /// An abstract definition of a parachain block tracker.
@@ -553,7 +553,11 @@ impl SubxtTracker {
 		let avail_bits: u32 = bitfields
 			.iter()
 			.map(|bitfield| {
-				let bit = bitfield.0[core as usize];
+				let bit = bitfield
+					.0
+					.as_bits()
+					.get(core as usize)
+					.expect("core index must be in the bitfield");
 				bit as u32
 			})
 			.sum();

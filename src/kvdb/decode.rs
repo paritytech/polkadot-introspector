@@ -28,7 +28,7 @@ use color_eyre::{eyre::eyre, Result};
 use erased_serde::{serialize_trait_object, Serialize};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
-use subxt::ext::sp_core::H256;
+use subxt::utils::H256;
 
 /// Decode result trait, used to display and format output of the decoder
 pub trait DecodeResult: Debug + Serialize + Display {}

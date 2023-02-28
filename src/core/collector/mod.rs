@@ -28,10 +28,8 @@ use std::{
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use subxt::{
-	ext::{
-		sp_core::{Hasher, H256},
-		sp_runtime::traits::BlakeTwo256,
-	},
+	config::{substrate::BlakeTwo256, Hasher},
+	utils::H256,
 	PolkadotConfig,
 };
 use tokio::sync::{
@@ -84,11 +82,11 @@ pub(crate) type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
 /// A structure used to track disputes progress
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct DisputeInfo {
-	pub initiated: <PolkadotConfig as subxt::Config>::BlockNumber,
+	pub initiated: <PolkadotConfig as subxt::Config>::Index,
 	pub dispute: SubxtDispute,
 	pub parachain_id: u32,
 	pub outcome: Option<SubxtDisputeResult>,
-	pub concluded: Option<<PolkadotConfig as subxt::Config>::BlockNumber>,
+	pub concluded: Option<<PolkadotConfig as subxt::Config>::Index>,
 }
 
 /// The current state of the collector, used to detect forks and track candidates
@@ -111,7 +109,7 @@ struct CollectorState {
 #[derive(Clone, Debug)]
 pub struct NewHeadEvent {
 	/// Relay parent block number
-	pub relay_parent_number: <PolkadotConfig as subxt::Config>::BlockNumber,
+	pub relay_parent_number: <PolkadotConfig as subxt::Config>::Index,
 	/// Relay parent block hash (or hashes in case of the forks)
 	pub relay_parent_hashes: Vec<H256>,
 	/// The parachain id (used for broadcasting events)
@@ -232,7 +230,7 @@ impl Collector {
 
 	fn update_state(
 		&mut self,
-		block_number: <PolkadotConfig as subxt::Config>::BlockNumber,
+		block_number: <PolkadotConfig as subxt::Config>::Index,
 		block_hash: H256,
 	) -> color_eyre::Result<()> {
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {

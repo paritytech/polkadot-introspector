@@ -30,7 +30,7 @@ use std::{
 	net::ToSocketAddrs,
 	sync::{Arc, Mutex},
 };
-use subxt::ext::sp_core::H256;
+use subxt::{config::Header, utils::H256};
 use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone, Debug, Parser)]

@@ -24,7 +24,7 @@ use std::{
 	fmt::{self, Display, Formatter},
 	time::Duration,
 };
-use subxt::ext::sp_core::H256;
+use subxt::utils::H256;
 
 #[derive(Clone, Default)]
 pub struct BitfieldsHealth {

@@ -339,7 +339,7 @@ where
 
 	// We cannot insert non prefixed key into a prefixed storage
 	fn insert(&mut self, key: K, _: StorageEntry) -> color_eyre::Result<()> {
-		return Err(eyre!("trying to insert key with no prefix to the prefixed storage: {:?}", key))
+		Err(eyre!("trying to insert key with no prefix to the prefixed storage: {:?}", key))
 	}
 
 	fn replace<Q: ?Sized + Hash + Eq>(&mut self, key: &Q, entry: StorageEntry) -> Option<StorageEntry>

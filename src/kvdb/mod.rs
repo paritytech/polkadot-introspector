@@ -120,11 +120,12 @@ pub(crate) enum KvdbMode {
 }
 
 /// Database type
-#[derive(Clone, Copy, Debug, Parser, EnumString, Display, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Parser, EnumString, Display, PartialEq, Eq, Default)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum KvdbType {
 	/// Automatically detect database type
 	#[strum(ascii_case_insensitive)]
+	#[default]
 	Auto,
 	#[strum(ascii_case_insensitive)]
 	/// RocksDB database
@@ -134,18 +135,13 @@ pub(crate) enum KvdbType {
 	ParityDB,
 }
 
-impl Default for KvdbType {
-	fn default() -> Self {
-		KvdbType::Auto
-	}
-}
-
 /// Output mode for the CLI commands
-#[derive(Clone, Debug, Parser, EnumString, Display)]
+#[derive(Clone, Debug, Parser, EnumString, Display, Default)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum OutputMode {
 	/// Human readable output
 	#[strum(ascii_case_insensitive)]
+	#[default]
 	Pretty,
 	/// Json output
 	#[strum(ascii_case_insensitive)]
@@ -155,17 +151,12 @@ pub(crate) enum OutputMode {
 	Bincode,
 }
 
-impl Default for OutputMode {
-	fn default() -> Self {
-		OutputMode::Pretty
-	}
-}
-
 /// Database type
-#[derive(Clone, Debug, Parser, EnumString, Display)]
+#[derive(Clone, Debug, Parser, EnumString, Display, Default)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum KvdbDumpMode {
 	#[strum(ascii_case_insensitive)]
+	#[default]
 	/// RocksDB database
 	RocksDB,
 	#[strum(ascii_case_insensitive)]
@@ -174,12 +165,6 @@ pub(crate) enum KvdbDumpMode {
 	/// Dump as new-line delimited JSON into files with a pattern `column_name.json`
 	#[strum(ascii_case_insensitive)]
 	Json,
-}
-
-impl Default for KvdbDumpMode {
-	fn default() -> Self {
-		KvdbDumpMode::RocksDB
-	}
 }
 
 #[derive(Clone, Debug, Parser)]

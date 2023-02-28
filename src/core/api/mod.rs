@@ -83,11 +83,10 @@ where
 mod tests {
 	use super::*;
 	use crate::core::*;
-	use subxt::ext::{
-		sp_core::H256,
-		sp_runtime::traits::{BlakeTwo256, Hash},
+	use subxt::{
+		config::{substrate::BlakeTwo256, Hasher, Header},
+		utils::H256,
 	};
-
 	#[cfg(feature = "polkadot")]
 	const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
 	#[cfg(feature = "rococo")]
