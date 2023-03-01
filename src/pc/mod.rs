@@ -46,7 +46,7 @@ pub(crate) mod prometheus;
 pub(crate) mod stats;
 pub(crate) mod tracker;
 
-use crate::core::collector::CollectorUpdateEvent;
+use crate::core::collector::{CollectorStorageApi, CollectorUpdateEvent};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use tracker::ParachainBlockTracker;
 
@@ -68,7 +68,7 @@ pub(crate) struct ParachainCommanderOptions {
 	pub node: String,
 	/// Parachain id.
 	#[clap(long)]
-	para_id: u32,
+	para_id: Vec<u32>,
 	/// Run for a number of blocks then stop.
 	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
@@ -82,31 +82,27 @@ pub(crate) struct ParachainCommanderOptions {
 	mode: Option<ParachainCommanderMode>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ParachainCommander {
 	opts: ParachainCommanderOptions,
 	node: String,
-	consumer_config: EventConsumerInit<SubxtEvent>,
-	collector: Collector,
 	metrics: Metrics,
 }
 
 impl ParachainCommander {
-	pub(crate) fn new(
-		mut opts: ParachainCommanderOptions,
-		consumer_config: EventConsumerInit<SubxtEvent>,
-	) -> color_eyre::Result<Self> {
+	pub(crate) fn new(mut opts: ParachainCommanderOptions) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let node = opts.node.clone();
-		let collector = Collector::new(node.as_str(), opts.collector_opts.clone());
 		opts.mode = opts.mode.or(Some(ParachainCommanderMode::Cli));
 
-		Ok(ParachainCommander { opts, node, consumer_config, collector, metrics: Default::default() })
+		Ok(ParachainCommander { opts, node, metrics: Default::default() })
 	}
 
 	/// Spawn the UI and subxt tasks and return their futures.
 	pub(crate) async fn run(
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
+		consumer_config: EventConsumerInit<SubxtEvent>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -114,29 +110,37 @@ impl ParachainCommander {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
-		self.collector.spawn(shutdown_tx).await?;
+		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone());
+		collector.spawn(shutdown_tx).await?;
 
-		let para_id = self.opts.para_id;
+		for para_id in self.opts.para_id.iter() {
+			let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
+			output_futures.push(tokio::spawn(ParachainCommander::watch_node(
+				self.clone(),
+				from_collector,
+				*para_id,
+				collector.api(),
+			)));
+		}
 
-		let from_collector = self.collector.subscribe_parachain_updates(para_id).await?;
-		output_futures.push(tokio::spawn(self.watch_node(from_collector)));
+		let consumer_channels: Vec<Receiver<SubxtEvent>> = consumer_config.into();
+		let collector_fut = collector.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap());
+		output_futures.push(collector_fut.await);
+
 		Ok(output_futures)
 	}
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node(self, mut from_collector: BroadcastReceiver<CollectorUpdateEvent>) {
-		let api_service = self.collector.api();
+	async fn watch_node(
+		self,
+		mut from_collector: BroadcastReceiver<CollectorUpdateEvent>,
+		para_id: u32,
+		api_service: CollectorStorageApi,
+	) {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
-		let para_id = self.opts.para_id;
 		let mut tracker = tracker::SubxtTracker::new(para_id, self.node.as_str(), executor, api_service);
-
-		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
-		let _collector_fut = self
-			.collector
-			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
-			.await;
 
 		println!(
 			"{} will trace parachain {} on {}",

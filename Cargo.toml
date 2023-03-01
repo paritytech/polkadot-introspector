@@ -38,7 +38,7 @@ rand = "0.8.5"
 time = { version = "0.3.20", features = ["formatting"] }
 
 [features]
-#default = ["versi"]
+default = ["versi"]
 rococo = []
 polkadot = []
 versi = []
