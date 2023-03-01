@@ -31,7 +31,7 @@ use std::{
 	str::FromStr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::ext::sp_core::H256;
+use subxt::utils::H256;
 use tokio::sync::broadcast::{Receiver, Sender};
 use typed_builder::TypedBuilder;
 use warp::{

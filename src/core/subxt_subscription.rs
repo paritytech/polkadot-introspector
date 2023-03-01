@@ -25,7 +25,7 @@ use serde::Serialize;
 use std::{future::Future, pin::Pin};
 use subxt::{
 	blocks::Block,
-	ext::sp_runtime::traits::{BlakeTwo256, Hash as CryptoHash},
+	config::{substrate::BlakeTwo256, Hasher},
 	Error, OnlineClient, PolkadotConfig,
 };
 use tokio::sync::{
@@ -81,18 +81,13 @@ pub enum SubxtDisputeResult {
 }
 
 /// How to subscribe to subxt blocks
-#[derive(strum::Display, Debug, Clone, Copy, clap::ValueEnum)]
+#[derive(strum::Display, Debug, Clone, Copy, clap::ValueEnum, Default)]
 pub enum SubxtSubscriptionMode {
 	/// Subscribe to the best chain
 	Best,
 	/// Subscribe to finalized blocks
+	#[default]
 	Finalized,
-}
-
-impl Default for SubxtSubscriptionMode {
-	fn default() -> Self {
-		SubxtSubscriptionMode::Finalized
-	}
 }
 
 /// A helper structure to keep track of a dispute and it's relay parent

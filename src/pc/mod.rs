@@ -50,19 +50,14 @@ use crate::core::collector::CollectorUpdateEvent;
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use tracker::ParachainBlockTracker;
 
-#[derive(Clone, Debug, Parser)]
+#[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum ParachainCommanderMode {
 	/// CLI chart mode.
+	#[default]
 	Cli,
 	/// Prometheus endpoint mode.
 	Prometheus(ParachainCommanderPrometheusOptions),
-}
-
-impl Default for ParachainCommanderMode {
-	fn default() -> Self {
-		ParachainCommanderMode::Cli
-	}
 }
 
 #[derive(Clone, Debug, Parser)]
