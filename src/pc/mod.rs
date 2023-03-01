@@ -34,6 +34,7 @@ use crate::core::{
 use clap::Parser;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use itertools::Itertools;
 use log::info;
 use std::{default::Default, time::Duration};
 use tokio::sync::{
@@ -113,6 +114,16 @@ impl ParachainCommander {
 		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone());
 		collector.spawn(shutdown_tx).await?;
 
+		println!(
+			"{} will trace parachain(s) {} on {}\n{}",
+			"Parachain Commander(TM)".to_string().purple(),
+			self.opts.para_id.iter().join(","),
+			&self.node,
+			"-----------------------------------------------------------------------"
+				.to_string()
+				.bold()
+		);
+
 		for para_id in self.opts.para_id.iter() {
 			let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
 			output_futures.push(tokio::spawn(ParachainCommander::watch_node(
@@ -141,19 +152,6 @@ impl ParachainCommander {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
 		let mut tracker = tracker::SubxtTracker::new(para_id, self.node.as_str(), executor, api_service);
-
-		println!(
-			"{} will trace parachain {} on {}",
-			"Parachain Commander(TM)".to_string().purple(),
-			para_id,
-			&self.node
-		);
-		println!(
-			"{}",
-			"-----------------------------------------------------------------------"
-				.to_string()
-				.bold()
-		);
 
 		loop {
 			match from_collector.try_recv() {
