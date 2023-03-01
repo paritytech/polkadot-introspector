@@ -135,8 +135,9 @@ impl ParachainCommander {
 		}
 
 		let consumer_channels: Vec<Receiver<SubxtEvent>> = consumer_config.into();
-		let collector_fut = collector.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap());
-		output_futures.push(collector_fut.await);
+		let _collector_fut = collector
+			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
+			.await;
 
 		Ok(output_futures)
 	}
