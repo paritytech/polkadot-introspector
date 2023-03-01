@@ -81,8 +81,8 @@ clippy:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo +nightly clippy --all-targets --features=polkadot -- -D warnings
-    - time cargo +nightly clippy --all-targets --features=rococo -- -D warnings
+    - time cargo +nightly clippy --no-default-features --all-targets --features=polkadot -- -D warnings
+    - time cargo +nightly clippy --no-default-features --all-targets --features=rococo -- -D warnings
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
@@ -91,8 +91,8 @@ check:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo +nightly check --all-targets --features=polkadot --workspace
-    - time cargo +nightly check --all-targets --features=rococo --workspace
+    - time cargo +nightly check --no-default-features --all-targets --features=polkadot --workspace
+    - time cargo +nightly check --no-default-features --all-targets --features=rococo --workspace
 
 #### stage:                       test
 
@@ -101,8 +101,8 @@ test:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo test --all-targets --features=polkadot --workspace
-    - time cargo test --all-targets --features=rococo --workspace
+    - time cargo test --all-targets --no-default-features --features=polkadot --workspace
+    - time cargo test --all-targets --no-default-features --features=rococo --workspace
 
 #### stage:                       build
 
@@ -115,9 +115,9 @@ build:
     - mkdir ./artifacts || echo "dir exists"
     - mkdir ./artifacts/polkadot || echo "dir exists"
     - mkdir ./artifacts/rococo || echo "dir exists"
-    - time cargo build --release --features=polkadot
+    - time cargo build --release --no-default-features --features=polkadot
     - cp target/release/polkadot-introspector ./artifacts/polkadot/
-    - time cargo build --release --features=rococo
+    - time cargo build --release --no-default-features --features=rococo
     - cp target/release/polkadot-introspector ./artifacts/rococo/
 
 # test that image can be built
