@@ -280,8 +280,8 @@ impl ParachainBlockTracker for SubxtTracker {
 			ParachainBlockState::Idle =>
 				if let Some(update) = self.update.as_mut() {
 					update.events.push(ParachainConsensusEvent::SkippedSlot);
-					self.stats.on_skipped_slot(&update);
-					metrics.on_skipped_slot(&update);
+					self.stats.on_skipped_slot(update);
+					metrics.on_skipped_slot(update);
 				},
 			ParachainBlockState::Backed =>
 				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
