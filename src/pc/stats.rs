@@ -121,7 +121,7 @@ pub struct ParachainStats {
 	/// was free.
 	skipped_slots: u32,
 	/// Last hashes of relay blocks for skipped slots
-	last_block_hashes_with_skipped_slots: Vec<H256>,
+	last_blocks_with_skipped_slots: Vec<(u32, H256)>,
 	/// Number of candidates included.
 	included_count: u32,
 	/// Disputes stats
@@ -141,7 +141,7 @@ pub struct ParachainStats {
 impl ParachainStats {
 	/// Returns a new tracker
 	pub fn new(para_id: u32) -> Self {
-		Self { para_id, last_block_hashes_with_skipped_slots: Vec::with_capacity(10), ..Default::default() }
+		Self { para_id, last_blocks_with_skipped_slots: Vec::with_capacity(10), ..Default::default() }
 	}
 
 	/// Update backed counter
@@ -200,11 +200,28 @@ impl ParachainStats {
 	pub fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate) {
 		self.skipped_slots += 1;
 
-		if self.last_block_hashes_with_skipped_slots.len() == self.last_block_hashes_with_skipped_slots.capacity() {
-			self.last_block_hashes_with_skipped_slots.rotate_left(1);
-			self.last_block_hashes_with_skipped_slots.pop();
+		let block = (update.block_number, update.block_hash);
+		if self.last_blocks_with_skipped_slots.len() < self.last_blocks_with_skipped_slots.capacity() {
+			self.last_blocks_with_skipped_slots.push(block)
+		} else {
+			let index = self.skipped_slots as usize % self.last_blocks_with_skipped_slots.capacity() - 1;
+			self.last_blocks_with_skipped_slots[index] = block;
 		}
-		self.last_block_hashes_with_skipped_slots.push(update.block_hash);
+	}
+
+	fn last_blocks_string(&self) -> String {
+		if self.last_blocks_with_skipped_slots.len() == 0 {
+			return String::from("-")
+		}
+
+		let mut blocks = self.last_blocks_with_skipped_slots.clone();
+		let index = self.skipped_slots as usize % self.last_blocks_with_skipped_slots.capacity();
+		blocks.rotate_left(index);
+
+		blocks
+			.iter()
+			.map(|h| format!("\n   {} {:?}", h.0, h.1).bright_purple().to_string())
+			.collect()
 	}
 }
 
@@ -230,7 +247,7 @@ impl Display for ParachainStats {
 			self.slow_avail_count.to_string().bright_cyan(),
 			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
-		writeln!(f, "Last blocks with skipped slots: {:?}", self.last_block_hashes_with_skipped_slots,)?;
+		writeln!(f, "Last blocks with skipped slots: {}", self.last_blocks_string())?;
 		writeln!(f, "Average bitfileds: {:.3}", self.bitfields.value())?;
 		writeln!(
 			f,
