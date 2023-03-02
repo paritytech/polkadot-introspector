@@ -19,12 +19,12 @@
 use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
-use subxt::utils::H256;
 use std::{
 	default::Default,
 	fmt::{self, Display, Formatter},
 	time::Duration,
 };
+use subxt::utils::H256;
 
 trait UsableNumber: PartialOrd + PartialEq + Into<f64> + Copy {
 	fn max() -> Self;
@@ -230,11 +230,7 @@ impl Display for ParachainStats {
 			self.slow_avail_count.to_string().bright_cyan(),
 			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
-		writeln!(
-			f,
-			"Last blocks with skipped slots: {:?}",
-			self.last_block_hashes_with_skipped_slots,
-		)?;
+		writeln!(f, "Last blocks with skipped slots: {:?}", self.last_block_hashes_with_skipped_slots,)?;
 		writeln!(f, "Average bitfileds: {:.3}", self.bitfields.value())?;
 		writeln!(
 			f,
