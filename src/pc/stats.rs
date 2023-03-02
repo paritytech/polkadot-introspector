@@ -210,7 +210,7 @@ impl ParachainStats {
 	}
 
 	fn last_blocks_string(&self) -> String {
-		if self.last_blocks_with_skipped_slots.len() == 0 {
+		if self.last_blocks_with_skipped_slots.is_empty() {
 			return String::from("-")
 		}
 
