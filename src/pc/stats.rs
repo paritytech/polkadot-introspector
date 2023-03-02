@@ -19,6 +19,7 @@
 use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use subxt::utils::H256;
 use std::{
 	default::Default,
 	fmt::{self, Display, Formatter},
@@ -120,7 +121,7 @@ pub struct ParachainStats {
 	/// was free.
 	skipped_slots: u32,
 	/// Last hashes of relay blocks for skipped slots
-	last_block_hashes_with_skipped_slots: Vec<u32>,
+	last_block_hashes_with_skipped_slots: Vec<H256>,
 	/// Number of candidates included.
 	included_count: u32,
 	/// Disputes stats
@@ -203,7 +204,7 @@ impl ParachainStats {
 			self.last_block_hashes_with_skipped_slots.rotate_left(1);
 			self.last_block_hashes_with_skipped_slots.pop();
 		}
-		self.last_block_hashes_with_skipped_slots.push(update.block_number);
+		self.last_block_hashes_with_skipped_slots.push(update.block_hash);
 	}
 }
 
