@@ -23,6 +23,8 @@ use prometheus_endpoint::{
 };
 use std::net::ToSocketAddrs;
 
+use super::progress::ParachainProgressUpdate;
+
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub struct ParachainCommanderPrometheusOptions {
@@ -111,9 +113,9 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_skipped_slot(&self, para_id: u32) {
+	pub(crate) fn on_skipped_slot(&self, update: &ParachainProgressUpdate) {
 		if let Some(metrics) = &self.0 {
-			metrics.skipped_slots.with_label_values(&[&para_id.to_string()[..]]).inc();
+			metrics.skipped_slots.with_label_values(&[&update.para_id.to_string()[..]]).inc();
 		}
 	}
 

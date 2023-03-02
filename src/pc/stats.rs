@@ -16,7 +16,7 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
-use super::tracker::DisputesTracker;
+use super::{tracker::DisputesTracker, progress::ParachainProgressUpdate};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
@@ -194,8 +194,8 @@ impl ParachainStats {
 	}
 
 	/// Update skipped slots count
-	pub fn on_skipped_slot(&mut self, block_number: u32) {
-		self.skipped_slots.push(block_number);
+	pub fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate) {
+		self.skipped_slots.push(update.block_number);
 	}
 }
 
