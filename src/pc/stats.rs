@@ -198,6 +198,11 @@ impl ParachainStats {
 	/// Update skipped slots count
 	pub fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate) {
 		self.skipped_slots += 1;
+
+		if self.last_block_hashes_with_skipped_slots.len() == self.last_block_hashes_with_skipped_slots.capacity() {
+			self.last_block_hashes_with_skipped_slots.rotate_left(1);
+			self.last_block_hashes_with_skipped_slots.pop();
+		}
 		self.last_block_hashes_with_skipped_slots.push(update.block_number);
 	}
 }
