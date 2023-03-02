@@ -25,4 +25,5 @@ RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && \
 
 USER polkadot-introspector
 
-ENTRYPOINT ["/polkadot-introspector/${RUNTIME}/polkadot-introspector"]
+ENV RUNTIME=$RUNTIME
+ENTRYPOINT ["/polkadot-introspector/$RUNTIME/polkadot-introspector"]
