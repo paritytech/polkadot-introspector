@@ -16,7 +16,7 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
-use super::{tracker::DisputesTracker, progress::ParachainProgressUpdate};
+use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
@@ -118,7 +118,9 @@ pub struct ParachainStats {
 	backed_count: u32,
 	/// Number of skipped slots, where no candidate was backed and availability core
 	/// was free.
-	skipped_slots: Vec<u32>,
+	skipped_slots: u32,
+	/// Last hashes of relay blocks for skipped slots
+	last_block_hashes_with_skipped_slots: Vec<u32>,
 	/// Number of candidates included.
 	included_count: u32,
 	/// Disputes stats
@@ -138,7 +140,7 @@ pub struct ParachainStats {
 impl ParachainStats {
 	/// Returns a new tracker
 	pub fn new(para_id: u32) -> Self {
-		Self { para_id, ..Default::default() }
+		Self { para_id, last_block_hashes_with_skipped_slots: Vec::with_capacity(10), ..Default::default() }
 	}
 
 	/// Update backed counter
@@ -195,7 +197,8 @@ impl ParachainStats {
 
 	/// Update skipped slots count
 	pub fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate) {
-		self.skipped_slots.push(update.block_number);
+		self.skipped_slots += 1;
+		self.last_block_hashes_with_skipped_slots.push(update.block_number);
 	}
 }
 
@@ -216,15 +219,15 @@ impl Display for ParachainStats {
 		)?;
 		writeln!(
 			f,
-			"Skipped slots: {}, {:?}",
-			self.skipped_slots.len().to_string().bright_purple(),
-			self.skipped_slots,
+			"Skipped slots: {}, slow availability: {}, slow bitfields propagation: {}",
+			self.skipped_slots.to_string().bright_purple(),
+			self.slow_avail_count.to_string().bright_cyan(),
+			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
 		writeln!(
 			f,
-			"Slow availability: {}, slow bitfields propagation: {}",
-			self.slow_avail_count.to_string().bright_cyan(),
-			self.low_bitfields_count.to_string().bright_magenta()
+			"Last blocks with skipped slots: {:?}",
+			self.last_block_hashes_with_skipped_slots,
 		)?;
 		writeln!(f, "Average bitfileds: {:.3}", self.bitfields.value())?;
 		writeln!(
