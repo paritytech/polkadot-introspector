@@ -118,7 +118,7 @@ pub struct ParachainStats {
 	backed_count: u32,
 	/// Number of skipped slots, where no candidate was backed and availability core
 	/// was free.
-	skipped_slots: u32,
+	skipped_slots: Vec<u32>,
 	/// Number of candidates included.
 	included_count: u32,
 	/// Disputes stats
@@ -194,8 +194,8 @@ impl ParachainStats {
 	}
 
 	/// Update skipped slots count
-	pub fn on_skipped_slot(&mut self) {
-		self.skipped_slots += 1;
+	pub fn on_skipped_slot(&mut self, block_number: u32) {
+		self.skipped_slots.push(block_number);
 	}
 }
 
@@ -216,8 +216,13 @@ impl Display for ParachainStats {
 		)?;
 		writeln!(
 			f,
-			"Skipped slots: {}, slow availability: {}, slow bitfields propagation: {}",
-			self.skipped_slots.to_string().bright_purple(),
+			"Skipped slots: {}, {:?}",
+			self.skipped_slots.len().to_string().bright_purple(),
+			self.skipped_slots,
+		)?;
+		writeln!(
+			f,
+			"Slow availability: {}, slow bitfields propagation: {}",
 			self.slow_avail_count.to_string().bright_cyan(),
 			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
