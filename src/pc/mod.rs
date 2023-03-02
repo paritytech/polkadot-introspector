@@ -76,6 +76,8 @@ pub(crate) struct ParachainCommanderOptions {
 	/// Defines subscription mode
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
 	pub subscribe_mode: SubxtSubscriptionMode,
+	#[clap(long = "last-skipped-slots", default_value = "10")]
+	pub last_skipped_slots: usize,
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
 	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
@@ -152,7 +154,13 @@ impl ParachainCommander {
 	) {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
-		let mut tracker = tracker::SubxtTracker::new(para_id, self.node.as_str(), executor, api_service);
+		let mut tracker = tracker::SubxtTracker::new(
+			para_id,
+			self.node.as_str(),
+			executor,
+			api_service,
+			self.opts.last_skipped_slots,
+		);
 
 		loop {
 			match from_collector.try_recv() {

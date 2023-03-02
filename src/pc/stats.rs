@@ -140,8 +140,8 @@ pub struct ParachainStats {
 
 impl ParachainStats {
 	/// Returns a new tracker
-	pub fn new(para_id: u32) -> Self {
-		Self { para_id, last_blocks_with_skipped_slots: Vec::with_capacity(10), ..Default::default() }
+	pub fn new(para_id: u32, last_skipped_slots: usize) -> Self {
+		Self { para_id, last_blocks_with_skipped_slots: Vec::with_capacity(last_skipped_slots), ..Default::default() }
 	}
 
 	/// Update backed counter
