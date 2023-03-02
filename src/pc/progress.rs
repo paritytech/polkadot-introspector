@@ -21,7 +21,7 @@ use crate::core::{api::BlockNumber, SubxtDisputeResult, SubxtHrmpChannel};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
-	fmt::{self, Display, Formatter},
+	fmt::{self, Display, Formatter, Write},
 	time::Duration,
 };
 use subxt::utils::H256;
@@ -96,26 +96,30 @@ fn format_ts(duration: Duration, current_block_ts: u64) -> String {
 
 impl Display for ParachainProgressUpdate {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut buf = String::with_capacity(8192);
 		if self.is_fork {
 			writeln!(
-				f,
-				"{} [#{}, fork]",
+				buf,
+				"{} [#{}, fork]; parachain: {}",
 				format_ts(Duration::from_millis(self.timestamp.saturating_sub(self.prev_timestamp)), self.timestamp),
-				self.block_number
+				self.block_number,
+				format!("{}", self.para_id).bold(),
 			)?;
 		} else {
 			writeln!(
-				f,
-				"{} [#{}]",
+				buf,
+				"{} [#{}]; parachain: {}",
 				format_ts(Duration::from_millis(self.timestamp.saturating_sub(self.prev_timestamp)), self.timestamp),
-				self.block_number
+				self.block_number,
+				format!("{}", self.para_id).bold(),
 			)?;
 		}
 		for event in &self.events {
-			event.fmt(f)?;
+			write!(buf, "{}", event)?;
 		}
-		writeln!(f, "\t🔗 Relay block hash: {} ", format!("{:?}", self.block_hash).bold())?;
-		writeln!(f, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })
+		writeln!(buf, "\t🔗 Relay block hash: {} ", format!("{:?}", self.block_hash).bold())?;
+		writeln!(buf, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })?;
+		f.write_str(buf.as_str())
 	}
 }
 

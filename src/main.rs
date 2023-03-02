@@ -114,7 +114,7 @@ async fn main() -> color_eyre::Result<()> {
 			let consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 
-			match pc::ParachainCommander::new(opts, consumer_init)?.run(&shutdown_tx).await {
+			match pc::ParachainCommander::new(opts)?.run(&shutdown_tx, consumer_init).await {
 				Ok(mut futures) => {
 					let shutdown_tx_cpy = shutdown_tx.clone();
 					futures.push(tokio::spawn(async move {
