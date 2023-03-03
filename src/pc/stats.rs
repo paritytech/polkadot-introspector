@@ -121,19 +121,19 @@ impl SkippedSlotBlock {
 	pub fn new(update: &ParachainProgressUpdate) -> Self {
 		Self { block_number: update.block_number, block_hash: update.block_hash }
 	}
-
-	pub fn join_to_string(blocks: &VecDeque<Self>) -> String {
-		if blocks.is_empty() {
-			String::from("none")
-		} else {
-			blocks.iter().map(|b| b.to_string()).collect()
-		}
-	}
 }
 
 impl Display for SkippedSlotBlock {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "\n    {} {:?}", self.block_number, self.block_hash)
+	}
+}
+
+fn join_skipped_slot_blocks_to_string(blocks: &VecDeque<SkippedSlotBlock>) -> String {
+	if blocks.is_empty() {
+		String::from("none")
+	} else {
+		blocks.iter().map(|b| b.to_string()).collect()
 	}
 }
 
@@ -268,7 +268,7 @@ impl Display for ParachainStats {
 		writeln!(
 			f,
 			"Last blocks with skipped slots: {}",
-			SkippedSlotBlock::join_to_string(&self.last_skipped_slot_blocks).bright_purple()
+			join_skipped_slot_blocks_to_string(&self.last_skipped_slot_blocks).bright_purple()
 		)?;
 		writeln!(f, "Average bitfileds: {:.3}", self.bitfields.value())?;
 		writeln!(
