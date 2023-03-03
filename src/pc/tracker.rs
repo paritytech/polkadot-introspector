@@ -277,13 +277,12 @@ impl ParachainBlockTracker for SubxtTracker {
 		self.update_bitfield_propagation(metrics);
 
 		match self.current_candidate.state {
-			ParachainBlockState::Idle => {
+			ParachainBlockState::Idle =>
 				if let Some(update) = self.update.as_mut() {
 					update.events.push(ParachainConsensusEvent::SkippedSlot);
-				}
-				self.stats.on_skipped_slot();
-				metrics.on_skipped_slot(self.para_id);
-			},
+					self.stats.on_skipped_slot(update);
+					metrics.on_skipped_slot(update);
+				},
 			ParachainBlockState::Backed =>
 				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
 					if let Some(update) = self.update.as_mut() {
@@ -339,13 +338,23 @@ impl ParachainBlockTracker for SubxtTracker {
 
 impl SubxtTracker {
 	/// Constructor.
-	pub fn new(para_id: u32, node_rpc_url: &str, executor: RequestExecutor, api: CollectorStorageApi) -> Self {
+	///
+	/// # Arguments
+	///
+	/// * `last_skipped_slot_blocks` - The number of last blocks with missing slots to display in cli stats
+	pub fn new(
+		para_id: u32,
+		node_rpc_url: &str,
+		executor: RequestExecutor,
+		api: CollectorStorageApi,
+		last_skipped_slot_blocks: usize,
+	) -> Self {
 		Self {
 			para_id,
 			node_rpc_url: node_rpc_url.to_owned(),
 			executor,
 			api,
-			stats: ParachainStats::new(para_id),
+			stats: ParachainStats::new(para_id, last_skipped_slot_blocks),
 			current_candidate: Default::default(),
 			current_relay_block: None,
 			previous_relay_block: None,
