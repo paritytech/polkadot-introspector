@@ -20,6 +20,7 @@ use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use std::{
+	collections::VecDeque,
 	default::Default,
 	fmt::{self, Display, Formatter},
 	time::Duration,
@@ -110,6 +111,32 @@ struct DisputesStats {
 	resolution_time: AvgBucket<u32>,
 }
 
+#[derive(Clone)]
+struct SkippedSlotBlock {
+	block_number: u32,
+	block_hash: H256,
+}
+
+impl SkippedSlotBlock {
+	pub fn new(update: &ParachainProgressUpdate) -> Self {
+		Self { block_number: update.block_number, block_hash: update.block_hash }
+	}
+
+	pub fn join_to_string(blocks: &VecDeque<Self>) -> String {
+		if blocks.is_empty() {
+			String::from("none")
+		} else {
+			blocks.iter().map(|b| b.to_string()).collect()
+		}
+	}
+}
+
+impl Display for SkippedSlotBlock {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "\n    {} {:?}", self.block_number, self.block_hash)
+	}
+}
+
 #[derive(Clone, Default)]
 /// Per parachain statistics
 pub struct ParachainStats {
@@ -120,8 +147,8 @@ pub struct ParachainStats {
 	/// Number of skipped slots, where no candidate was backed and availability core
 	/// was free.
 	skipped_slots: u32,
-	/// Last hashes of relay blocks for skipped slots
-	last_blocks_with_skipped_slots: Vec<(u32, H256)>,
+	/// Last relay blocks for skipped slots
+	last_skipped_slot_blocks: VecDeque<SkippedSlotBlock>,
 	/// Number of candidates included.
 	included_count: u32,
 	/// Disputes stats
@@ -140,8 +167,17 @@ pub struct ParachainStats {
 
 impl ParachainStats {
 	/// Returns a new tracker
-	pub fn new(para_id: u32, last_skipped_slots: usize) -> Self {
-		Self { para_id, last_blocks_with_skipped_slots: Vec::with_capacity(last_skipped_slots), ..Default::default() }
+	///
+	/// # Arguments
+	///
+	/// * `para_id` - Parachain id
+	/// * `last_skipped_slot_blocks` - The number of last blocks with missing slots
+	pub fn new(para_id: u32, last_skipped_slot_blocks: usize) -> Self {
+		Self {
+			para_id,
+			last_skipped_slot_blocks: VecDeque::with_capacity(last_skipped_slot_blocks),
+			..Default::default()
+		}
 	}
 
 	/// Update backed counter
@@ -196,29 +232,14 @@ impl ParachainStats {
 		self.slow_avail_count += 1;
 	}
 
-	/// Update skipped slots count
+	/// Update count and last blocks details for skipped slots
 	pub fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate) {
 		self.skipped_slots += 1;
 
-		let block = (update.block_number, update.block_hash);
-		if self.last_blocks_with_skipped_slots.len() < self.last_blocks_with_skipped_slots.capacity() {
-			self.last_blocks_with_skipped_slots.push(block)
-		} else {
-			let index = self.skipped_slots as usize % self.last_blocks_with_skipped_slots.capacity() - 1;
-			self.last_blocks_with_skipped_slots[index] = block;
+		if self.last_skipped_slot_blocks.len() >= self.last_skipped_slot_blocks.capacity() {
+			self.last_skipped_slot_blocks.pop_front();
 		}
-	}
-
-	fn last_blocks_string(&self) -> String {
-		if self.last_blocks_with_skipped_slots.is_empty() {
-			return String::from("-")
-		}
-
-		let mut blocks = self.last_blocks_with_skipped_slots.clone();
-		let index = self.skipped_slots as usize % self.last_blocks_with_skipped_slots.capacity();
-		blocks.rotate_left(index);
-
-		blocks.iter().map(|h| format!("\n   {} {:?}", h.0, h.1)).collect()
+		self.last_skipped_slot_blocks.push_back(SkippedSlotBlock::new(update))
 	}
 }
 
@@ -244,7 +265,11 @@ impl Display for ParachainStats {
 			self.slow_avail_count.to_string().bright_cyan(),
 			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
-		writeln!(f, "Last blocks with skipped slots: {}", self.last_blocks_string().bright_purple())?;
+		writeln!(
+			f,
+			"Last blocks with skipped slots: {}",
+			SkippedSlotBlock::join_to_string(&self.last_skipped_slot_blocks).bright_purple()
+		)?;
 		writeln!(f, "Average bitfileds: {:.3}", self.bitfields.value())?;
 		writeln!(
 			f,

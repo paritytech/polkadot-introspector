@@ -338,19 +338,23 @@ impl ParachainBlockTracker for SubxtTracker {
 
 impl SubxtTracker {
 	/// Constructor.
+	///
+	/// # Arguments
+	///
+	/// * `last_skipped_slot_blocks` - The number of last blocks with missing slots to display in cli stats
 	pub fn new(
 		para_id: u32,
 		node_rpc_url: &str,
 		executor: RequestExecutor,
 		api: CollectorStorageApi,
-		last_skipped_slots: usize,
+		last_skipped_slot_blocks: usize,
 	) -> Self {
 		Self {
 			para_id,
 			node_rpc_url: node_rpc_url.to_owned(),
 			executor,
 			api,
-			stats: ParachainStats::new(para_id, last_skipped_slots),
+			stats: ParachainStats::new(para_id, last_skipped_slot_blocks),
 			current_candidate: Default::default(),
 			current_relay_block: None,
 			previous_relay_block: None,
