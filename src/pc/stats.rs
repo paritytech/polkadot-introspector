@@ -218,10 +218,7 @@ impl ParachainStats {
 		let index = self.skipped_slots as usize % self.last_blocks_with_skipped_slots.capacity();
 		blocks.rotate_left(index);
 
-		blocks
-			.iter()
-			.map(|h| format!("\n   {} {:?}", h.0, h.1).bright_purple().to_string())
-			.collect()
+		blocks.iter().map(|h| format!("\n   {} {:?}", h.0, h.1)).collect()
 	}
 }
 
@@ -247,7 +244,7 @@ impl Display for ParachainStats {
 			self.slow_avail_count.to_string().bright_cyan(),
 			self.low_bitfields_count.to_string().bright_magenta()
 		)?;
-		writeln!(f, "Last blocks with skipped slots: {}", self.last_blocks_string())?;
+		writeln!(f, "Last blocks with skipped slots: {}", self.last_blocks_string().bright_purple())?;
 		writeln!(f, "Average bitfileds: {:.3}", self.bitfields.value())?;
 		writeln!(
 			f,
