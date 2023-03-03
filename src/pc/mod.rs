@@ -29,10 +29,10 @@
 
 use crate::core::{
 	collector::{Collector, CollectorOptions},
-	EventConsumerInit, SubxtEvent, SubxtSubscriptionMode,
+	EventConsumerInit, RequestExecutor, SubxtEvent, SubxtSubscriptionMode,
 };
 use clap::Parser;
-use color_eyre::owo_colors::OwoColorize;
+use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use log::info;
@@ -113,6 +113,7 @@ impl ParachainCommander {
 
 		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone());
 		collector.spawn(shutdown_tx).await?;
+		print_host_configuration(self.opts.node.as_str(), &collector.api().subxt()).await?;
 
 		println!(
 			"{} will trace parachain(s) {} on {}\n{}",
@@ -187,4 +188,18 @@ impl ParachainCommander {
 			info!("{}", stats);
 		}
 	}
+}
+
+async fn print_host_configuration(url: &str, executor: &RequestExecutor) -> color_eyre::Result<()> {
+	let conf = executor.get_host_configuration(url.to_owned()).await;
+	println!("Host configuration for {}:", url.to_owned().bold());
+	println!(
+		"\t👀 Max validators: {} / {} per core",
+		format!("{}", conf.max_validators.unwrap_or(0)).bold(),
+		format!("{}", conf.max_validators_per_core.unwrap_or(0)).bright_magenta(),
+	);
+	println!("\t👍 Needed approvals: {}", format!("{}", conf.needed_approvals).bold(),);
+	println!("\t🥔 No show slots: {}", format!("{}", conf.no_show_slots).bold(),);
+	println!("\t⏳ Delay tranches: {}", format!("{}", conf.n_delay_tranches).bold(),);
+	Ok(())
 }
