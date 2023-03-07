@@ -41,19 +41,10 @@ pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
 #[cfg(feature = "versi")]
 pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
 
-use std::{
-	collections::hash_map::{Entry, HashMap},
-	fmt::Debug,
-};
+use std::{collections::hash_map::HashMap, fmt::Debug};
 use subxt::{
 	utils::{AccountId32, H256},
 	OnlineClient, PolkadotConfig,
-};
-
-use tokio::sync::{
-	mpsc::{Receiver, Sender},
-	oneshot,
-	oneshot::error::TryRecvError,
 };
 
 /// Subxt based APIs for fetching via RPC and processing of extrinsics.
@@ -85,7 +76,7 @@ pub enum RequestType {
 	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
 	GetOutboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
 	/// Get active host configuration
-	GetHostConfiguration,
+	GetHostConfiguration(()),
 }
 
 // Required after subxt changes that removed Debug trait from the generated structures
@@ -131,7 +122,7 @@ impl Debug for RequestType {
 			RequestType::GetOutboundHRMPChannels(h, para_id) => {
 				format!("get outbount channels: {:?}; para id: {}", h, para_id)
 			},
-			RequestType::GetHostConfiguration => "get host configuration".to_string(),
+			RequestType::GetHostConfiguration(_) => "get host configuration".to_string(),
 		};
 		write!(f, "Subxt request: {}", description)
 	}
@@ -181,246 +172,191 @@ impl Debug for Response {
 	}
 }
 
-#[derive(Debug)]
-pub struct Request {
-	pub url: String,
-	pub request_type: RequestType,
-	pub response_sender: oneshot::Sender<Response>,
+/// Represents a pool for subxt requests
+#[derive(Clone, Default)]
+pub struct RequestExecutor {
+	connection_pool: HashMap<String, OnlineClient<PolkadotConfig>>,
 }
 
-#[derive(Clone)]
-pub struct RequestExecutor {
-	to_api: Sender<Request>,
+macro_rules! wrap_subxt_call {
+	($self: ident, $req_ty: ident, $rep_ty: ident, $url: ident, $($arg:expr),*) => (
+		match $self.execute_request(RequestType::$req_ty($($arg),*), $url).await {
+			Ok(Response::$rep_ty(data)) => Ok(data),
+			Err(e) => Err(e),
+			_ => panic!("Expected {}, got something else.", stringify!($rep_ty)),
+		}
+	)
 }
 
 impl RequestExecutor {
-	pub fn new(to_api: Sender<Request>) -> Self {
-		RequestExecutor { to_api }
+	pub fn new() -> Self {
+		Default::default()
 	}
 
-	pub async fn get_block_timestamp(&self, url: String, hash: Option<<PolkadotConfig as subxt::Config>::Hash>) -> u64 {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request { url, request_type: RequestType::GetBlockTimestamp(hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
+	async fn execute_request(&mut self, request: RequestType, url: &str) -> Result {
+		let maybe_api = self.connection_pool.get(url);
 
-		match receiver.await {
-			Ok(Response::Timestamp(ts)) => ts,
-			_ => panic!("Expected Timestamp, got something else."),
+		let api = match maybe_api {
+			Some(api) => api.clone(),
+			None => {
+				let new_api = new_client_fn(url).await;
+				if let Some(api) = new_api {
+					self.connection_pool.insert(url.to_owned(), api).unwrap()
+				} else {
+					return Err(SubxtWrapperError::ConnectionError)
+				}
+			},
+		};
+		match request {
+			RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(&api, maybe_hash).await,
+			RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
+			RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
+			RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
+			RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
+			RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
+			RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(&api, hash).await,
+			RequestType::GetSessionIndex(hash) => subxt_get_session_index(&api, hash).await,
+			RequestType::GetSessionInfo(session_index) => subxt_get_session_info(&api, session_index).await,
+			RequestType::GetSessionAccountKeys(session_index) =>
+				subxt_get_session_account_keys(&api, session_index).await,
+			RequestType::GetInboundHRMPChannels(hash, para_id) =>
+				subxt_get_inbound_hrmp_channels(&api, hash, para_id).await,
+			RequestType::GetOutboundHRMPChannels(hash, para_id) =>
+				subxt_get_outbound_hrmp_channels(&api, hash, para_id).await,
+			RequestType::GetHRMPData(hash, para_id, sender) =>
+				subxt_get_hrmp_content(&api, hash, para_id, sender).await,
+			RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(&api).await,
 		}
+	}
+
+	pub async fn get_block_timestamp(
+		&mut self,
+		url: &str,
+		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+	) -> std::result::Result<u64, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetBlockTimestamp, Timestamp, url, maybe_hash)
 	}
 
 	pub async fn get_block_head(
-		&self,
-		url: String,
-		hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
-	) -> Option<<PolkadotConfig as subxt::Config>::Header> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request { url, request_type: RequestType::GetHead(hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::MaybeHead(maybe_head)) => maybe_head,
-			_ => panic!("Expected MaybeHead, got something else."),
-		}
+		&mut self,
+		url: &str,
+		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+	) -> std::result::Result<Option<<PolkadotConfig as subxt::Config>::Header>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetHead, MaybeHead, url, maybe_hash)
 	}
 
 	pub async fn get_block(
-		&self,
-		url: String,
-		hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
-	) -> Option<subxt::rpc::types::ChainBlock<PolkadotConfig>> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request { url, request_type: RequestType::GetBlock(hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::MaybeBlock(maybe_block)) => maybe_block,
-			_ => panic!("Expected MaybeHead, got something else."),
-		}
+		&mut self,
+		url: &str,
+		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+	) -> std::result::Result<Option<subxt::rpc::types::ChainBlock<PolkadotConfig>>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetBlock, MaybeBlock, url, maybe_hash)
 	}
 
 	pub async fn extract_parainherent_data(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
-	) -> Option<InherentData> {
-		if let Some(block) = self.get_block(url.clone(), maybe_hash).await {
-			let (sender, receiver) = oneshot::channel::<Response>();
-			let request =
-				Request { url, request_type: RequestType::ExtractParaInherent(block), response_sender: sender };
-			self.to_api.send(request).await.expect("Channel closed");
-
-			match receiver.await {
-				Ok(Response::ParaInherentData(data)) => Some(data),
-				_ => panic!("Expected MaybeHead, got something else."),
-			}
-		} else {
-			None
+	) -> std::result::Result<Option<InherentData>, SubxtWrapperError> {
+		match self.get_block(url, maybe_hash).await {
+			Ok(Some(block)) => match self.execute_request(RequestType::ExtractParaInherent(block), url).await {
+				Ok(Response::ParaInherentData(data)) => Ok(Some(data)),
+				Err(e) => Err(e),
+				_ => panic!("Expected ParaInherentData, got something else."),
+			},
+			Ok(None) => Ok(None),
+			Err(e) => Err(e),
 		}
 	}
 
 	pub async fn get_scheduled_paras(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> Vec<CoreAssignment> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request =
-			Request { url, request_type: RequestType::GetScheduledParas(block_hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::ScheduledParas(assignments)) => assignments,
-			_ => panic!("Expected ScheduledParas, got something else."),
-		}
+	) -> std::result::Result<Vec<CoreAssignment>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetScheduledParas, ScheduledParas, url, block_hash)
 	}
 
 	pub async fn get_occupied_cores(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> Vec<Option<CoreOccupied>> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request { url, request_type: RequestType::GetOccupiedCores(block_hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::OccupiedCores(assignments)) => assignments,
-			_ => panic!("Expected OccupiedCores, got something else."),
-		}
+	) -> std::result::Result<Vec<Option<CoreOccupied>>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetOccupiedCores, OccupiedCores, url, block_hash)
 	}
 
 	pub async fn get_backing_groups(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> Vec<Vec<ValidatorIndex>> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request { url, request_type: RequestType::GetBackingGroups(block_hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::BackingGroups(groups)) => groups,
-			_ => panic!("Expected BackingGroups, got something else."),
-		}
+	) -> std::result::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetBackingGroups, BackingGroups, url, block_hash)
 	}
 
 	pub async fn get_session_info(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		session_index: u32,
-	) -> Option<polkadot_rt_primitives::v2::SessionInfo> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request =
-			Request { url, request_type: RequestType::GetSessionInfo(session_index), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::SessionInfo(info)) => info,
-			_ => panic!("Expected SessionInfo, got something else."),
-		}
+	) -> std::result::Result<Option<polkadot_rt_primitives::v2::SessionInfo>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetSessionInfo, SessionInfo, url, session_index)
 	}
 
-	pub async fn get_session_index(&self, url: String, block_hash: <PolkadotConfig as subxt::Config>::Hash) -> u32 {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request { url, request_type: RequestType::GetSessionIndex(block_hash), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::SessionIndex(index)) => index,
-			_ => panic!("Expected SessionInfo, got something else."),
-		}
+	pub async fn get_session_index(
+		&mut self,
+		url: &str,
+		block_hash: <PolkadotConfig as subxt::Config>::Hash,
+	) -> std::result::Result<u32, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetSessionIndex, SessionIndex, url, block_hash)
 	}
 
-	pub async fn get_session_account_keys(&self, url: String, session_index: u32) -> Option<Vec<AccountId32>> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request =
-			Request { url, request_type: RequestType::GetSessionAccountKeys(session_index), response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::SessionAccountKeys(maybe_keys)) => maybe_keys,
-			_ => panic!("Expected AccountKeys, got something else."),
-		}
+	pub async fn get_session_account_keys(
+		&mut self,
+		url: &str,
+		session_index: u32,
+	) -> std::result::Result<Option<Vec<AccountId32>>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetSessionAccountKeys, SessionAccountKeys, url, session_index)
 	}
 
 	pub async fn get_inbound_hrmp_channels(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
 		para_id: u32,
-	) -> BTreeMap<u32, SubxtHrmpChannel> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request {
-			url,
-			request_type: RequestType::GetInboundHRMPChannels(block_hash, para_id),
-			response_sender: sender,
-		};
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::HRMPChannels(channels)) => channels,
-			_ => panic!("Expected HRMPChannels, got something else."),
-		}
+	) -> std::result::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetInboundHRMPChannels, HRMPChannels, url, block_hash, para_id)
 	}
 
 	pub async fn get_outbound_hrmp_channels(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
 		para_id: u32,
-	) -> BTreeMap<u32, SubxtHrmpChannel> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request {
-			url,
-			request_type: RequestType::GetOutboundHRMPChannels(block_hash, para_id),
-			response_sender: sender,
-		};
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::HRMPChannels(channels)) => channels,
-			_ => panic!("Expected HRMPChannels, got something else."),
-		}
+	) -> std::result::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetOutboundHRMPChannels, HRMPChannels, url, block_hash, para_id)
 	}
 
 	pub async fn get_hrmp_content(
-		&self,
-		url: String,
+		&mut self,
+		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
 		receiver_id: u32,
 		sender_id: u32,
-	) -> Vec<Vec<u8>> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request {
-			url,
-			request_type: RequestType::GetHRMPData(block_hash, receiver_id, sender_id),
-			response_sender: sender,
-		};
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::HRMPContent(data)) => data,
-			_ => panic!("Expected HRMPInboundContent, got something else."),
-		}
+	) -> std::result::Result<Vec<Vec<u8>>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetHRMPData, HRMPContent, url, block_hash, receiver_id, sender_id)
 	}
 
-	pub async fn get_host_configuration(&self, url: String) -> HostConfiguration<u32> {
-		let (sender, receiver) = oneshot::channel::<Response>();
-		let request = Request { url, request_type: RequestType::GetHostConfiguration, response_sender: sender };
-		self.to_api.send(request).await.expect("Channel closed");
-
-		match receiver.await {
-			Ok(Response::HostConfiguration(conf)) => conf,
-			_ => panic!("Expected HostConfiguration, got something else."),
-		}
+	pub async fn get_host_configuration(
+		&mut self,
+		url: &str,
+	) -> std::result::Result<HostConfiguration<u32>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetHostConfiguration, HostConfiguration, url, ())
 	}
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn new_client_fn(url: String) -> Option<OnlineClient<PolkadotConfig>> {
+async fn new_client_fn(url: &str) -> Option<OnlineClient<PolkadotConfig>> {
 	for _ in 0..crate::core::RETRY_COUNT {
-		match OnlineClient::<PolkadotConfig>::from_url(url.clone()).await {
+		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {
 			Ok(api) => return Some(api),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
@@ -430,97 +366,6 @@ async fn new_client_fn(url: String) -> Option<OnlineClient<PolkadotConfig>> {
 		};
 	}
 	None
-}
-// A task that handles subxt API calls.
-pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
-	let mut connection_pool = HashMap::new();
-	while let Some(request) = api.recv().await {
-		let (timeout_sender, mut timeout_receiver) = oneshot::channel::<bool>();
-
-		// Start API retry timeout task.
-		let timeout_task = tokio::spawn(async move {
-			tokio::time::sleep(std::time::Duration::from_millis(crate::core::API_RETRY_TIMEOUT_MS)).await;
-			timeout_sender.send(true).expect("Sending timeout signal never fails.");
-		});
-
-		// Loop while the timeout task doesn't fire. Other errors will cancel this loop
-		loop {
-			match timeout_receiver.try_recv() {
-				Err(TryRecvError::Empty) => {},
-				Err(TryRecvError::Closed) => {
-					// Timeout task has exit unexpectedely; this should never happen.
-					panic!("API timeout task closed channel: {:?}", request);
-				},
-				Ok(_) => {
-					// Panic on timeout.
-					panic!("Request timed out: {:?}", request);
-				},
-			}
-			match connection_pool.entry(request.url.clone()) {
-				Entry::Occupied(_) => (),
-				Entry::Vacant(entry) => {
-					let maybe_api = new_client_fn(request.url.clone()).await;
-					if let Some(api) = maybe_api {
-						entry.insert(api);
-					}
-				},
-			};
-
-			let api = connection_pool.get(&request.url.clone());
-
-			let result = if let Some(api) = api {
-				match request.request_type {
-					RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(api, maybe_hash).await,
-					RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
-					RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
-					RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
-					RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
-					RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
-					RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
-					RequestType::GetSessionIndex(hash) => subxt_get_session_index(api, hash).await,
-					RequestType::GetSessionInfo(session_index) => subxt_get_session_info(api, session_index).await,
-					RequestType::GetSessionAccountKeys(session_index) =>
-						subxt_get_session_account_keys(api, session_index).await,
-					RequestType::GetInboundHRMPChannels(hash, para_id) =>
-						subxt_get_inbound_hrmp_channels(api, hash, para_id).await,
-					RequestType::GetOutboundHRMPChannels(hash, para_id) =>
-						subxt_get_outbound_hrmp_channels(api, hash, para_id).await,
-					RequestType::GetHRMPData(hash, para_id, sender) =>
-						subxt_get_hrmp_content(api, hash, para_id, sender).await,
-					RequestType::GetHostConfiguration => subxt_get_host_configuration(api).await,
-				}
-			} else {
-				// Remove the faulty websocket from connection pool.
-				let _ = connection_pool.remove(&request.url);
-				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-				continue
-			};
-
-			let response = match result {
-				Ok(response) => response,
-				Err(SubxtWrapperError::SubxtError(err)) => {
-					error!("subxt call error: {:?}, request: {:?}", err, request.request_type);
-					// TODO: this is not true for the unfinalized subscription mode and must be fixed via total rework!
-					// Always retry for subxt errors (most of them are transient).
-					let _ = connection_pool.remove(&request.url);
-					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-					continue
-				},
-				Err(SubxtWrapperError::DecodeExtrinsicError) => {
-					error!("Decoding extrinsic failed");
-					// Always retry for subxt errors (most of them are transient).
-					let _ = connection_pool.remove(&request.url);
-					tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
-					continue
-				},
-			};
-
-			// We only break in the happy case.
-			let _ = request.response_sender.send(response);
-			timeout_task.abort();
-			break
-		}
-	}
 }
 
 async fn subxt_get_head(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
@@ -756,6 +601,10 @@ fn subxt_extract_parainherent(block: &subxt::rpc::types::ChainBlock<PolkadotConf
 pub enum SubxtWrapperError {
 	#[error("subxt error: {0}")]
 	SubxtError(#[from] subxt::error::Error),
+	#[error("subxt connection timeout")]
+	Timeout,
+	#[error("subxt connection error")]
+	ConnectionError,
 	#[error("decode extinisc error")]
 	DecodeExtrinsicError,
 }

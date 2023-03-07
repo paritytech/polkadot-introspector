@@ -28,7 +28,6 @@ pub use subxt_wrapper::*;
 // Provides access to subxt and storage APIs, more to come.
 #[derive(Clone)]
 pub struct ApiService<K, P = ()> {
-	subxt_tx: Sender<subxt_wrapper::Request>,
 	storage_tx: Sender<storage::Request<K, P>>,
 }
 
@@ -43,7 +42,7 @@ where
 	}
 
 	pub fn subxt(&self) -> subxt_wrapper::RequestExecutor {
-		RequestExecutor::new(self.subxt_tx.clone())
+		RequestExecutor::new()
 	}
 }
 
@@ -53,13 +52,11 @@ where
 	K: Eq + Sized + Hash + Debug + Clone + Send + 'static,
 {
 	pub fn new_with_storage(storage_config: RecordsStorageConfig) -> ApiService<K> {
-		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
-		tokio::spawn(subxt_wrapper::api_handler_task(subxt_rx));
 		tokio::spawn(storage::api_handler_task(storage_rx, storage_config));
 
-		Self { subxt_tx, storage_tx }
+		Self { storage_tx }
 	}
 }
 
@@ -70,13 +67,11 @@ where
 	P: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
 {
 	pub fn new_with_prefixed_storage(storage_config: RecordsStorageConfig) -> ApiService<K, P> {
-		let (subxt_tx, subxt_rx) = channel(MAX_MSG_QUEUE_SIZE);
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
-		tokio::spawn(subxt_wrapper::api_handler_task(subxt_rx));
 		tokio::spawn(storage::api_handler_task_prefixed(storage_rx, storage_config));
 
-		Self { subxt_tx, storage_tx }
+		Self { storage_tx }
 	}
 }
 #[cfg(test)]
@@ -110,7 +105,7 @@ mod tests {
 	#[tokio::test]
 	async fn basic_subxt_test() {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
-		let subxt = api.subxt();
+		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
 		let timestamp = subxt.get_block_timestamp(RPC_NODE_URL.into(), Some(head.hash())).await;
