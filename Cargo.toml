@@ -27,7 +27,7 @@ serde_bytes = "0.11.9"
 serde_urlencoded = "0.7.1"
 bincode = "1.3.3"
 erased-serde = "0.3.25"
-async-trait = "0.1.64"
+async-trait = "0.1.66"
 strum = { version = "0.24.1", features = ["derive"] }
 rocksdb = "0.20.1"
 parity-db = "0.4.4"
