@@ -177,3 +177,20 @@ publish-docker:
     - buildah push --format=v2s2 "$IMAGE_NAME:latest"
   after_script:
     - buildah logout --all
+
+publish-docker-image-description:
+  stage:                           publish
+  <<:                              *kubernetes-env
+  image:                           paritytech/dockerhub-description
+  variables:
+    DOCKER_USERNAME:               $Docker_Hub_User_Parity
+    DOCKER_PASSWORD:               $Docker_Hub_Pass_Parity
+    README_FILEPATH:               $CI_PROJECT_DIR/scripts/ci/dockerfiles/Dockerfile.README.md
+    DOCKERHUB_REPOSITORY:          paritytech/polkadot-introspector
+    SHORT_DESCRIPTION:             "Collection of tools for monitoring and introspection of Substrate based blockchains like Polkadot"
+  rules:
+  - if: $CI_COMMIT_REF_NAME == "master"
+    changes:
+    - scripts/ci/dockerfiles/Dockerfile.README.md
+  script:
+    - cd / && sh entrypoint.sh

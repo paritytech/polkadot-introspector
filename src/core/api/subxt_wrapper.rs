@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 pub use crate::core::polkadot::runtime_types::{
 	polkadot_core_primitives::CandidateHash,
 	polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
-	polkadot_runtime_parachains::scheduler::CoreAssignment,
+	polkadot_runtime_parachains::{configuration::HostConfiguration, scheduler::CoreAssignment},
 };
 
 pub type BlockNumber = u32;
@@ -84,6 +84,8 @@ pub enum RequestType {
 	GetHRMPData(<PolkadotConfig as subxt::Config>::Hash, u32, u32),
 	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
 	GetOutboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
+	/// Get active host configuration
+	GetHostConfiguration,
 }
 
 // Required after subxt changes that removed Debug trait from the generated structures
@@ -129,6 +131,7 @@ impl Debug for RequestType {
 			RequestType::GetOutboundHRMPChannels(h, para_id) => {
 				format!("get outbount channels: {:?}; para id: {}", h, para_id)
 			},
+			RequestType::GetHostConfiguration => "get host configuration".to_string(),
 		};
 		write!(f, "Subxt request: {}", description)
 	}
@@ -168,6 +171,8 @@ pub enum Response {
 	HRMPChannels(BTreeMap<u32, SubxtHrmpChannel>),
 	/// HRMP content for a specific channel
 	HRMPContent(Vec<Vec<u8>>),
+	/// The current host configuration
+	HostConfiguration(HostConfiguration<u32>),
 }
 
 impl Debug for Response {
@@ -399,6 +404,17 @@ impl RequestExecutor {
 			_ => panic!("Expected HRMPInboundContent, got something else."),
 		}
 	}
+
+	pub async fn get_host_configuration(&self, url: String) -> HostConfiguration<u32> {
+		let (sender, receiver) = oneshot::channel::<Response>();
+		let request = Request { url, request_type: RequestType::GetHostConfiguration, response_sender: sender };
+		self.to_api.send(request).await.expect("Channel closed");
+
+		match receiver.await {
+			Ok(Response::HostConfiguration(conf)) => conf,
+			_ => panic!("Expected HostConfiguration, got something else."),
+		}
+	}
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
@@ -471,6 +487,7 @@ pub(crate) async fn api_handler_task(mut api: Receiver<Request>) {
 						subxt_get_outbound_hrmp_channels(api, hash, para_id).await,
 					RequestType::GetHRMPData(hash, para_id, sender) =>
 						subxt_get_hrmp_content(api, hash, para_id, sender).await,
+					RequestType::GetHostConfiguration => subxt_get_host_configuration(api).await,
 				}
 			} else {
 				// Remove the faulty websocket from connection pool.
@@ -714,6 +731,12 @@ async fn subxt_get_hrmp_content(
 		.await?
 		.unwrap_or_default();
 	Ok(Response::HRMPContent(hrmp_content.into_iter().map(|hrmp_content| hrmp_content.data).collect()))
+}
+
+async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Result {
+	let addr = polkadot::storage().configuration().active_config();
+	let host_configuration = api.storage().at(None).await?.fetch(&addr).await?.unwrap();
+	Ok(Response::HostConfiguration(host_configuration))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::types::ChainBlock<PolkadotConfig>) -> Result {

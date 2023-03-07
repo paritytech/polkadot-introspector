@@ -29,10 +29,10 @@
 
 use crate::core::{
 	collector::{Collector, CollectorOptions},
-	EventConsumerInit, SubxtEvent, SubxtSubscriptionMode,
+	EventConsumerInit, RequestExecutor, SubxtEvent, SubxtSubscriptionMode,
 };
 use clap::Parser;
-use color_eyre::owo_colors::OwoColorize;
+use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use log::info;
@@ -76,6 +76,9 @@ pub(crate) struct ParachainCommanderOptions {
 	/// Defines subscription mode
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
 	pub subscribe_mode: SubxtSubscriptionMode,
+	/// The number of last blocks with missing slots to display
+	#[clap(long = "last-skipped-slot-blocks", default_value = "10")]
+	pub last_skipped_slot_blocks: usize,
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
 	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
@@ -113,6 +116,7 @@ impl ParachainCommander {
 
 		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone());
 		collector.spawn(shutdown_tx).await?;
+		print_host_configuration(self.opts.node.as_str(), &collector.api().subxt()).await?;
 
 		println!(
 			"{} will trace parachain(s) {} on {}\n{}",
@@ -152,7 +156,13 @@ impl ParachainCommander {
 	) {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
-		let mut tracker = tracker::SubxtTracker::new(para_id, self.node.as_str(), executor, api_service);
+		let mut tracker = tracker::SubxtTracker::new(
+			para_id,
+			self.node.as_str(),
+			executor,
+			api_service,
+			self.opts.last_skipped_slot_blocks,
+		);
 
 		loop {
 			match from_collector.try_recv() {
@@ -187,4 +197,18 @@ impl ParachainCommander {
 			info!("{}", stats);
 		}
 	}
+}
+
+async fn print_host_configuration(url: &str, executor: &RequestExecutor) -> color_eyre::Result<()> {
+	let conf = executor.get_host_configuration(url.to_owned()).await;
+	println!("Host configuration for {}:", url.to_owned().bold());
+	println!(
+		"\t👀 Max validators: {} / {} per core",
+		format!("{}", conf.max_validators.unwrap_or(0)).bold(),
+		format!("{}", conf.max_validators_per_core.unwrap_or(0)).bright_magenta(),
+	);
+	println!("\t👍 Needed approvals: {}", format!("{}", conf.needed_approvals).bold(),);
+	println!("\t🥔 No show slots: {}", format!("{}", conf.no_show_slots).bold(),);
+	println!("\t⏳ Delay tranches: {}", format!("{}", conf.n_delay_tranches).bold(),);
+	Ok(())
 }
