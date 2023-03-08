@@ -107,50 +107,51 @@ mod tests {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
 		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
-		let timestamp = subxt.get_block_timestamp(RPC_NODE_URL.into(), Some(head.hash())).await;
-		let _block = subxt.get_block(RPC_NODE_URL.into(), Some(head.hash())).await.unwrap();
+		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
+		let timestamp = subxt.get_block_timestamp(RPC_NODE_URL, Some(head.hash())).await.unwrap();
+		let _block = subxt.get_block(RPC_NODE_URL, Some(head.hash())).await.unwrap().unwrap();
 		assert!(timestamp > 0);
 	}
 
 	#[tokio::test]
 	async fn extract_parainherent_data() {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
-		let subxt = api.subxt();
+		let mut subxt = api.subxt();
 
 		subxt
-			.extract_parainherent_data(RPC_NODE_URL.into(), None)
+			.extract_parainherent_data(RPC_NODE_URL, None)
 			.await
+			.unwrap()
 			.expect("Inherent data must be present");
 	}
 
 	#[tokio::test]
 	async fn get_scheduled_paras() {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
-		let subxt = api.subxt();
+		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
+		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
 
-		assert!(!subxt.get_scheduled_paras(RPC_NODE_URL.into(), head.hash()).await.is_empty())
+		assert!(!subxt.get_scheduled_paras(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
 	}
 
 	#[tokio::test]
 	async fn get_occupied_cores() {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
-		let subxt = api.subxt();
+		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
+		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
 
-		assert!(!subxt.get_occupied_cores(RPC_NODE_URL.into(), head.hash()).await.is_empty())
+		assert!(!subxt.get_occupied_cores(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
 	}
 
 	#[tokio::test]
 	async fn get_backing_groups() {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
-		let subxt = api.subxt();
+		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL.into(), None).await.unwrap();
+		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
 
-		assert!(!subxt.get_backing_groups(RPC_NODE_URL.into(), head.hash()).await.is_empty())
+		assert!(!subxt.get_backing_groups(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
 	}
 }
