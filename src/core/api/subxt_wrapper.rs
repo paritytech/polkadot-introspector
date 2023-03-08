@@ -235,15 +235,12 @@ impl RequestExecutor {
 			match reply {
 				Ok(rep) => return Ok(rep),
 				Err(err) => match &err {
-					SubxtWrapperError::SubxtError(subxt_error) => match subxt_error {
-						subxt::Error::Io(io_err) => {
-							error!("[{}] Subxt IO error: {:?}", url, io_err);
-							connection_pool.remove(url);
-							tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS * (i + 1)))
-								.await;
-							continue
-						},
-						_ => return Err(err),
+					SubxtWrapperError::SubxtError(subxt::Error::Io(io_err)) => {
+						let next_reconnect = crate::core::RETRY_DELAY_MS * (i + 1);
+						error!("[{}] Subxt IO error: {:?}, reconnecting in {}ms", url, io_err, next_reconnect);
+						connection_pool.remove(url);
+						tokio::time::sleep(std::time::Duration::from_millis(next_reconnect)).await;
+						continue
 					},
 					_ => return Err(err),
 				},

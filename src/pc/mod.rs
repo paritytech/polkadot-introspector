@@ -118,9 +118,9 @@ impl ParachainCommander {
 		collector.spawn(shutdown_tx).await?;
 		print_host_configuration(self.opts.node.as_str(), &mut collector.executor())
 			.await
-			.or_else(|e| {
+			.map_err(|e| {
 				warn!("Cannot get host configuration: {}", e);
-				Err(e)
+				e
 			})
 			.unwrap_or_default();
 

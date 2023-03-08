@@ -287,8 +287,8 @@ async fn populate_view(
 	let mut parent_hash = None;
 
 	for _ in 0..blocks_to_fetch {
-		if let Ok(Some(header)) = executor.get_block_head(url.into(), parent_hash).await {
-			let ts = executor.get_block_timestamp(url.into(), Some(header.hash())).await.unwrap();
+		if let Ok(Some(header)) = executor.get_block_head(url, parent_hash).await {
+			let ts = executor.get_block_timestamp(url, Some(header.hash())).await.unwrap();
 
 			if prev_ts != 0 {
 				// We are walking backwards.
