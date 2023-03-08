@@ -41,6 +41,7 @@ pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
 #[cfg(feature = "versi")]
 pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
 
+use crate::core::RETRY_COUNT;
 use std::{collections::hash_map::HashMap, fmt::Debug};
 use subxt::{
 	utils::{AccountId32, H256},
@@ -194,40 +195,62 @@ impl RequestExecutor {
 	}
 
 	async fn execute_request(&mut self, request: RequestType, url: &str) -> Result {
-		let maybe_api = self.connection_pool.get(url);
+		let connection_pool = &mut self.connection_pool;
+		let maybe_api = connection_pool.get(url).cloned();
 
-		let api = match maybe_api {
-			Some(api) => api.clone(),
-			None => {
-				let new_api = new_client_fn(url).await;
-				if let Some(api) = new_api {
-					self.connection_pool.insert(url.to_owned(), api.clone());
-					api
-				} else {
-					return Err(SubxtWrapperError::ConnectionError)
-				}
-			},
-		};
-		match request {
-			RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(&api, maybe_hash).await,
-			RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
-			RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
-			RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
-			RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
-			RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
-			RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(&api, hash).await,
-			RequestType::GetSessionIndex(hash) => subxt_get_session_index(&api, hash).await,
-			RequestType::GetSessionInfo(session_index) => subxt_get_session_info(&api, session_index).await,
-			RequestType::GetSessionAccountKeys(session_index) =>
-				subxt_get_session_account_keys(&api, session_index).await,
-			RequestType::GetInboundHRMPChannels(hash, para_id) =>
-				subxt_get_inbound_hrmp_channels(&api, hash, para_id).await,
-			RequestType::GetOutboundHRMPChannels(hash, para_id) =>
-				subxt_get_outbound_hrmp_channels(&api, hash, para_id).await,
-			RequestType::GetHRMPData(hash, para_id, sender) =>
-				subxt_get_hrmp_content(&api, hash, para_id, sender).await,
-			RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(&api).await,
+		for i in 0..RETRY_COUNT {
+			let api = match maybe_api {
+				Some(ref api) => api.clone(),
+				None => {
+					let new_api = new_client_fn(url).await;
+					if let Some(api) = new_api {
+						connection_pool.insert(url.to_owned(), api.clone());
+						api
+					} else {
+						return Err(SubxtWrapperError::ConnectionError)
+					}
+				},
+			};
+			let reply = match request {
+				RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(&api, maybe_hash).await,
+				RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
+				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
+				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
+				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
+				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
+				RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(&api, hash).await,
+				RequestType::GetSessionIndex(hash) => subxt_get_session_index(&api, hash).await,
+				RequestType::GetSessionInfo(session_index) => subxt_get_session_info(&api, session_index).await,
+				RequestType::GetSessionAccountKeys(session_index) =>
+					subxt_get_session_account_keys(&api, session_index).await,
+				RequestType::GetInboundHRMPChannels(hash, para_id) =>
+					subxt_get_inbound_hrmp_channels(&api, hash, para_id).await,
+				RequestType::GetOutboundHRMPChannels(hash, para_id) =>
+					subxt_get_outbound_hrmp_channels(&api, hash, para_id).await,
+				RequestType::GetHRMPData(hash, para_id, sender) =>
+					subxt_get_hrmp_content(&api, hash, para_id, sender).await,
+				RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(&api).await,
+			};
+
+			match reply {
+				Ok(rep) => return Ok(rep),
+				Err(err) => match &err {
+					SubxtWrapperError::SubxtError(subxt_error) => match subxt_error {
+						subxt::Error::Io(io_err) => {
+							error!("[{}] Subxt IO error: {:?}", url, io_err);
+							connection_pool.remove(url);
+							tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS * (i + 1)))
+								.await;
+							continue
+						},
+						_ => return Err(err),
+					},
+					_ => return Err(err),
+				},
+			}
 		}
+
+		Err(SubxtWrapperError::Timeout)
 	}
 
 	pub async fn get_block_timestamp(
