@@ -201,7 +201,8 @@ impl RequestExecutor {
 			None => {
 				let new_api = new_client_fn(url).await;
 				if let Some(api) = new_api {
-					self.connection_pool.insert(url.to_owned(), api).unwrap()
+					self.connection_pool.insert(url.to_owned(), api.clone());
+					api
 				} else {
 					return Err(SubxtWrapperError::ConnectionError)
 				}

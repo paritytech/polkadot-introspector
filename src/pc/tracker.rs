@@ -59,7 +59,7 @@ pub trait ParachainBlockTracker {
 		&mut self,
 		block_hash: Self::RelayChainNewHead,
 		block_number: Self::RelayChainBlockNumber,
-	) -> &Self::ParachainBlockInfo;
+	) -> color_eyre::Result<&Self::ParachainBlockInfo>;
 	/// Called when a new session is observed
 	async fn new_session(&mut self, new_session_index: u32);
 
@@ -211,7 +211,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		&mut self,
 		block_hash: Self::RelayChainNewHead,
 		block_number: Self::RelayChainBlockNumber,
-	) -> &Self::ParachainBlockInfo {
+	) -> color_eyre::Result<&Self::ParachainBlockInfo> {
 		let is_fork = block_number == self.current_relay_block.unwrap_or((0, H256::zero())).0;
 		let inherent_data = self
 			.api
@@ -225,20 +225,20 @@ impl ParachainBlockTracker for SubxtTracker {
 
 			let inbound_hrmp_channels = self
 				.executor
-				.get_inbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
-				.await;
+				.get_inbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
+				.await?;
 			let outbound_hrmp_channels = self
 				.executor
-				.get_outbound_hrmp_channels(self.node_rpc_url.clone(), block_hash, self.para_id)
-				.await;
+				.get_outbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
+				.await?;
 			self.message_queues
 				.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
-			self.on_inherent_data(block_hash, block_number, inherent, is_fork).await;
+			self.on_inherent_data(block_hash, block_number, inherent, is_fork).await?;
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
 
-		&self.current_candidate
+		Ok(&self.current_candidate)
 	}
 
 	async fn new_session(&mut self, new_session_index: u32) {
@@ -391,11 +391,14 @@ impl SubxtTracker {
 		block_number: BlockNumber,
 		data: InherentData,
 		is_fork: bool,
-	) {
-		let core_assignments = self.executor.get_scheduled_paras(self.node_rpc_url.clone(), block_hash).await;
+	) -> color_eyre::Result<()> {
+		let core_assignments = self
+			.executor
+			.get_scheduled_paras(self.node_rpc_url.as_str(), block_hash)
+			.await?;
 		let backed_candidates = data.backed_candidates;
-		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.clone(), block_hash).await;
-		let validator_groups = self.executor.get_backing_groups(self.node_rpc_url.clone(), block_hash).await;
+		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
+		let validator_groups = self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await?;
 		let bitfields = data
 			.bitfields
 			.into_iter()
@@ -418,8 +421,8 @@ impl SubxtTracker {
 
 		self.current_relay_block_ts = Some(
 			self.executor
-				.get_block_timestamp(self.node_rpc_url.clone(), Some(block_hash))
-				.await,
+				.get_block_timestamp(self.node_rpc_url.as_str(), Some(block_hash))
+				.await?,
 		);
 
 		// Update backing information if any.
@@ -443,7 +446,7 @@ impl SubxtTracker {
 						.expect("checked in candidate_backed, qed."),
 				);
 			}
-			return
+			return Ok(())
 		}
 
 		if self.current_candidate.candidate.is_none() &&
@@ -453,7 +456,7 @@ impl SubxtTracker {
 		{
 			// If no candidate is being backed reset the state to `Idle`.
 			self.current_candidate.state = ParachainBlockState::Idle;
-			return
+			return Ok(())
 		}
 
 		if self.current_candidate.state == ParachainBlockState::Backed {
@@ -462,6 +465,8 @@ impl SubxtTracker {
 				self.update_availability(assigned_core, bitfields, validator_groups);
 			}
 		}
+
+		Ok(())
 	}
 
 	fn update_backing(&mut self, mut backed_candidates: Vec<BackedCandidate<H256>>, block_number: BlockNumber) -> bool {
