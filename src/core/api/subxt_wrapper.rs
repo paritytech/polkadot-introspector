@@ -356,12 +356,12 @@ impl RequestExecutor {
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
 async fn new_client_fn(url: &str) -> Option<OnlineClient<PolkadotConfig>> {
-	for _ in 0..crate::core::RETRY_COUNT {
+	for i in 0..crate::core::RETRY_COUNT {
 		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {
 			Ok(api) => return Some(api),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
-				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS)).await;
+				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS * (i + 1))).await;
 				continue
 			},
 		};
