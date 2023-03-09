@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::{decode_or_send_raw_event, EventConsumerInit, EventStream, SubxtEvent, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
+use super::{decode_block_event, EventConsumerInit, EventStream, SubxtEvent, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
 use async_trait::async_trait;
 use futures::{future, Stream, StreamExt};
 use log::{error, info};
@@ -180,7 +180,7 @@ async fn process_subscription_or_stop<Sub, Client>(
 
 						for event in events.iter() {
 							let event = event.unwrap();
-							let subxt_event = decode_or_send_raw_event(hash, event.clone()).await.unwrap();
+							let subxt_event = decode_block_event(hash, event.clone()).await.unwrap();
 							if let Err(e) = update_channel.send(subxt_event).await {
 								info!("Event consumer has terminated: {:?}, shutting down", e);
 								return;
