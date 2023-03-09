@@ -22,13 +22,16 @@ use crossterm::{
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
 	collections::VecDeque,
 	io::{stdout, Write},
 	net::ToSocketAddrs,
-	sync::{Arc, Mutex},
+	sync::{
+		atomic::{AtomicUsize, Ordering},
+		Arc, Mutex,
+	},
 };
 use subxt::{config::Header, utils::H256};
 use tokio::sync::mpsc::Receiver;
@@ -84,6 +87,7 @@ pub(crate) struct BlockTimeMonitor {
 	endpoints: Vec<String>,
 	consumer_config: EventConsumerInit<SubxtEvent>,
 	api_service: ApiService<H256>,
+	active_endpoints: Arc<AtomicUsize>,
 }
 
 impl BlockTimeMonitor {
@@ -99,6 +103,7 @@ impl BlockTimeMonitor {
 
 		// This starts the both the storage and subxt APIs.
 		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 });
+		let active_endpoints = Arc::new(AtomicUsize::new(endpoints.len()));
 
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(prometheus_opts) => {
@@ -109,10 +114,25 @@ impl BlockTimeMonitor {
 				socket_addr_str.to_socket_addrs()?.for_each(|addr| {
 					tokio::spawn(prometheus_endpoint::init_prometheus(addr, prometheus_registry.clone()));
 				});
-				Ok(BlockTimeMonitor { values, opts, block_time_metric, endpoints, consumer_config, api_service })
+				Ok(BlockTimeMonitor {
+					values,
+					opts,
+					block_time_metric,
+					endpoints,
+					consumer_config,
+					api_service,
+					active_endpoints,
+				})
 			},
-			BlockTimeMode::Cli(_) =>
-				Ok(BlockTimeMonitor { values, opts, block_time_metric: None, endpoints, consumer_config, api_service }),
+			BlockTimeMode::Cli(_) => Ok(BlockTimeMonitor {
+				values,
+				opts,
+				block_time_metric: None,
+				endpoints,
+				consumer_config,
+				api_service,
+				active_endpoints,
+			}),
 		}
 	}
 
@@ -133,19 +153,35 @@ impl BlockTimeMonitor {
 					values,
 					update_channel,
 					self.api_service.clone(),
+					self.active_endpoints.clone(),
 				))
 			})
 			.collect::<Vec<_>>();
 
-		futures.push(tokio::spawn(Self::display_charts(self.values.clone(), self.endpoints.clone(), self.opts)));
+		futures.push(tokio::spawn(Self::display_charts(
+			self.values.clone(),
+			self.endpoints.clone(),
+			self.opts,
+			self.active_endpoints,
+		)));
 
 		Ok(futures)
 	}
 
 	// TODO: get rid of arc mutex and use channels.
-	async fn display_charts(values: Vec<Arc<Mutex<VecDeque<u64>>>>, endpoints: Vec<String>, opts: BlockTimeOptions) {
+	async fn display_charts(
+		values: Vec<Arc<Mutex<VecDeque<u64>>>>,
+		endpoints: Vec<String>,
+		opts: BlockTimeOptions,
+		active_endpoints: Arc<AtomicUsize>,
+	) {
 		if let BlockTimeMode::Cli(opts) = opts.mode {
 			loop {
+				if active_endpoints.load(Ordering::Acquire) == 0 {
+					// No more active endpoints remaining, give up
+					info!("no more active endpoints are left, terminating UI loop");
+					break
+				}
 				let _ = stdout().queue(Clear(ClearType::All)).unwrap();
 				endpoints.iter().zip(values.iter()).enumerate().for_each(|(i, (uri, values))| {
 					Self::display_chart(uri, (i * (opts.chart_height + 3)) as u32, values.clone(), opts.clone());
@@ -205,6 +241,7 @@ impl BlockTimeMonitor {
 		// TODO: make this a struct.
 		mut consumer_config: Receiver<SubxtEvent>,
 		api_service: ApiService<H256>,
+		active_endpoints: Arc<AtomicUsize>,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
 		let url = leak_static_str(url);
@@ -268,10 +305,11 @@ impl BlockTimeMonitor {
 					_ => continue,
 				}
 			} else {
-				error!("[{}] Update channel disconnected", url);
+				info!("[{}] Update channel disconnected", url);
 				break
 			}
 		}
+		active_endpoints.fetch_sub(1, Ordering::SeqCst);
 	}
 }
 
