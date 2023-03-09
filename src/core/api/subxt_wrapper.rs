@@ -27,7 +27,7 @@ use codec::Decode;
 use log::error;
 use thiserror::Error;
 
-use crate::core::subxt_subscription::polkadot::{
+use crate::core::polkadot::{
 	self, runtime_types as subxt_runtime_types,
 	runtime_types::{polkadot_primitives as polkadot_rt_primitives, polkadot_runtime_parachains::hrmp::HrmpChannel},
 };
