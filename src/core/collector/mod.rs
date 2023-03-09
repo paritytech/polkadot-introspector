@@ -30,7 +30,7 @@ use color_eyre::eyre::eyre;
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},
 	utils::H256,
-	PolkadotConfig,
+	OnlineClient, PolkadotConfig,
 };
 use tokio::sync::{
 	broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender},
@@ -47,6 +47,8 @@ use crate::core::{
 
 use candidate_record::*;
 use ws::*;
+
+use super::decode_block_event;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -189,10 +191,17 @@ impl Collector {
 		tokio::spawn(async move {
 			loop {
 				match consumer_channel.try_recv() {
-					Ok(event) =>
-						if let Err(e) = self.process_subxt_event(&event).await {
-							info!("collector service could not process event: {}", e);
+					Ok(event) => match self.map_subxt_event(&event).await {
+						Ok(subxt_events) =>
+							for e in subxt_events.iter() {
+								if let Err(e) = self.process_subxt_event(e).await {
+									info!("collector service could not process event: {}", e);
+								}
+							},
+						Err(e) => {
+							info!("collector service could not process events: {}", e);
 						},
+					},
 					Err(TryRecvError::Disconnected) => {
 						self.broadcast_event(CollectorUpdateEvent::Termination).await.unwrap();
 						break
@@ -201,6 +210,24 @@ impl Collector {
 				}
 			}
 		})
+	}
+
+	pub async fn map_subxt_event(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<SubxtEvent>> {
+		match event {
+			SubxtEvent::NewHead(block_hash) => {
+				let block_hash = *block_hash;
+				let mut subxt_events = vec![SubxtEvent::NewHead(block_hash)];
+				let client = OnlineClient::<PolkadotConfig>::from_url(self.endpoint.as_str()).await?;
+				let block_events = client.events().at(Some(block_hash)).await?;
+
+				for event in block_events.iter() {
+					subxt_events.push(decode_block_event(block_hash, event.unwrap()).await?);
+				}
+
+				Ok(subxt_events)
+			},
+			_ => Ok(vec![]),
+		}
 	}
 
 	/// Process a next subxt event

@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::{decode_block_event, EventConsumerInit, EventStream, SubxtEvent, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
+use super::{EventConsumerInit, EventStream, SubxtEvent, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
 use async_trait::async_trait;
 use futures::{future, Stream, StreamExt};
 use log::{error, info};
@@ -169,22 +169,12 @@ async fn process_subscription_or_stop<Sub, Client>(
 				tokio::select! {
 					Some(block) = sub.next() => {
 						let block = block.unwrap();
-						let events = block.events().await.unwrap();
 						let hash = block.hash();
 						info!("[{}] Block imported ({:?})", url, &hash);
 
 						if let Err(e) = update_channel.send(SubxtEvent::NewHead(hash)).await {
 							info!("Event consumer has terminated: {:?}, shutting down", e);
 							return;
-						}
-
-						for event in events.iter() {
-							let event = event.unwrap();
-							let subxt_event = decode_block_event(hash, event.clone()).await.unwrap();
-							if let Err(e) = update_channel.send(subxt_event).await {
-								info!("Event consumer has terminated: {:?}, shutting down", e);
-								return;
-							}
 						}
 					},
 					_ = shutdown_rx.recv() => {
