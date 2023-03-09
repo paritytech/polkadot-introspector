@@ -41,8 +41,8 @@ pub mod candidate_record;
 mod ws;
 
 use crate::core::{
-	ApiService, RecordTime, RecordsStorageConfig, StorageEntry, SubxtCandidateEvent, SubxtCandidateEventType,
-	SubxtDispute, SubxtDisputeResult, SubxtEvent,
+	ApiService, RecordTime, RecordsStorageConfig, RequestExecutor, StorageEntry, SubxtCandidateEvent,
+	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
 };
 
 use candidate_record::*;
@@ -139,6 +139,7 @@ pub struct Collector {
 	subscribe_channels: BTreeMap<u32, Vec<BroadcastSender<CollectorUpdateEvent>>>,
 	broadcast_channels: Vec<BroadcastSender<CollectorUpdateEvent>>,
 	state: CollectorState,
+	executor: RequestExecutor,
 }
 
 impl Collector {
@@ -153,6 +154,7 @@ impl Collector {
 		} else {
 			None
 		};
+		let executor = api_service.subxt();
 		Self {
 			api_service,
 			ws_listener,
@@ -161,6 +163,7 @@ impl Collector {
 			subscribe_channels: Default::default(),
 			state: Default::default(),
 			broadcast_channels: Default::default(),
+			executor,
 		}
 	}
 
@@ -226,6 +229,11 @@ impl Collector {
 	/// Returns API endpoint for storage and request executor
 	pub fn api(&self) -> CollectorStorageApi {
 		self.api_service.clone()
+	}
+
+	/// Returns Subxt request executor
+	pub fn executor(&self) -> RequestExecutor {
+		self.executor.clone()
 	}
 
 	fn update_state(
@@ -296,11 +304,14 @@ impl Collector {
 	}
 
 	async fn process_new_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		let executor = self.api_service.subxt();
-		let ts = executor.get_block_timestamp(self.endpoint.clone(), Some(block_hash)).await;
-		let header = executor
-			.get_block_head(self.endpoint.clone(), Some(block_hash))
-			.await
+		let ts = self
+			.executor
+			.get_block_timestamp(self.endpoint.as_str(), Some(block_hash))
+			.await?;
+		let header = self
+			.executor
+			.get_block_head(self.endpoint.as_str(), Some(block_hash))
+			.await?
 			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
 		let block_number = header.number;
 		info!(
@@ -336,7 +347,7 @@ impl Collector {
 			)
 			.await
 			.unwrap();
-		let cur_session = executor.get_session_index(self.endpoint.clone(), block_hash).await;
+		let cur_session = self.executor.get_session_index(self.endpoint.as_str(), block_hash).await?;
 		let cur_session_hash = BlakeTwo256::hash(&cur_session.to_be_bytes()[..]);
 		let maybe_existing_session = self
 			.api_service
@@ -346,9 +357,10 @@ impl Collector {
 		if maybe_existing_session.is_none() {
 			// New session, need to store it's data
 			debug!("new session: {}, hash: {}", cur_session, cur_session_hash);
-			let accounts_keys = executor
-				.get_session_account_keys(self.endpoint.clone(), cur_session)
-				.await
+			let accounts_keys = self
+				.executor
+				.get_session_account_keys(self.endpoint.as_str(), cur_session)
+				.await?
 				.ok_or_else(|| eyre!("Missing account keys for session {}", cur_session))?;
 			self.api_service
 				.storage()
@@ -380,10 +392,9 @@ impl Collector {
 		}
 
 		let inherent_data = self
-			.api_service
-			.subxt()
-			.extract_parainherent_data(self.endpoint.clone(), Some(block_hash))
-			.await;
+			.executor
+			.extract_parainherent_data(self.endpoint.as_str(), Some(block_hash))
+			.await?;
 
 		if let Some(inherent_data) = inherent_data {
 			self.api_service

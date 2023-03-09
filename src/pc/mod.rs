@@ -35,7 +35,7 @@ use clap::Parser;
 use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
-use log::info;
+use log::{error, info, warn};
 use std::{default::Default, time::Duration};
 use tokio::sync::{
 	broadcast::{error::TryRecvError, Receiver as BroadcastReceiver, Sender as BroadcastSender},
@@ -116,7 +116,13 @@ impl ParachainCommander {
 
 		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone());
 		collector.spawn(shutdown_tx).await?;
-		print_host_configuration(self.opts.node.as_str(), &collector.api().subxt()).await?;
+		print_host_configuration(self.opts.node.as_str(), &mut collector.executor())
+			.await
+			.map_err(|e| {
+				warn!("Cannot get host configuration: {}", e);
+				e
+			})
+			.unwrap_or_default();
 
 		println!(
 			"{} will trace parachain(s) {} on {}\n{}",
@@ -169,13 +175,19 @@ impl ParachainCommander {
 				Ok(update_event) => match update_event {
 					CollectorUpdateEvent::NewHead(new_head) =>
 						for relay_fork in &new_head.relay_parent_hashes {
-							tracker.inject_block(*relay_fork, new_head.relay_parent_number).await;
-							if let Some(progress) = tracker.progress(&self.metrics) {
-								if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-									println!("{}", progress);
-								}
+							match tracker.inject_block(*relay_fork, new_head.relay_parent_number).await {
+								Ok(_) => {
+									if let Some(progress) = tracker.progress(&self.metrics) {
+										if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+											println!("{}", progress);
+										}
+									}
+									tracker.maybe_reset_state();
+								},
+								Err(e) => {
+									error!("error occurred when processing block {}: {:?}", relay_fork, e)
+								},
 							}
-							tracker.maybe_reset_state();
 						},
 					CollectorUpdateEvent::NewSession(idx) => {
 						tracker.new_session(idx).await;
@@ -199,8 +211,8 @@ impl ParachainCommander {
 	}
 }
 
-async fn print_host_configuration(url: &str, executor: &RequestExecutor) -> color_eyre::Result<()> {
-	let conf = executor.get_host_configuration(url.to_owned()).await;
+async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> color_eyre::Result<()> {
+	let conf = executor.get_host_configuration(url).await?;
 	println!("Host configuration for {}:", url.to_owned().bold());
 	println!(
 		"\t👀 Max validators: {} / {} per core",

@@ -214,7 +214,7 @@ impl BlockTimeMonitor {
 				populate_view(values.clone(), url, cli_opts, api_service.clone()).await;
 			},
 		}
-		let executor = api_service.subxt();
+		let mut executor = api_service.subxt();
 
 		let mut prev_ts = 0;
 		let mut prev_block = 0u32;
@@ -226,40 +226,44 @@ impl BlockTimeMonitor {
 				debug!("New event: {:?}", event);
 				match event {
 					SubxtEvent::NewHead(hash) => {
-						let ts = executor.get_block_timestamp(url.into(), Some(hash)).await;
-						let header = executor.get_block_head(url.into(), Some(hash)).await.unwrap();
+						let ts = executor.get_block_timestamp(url, Some(hash)).await;
+						let header = executor.get_block_head(url, Some(hash)).await;
 
-						if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
-							// We know a prev block and this is it's child
-							let block_time_ms = ts.saturating_sub(prev_ts);
-							info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
+						if let Ok(ts) = ts {
+							if let Ok(Some(header)) = header {
+								if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
+									// We know a prev block and this is it's child
+									let block_time_ms = ts.saturating_sub(prev_ts);
+									info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
 
-							match opts.mode {
-								BlockTimeMode::Cli(_) => {
-									values.lock().expect("Bad lock").push_back(block_time_ms);
-								},
-								BlockTimeMode::Prometheus(_) =>
+									match opts.mode {
+										BlockTimeMode::Cli(_) => {
+											values.lock().expect("Bad lock").push_back(block_time_ms);
+										},
+										BlockTimeMode::Prometheus(_) =>
+											if let Some(metric) = metric.clone() {
+												metric.with_label_values(&[url]).observe(block_time_ms as f64)
+											},
+									}
+								} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
+									// We know a prev block, but the diff is > 1. We lost blocks.
+									// TODO(later): fetch the gap and publish the stats.
+									// TODO(later later): Metrics tracking the missed blocks.
+									warn!(
+										"[{}] Missed {} blocks, likely because of WS connectivity issues",
+										url,
+										header.number.saturating_sub(prev_block).saturating_sub(1)
+									);
+								} else if prev_block == 0 {
+									// Just starting up - init metric.
 									if let Some(metric) = metric.clone() {
-										metric.with_label_values(&[url]).observe(block_time_ms as f64)
-									},
-							}
-						} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
-							// We know a prev block, but the diff is > 1. We lost blocks.
-							// TODO(later): fetch the gap and publish the stats.
-							// TODO(later later): Metrics tracking the missed blocks.
-							warn!(
-								"[{}] Missed {} blocks, likely because of WS connectivity issues",
-								url,
-								header.number.saturating_sub(prev_block).saturating_sub(1)
-							);
-						} else if prev_block == 0 {
-							// Just starting up - init metric.
-							if let Some(metric) = metric.clone() {
-								metric.with_label_values(&[url]).observe(0f64)
+										metric.with_label_values(&[url]).observe(0f64)
+									}
+								}
+								prev_ts = ts;
+								prev_block = header.number;
 							}
 						}
-						prev_ts = ts;
-						prev_block = header.number;
 					},
 					_ => continue,
 				}
@@ -279,12 +283,12 @@ async fn populate_view(
 ) {
 	let mut prev_ts = 0u64;
 	let blocks_to_fetch = cli_opts.chart_width;
-	let executor = api_service.subxt();
+	let mut executor = api_service.subxt();
 	let mut parent_hash = None;
 
 	for _ in 0..blocks_to_fetch {
-		if let Some(header) = executor.get_block_head(url.into(), parent_hash).await {
-			let ts = executor.get_block_timestamp(url.into(), Some(header.hash())).await;
+		if let Ok(Some(header)) = executor.get_block_head(url, parent_hash).await {
+			let ts = executor.get_block_timestamp(url, Some(header.hash())).await.unwrap();
 
 			if prev_ts != 0 {
 				// We are walking backwards.
