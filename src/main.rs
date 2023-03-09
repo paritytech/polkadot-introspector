@@ -36,12 +36,14 @@ use crate::{core::EventStream, kvdb::KvdbOptions};
 #[clap(rename_all = "kebab-case")]
 enum Command {
 	/// Observe block times using an RPC node
+	#[clap(aliases = &["blockmon"])]
 	BlockTimeMonitor(BlockTimeOptions),
 	/// Examine jaeger traces
 	Jaeger(JaegerOptions),
 	/// Examine key-value database for both relay chain and parachains
 	Kvdb(KvdbOptions),
 	/// Observe parachain state
+	#[clap(aliases = &["pc"])]
 	ParachainCommander(ParachainCommanderOptions),
 }
 
