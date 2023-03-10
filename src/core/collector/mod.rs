@@ -30,7 +30,7 @@ use color_eyre::eyre::eyre;
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},
 	utils::H256,
-	OnlineClient, PolkadotConfig,
+	PolkadotConfig,
 };
 use tokio::sync::{
 	broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender},
@@ -213,16 +213,17 @@ impl Collector {
 	}
 
 	/// Collects chain events from new head including block events parsing
-	pub async fn collect_chain_events(&self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
+	pub async fn collect_chain_events(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
 		match event {
 			SubxtEvent::NewHead(block_hash) => {
 				let block_hash = *block_hash;
 				let mut chain_events = vec![ChainEvent::NewHead(block_hash)];
-				let client = OnlineClient::<PolkadotConfig>::from_url(self.endpoint.as_str()).await?;
-				let block_events = client.events().at(Some(block_hash)).await?;
+				let block_events = self.executor.get_events(self.endpoint.as_str(), Some(block_hash)).await?;
 
-				for block_event in block_events.iter() {
-					chain_events.push(decode_chain_event(block_hash, block_event.unwrap()).await?);
+				if let Some(block_events) = block_events {
+					for block_event in block_events.iter() {
+						chain_events.push(decode_chain_event(block_hash, block_event.unwrap()).await?);
+					}
 				}
 
 				Ok(chain_events)
