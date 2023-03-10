@@ -212,24 +212,25 @@ impl Collector {
 		})
 	}
 
+	/// Collects chain events from new head including block events parsing
 	pub async fn collect_chain_events(&self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
 		match event {
 			SubxtEvent::NewHead(block_hash) => {
 				let block_hash = *block_hash;
-				let mut subxt_events = vec![ChainEvent::NewHead(block_hash)];
+				let mut chain_events = vec![ChainEvent::NewHead(block_hash)];
 				let client = OnlineClient::<PolkadotConfig>::from_url(self.endpoint.as_str()).await?;
 				let block_events = client.events().at(Some(block_hash)).await?;
 
-				for event in block_events.iter() {
-					subxt_events.push(decode_chain_event(block_hash, event.unwrap()).await?);
+				for block_event in block_events.iter() {
+					chain_events.push(decode_chain_event(block_hash, block_event.unwrap()).await?);
 				}
 
-				Ok(subxt_events)
+				Ok(chain_events)
 			},
 		}
 	}
 
-	/// Process a next subxt event
+	/// Process a next chain event
 	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<()> {
 		match event {
 			ChainEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
