@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::{EventConsumerInit, EventStream, SubxtEvent, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
+use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
 use async_trait::async_trait;
 use futures::{future, Stream, StreamExt};
 use log::{error, info};
@@ -25,6 +25,12 @@ use tokio::sync::{
 	broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender},
 	mpsc::{channel, Sender},
 };
+
+#[derive(Debug)]
+pub enum SubxtEvent {
+	/// New relay chain head
+	NewHead(<PolkadotConfig as subxt::Config>::Hash),
+}
 
 pub struct SubxtWrapper {
 	urls: Vec<String>,

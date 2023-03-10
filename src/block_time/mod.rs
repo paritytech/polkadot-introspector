@@ -255,7 +255,6 @@ impl BlockTimeMonitor {
 
 		let mut prev_ts = 0;
 		let mut prev_block = 0u32;
-		// tokio::time::sleep(std::time::Duration::from_secs(3000)).await;
 
 		loop {
 			debug!("[{}] New loop - waiting for events", url);
@@ -302,7 +301,6 @@ impl BlockTimeMonitor {
 							}
 						}
 					},
-					_ => continue,
 				}
 			} else {
 				info!("[{}] Update channel disconnected", url);

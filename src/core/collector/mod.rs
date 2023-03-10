@@ -41,14 +41,14 @@ pub mod candidate_record;
 mod ws;
 
 use crate::core::{
-	ApiService, RecordTime, RecordsStorageConfig, RequestExecutor, StorageEntry, SubxtCandidateEvent,
-	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
+	ApiService, ChainEvent, RecordTime, RecordsStorageConfig, RequestExecutor, StorageEntry, SubxtCandidateEvent,
+	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 };
 
 use candidate_record::*;
 use ws::*;
 
-use super::decode_block_event;
+use super::{decode_block_event, SubxtEvent};
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -194,7 +194,7 @@ impl Collector {
 					Ok(event) => match self.map_subxt_event(&event).await {
 						Ok(subxt_events) =>
 							for e in subxt_events.iter() {
-								if let Err(e) = self.process_subxt_event(e).await {
+								if let Err(e) = self.process_chain_event(e).await {
 									info!("collector service could not process event: {}", e);
 								}
 							},
@@ -212,11 +212,11 @@ impl Collector {
 		})
 	}
 
-	pub async fn map_subxt_event(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<SubxtEvent>> {
+	pub async fn map_subxt_event(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
 		match event {
 			SubxtEvent::NewHead(block_hash) => {
 				let block_hash = *block_hash;
-				let mut subxt_events = vec![SubxtEvent::NewHead(block_hash)];
+				let mut subxt_events = vec![ChainEvent::NewHead(block_hash)];
 				let client = OnlineClient::<PolkadotConfig>::from_url(self.endpoint.as_str()).await?;
 				let block_events = client.events().at(Some(block_hash)).await?;
 
@@ -226,17 +226,16 @@ impl Collector {
 
 				Ok(subxt_events)
 			},
-			_ => Ok(vec![]),
 		}
 	}
 
 	/// Process a next subxt event
-	pub async fn process_subxt_event(&mut self, event: &SubxtEvent) -> color_eyre::Result<()> {
+	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<()> {
 		match event {
-			SubxtEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
-			SubxtEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
-			SubxtEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
-			SubxtEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
+			ChainEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
+			ChainEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
+			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
+			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
 				self.process_dispute_concluded(dispute_event, dispute_outcome).await,
 			_ => Ok(()),
 		}
