@@ -108,7 +108,7 @@ pub enum SubxtDisputeResult {
 	TimedOut,
 }
 
-pub async fn decode_block_event(
+pub async fn decode_chain_event(
 	block_hash: <PolkadotConfig as subxt::Config>::Hash,
 	event: subxt::events::EventDetails,
 ) -> Result<ChainEvent> {

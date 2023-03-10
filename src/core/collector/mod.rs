@@ -48,7 +48,7 @@ use crate::core::{
 use candidate_record::*;
 use ws::*;
 
-use super::{decode_block_event, SubxtEvent};
+use super::{decode_chain_event, SubxtEvent};
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -191,7 +191,7 @@ impl Collector {
 		tokio::spawn(async move {
 			loop {
 				match consumer_channel.try_recv() {
-					Ok(event) => match self.map_subxt_event(&event).await {
+					Ok(event) => match self.collect_chain_events(&event).await {
 						Ok(subxt_events) =>
 							for e in subxt_events.iter() {
 								if let Err(e) = self.process_chain_event(e).await {
@@ -212,7 +212,7 @@ impl Collector {
 		})
 	}
 
-	pub async fn map_subxt_event(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
+	pub async fn collect_chain_events(&self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
 		match event {
 			SubxtEvent::NewHead(block_hash) => {
 				let block_hash = *block_hash;
@@ -221,7 +221,7 @@ impl Collector {
 				let block_events = client.events().at(Some(block_hash)).await?;
 
 				for event in block_events.iter() {
-					subxt_events.push(decode_block_event(block_hash, event.unwrap()).await?);
+					subxt_events.push(decode_chain_event(block_hash, event.unwrap()).await?);
 				}
 
 				Ok(subxt_events)
