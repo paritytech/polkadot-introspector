@@ -29,6 +29,7 @@
 //! can be built by combining existing ones by listening to storage update events.
 
 pub mod api;
+mod chain_events;
 pub mod collector;
 pub mod constants;
 pub mod consumer;
@@ -39,6 +40,7 @@ mod subxt_subscription;
 
 pub use self::subxt_subscription::*;
 pub use api::*;
+pub use chain_events::*;
 pub use constants::*;
 pub use consumer::*;
 pub use storage::*;

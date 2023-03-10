@@ -41,12 +41,14 @@ pub mod candidate_record;
 mod ws;
 
 use crate::core::{
-	ApiService, RecordTime, RecordsStorageConfig, RequestExecutor, StorageEntry, SubxtCandidateEvent,
-	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, SubxtEvent,
+	ApiService, ChainEvent, RecordTime, RecordsStorageConfig, RequestExecutor, StorageEntry, SubxtCandidateEvent,
+	SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 };
 
 use candidate_record::*;
 use ws::*;
+
+use super::{decode_chain_event, SubxtEvent};
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -189,10 +191,17 @@ impl Collector {
 		tokio::spawn(async move {
 			loop {
 				match consumer_channel.try_recv() {
-					Ok(event) =>
-						if let Err(e) = self.process_subxt_event(&event).await {
-							info!("collector service could not process event: {}", e);
+					Ok(event) => match self.collect_chain_events(&event).await {
+						Ok(subxt_events) =>
+							for e in subxt_events.iter() {
+								if let Err(e) = self.process_chain_event(e).await {
+									info!("collector service could not process event: {}", e);
+								}
+							},
+						Err(e) => {
+							info!("collector service could not process events: {}", e);
 						},
+					},
 					Err(TryRecvError::Disconnected) => {
 						self.broadcast_event(CollectorUpdateEvent::Termination).await.unwrap();
 						break
@@ -203,13 +212,32 @@ impl Collector {
 		})
 	}
 
-	/// Process a next subxt event
-	pub async fn process_subxt_event(&mut self, event: &SubxtEvent) -> color_eyre::Result<()> {
+	/// Collects chain events from new head including block events parsing
+	pub async fn collect_chain_events(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
 		match event {
-			SubxtEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
-			SubxtEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
-			SubxtEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
-			SubxtEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
+			SubxtEvent::NewHead(block_hash) => {
+				let block_hash = *block_hash;
+				let mut chain_events = vec![ChainEvent::NewHead(block_hash)];
+				let block_events = self.executor.get_events(self.endpoint.as_str(), Some(block_hash)).await?;
+
+				if let Some(block_events) = block_events {
+					for block_event in block_events.iter() {
+						chain_events.push(decode_chain_event(block_hash, block_event.unwrap()).await?);
+					}
+				}
+
+				Ok(chain_events)
+			},
+		}
+	}
+
+	/// Process a next chain event
+	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<()> {
+		match event {
+			ChainEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
+			ChainEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
+			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
+			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
 				self.process_dispute_concluded(dispute_event, dispute_outcome).await,
 			_ => Ok(()),
 		}

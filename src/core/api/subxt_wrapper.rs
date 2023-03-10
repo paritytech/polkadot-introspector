@@ -27,7 +27,7 @@ use codec::Decode;
 use log::error;
 use thiserror::Error;
 
-use crate::core::subxt_subscription::polkadot::{
+use crate::core::polkadot::{
 	self, runtime_types as subxt_runtime_types,
 	runtime_types::{polkadot_primitives as polkadot_rt_primitives, polkadot_runtime_parachains::hrmp::HrmpChannel},
 };
@@ -56,6 +56,8 @@ pub enum RequestType {
 	GetHead(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get a full block.
 	GetBlock(Option<<PolkadotConfig as subxt::Config>::Hash>),
+	/// Get block events.
+	GetEvents(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Extract the `ParaInherentData` from a given block.
 	ExtractParaInherent(subxt::rpc::types::ChainBlock<PolkadotConfig>),
 	/// Get the availability core scheduling information at a given block.
@@ -92,6 +94,9 @@ impl Debug for RequestType {
 			},
 			RequestType::GetBlock(h) => {
 				format!("get block: {:?}", h)
+			},
+			RequestType::GetEvents(h) => {
+				format!("get events: {:?}", h)
 			},
 			RequestType::ExtractParaInherent(block) => {
 				format!("get inherent for block number: {:?}", block.header.number)
@@ -145,6 +150,8 @@ pub enum Response {
 	MaybeHead(Option<<PolkadotConfig as subxt::Config>::Header>),
 	/// A full block.
 	MaybeBlock(Option<subxt::rpc::types::ChainBlock<PolkadotConfig>>),
+	/// Block events
+	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
@@ -215,6 +222,7 @@ impl RequestExecutor {
 				RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(&api, maybe_hash).await,
 				RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
 				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
+				RequestType::GetEvents(maybe_hash) => subxt_get_events(&api, maybe_hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
@@ -272,6 +280,14 @@ impl RequestExecutor {
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
 	) -> std::result::Result<Option<subxt::rpc::types::ChainBlock<PolkadotConfig>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetBlock, MaybeBlock, url, maybe_hash)
+	}
+
+	pub async fn get_events(
+		&mut self,
+		url: &str,
+		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+	) -> std::result::Result<Option<subxt::events::Events<PolkadotConfig>>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetEvents, MaybeEvents, url, maybe_hash)
 	}
 
 	pub async fn extract_parainherent_data(
@@ -400,6 +416,10 @@ async fn subxt_get_block_ts(api: &OnlineClient<PolkadotConfig>, maybe_hash: Opti
 
 async fn subxt_get_block(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
 	Ok(Response::MaybeBlock(api.rpc().block(maybe_hash).await?.map(|response| response.block)))
+}
+
+async fn subxt_get_events(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
+	Ok(Response::MaybeEvents(Some(api.events().at(maybe_hash).await?)))
 }
 
 /// Error originated from decoding an extrinsic.
