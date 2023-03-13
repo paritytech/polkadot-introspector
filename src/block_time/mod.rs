@@ -14,7 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent};
+use crate::core::{
+	api::ApiService,
+	collector::{new_head_hash, CollectorSubscriptionMode},
+	EventConsumerInit, RecordsStorageConfig, SubxtEvent,
+};
 use clap::Parser;
 use colored::Colorize;
 use crossterm::{
@@ -55,7 +59,7 @@ pub(crate) struct BlockTimeOptions {
 	mode: BlockTimeMode,
 	/// Defines subscription mode
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
-	pub subscribe_mode: SubxtSubscriptionMode,
+	pub subscribe_mode: CollectorSubscriptionMode,
 }
 
 #[derive(Clone, Debug, Parser, Default)]
@@ -260,47 +264,48 @@ impl BlockTimeMonitor {
 			debug!("[{}] New loop - waiting for events", url);
 			if let Some(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
-				match event {
-					SubxtEvent::NewBestHead(hash) => {
-						let ts = executor.get_block_timestamp(url, Some(hash)).await;
-						let header = executor.get_block_head(url, Some(hash)).await;
+				if let Some(hash) = new_head_hash(&event, opts.subscribe_mode) {
+					let hash = *hash;
+					let ts = executor.get_block_timestamp(url, Some(hash)).await;
+					let header = executor.get_block_head(url, Some(hash)).await;
 
-						if let Ok(ts) = ts {
-							if let Ok(Some(header)) = header {
-								if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
-									// We know a prev block and this is it's child
-									let block_time_ms = ts.saturating_sub(prev_ts);
-									info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
+					if let Ok(ts) = ts {
+						if let Ok(Some(header)) = header {
+							if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
+								// We know a prev block and this is it's child
+								let block_time_ms = ts.saturating_sub(prev_ts);
+								info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
 
-									match opts.mode {
-										BlockTimeMode::Cli(_) => {
-											values.lock().expect("Bad lock").push_back(block_time_ms);
+								match opts.mode {
+									BlockTimeMode::Cli(_) => {
+										values.lock().expect("Bad lock").push_back(block_time_ms);
+									},
+									BlockTimeMode::Prometheus(_) =>
+										if let Some(metric) = metric.clone() {
+											metric.with_label_values(&[url]).observe(block_time_ms as f64)
 										},
-										BlockTimeMode::Prometheus(_) =>
-											if let Some(metric) = metric.clone() {
-												metric.with_label_values(&[url]).observe(block_time_ms as f64)
-											},
-									}
-								} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
-									// We know a prev block, but the diff is > 1. We lost blocks.
-									// TODO(later): fetch the gap and publish the stats.
-									// TODO(later later): Metrics tracking the missed blocks.
-									warn!(
-										"[{}] Missed {} blocks, likely because of WS connectivity issues",
-										url,
-										header.number.saturating_sub(prev_block).saturating_sub(1)
-									);
-								} else if prev_block == 0 {
-									// Just starting up - init metric.
-									if let Some(metric) = metric.clone() {
-										metric.with_label_values(&[url]).observe(0f64)
-									}
 								}
-								prev_ts = ts;
-								prev_block = header.number;
+							} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
+								// We know a prev block, but the diff is > 1. We lost blocks.
+								// TODO(later): fetch the gap and publish the stats.
+								// TODO(later later): Metrics tracking the missed blocks.
+								warn!(
+									"[{}] Missed {} blocks, likely because of WS connectivity issues",
+									url,
+									header.number.saturating_sub(prev_block).saturating_sub(1)
+								);
+							} else if prev_block == 0 {
+								// Just starting up - init metric.
+								if let Some(metric) = metric.clone() {
+									metric.with_label_values(&[url]).observe(0f64)
+								}
 							}
+							prev_ts = ts;
+							prev_block = header.number;
 						}
-					},
+					}
+				} else {
+					continue
 				}
 			} else {
 				info!("[{}] Update channel disconnected", url);

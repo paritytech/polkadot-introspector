@@ -111,7 +111,7 @@ impl SubxtSubscription {
 							FollowEvent::Finalized(finalized) => {
 								for hash in finalized.finalized_block_hashes.iter() {
 									info!("[{}] Finalized block imported ({:?})", url, hash);
-									if let Err(e) = update_channel.send(SubxtEvent::NewBestHead(*hash)).await {
+									if let Err(e) = update_channel.send(SubxtEvent::NewFinalizedHead(*hash)).await {
 										return on_error(e);
 									}
 								}
