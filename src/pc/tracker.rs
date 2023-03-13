@@ -30,7 +30,7 @@ use crate::core::{
 	SubxtDisputeResult, SubxtHrmpChannel,
 };
 use codec::{Decode, Encode};
-use log::{debug, error};
+use log::{debug, error, info};
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},
@@ -511,6 +511,12 @@ impl SubxtTracker {
 				.storage_read_prefixed(CollectorPrefixType::Dispute(self.para_id), dispute_info.candidate_hash.0)
 				.await;
 			if let Some(stored_dispute) = stored_dispute.map(|entry| -> DisputeInfo { entry.into_inner().unwrap() }) {
+				if stored_dispute.outcome.is_none() {
+					info!("dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
+						dispute_info.candidate_hash.0);
+					continue
+				}
+
 				let session_index = dispute_info.session;
 				let session_info = self.get_session_keys(session_index).await;
 				// TODO: we would like to distinguish different dispute phases at some point
@@ -521,7 +527,8 @@ impl SubxtTracker {
 					.count() as u32;
 				let voted_against = dispute_info.statements.len() as u32 - voted_for;
 
-				let outcome = stored_dispute.outcome.expect("disputes must be resolved before tracking");
+				// This is a tracked outcome
+				let outcome = stored_dispute.outcome.expect("checked above; qed");
 
 				let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
 					dispute_info
