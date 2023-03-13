@@ -16,7 +16,7 @@
 
 use crate::core::{
 	api::ApiService,
-	collector::{new_head_hash, CollectorSubscriptionMode},
+	collector::{new_head_hash, CollectorSubscribeMode},
 	EventConsumerInit, RecordsStorageConfig, SubxtEvent,
 };
 use clap::Parser;
@@ -59,7 +59,7 @@ pub(crate) struct BlockTimeOptions {
 	mode: BlockTimeMode,
 	/// Defines subscription mode
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
-	pub subscribe_mode: CollectorSubscriptionMode,
+	pub subscribe_mode: CollectorSubscribeMode,
 }
 
 #[derive(Clone, Debug, Parser, Default)]

@@ -60,12 +60,12 @@ pub struct CollectorOptions {
 	#[clap(short = 'l', long = "listen")]
 	listen_addr: Option<SocketAddr>,
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
-	pub subscribe_mode: CollectorSubscriptionMode,
+	pub subscribe_mode: CollectorSubscribeMode,
 }
 
 /// How to subscribe to subxt blocks
 #[derive(strum::Display, Debug, Clone, Copy, clap::ValueEnum, Default)]
-pub enum CollectorSubscriptionMode {
+pub enum CollectorSubscribeMode {
 	/// Subscribe to the best chain
 	Best,
 	/// Subscribe to finalized blocks
@@ -154,7 +154,7 @@ pub struct Collector {
 	broadcast_channels: Vec<BroadcastSender<CollectorUpdateEvent>>,
 	state: CollectorState,
 	executor: RequestExecutor,
-	subscribe_mode: CollectorSubscriptionMode,
+	subscribe_mode: CollectorSubscribeMode,
 }
 
 impl Collector {
@@ -807,10 +807,10 @@ fn get_unix_time_unwrap() -> Duration {
 	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }
 
-pub fn new_head_hash(event: &SubxtEvent, subscribe_mode: CollectorSubscriptionMode) -> Option<&H256> {
+pub fn new_head_hash(event: &SubxtEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
 	match (event, subscribe_mode) {
-		(SubxtEvent::NewBestHead(hash), CollectorSubscriptionMode::Best) => Some(hash),
-		(SubxtEvent::NewFinalizedHead(hash), CollectorSubscriptionMode::Finalized) => Some(hash),
+		(SubxtEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
+		(SubxtEvent::NewFinalizedHead(hash), CollectorSubscribeMode::Finalized) => Some(hash),
 		_ => None,
 	}
 }
