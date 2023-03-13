@@ -1,4 +1,4 @@
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -29,7 +29,7 @@
 
 use crate::core::{
 	collector::{Collector, CollectorOptions},
-	EventConsumerInit, RequestExecutor, SubxtEvent, SubxtSubscriptionMode,
+	EventConsumerInit, RequestExecutor, SubxtEvent,
 };
 use clap::Parser;
 use colored::Colorize;

@@ -1,4 +1,4 @@
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent, SubxtSubscriptionMode};
+use crate::core::{api::ApiService, EventConsumerInit, RecordsStorageConfig, SubxtEvent};
 use clap::Parser;
 use colored::Colorize;
 use crossterm::{
@@ -261,7 +261,7 @@ impl BlockTimeMonitor {
 			if let Some(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
 				match event {
-					SubxtEvent::NewHead(hash) => {
+					SubxtEvent::NewBestHead(hash) => {
 						let ts = executor.get_block_timestamp(url, Some(hash)).await;
 						let header = executor.get_block_head(url, Some(hash)).await;
 

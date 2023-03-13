@@ -215,7 +215,7 @@ impl Collector {
 	/// Collects chain events from new head including block events parsing
 	pub async fn collect_chain_events(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
 		match event {
-			SubxtEvent::NewHead(block_hash) => {
+			SubxtEvent::NewBestHead(block_hash) => {
 				let block_hash = *block_hash;
 				let mut chain_events = vec![ChainEvent::NewHead(block_hash)];
 				let block_events = self.executor.get_events(self.endpoint.as_str(), Some(block_hash)).await?;
