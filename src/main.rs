@@ -1,4 +1,4 @@
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -77,7 +77,7 @@ async fn main() -> color_eyre::Result<()> {
 
 	match opts.command {
 		Command::BlockTimeMonitor(opts) => {
-			let mut core = core::SubxtWrapper::new(opts.nodes.clone(), opts.subscribe_mode);
+			let mut core = core::SubxtSubscription::new(opts.nodes.clone());
 			let block_time_consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -112,7 +112,7 @@ async fn main() -> color_eyre::Result<()> {
 			kvdb::introspect_kvdb(opts).await?;
 		},
 		Command::ParachainCommander(opts) => {
-			let mut core = core::SubxtWrapper::new(vec![opts.node.clone()], opts.subscribe_mode);
+			let mut core = core::SubxtSubscription::new(vec![opts.node.clone()]);
 			let consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 

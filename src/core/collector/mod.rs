@@ -59,6 +59,18 @@ pub struct CollectorOptions {
 	/// WS listen address to bind to
 	#[clap(short = 'l', long = "listen")]
 	listen_addr: Option<SocketAddr>,
+	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
+	pub subscribe_mode: CollectorSubscribeMode,
+}
+
+/// How to subscribe to subxt blocks
+#[derive(strum::Display, Debug, Clone, Copy, clap::ValueEnum, Default)]
+pub enum CollectorSubscribeMode {
+	/// Subscribe to the best chain
+	Best,
+	/// Subscribe to finalized blocks
+	#[default]
+	Finalized,
 }
 
 /// This type is used to distinguish different keys in the storage
@@ -142,6 +154,7 @@ pub struct Collector {
 	broadcast_channels: Vec<BroadcastSender<CollectorUpdateEvent>>,
 	state: CollectorState,
 	executor: RequestExecutor,
+	subscribe_mode: CollectorSubscribeMode,
 }
 
 impl Collector {
@@ -166,6 +179,7 @@ impl Collector {
 			state: Default::default(),
 			broadcast_channels: Default::default(),
 			executor,
+			subscribe_mode: opts.subscribe_mode,
 		}
 	}
 
@@ -214,20 +228,20 @@ impl Collector {
 
 	/// Collects chain events from new head including block events parsing
 	pub async fn collect_chain_events(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
-		match event {
-			SubxtEvent::NewHead(block_hash) => {
-				let block_hash = *block_hash;
-				let mut chain_events = vec![ChainEvent::NewHead(block_hash)];
-				let block_events = self.executor.get_events(self.endpoint.as_str(), Some(block_hash)).await?;
+		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
+			let hash = *hash;
+			let mut chain_events = vec![ChainEvent::NewHead(hash)];
+			let block_events = self.executor.get_events(self.endpoint.as_str(), Some(hash)).await?;
 
-				if let Some(block_events) = block_events {
-					for block_event in block_events.iter() {
-						chain_events.push(decode_chain_event(block_hash, block_event.unwrap()).await?);
-					}
+			if let Some(block_events) = block_events {
+				for block_event in block_events.iter() {
+					chain_events.push(decode_chain_event(hash, block_event.unwrap()).await?);
 				}
+			}
 
-				Ok(chain_events)
-			},
+			Ok(chain_events)
+		} else {
+			Ok(vec![])
 		}
 	}
 
@@ -791,4 +805,12 @@ impl Collector {
 
 fn get_unix_time_unwrap() -> Duration {
 	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+}
+
+pub fn new_head_hash(event: &SubxtEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
+	match (event, subscribe_mode) {
+		(SubxtEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
+		(SubxtEvent::NewFinalizedHead(hash), CollectorSubscribeMode::Finalized) => Some(hash),
+		_ => None,
+	}
 }

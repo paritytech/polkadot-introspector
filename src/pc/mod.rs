@@ -1,4 +1,4 @@
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -29,7 +29,7 @@
 
 use crate::core::{
 	collector::{Collector, CollectorOptions},
-	EventConsumerInit, RequestExecutor, SubxtEvent, SubxtSubscriptionMode,
+	EventConsumerInit, RequestExecutor, SubxtEvent,
 };
 use clap::Parser;
 use colored::Colorize;
@@ -74,8 +74,6 @@ pub(crate) struct ParachainCommanderOptions {
 	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
 	/// Defines subscription mode
-	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
-	pub subscribe_mode: SubxtSubscriptionMode,
 	/// The number of last blocks with missing slots to display
 	#[clap(long = "last-skipped-slot-blocks", default_value = "10")]
 	pub last_skipped_slot_blocks: usize,
