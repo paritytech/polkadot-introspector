@@ -335,6 +335,11 @@ impl ParachainBlockTracker for SubxtTracker {
 			self.stats.on_block(tm);
 			metrics.on_block(tm.as_secs_f64(), self.para_id);
 		}
+
+		if let Some(finality_lag) = self.current_finality_lag {
+			metrics.on_finality_lag(finality_lag, self.para_id);
+		}
+
 		self.update.clone()
 	}
 }

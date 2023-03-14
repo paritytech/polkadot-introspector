@@ -68,6 +68,8 @@ struct MetricsInner {
 	bitfields: IntGaugeVec,
 	/// Average candidate inclusion time measured in relay chain blocks.
 	para_block_times: HistogramVec,
+	/// Finality lag
+	finality_lag: IntGaugeVec,
 }
 
 /// Parachain commander prometheus metrics
@@ -158,6 +160,15 @@ impl Metrics {
 					.with_label_values(&[&para_str[..]])
 					.observe(relay_parent_number.saturating_sub(previous_block_number) as f64);
 			}
+		}
+	}
+
+	pub(crate) fn on_finality_lag(&self, lag: u32, para_id: u32) {
+		if let Some(metrics) = &self.0 {
+			metrics
+				.finality_lag
+				.with_label_values(&[&para_id.to_string()[..]])
+				.add(lag.into());
 		}
 	}
 }
@@ -255,6 +266,10 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
 			)?,
+			registry,
+		)?,
+		finality_lag: prometheus_endpoint::register(
+			IntGaugeVec::new(Opts::new("pc_finality_lag", "Finality lag"), &["parachain_id"])?,
 			registry,
 		)?,
 	})))
