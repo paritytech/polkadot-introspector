@@ -22,7 +22,7 @@ use std::{
 	default::Default,
 	hash::Hash,
 	net::SocketAddr,
-	time::{Duration, SystemTime, UNIX_EPOCH},
+	time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use codec::{Decode, Encode};
@@ -117,6 +117,8 @@ struct CollectorState {
 	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
 	/// A current session index
 	current_session_index: u32,
+	/// Last best blocks times
+	best_times: BTreeMap<H256, Instant>,
 }
 
 /// Provides collector new head events split by parachain
@@ -347,6 +349,8 @@ impl Collector {
 	}
 
 	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		self.state.best_times.insert(block_hash, Instant::now());
+
 		match self.subscribe_mode {
 			CollectorSubscribeMode::Best => self.process_new_head(block_hash).await,
 			_ => Ok(()),
@@ -354,6 +358,16 @@ impl Collector {
 	}
 
 	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		if let Some(best_time) = self.state.best_times.remove(&block_hash) {
+			info!(
+				"Finalization lag: {:?}ms for block with hash {:?}",
+				Instant::now()
+					.checked_duration_since(best_time)
+					.map(|duration| duration.as_millis()),
+				block_hash,
+			);
+		}
+
 		match self.subscribe_mode {
 			CollectorSubscribeMode::Finalized => self.process_new_head(block_hash).await,
 			_ => Ok(()),
