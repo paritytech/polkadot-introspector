@@ -22,13 +22,16 @@ use std::{
 	default::Default,
 	hash::Hash,
 	net::SocketAddr,
-	time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use subxt::{
-	config::{substrate::BlakeTwo256, Hasher},
+	config::{
+		substrate::{BlakeTwo256, SubstrateHeader},
+		Hasher,
+	},
 	utils::H256,
 	PolkadotConfig,
 };
@@ -82,6 +85,8 @@ pub enum CollectorPrefixType {
 	CandidatesParachains,
 	/// Relay chain block header
 	RelayBlockHeader,
+	/// Last finalized relay chain block number when new head appeared
+	RelevantFinalizedBlockNumber,
 	/// Validators account keys keyed by session index hash (blake2b(session_index))
 	AccountKeys,
 	/// Inherent data (more expensive to store, so good to have it shared)
@@ -117,8 +122,8 @@ struct CollectorState {
 	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
 	/// A current session index
 	current_session_index: u32,
-	/// Last best blocks times
-	best_times: BTreeMap<H256, Instant>,
+	/// Last finalized block number
+	last_finalized_block_number: Option<u32>,
 }
 
 /// Provides collector new head events split by parachain
@@ -134,6 +139,8 @@ pub struct NewHeadEvent {
 	pub candidates_seen: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
+	/// Finality lag (best block number - last finalized block number)
+	pub finality_lag: Option<u32>,
 }
 
 /// Handles collector updates
@@ -281,11 +288,20 @@ impl Collector {
 		self.executor.clone()
 	}
 
-	fn update_state(
+	async fn update_state(
 		&mut self,
 		block_number: <PolkadotConfig as subxt::Config>::Index,
 		block_hash: H256,
 	) -> color_eyre::Result<()> {
+		let maybe_finality_lag = self
+			.api_service
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, block_hash)
+			.await;
+		let finality_lag: Option<u32> = match maybe_finality_lag {
+			Some(entry) => entry.into_inner()?,
+			None => None,
+		};
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {
 			let candidates = self.state.candidates_seen.get(para_id);
 			let disputes_concluded = self.state.disputes_seen.get(para_id).map(|disputes_seen| {
@@ -303,6 +319,7 @@ impl Collector {
 					candidates_seen: candidates.cloned().unwrap_or_default(),
 					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 					para_id: *para_id,
+					finality_lag,
 				}))?;
 			}
 		}
@@ -322,6 +339,7 @@ impl Collector {
 					candidates_seen: candidates.clone(),
 					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 					para_id: *para_id,
+					finality_lag,
 				}))?;
 			}
 		}
@@ -348,43 +366,70 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		self.state.best_times.insert(block_hash, Instant::now());
-
-		match self.subscribe_mode {
-			CollectorSubscribeMode::Best => self.process_new_head(block_hash).await,
-			_ => Ok(()),
-		}
-	}
-
-	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		if let Some(best_time) = self.state.best_times.remove(&block_hash) {
-			info!(
-				"Finalization lag: {:?}ms for block with hash {:?}",
-				Instant::now()
-					.checked_duration_since(best_time)
-					.map(|duration| duration.as_millis()),
-				block_hash,
-			);
-		}
-
-		match self.subscribe_mode {
-			CollectorSubscribeMode::Finalized => self.process_new_head(block_hash).await,
-			_ => Ok(()),
-		}
-	}
-
-	async fn process_new_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		let ts = self
-			.executor
-			.get_block_timestamp(self.endpoint.as_str(), Some(block_hash))
-			.await?;
+	async fn get_head_details(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<(SubstrateHeader<u32, BlakeTwo256>, u64, u32)> {
 		let header = self
 			.executor
 			.get_block_head(self.endpoint.as_str(), Some(block_hash))
 			.await?
 			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
+		let ts = self
+			.executor
+			.get_block_timestamp(self.endpoint.as_str(), Some(block_hash))
+			.await?;
 		let block_number = header.number;
+
+		Ok((header, ts, block_number))
+	}
+
+	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
+
+		if self.state.last_finalized_block_number.is_some() {
+			self.api_service
+				.storage()
+				.storage_write_prefixed(
+					CollectorPrefixType::RelevantFinalizedBlockNumber,
+					block_hash,
+					StorageEntry::new_onchain(
+						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
+						self.state.last_finalized_block_number,
+					),
+				)
+				.await?;
+		}
+
+		match self.subscribe_mode {
+			CollectorSubscribeMode::Best => self.process_new_head(block_hash, header, ts, block_number).await,
+			_ => Ok(()),
+		}
+	}
+
+	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
+
+		if self.state.last_finalized_block_number.is_none() ||
+			self.state.last_finalized_block_number.unwrap() < block_number
+		{
+			self.state.last_finalized_block_number = Some(block_number);
+			info!("Last finalized block {}", block_number);
+		}
+
+		match self.subscribe_mode {
+			CollectorSubscribeMode::Finalized => self.process_new_head(block_hash, header, ts, block_number).await,
+			_ => Ok(()),
+		}
+	}
+
+	async fn process_new_head(
+		&mut self,
+		block_hash: H256,
+		header: SubstrateHeader<u32, BlakeTwo256>,
+		ts: u64,
+		block_number: u32,
+	) -> color_eyre::Result<()> {
 		info!(
 			"imported new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
 			block_hash,
@@ -395,7 +440,7 @@ impl Collector {
 
 		match block_number.cmp(&self.state.current_relay_chain_block_number) {
 			Ordering::Greater => {
-				self.update_state(block_number, block_hash)?;
+				self.update_state(block_number, block_hash).await?;
 			},
 			Ordering::Equal => {
 				// A fork
