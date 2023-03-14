@@ -228,27 +228,28 @@ impl Collector {
 
 	/// Collects chain events from new head including block events parsing
 	pub async fn collect_chain_events(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
-		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
-			let hash = *hash;
-			let mut chain_events = vec![ChainEvent::NewHead(hash)];
-			let block_events = self.executor.get_events(self.endpoint.as_str(), Some(hash)).await?;
+		let new_head_event = match event {
+			SubxtEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
+			SubxtEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
+		};
+		let mut chain_events = vec![new_head_event];
 
-			if let Some(block_events) = block_events {
+		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
+			if let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), Some(*hash)).await? {
 				for block_event in block_events.iter() {
-					chain_events.push(decode_chain_event(hash, block_event.unwrap()).await?);
+					chain_events.push(decode_chain_event(*hash, block_event.unwrap()).await?);
 				}
 			}
+		};
 
-			Ok(chain_events)
-		} else {
-			Ok(vec![])
-		}
+		Ok(chain_events)
 	}
 
 	/// Process a next chain event
 	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<()> {
 		match event {
-			ChainEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
+			ChainEvent::NewBestHead(block_hash) => self.process_new_best_head(*block_hash).await,
+			ChainEvent::NewFinalizedHead(block_hash) => self.process_new_finalized_head(*block_hash).await,
 			ChainEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
@@ -343,6 +344,20 @@ impl Collector {
 		}
 
 		Ok(())
+	}
+
+	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		match self.subscribe_mode {
+			CollectorSubscribeMode::Best => self.process_new_head(block_hash).await,
+			_ => Ok(()),
+		}
+	}
+
+	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		match self.subscribe_mode {
+			CollectorSubscribeMode::Finalized => self.process_new_head(block_hash).await,
+			_ => Ok(()),
+		}
 	}
 
 	async fn process_new_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
