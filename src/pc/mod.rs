@@ -32,11 +32,12 @@ use crate::core::{
 	EventConsumerInit, RequestExecutor, SubxtEvent,
 };
 use clap::Parser;
+use color_eyre::eyre::eyre;
 use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use log::{error, info, warn};
-use std::{default::Default, time::Duration};
+use std::{collections::HashMap, default::Default, str::FromStr, time::Duration};
 use tokio::sync::{
 	broadcast::{error::TryRecvError, Receiver as BroadcastReceiver, Sender as BroadcastSender},
 	mpsc::Receiver,
@@ -47,7 +48,10 @@ pub(crate) mod prometheus;
 pub(crate) mod stats;
 pub(crate) mod tracker;
 
-use crate::core::collector::{CollectorStorageApi, CollectorUpdateEvent};
+use crate::{
+	core::collector::{CollectorStorageApi, CollectorUpdateEvent},
+	pc::tracker::SubxtTracker,
+};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use tracker::ParachainBlockTracker;
 
@@ -61,6 +65,26 @@ pub(crate) enum ParachainCommanderMode {
 	Prometheus(ParachainCommanderPrometheusOptions),
 }
 
+#[derive(Clone, Debug, strum::Display)]
+enum ParachainCommanderParaId {
+	All,
+	ParaId(u32),
+}
+
+impl FromStr for ParachainCommanderParaId {
+	type Err = color_eyre::Report;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.to_lowercase().as_str() {
+			"all" => Ok(ParachainCommanderParaId::All),
+			_ => {
+				let para_id: u32 = s.parse().map_err(|e| eyre!("{} is invalid number: {:?}", s, e))?;
+				Ok(ParachainCommanderParaId::ParaId(para_id))
+			},
+		}
+	}
+}
+
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct ParachainCommanderOptions {
@@ -69,7 +93,7 @@ pub(crate) struct ParachainCommanderOptions {
 	pub node: String,
 	/// Parachain id.
 	#[clap(long)]
-	para_id: Vec<u32>,
+	para_id: Vec<ParachainCommanderParaId>,
 	/// Run for a number of blocks then stop.
 	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
@@ -133,13 +157,25 @@ impl ParachainCommander {
 		);
 
 		for para_id in self.opts.para_id.iter() {
-			let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
-			output_futures.push(tokio::spawn(ParachainCommander::watch_node(
-				self.clone(),
-				from_collector,
-				*para_id,
-				collector.api(),
-			)));
+			match para_id {
+				ParachainCommanderParaId::All => {
+					let from_collector = collector.subscribe_broadcast_updates().await?;
+					output_futures.push(tokio::spawn(ParachainCommander::watch_node_broadcast(
+						self.clone(),
+						from_collector,
+						collector.api(),
+					)));
+				},
+				ParachainCommanderParaId::ParaId(para_id) => {
+					let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
+					output_futures.push(tokio::spawn(ParachainCommander::watch_node_for_parachain(
+						self.clone(),
+						from_collector,
+						*para_id,
+						collector.api(),
+					)));
+				},
+			}
 		}
 
 		let consumer_channels: Vec<Receiver<SubxtEvent>> = consumer_config.into();
@@ -152,7 +188,7 @@ impl ParachainCommander {
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node(
+	async fn watch_node_for_parachain(
 		self,
 		mut from_collector: BroadcastReceiver<CollectorUpdateEvent>,
 		para_id: u32,
@@ -205,6 +241,68 @@ impl ParachainCommander {
 			print!("{}", stats);
 		} else {
 			info!("{}", stats);
+		}
+	}
+
+	async fn watch_node_broadcast(
+		self,
+		mut from_collector: BroadcastReceiver<CollectorUpdateEvent>,
+		api_service: CollectorStorageApi,
+	) {
+		let mut trackers: HashMap<u32, SubxtTracker> = HashMap::new();
+		let executor = api_service.subxt();
+
+		loop {
+			match from_collector.try_recv() {
+				Ok(update_event) => match update_event {
+					CollectorUpdateEvent::NewHead(new_head) =>
+						for relay_fork in &new_head.relay_parent_hashes {
+							let para_id = new_head.para_id;
+
+							let tracker = trackers.entry(para_id).or_insert_with(|| {
+								SubxtTracker::new(
+									para_id,
+									self.node.as_str(),
+									executor.clone(),
+									api_service.clone(),
+									self.opts.last_skipped_slot_blocks,
+								)
+							});
+							match tracker.inject_block(*relay_fork, new_head.relay_parent_number).await {
+								Ok(_) => {
+									if let Some(progress) = tracker.progress(&self.metrics) {
+										if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+											println!("{}", progress);
+										}
+									}
+									tracker.maybe_reset_state();
+								},
+								Err(e) => {
+									error!("error occurred when processing block {}: {:?}", relay_fork, e)
+								},
+							}
+						},
+					CollectorUpdateEvent::NewSession(idx) =>
+						for tracker in trackers.values_mut() {
+							tracker.new_session(idx).await;
+						},
+					CollectorUpdateEvent::Termination => break,
+				},
+				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(500)).await,
+				Err(e) => {
+					info!("Input channel has been closed: {:?}", e);
+					break
+				},
+			}
+		}
+
+		for tracker in trackers.values() {
+			let stats = tracker.summary();
+			if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+				print!("{}", stats);
+			} else {
+				info!("{}", stats);
+			}
 		}
 	}
 }

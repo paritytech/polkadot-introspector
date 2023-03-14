@@ -268,6 +268,15 @@ impl Collector {
 		Ok(receiver)
 	}
 
+	/// Subscribe for broadcast updates
+	pub async fn subscribe_broadcast_updates(&mut self) -> color_eyre::Result<BroadcastReceiver<CollectorUpdateEvent>> {
+		// We create much larger channel for broadcast events to avoid potential issues with lagging
+		let (sender, receiver) = broadcast::channel(32768);
+		self.broadcast_channels.push(sender);
+
+		Ok(receiver)
+	}
+
 	/// Returns API endpoint for storage and request executor
 	pub fn api(&self) -> CollectorStorageApi {
 		self.api_service.clone()
