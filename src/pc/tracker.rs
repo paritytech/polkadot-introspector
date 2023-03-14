@@ -147,6 +147,8 @@ pub struct SubxtTracker {
 	disputes: Vec<DisputesTracker>,
 	/// Current relay chain block timestamp.
 	current_relay_block_ts: Option<u64>,
+	/// Current finality lag
+	current_finality_lag: Option<u32>,
 	/// Last relay chain block timestamp.
 	last_relay_block_ts: Option<u64>,
 	/// Last included candidate in relay parent number
@@ -266,6 +268,7 @@ impl ParachainBlockTracker for SubxtTracker {
 			block_number: relay_block_number,
 			block_hash: relay_block_hash,
 			is_fork,
+			finality_lag: self.current_finality_lag,
 			..Default::default()
 		});
 
@@ -359,6 +362,7 @@ impl SubxtTracker {
 			current_relay_block: None,
 			previous_relay_block: None,
 			current_relay_block_ts: None,
+			current_finality_lag: None,
 			disputes: Vec::new(),
 			last_assignment: None,
 			last_backed_at: None,
@@ -424,6 +428,21 @@ impl SubxtTracker {
 				.get_block_timestamp(self.node_rpc_url.as_str(), Some(block_hash))
 				.await?,
 		);
+
+		if let Some((relay_block_number, relay_block_hash)) = self.current_relay_block {
+			let maybe_relevant_finalized_block_number = self
+				.api
+				.storage()
+				.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, relay_block_hash)
+				.await;
+			self.current_finality_lag = match maybe_relevant_finalized_block_number {
+				Some(entry) => {
+					let relevant_finalized_block_number: u32 = entry.into_inner()?;
+					Some(relay_block_number - relevant_finalized_block_number)
+				},
+				None => None,
+			};
+		}
 
 		// Update backing information if any.
 		let candidate_backed = self.update_backing(backed_candidates, block_number);

@@ -139,8 +139,6 @@ pub struct NewHeadEvent {
 	pub candidates_seen: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
-	/// Finality lag (best block number - last finalized block number)
-	pub finality_lag: Option<u32>,
 }
 
 /// Handles collector updates
@@ -288,20 +286,11 @@ impl Collector {
 		self.executor.clone()
 	}
 
-	async fn update_state(
+	fn update_state(
 		&mut self,
 		block_number: <PolkadotConfig as subxt::Config>::Index,
 		block_hash: H256,
 	) -> color_eyre::Result<()> {
-		let maybe_finality_lag = self
-			.api_service
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, block_hash)
-			.await;
-		let finality_lag: Option<u32> = match maybe_finality_lag {
-			Some(entry) => entry.into_inner()?,
-			None => None,
-		};
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {
 			let candidates = self.state.candidates_seen.get(para_id);
 			let disputes_concluded = self.state.disputes_seen.get(para_id).map(|disputes_seen| {
@@ -319,7 +308,6 @@ impl Collector {
 					candidates_seen: candidates.cloned().unwrap_or_default(),
 					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 					para_id: *para_id,
-					finality_lag,
 				}))?;
 			}
 		}
@@ -339,7 +327,6 @@ impl Collector {
 					candidates_seen: candidates.clone(),
 					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 					para_id: *para_id,
-					finality_lag,
 				}))?;
 			}
 		}
@@ -395,7 +382,7 @@ impl Collector {
 					block_hash,
 					StorageEntry::new_onchain(
 						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
-						self.state.last_finalized_block_number,
+						self.state.last_finalized_block_number.unwrap(),
 					),
 				)
 				.await?;
@@ -440,7 +427,7 @@ impl Collector {
 
 		match block_number.cmp(&self.state.current_relay_chain_block_number) {
 			Ordering::Greater => {
-				self.update_state(block_number, block_hash).await?;
+				self.update_state(block_number, block_hash)?;
 			},
 			Ordering::Equal => {
 				// A fork
