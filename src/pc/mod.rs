@@ -37,10 +37,17 @@ use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use log::{error, info, warn};
+use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use std::{collections::HashMap, default::Default, str::FromStr, time::Duration};
+use subxt::utils::H256;
 use tokio::sync::{
 	broadcast::{error::TryRecvError, Receiver as BroadcastReceiver, Sender as BroadcastSender},
 	mpsc::Receiver,
+};
+
+use crate::{
+	core::collector::{CollectorStorageApi, CollectorUpdateEvent},
+	pc::tracker::SubxtTracker,
 };
 
 mod progress;
@@ -48,11 +55,6 @@ pub(crate) mod prometheus;
 pub(crate) mod stats;
 pub(crate) mod tracker;
 
-use crate::{
-	core::collector::{CollectorStorageApi, CollectorUpdateEvent},
-	pc::tracker::SubxtTracker,
-};
-use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use tracker::ParachainBlockTracker;
 
 #[derive(Clone, Debug, Parser, Default)]
@@ -209,19 +211,8 @@ impl ParachainCommander {
 				Ok(update_event) => match update_event {
 					CollectorUpdateEvent::NewHead(new_head) =>
 						for relay_fork in &new_head.relay_parent_hashes {
-							match tracker.inject_block(*relay_fork, new_head.relay_parent_number).await {
-								Ok(_) => {
-									if let Some(progress) = tracker.progress(&self.metrics) {
-										if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-											println!("{}", progress);
-										}
-									}
-									tracker.maybe_reset_state();
-								},
-								Err(e) => {
-									error!("error occurred when processing block {}: {:?}", relay_fork, e)
-								},
-							}
+							self.process_tracker_update(&mut tracker, *relay_fork, new_head.relay_parent_number)
+								.await;
 						},
 					CollectorUpdateEvent::NewSession(idx) => {
 						tracker.new_session(idx).await;
@@ -268,19 +259,8 @@ impl ParachainCommander {
 									self.opts.last_skipped_slot_blocks,
 								)
 							});
-							match tracker.inject_block(*relay_fork, new_head.relay_parent_number).await {
-								Ok(_) => {
-									if let Some(progress) = tracker.progress(&self.metrics) {
-										if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-											println!("{}", progress);
-										}
-									}
-									tracker.maybe_reset_state();
-								},
-								Err(e) => {
-									error!("error occurred when processing block {}: {:?}", relay_fork, e)
-								},
-							}
+							self.process_tracker_update(tracker, *relay_fork, new_head.relay_parent_number)
+								.await;
 						},
 					CollectorUpdateEvent::NewSession(idx) =>
 						for tracker in trackers.values_mut() {
@@ -303,6 +283,22 @@ impl ParachainCommander {
 			} else {
 				info!("{}", stats);
 			}
+		}
+	}
+
+	async fn process_tracker_update(&self, tracker: &mut SubxtTracker, relay_hash: H256, relay_parent_number: u32) {
+		match tracker.inject_block(relay_hash, relay_parent_number).await {
+			Ok(_) => {
+				if let Some(progress) = tracker.progress(&self.metrics) {
+					if matches!(&self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+						println!("{}", progress);
+					}
+				}
+				tracker.maybe_reset_state();
+			},
+			Err(e) => {
+				error!("error occurred when processing block {}: {:?}", relay_hash, e)
+			},
 		}
 	}
 }
