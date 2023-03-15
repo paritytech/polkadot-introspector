@@ -127,7 +127,7 @@ impl Display for ParachainProgressUpdate {
 			if self.finality_lag.is_some() {
 				format!("{} blocks", self.finality_lag.unwrap())
 			} else {
-				String::from("not found")
+				String::from("N/A")
 			}
 		)?;
 		f.write_str(buf.as_str())

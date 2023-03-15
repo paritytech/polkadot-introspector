@@ -401,7 +401,7 @@ impl Collector {
 			self.state.last_finalized_block_number.unwrap() < block_number
 		{
 			self.state.last_finalized_block_number = Some(block_number);
-			info!("Last finalized block {}", block_number);
+			debug!("Last finalized block {}", block_number);
 		}
 
 		match self.subscribe_mode {
