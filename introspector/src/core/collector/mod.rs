@@ -27,15 +27,13 @@ use std::{
 
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
+use priority_channel::{Receiver, Sender, TryRecvError};
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},
 	utils::H256,
 	PolkadotConfig,
 };
-use tokio::sync::{
-	broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender},
-	mpsc::{error::TryRecvError, Receiver as MspcReceiver},
-};
+use tokio::sync::broadcast::Sender as BroadcastSender;
 
 pub mod candidate_record;
 mod ws;
@@ -151,10 +149,10 @@ pub enum CollectorUpdateEvent {
 pub struct Collector {
 	api_service: CollectorStorageApi,
 	ws_listener: Option<WebSocketListener>,
-	to_websocket: Option<BroadcastSender<WebSocketUpdateEvent>>,
+	to_websocket: Option<Sender<WebSocketUpdateEvent>>,
 	endpoint: String,
-	subscribe_channels: BTreeMap<u32, Vec<BroadcastSender<CollectorUpdateEvent>>>,
-	broadcast_channels: Vec<BroadcastSender<CollectorUpdateEvent>>,
+	subscribe_channels: BTreeMap<u32, Vec<Sender<CollectorUpdateEvent>>>,
+	broadcast_channels: Vec<Sender<CollectorUpdateEvent>>,
 	state: CollectorState,
 	executor: RequestExecutor,
 	subscribe_mode: CollectorSubscribeMode,
@@ -189,9 +187,9 @@ impl Collector {
 	/// Spawns a collector futures (e.g. websocket server)
 	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<()> {
 		if let Some(ws_listener) = &self.ws_listener {
-			let (to_websocket, _) = broadcast::channel(32);
+			let (to_websocket, from_collector) = priority_channel::channel(32);
 			ws_listener
-				.spawn(shutdown_tx.subscribe(), to_websocket.clone())
+				.spawn(shutdown_tx.subscribe(), from_collector)
 				.await
 				.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
 			self.to_websocket = Some(to_websocket);
@@ -203,11 +201,11 @@ impl Collector {
 	/// Process async channels in the endless loop
 	pub async fn run_with_consumer_channel(
 		mut self,
-		mut consumer_channel: MspcReceiver<SubxtEvent>,
+		mut consumer_channel: Receiver<SubxtEvent>,
 	) -> tokio::task::JoinHandle<()> {
 		tokio::spawn(async move {
 			loop {
-				match consumer_channel.try_recv() {
+				match consumer_channel.try_next() {
 					Ok(event) => match self.collect_chain_events(&event).await {
 						Ok(subxt_events) =>
 							for e in subxt_events.iter() {
@@ -219,7 +217,7 @@ impl Collector {
 							info!("collector service could not process events: {}", e);
 						},
 					},
-					Err(TryRecvError::Disconnected) => {
+					Err(TryRecvError::Closed) => {
 						self.broadcast_event(CollectorUpdateEvent::Termination).await.unwrap();
 						break
 					},
@@ -264,17 +262,17 @@ impl Collector {
 	pub async fn subscribe_parachain_updates(
 		&mut self,
 		para_id: u32,
-	) -> color_eyre::Result<BroadcastReceiver<CollectorUpdateEvent>> {
-		let (sender, receiver) = broadcast::channel(COLLECTOR_NORMAL_CHANNEL_CAPACITY);
+	) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
+		let (sender, receiver) = priority_channel::channel(COLLECTOR_NORMAL_CHANNEL_CAPACITY);
 		self.subscribe_channels.entry(para_id).or_default().push(sender);
 
 		Ok(receiver)
 	}
 
 	/// Subscribe for broadcast updates
-	pub async fn subscribe_broadcast_updates(&mut self) -> color_eyre::Result<BroadcastReceiver<CollectorUpdateEvent>> {
+	pub async fn subscribe_broadcast_updates(&mut self) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
 		// We create much larger channel for broadcast events to avoid potential issues with lagging
-		let (sender, receiver) = broadcast::channel(COLLECTOR_BROADCAST_CHANNEL_CAPACITY);
+		let (sender, receiver) = priority_channel::channel(COLLECTOR_BROADCAST_CHANNEL_CAPACITY);
 		self.broadcast_channels.push(sender);
 
 		Ok(receiver)
@@ -290,7 +288,7 @@ impl Collector {
 		self.executor.clone()
 	}
 
-	fn update_state(
+	async fn update_state(
 		&mut self,
 		block_number: <PolkadotConfig as subxt::Config>::Index,
 		block_hash: H256,
@@ -306,13 +304,15 @@ impl Collector {
 			});
 
 			for channel in channels {
-				channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
-					relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
-					relay_parent_number: self.state.current_relay_chain_block_number,
-					candidates_seen: candidates.cloned().unwrap_or_default(),
-					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
-					para_id: *para_id,
-				}))?;
+				channel
+					.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
+						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
+						relay_parent_number: self.state.current_relay_chain_block_number,
+						candidates_seen: candidates.cloned().unwrap_or_default(),
+						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
+						para_id: *para_id,
+					}))
+					.await?;
 			}
 		}
 
@@ -325,13 +325,15 @@ impl Collector {
 						.cloned()
 						.collect::<Vec<_>>()
 				});
-				broadcast_channel.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
-					relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
-					relay_parent_number: self.state.current_relay_chain_block_number,
-					candidates_seen: candidates.clone(),
-					disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
-					para_id: *para_id,
-				}))?;
+				broadcast_channel
+					.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
+						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
+						relay_parent_number: self.state.current_relay_chain_block_number,
+						candidates_seen: candidates.clone(),
+						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
+						para_id: *para_id,
+					}))
+					.await?;
 			}
 		}
 
@@ -346,12 +348,12 @@ impl Collector {
 	async fn broadcast_event(&mut self, event: CollectorUpdateEvent) -> color_eyre::Result<()> {
 		for (_, channels) in self.subscribe_channels.iter_mut() {
 			for channel in channels {
-				channel.send(event.clone())?;
+				channel.send(event.clone()).await?;
 			}
 		}
 
 		for broadcast_channel in self.broadcast_channels.iter_mut() {
-			broadcast_channel.send(event.clone())?;
+			broadcast_channel.send(event.clone()).await?;
 		}
 
 		Ok(())
@@ -378,7 +380,7 @@ impl Collector {
 
 		match block_number.cmp(&self.state.current_relay_chain_block_number) {
 			Ordering::Greater => {
-				self.update_state(block_number, block_hash)?;
+				self.update_state(block_number, block_hash).await?;
 			},
 			Ordering::Equal => {
 				// A fork
@@ -543,7 +545,7 @@ impl Collector {
 							.entry(change_event.parachain_id)
 							.or_default()
 							.push(change_event.candidate_hash);
-						self.to_websocket.as_ref().map(|to_websocket| {
+						if let Some(to_websocket) = self.to_websocket.as_mut() {
 							to_websocket
 								.send(WebSocketUpdateEvent {
 									candidate_hash: change_event.candidate_hash,
@@ -551,8 +553,8 @@ impl Collector {
 									parachain_id: change_event.parachain_id,
 									event: WebSocketEventType::Backed,
 								})
-								.unwrap()
-						});
+								.await?;
+						}
 					} else {
 						return Err(eyre!(
 							"no stored relay parent {:?} for candidate {:?}, parachain id: {}",
@@ -578,7 +580,7 @@ impl Collector {
 					let relay_block_number = self.state.current_relay_chain_block_number;
 					let mut known_candidate: CandidateRecord = known_candidate.into_inner()?;
 					known_candidate.candidate_inclusion.included = Some(relay_block_number);
-					self.to_websocket.as_ref().map(|to_websocket| {
+					if let Some(to_websocket) = self.to_websocket.as_mut() {
 						to_websocket
 							.send(WebSocketUpdateEvent {
 								candidate_hash: change_event.candidate_hash,
@@ -588,8 +590,8 @@ impl Collector {
 									now.saturating_sub(known_candidate.candidate_first_seen),
 								),
 							})
-							.unwrap()
-					});
+							.await?;
+					}
 					self.state
 						.candidates_seen
 						.entry(change_event.parachain_id)
@@ -625,7 +627,7 @@ impl Collector {
 					let now = get_unix_time_unwrap();
 					let relay_block_number = self.state.current_relay_chain_block_number;
 					known_candidate.candidate_inclusion.timedout = Some(relay_block_number);
-					self.to_websocket.as_ref().map(|to_websocket| {
+					if let Some(to_websocket) = self.to_websocket.as_mut() {
 						to_websocket
 							.send(WebSocketUpdateEvent {
 								candidate_hash: change_event.candidate_hash,
@@ -635,8 +637,8 @@ impl Collector {
 									now.saturating_sub(known_candidate.candidate_first_seen),
 								),
 							})
-							.unwrap()
-					});
+							.await?;
+					}
 					self.state
 						.candidates_seen
 						.entry(change_event.parachain_id)
@@ -686,7 +688,7 @@ impl Collector {
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed { disputed: relay_block_number, concluded: None });
-		self.to_websocket.as_ref().map(|to_websocket| {
+		if let Some(to_websocket) = self.to_websocket.as_mut() {
 			to_websocket
 				.send(WebSocketUpdateEvent {
 					event: WebSocketEventType::DisputeInitiated(dispute_event.relay_parent_block),
@@ -694,8 +696,8 @@ impl Collector {
 					ts: now,
 					parachain_id: para_id,
 				})
-				.unwrap()
-		});
+				.await?;
+		}
 
 		// Fill and write dispute info structure
 		let dispute_info = DisputeInfo {
@@ -760,7 +762,7 @@ impl Collector {
 				outcome: *dispute_outcome,
 			}),
 		});
-		self.to_websocket.as_ref().map(|to_websocket| {
+		if let Some(to_websocket) = self.to_websocket.as_mut() {
 			to_websocket
 				.send(WebSocketUpdateEvent {
 					event: WebSocketEventType::DisputeConcluded(dispute_event.relay_parent_block, *dispute_outcome),
@@ -768,8 +770,8 @@ impl Collector {
 					ts: now,
 					parachain_id: candidate.parachain_id(),
 				})
-				.unwrap()
-		});
+				.await?;
+		}
 
 		let dispute_info_entry = self
 			.api_service

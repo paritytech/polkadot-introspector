@@ -19,6 +19,7 @@ use crate::core::{
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
+use priority_channel::Receiver;
 use serde::{Deserialize, Serialize};
 use std::{
 	convert::Infallible,
@@ -32,7 +33,7 @@ use std::{
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::utils::H256;
-use tokio::sync::broadcast::{Receiver, Sender};
+use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 use typed_builder::TypedBuilder;
 use warp::{
 	http::StatusCode,
@@ -117,8 +118,8 @@ impl WebSocketListener {
 	/// Spawn an async HTTP server
 	pub(crate) async fn spawn<Shutdown, Update>(
 		&self,
-		mut shutdown_rx: Receiver<Shutdown>,
-		updates_broadcast: Sender<Update>,
+		mut shutdown_rx: BroadcastReceiver<Shutdown>,
+		updates_broadcast: Receiver<Update>,
 	) -> Result<(), Box<dyn Error>>
 	where
 		Shutdown: Send + Sync + 'static + Clone,
@@ -190,9 +191,9 @@ fn with_api_service(
 }
 
 fn with_updates_channel<T: Send>(
-	updates_rx: Sender<T>,
+	updates_rx: Receiver<T>,
 ) -> impl Filter<Extract = (Receiver<T>,), Error = Infallible> + Clone {
-	warp::any().map(move || updates_rx.subscribe())
+	warp::any().map(move || updates_rx.clone())
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
@@ -265,7 +266,7 @@ where
 	Ok(ws.on_upgrade(move |socket| handle_ws_connection(socket, update_channel, remote)))
 }
 
-async fn handle_ws_connection<T>(ws: WebSocket, mut update_channel: Receiver<T>, remote: Option<SocketAddr>)
+async fn handle_ws_connection<T>(ws: WebSocket, update_channel: Receiver<T>, remote: Option<SocketAddr>)
 where
 	T: Send + Sync + Clone + Debug + Serialize + 'static,
 {

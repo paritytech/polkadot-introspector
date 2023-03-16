@@ -17,7 +17,8 @@
 //! Event consumer traits and types. Abstracts on-chain/off-chain event streams and
 //! APIs for RPC nodes and internal storage.
 use async_trait::async_trait;
-use tokio::sync::{broadcast::Sender as BroadcastSender, mpsc::Receiver};
+use priority_channel::Receiver;
+use tokio::sync::broadcast::Sender as BroadcastSender;
 
 #[async_trait]
 pub trait EventStream {

@@ -19,15 +19,13 @@ use super::{EventConsumerInit, EventStream, MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
 use async_trait::async_trait;
 use futures::future;
 use log::{error, info};
+use priority_channel::{channel, SendError, Sender};
 use subxt::{
 	rpc::{types::FollowEvent, Subscription},
 	utils::H256,
 	OnlineClient, PolkadotConfig,
 };
-use tokio::sync::{
-	broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender},
-	mpsc::{channel, error::SendError, Sender},
-};
+use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 
 #[derive(Debug)]
 pub enum SubxtEvent {
@@ -88,7 +86,7 @@ impl SubxtSubscription {
 	}
 
 	// Per consumer
-	async fn run_per_node(update_channel: Sender<SubxtEvent>, url: String, shutdown_tx: BroadcastSender<()>) {
+	async fn run_per_node(mut update_channel: Sender<SubxtEvent>, url: String, shutdown_tx: BroadcastSender<()>) {
 		if let Some(api) = subxt_client(url.clone(), shutdown_tx.subscribe()).await {
 			let mut shutdown_rx = shutdown_tx.subscribe();
 			let (mut sub, sub_id) = subxt_chain_head_subscription(&api).await;
@@ -191,7 +189,7 @@ async fn subxt_unpin_hash(api: &OnlineClient<PolkadotConfig>, sub_id: String, ha
 	let _ = api.rpc().chainhead_unstable_unpin(sub_id.clone(), hash).await;
 }
 
-fn on_error(e: SendError<SubxtEvent>) {
+fn on_error(e: SendError) {
 	info!("Event consumer has terminated: {:?}, shutting down", e);
 }
 

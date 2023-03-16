@@ -27,6 +27,7 @@ use crossterm::{
 	QueueableCommand,
 };
 use log::{debug, info, warn};
+use priority_channel::Receiver;
 use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
 	collections::VecDeque,
@@ -38,7 +39,6 @@ use std::{
 	},
 };
 use subxt::{config::Header, utils::H256};
-use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -243,7 +243,7 @@ impl BlockTimeMonitor {
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
 		// TODO: make this a struct.
-		mut consumer_config: Receiver<SubxtEvent>,
+		consumer_config: Receiver<SubxtEvent>,
 		api_service: ApiService<H256>,
 		active_endpoints: Arc<AtomicUsize>,
 	) {
@@ -262,7 +262,7 @@ impl BlockTimeMonitor {
 
 		loop {
 			debug!("[{}] New loop - waiting for events", url);
-			if let Some(event) = consumer_config.recv().await {
+			if let Ok(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
 				if let Some(hash) = new_head_hash(&event, opts.subscribe_mode) {
 					let hash = *hash;
