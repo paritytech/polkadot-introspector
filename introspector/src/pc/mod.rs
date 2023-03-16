@@ -36,13 +36,11 @@ use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use log::{error, info, warn};
+use priority_channel::{Receiver, TryRecvError};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut, time::Duration};
 use subxt::utils::H256;
-use tokio::sync::{
-	broadcast::{error::TryRecvError, Receiver as BroadcastReceiver, Sender as BroadcastSender},
-	mpsc::Receiver,
-};
+use tokio::sync::broadcast::Sender as BroadcastSender;
 
 use crate::{
 	core::collector::{CollectorStorageApi, CollectorUpdateEvent},
@@ -173,7 +171,7 @@ impl ParachainCommander {
 	// Follows the stream of events and updates the application state.
 	async fn watch_node_for_parachain(
 		self,
-		mut from_collector: BroadcastReceiver<CollectorUpdateEvent>,
+		from_collector: Receiver<CollectorUpdateEvent>,
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) {
@@ -218,7 +216,7 @@ impl ParachainCommander {
 
 	async fn watch_node_broadcast(
 		self,
-		mut from_collector: BroadcastReceiver<CollectorUpdateEvent>,
+		from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) {
 		let mut trackers: HashMap<u32, SubxtTracker> = HashMap::new();

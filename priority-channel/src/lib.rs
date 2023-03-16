@@ -18,7 +18,8 @@ use std::{
 };
 // You should have received a copy of the GNU General Public License
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
-use async_channel::{bounded, TryRecvError, TrySendError};
+use async_channel::bounded;
+pub use async_channel::{TryRecvError, TrySendError};
 use futures::Stream;
 
 /// Create a wrapped `mpsc::broadcast` pair of `Sender` and `Receiver`.
@@ -134,11 +135,21 @@ impl<T> std::ops::DerefMut for Sender<T> {
 
 impl<T> Sender<T> {
 	/// Send message, wait until capacity is available.
-	pub async fn send(&mut self, msg: T) -> async_channel::Send<'_, T>
+	pub async fn send(&mut self, msg: T) -> result::Result<(), SendError>
 	where
 		Self: Unpin,
 	{
-		self.inner.send(msg)
+		match self.inner.try_send(msg) {
+			Err(send_err) => {
+				if !send_err.is_full() {
+					return Err(SendError::Disconnected)
+				}
+				let fut = self.inner.send(send_err.into_inner());
+				futures::pin_mut!(fut);
+				fut.await.map_err(|_| SendError::Disconnected)
+			},
+			_ => Ok(()),
+		}
 	}
 
 	/// Send message over priority channel, wait until capacity is available.
