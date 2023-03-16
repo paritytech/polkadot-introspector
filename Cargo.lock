@@ -1687,6 +1687,7 @@ dependencies = [
  "log",
  "parity-db",
  "parity-scale-codec",
+ "priority-channel",
  "rand",
  "rasciigraph",
  "reqwest",
