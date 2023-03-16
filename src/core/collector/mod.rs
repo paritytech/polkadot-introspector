@@ -28,7 +28,10 @@ use std::{
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use subxt::{
-	config::{substrate::BlakeTwo256, Hasher},
+	config::{
+		substrate::{BlakeTwo256, SubstrateHeader},
+		Hasher,
+	},
 	utils::H256,
 	PolkadotConfig,
 };
@@ -82,6 +85,8 @@ pub enum CollectorPrefixType {
 	CandidatesParachains,
 	/// Relay chain block header
 	RelayBlockHeader,
+	/// Last finalized relay chain block number when new head appeared
+	RelevantFinalizedBlockNumber,
 	/// Validators account keys keyed by session index hash (blake2b(session_index))
 	AccountKeys,
 	/// Inherent data (more expensive to store, so good to have it shared)
@@ -117,6 +122,8 @@ struct CollectorState {
 	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
 	/// A current session index
 	current_session_index: u32,
+	/// Last finalized block number
+	last_finalized_block_number: Option<u32>,
 }
 
 /// Provides collector new head events split by parachain
@@ -228,27 +235,28 @@ impl Collector {
 
 	/// Collects chain events from new head including block events parsing
 	pub async fn collect_chain_events(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
-		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
-			let hash = *hash;
-			let mut chain_events = vec![ChainEvent::NewHead(hash)];
-			let block_events = self.executor.get_events(self.endpoint.as_str(), Some(hash)).await?;
+		let new_head_event = match event {
+			SubxtEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
+			SubxtEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
+		};
+		let mut chain_events = vec![new_head_event];
 
-			if let Some(block_events) = block_events {
+		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
+			if let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), Some(*hash)).await? {
 				for block_event in block_events.iter() {
-					chain_events.push(decode_chain_event(hash, block_event.unwrap()).await?);
+					chain_events.push(decode_chain_event(*hash, block_event.unwrap()).await?);
 				}
 			}
+		};
 
-			Ok(chain_events)
-		} else {
-			Ok(vec![])
-		}
+		Ok(chain_events)
 	}
 
 	/// Process a next chain event
 	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<()> {
 		match event {
-			ChainEvent::NewHead(block_hash) => self.process_new_head(*block_hash).await,
+			ChainEvent::NewBestHead(block_hash) => self.process_new_best_head(*block_hash).await,
+			ChainEvent::NewFinalizedHead(block_hash) => self.process_new_finalized_head(*block_hash).await,
 			ChainEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
@@ -345,17 +353,70 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn process_new_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		let ts = self
-			.executor
-			.get_block_timestamp(self.endpoint.as_str(), Some(block_hash))
-			.await?;
+	async fn get_head_details(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<(SubstrateHeader<u32, BlakeTwo256>, u64, u32)> {
 		let header = self
 			.executor
 			.get_block_head(self.endpoint.as_str(), Some(block_hash))
 			.await?
 			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
+		let ts = self
+			.executor
+			.get_block_timestamp(self.endpoint.as_str(), Some(block_hash))
+			.await?;
 		let block_number = header.number;
+
+		Ok((header, ts, block_number))
+	}
+
+	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
+
+		if self.state.last_finalized_block_number.is_some() {
+			self.api_service
+				.storage()
+				.storage_write_prefixed(
+					CollectorPrefixType::RelevantFinalizedBlockNumber,
+					block_hash,
+					StorageEntry::new_onchain(
+						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
+						self.state.last_finalized_block_number.unwrap(),
+					),
+				)
+				.await?;
+		}
+
+		match self.subscribe_mode {
+			CollectorSubscribeMode::Best => self.process_new_head(block_hash, header, ts, block_number).await,
+			_ => Ok(()),
+		}
+	}
+
+	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
+
+		if self.state.last_finalized_block_number.is_none() ||
+			self.state.last_finalized_block_number.unwrap() < block_number
+		{
+			self.state.last_finalized_block_number = Some(block_number);
+			debug!("Last finalized block {}", block_number);
+		}
+
+		match self.subscribe_mode {
+			CollectorSubscribeMode::Finalized => self.process_new_head(block_hash, header, ts, block_number).await,
+			_ => Ok(()),
+		}
+	}
+
+	async fn process_new_head(
+		&mut self,
+		block_hash: H256,
+		header: SubstrateHeader<u32, BlakeTwo256>,
+		ts: u64,
+		block_number: u32,
+	) -> color_eyre::Result<()> {
 		info!(
 			"imported new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
 			block_hash,

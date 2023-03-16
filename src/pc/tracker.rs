@@ -30,7 +30,7 @@ use crate::core::{
 	SubxtDisputeResult, SubxtHrmpChannel,
 };
 use codec::{Decode, Encode};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},
@@ -147,6 +147,8 @@ pub struct SubxtTracker {
 	disputes: Vec<DisputesTracker>,
 	/// Current relay chain block timestamp.
 	current_relay_block_ts: Option<u64>,
+	/// Last observed finality lag
+	finality_lag: Option<u32>,
 	/// Last relay chain block timestamp.
 	last_relay_block_ts: Option<u64>,
 	/// Last included candidate in relay parent number
@@ -266,6 +268,7 @@ impl ParachainBlockTracker for SubxtTracker {
 			block_number: relay_block_number,
 			block_hash: relay_block_hash,
 			is_fork,
+			finality_lag: self.finality_lag,
 			..Default::default()
 		});
 
@@ -332,6 +335,11 @@ impl ParachainBlockTracker for SubxtTracker {
 			self.stats.on_block(tm);
 			metrics.on_block(tm.as_secs_f64(), self.para_id);
 		}
+
+		if let Some(finality_lag) = self.finality_lag {
+			metrics.on_finality_lag(finality_lag);
+		}
+
 		self.update.clone()
 	}
 }
@@ -359,6 +367,7 @@ impl SubxtTracker {
 			current_relay_block: None,
 			previous_relay_block: None,
 			current_relay_block_ts: None,
+			finality_lag: None,
 			disputes: Vec::new(),
 			last_assignment: None,
 			last_backed_at: None,
@@ -424,6 +433,24 @@ impl SubxtTracker {
 				.get_block_timestamp(self.node_rpc_url.as_str(), Some(block_hash))
 				.await?,
 		);
+
+		if let Some((relay_block_number, relay_block_hash)) = self.current_relay_block {
+			let maybe_relevant_finalized_block_number = self
+				.api
+				.storage()
+				.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, relay_block_hash)
+				.await;
+			self.finality_lag = match maybe_relevant_finalized_block_number {
+				Some(entry) => match entry.into_inner::<u32>() {
+					Ok(relevant_finalized_block_number) => Some(relay_block_number - relevant_finalized_block_number),
+					Err(e) => {
+						warn!("Cannot decode the value of finality_lag: {:?}", e);
+						None
+					},
+				},
+				None => None,
+			};
+		}
 
 		// Update backing information if any.
 		let candidate_backed = self.update_backing(backed_candidates, block_number);

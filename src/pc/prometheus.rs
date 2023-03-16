@@ -18,7 +18,7 @@ use crate::pc::tracker::DisputesTracker;
 use clap::Parser;
 use color_eyre::Result;
 use prometheus_endpoint::{
-	prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
+	prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
 };
 use std::net::ToSocketAddrs;
@@ -68,6 +68,8 @@ struct MetricsInner {
 	bitfields: IntGaugeVec,
 	/// Average candidate inclusion time measured in relay chain blocks.
 	para_block_times: HistogramVec,
+	/// Finality lag
+	finality_lag: Gauge,
 }
 
 /// Parachain commander prometheus metrics
@@ -158,6 +160,12 @@ impl Metrics {
 					.with_label_values(&[&para_str[..]])
 					.observe(relay_parent_number.saturating_sub(previous_block_number) as f64);
 			}
+		}
+	}
+
+	pub(crate) fn on_finality_lag(&self, lag: u32) {
+		if let Some(metrics) = &self.0 {
+			metrics.finality_lag.set(lag.into());
 		}
 	}
 }
@@ -255,6 +263,10 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
 			)?,
+			registry,
+		)?,
+		finality_lag: prometheus_endpoint::register(
+			Gauge::new("pc_finality_lag", "Finality lag")?,
 			registry,
 		)?,
 	})))

@@ -81,6 +81,8 @@ pub struct ParachainProgressUpdate {
 	pub events: Vec<ParachainConsensusEvent>,
 	/// If we are in the fork chain, then this flag will be `true`
 	pub is_fork: bool,
+	/// Finality lag (best block number - last finalized block number)
+	pub finality_lag: Option<u32>,
 }
 
 /// Format the current block inherent timestamp.
@@ -119,6 +121,12 @@ impl Display for ParachainProgressUpdate {
 		}
 		writeln!(buf, "\t🔗 Relay block hash: {} ", format!("{:?}", self.block_hash).bold())?;
 		writeln!(buf, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })?;
+		writeln!(
+			buf,
+			"\t🐌 Finality lag: {}",
+			self.finality_lag
+				.map_or_else(|| "NA".to_owned(), |lag| format!("{} blocks", lag))
+		)?;
 		f.write_str(buf.as_str())
 	}
 }

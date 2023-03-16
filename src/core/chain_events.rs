@@ -53,8 +53,10 @@ use polkadot::{
 
 #[derive(Debug)]
 pub enum ChainEvent {
-	/// New relay chain head
-	NewHead(<PolkadotConfig as subxt::Config>::Hash),
+	/// New best relay chain head
+	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
+	/// New finalized relay chain head
+	NewFinalizedHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// Dispute for a specific candidate hash
 	DisputeInitiated(SubxtDispute),
 	/// Conclusion for a dispute
