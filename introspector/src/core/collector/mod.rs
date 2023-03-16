@@ -218,7 +218,7 @@ impl Collector {
 						},
 					},
 					Err(TryRecvError::Closed) => {
-						self.broadcast_event(CollectorUpdateEvent::Termination).await.unwrap();
+						self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
 						break
 					},
 					Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
@@ -354,6 +354,21 @@ impl Collector {
 
 		for broadcast_channel in self.broadcast_channels.iter_mut() {
 			broadcast_channel.send(event.clone()).await?;
+		}
+
+		Ok(())
+	}
+
+	/// Send a priority event to all open channels
+	async fn broadcast_event_priority(&mut self, event: CollectorUpdateEvent) -> color_eyre::Result<()> {
+		for (_, channels) in self.subscribe_channels.iter_mut() {
+			for channel in channels {
+				channel.send_priority(event.clone()).await?;
+			}
+		}
+
+		for broadcast_channel in self.broadcast_channels.iter_mut() {
+			broadcast_channel.send_priority(event.clone()).await?;
 		}
 
 		Ok(())

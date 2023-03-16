@@ -153,11 +153,21 @@ impl<T> Sender<T> {
 	}
 
 	/// Send message over priority channel, wait until capacity is available.
-	pub async fn send_priority(&mut self, msg: T) -> async_channel::Send<'_, T>
+	pub async fn send_priority(&mut self, msg: T) -> result::Result<(), SendError>
 	where
 		Self: Unpin,
 	{
-		self.inner_priority.send(msg)
+		match self.inner_priority.try_send(msg) {
+			Err(send_err) => {
+				if !send_err.is_full() {
+					return Err(SendError::Disconnected)
+				}
+				let fut = self.inner_priority.send(send_err.into_inner());
+				futures::pin_mut!(fut);
+				fut.await.map_err(|_| SendError::Disconnected)
+			},
+			_ => Ok(()),
+		}
 	}
 
 	/// Attempt to send message or fail immediately.
