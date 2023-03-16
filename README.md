@@ -35,7 +35,7 @@ Use the output file to replace the older in the `assets` folder then rebuild.
 ### Parachain commander
 A parachain progress monitor and debugger which uses `on-chain` data to trace parachain candidates during backing and inclusion.
 
-The tool documentation is available [here](src/pc/README.md).
+The tool documentation is available [here](introspector/src/pc/README.md).
 
 This is how it looks when it's running:
 ![Tracing a parachain on Kusama](img/pc1.png)
