@@ -181,10 +181,13 @@ async fn subxt_client(url: String, mut shutdown_rx: BroadcastReceiver<()>) -> Op
 async fn subxt_chain_head_subscription(
 	api: &OnlineClient<PolkadotConfig>,
 ) -> (Subscription<FollowEvent<H256>>, String) {
-	let sub = api.rpc().chainhead_unstable_follow(false).await.unwrap();
-	let sub_id = sub.subscription_id().expect("A subscription ID must be provided").to_string();
-
-	(sub, sub_id)
+	match api.rpc().chainhead_unstable_follow(true).await {
+		Ok(sub) => {
+			let sub_id = sub.subscription_id().expect("A subscription ID must be provided").to_string();
+			(sub, sub_id)
+		},
+		Err(err) => panic!("Cannot subscribe to head updates: {:?}", err),
+	}
 }
 
 async fn subxt_unpin_hash(api: &OnlineClient<PolkadotConfig>, sub_id: String, hash: H256) {
