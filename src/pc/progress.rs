@@ -124,11 +124,7 @@ impl Display for ParachainProgressUpdate {
 		writeln!(
 			buf,
 			"\t🐌 Finality lag: {}",
-			if self.finality_lag.is_some() {
-				format!("{} blocks", self.finality_lag.unwrap())
-			} else {
-				String::from("N/A")
-			}
+			self.finality_lag.map_or_else(|| "NA".to_owned(), |lag| format!("{} blocks", lag))
 		)?;
 		f.write_str(buf.as_str())
 	}
