@@ -11,7 +11,7 @@ clap = {version = "4.1.11", features = ["derive"]}
 codec = { package = "parity-scale-codec", version = "3.2.1", default-features = false, features = ["derive", "full", "bit-vec"] }
 subxt = { git = "https://github.com/paritytech/subxt", rev = "v0.27.1", default-features = false, features = ["jsonrpsee-ws"] }
 tokio = { version = "1.26.0", features = ["macros", "rt-multi-thread", "signal"] }
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 typed-builder = "0.14.0"
 futures = "0.3.27"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
