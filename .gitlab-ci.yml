@@ -83,6 +83,7 @@ clippy:
   script:
     - time cargo +nightly clippy --no-default-features --all-targets --features=polkadot -- -D warnings
     - time cargo +nightly clippy --no-default-features --all-targets --features=rococo -- -D warnings
+    - time cargo +nightly clippy --no-default-features --all-targets --features=versi -- -D warnings
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
@@ -93,6 +94,7 @@ check:
   script:
     - time cargo +nightly check --no-default-features --all-targets --features=polkadot --workspace
     - time cargo +nightly check --no-default-features --all-targets --features=rococo --workspace
+    - time cargo +nightly check --no-default-features --all-targets --features=versi --workspace
 
 #### stage:                       test
 
@@ -103,6 +105,7 @@ test:
   script:
     - time cargo test --all-targets --no-default-features --features=polkadot --workspace
     - time cargo test --all-targets --no-default-features --features=rococo --workspace
+    - time cargo test --all-targets --no-default-features --features=versi --workspace
 
 #### stage:                       build
 
@@ -115,10 +118,13 @@ build:
     - mkdir ./artifacts || echo "dir exists"
     - mkdir ./artifacts/polkadot || echo "dir exists"
     - mkdir ./artifacts/rococo || echo "dir exists"
+    - mkdir ./artifacts/versi || echo "dir exists"
     - time cargo build --release --no-default-features --features=polkadot
     - cp target/release/polkadot-introspector ./artifacts/polkadot/
     - time cargo build --release --no-default-features --features=rococo
     - cp target/release/polkadot-introspector ./artifacts/rococo/
+    - time cargo build --release --no-default-features --features=versi
+    - cp target/release/polkadot-introspector ./artifacts/versi/
 
 # test that image can be built
 build-docker:
