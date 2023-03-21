@@ -11,8 +11,7 @@ Depending on the tool, the data source and output might differ. For examples of 
 
 It is mandatory to specify which `Runtime` the build will target. Currently `Polkadot Introspector` can only build for a single runtime version by enabling one of the features:
 - `polkadot` (supports both Kusama and Polkadot)
-- `rococo` (supports Rococo test network)
-- `versi` (supports Versi test network)
+- `rococo` (supports Rococo and Versi test networks)
 
 `cargo build --profile=release --features=polkadot`
 
