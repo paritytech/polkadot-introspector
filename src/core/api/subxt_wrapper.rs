@@ -38,9 +38,6 @@ pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
 #[cfg(feature = "polkadot")]
 pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
 
-#[cfg(feature = "versi")]
-pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
-
 use crate::core::RETRY_COUNT;
 use std::{collections::hash_map::HashMap, fmt::Debug};
 use subxt::{

@@ -86,8 +86,6 @@ mod tests {
 	const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
 	#[cfg(feature = "rococo")]
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
-	#[cfg(feature = "versi")]
-	const RPC_NODE_URL: &str = "wss://versi-rpc-node-0.parity-versi.parity.io:443";
 
 	#[tokio::test]
 	async fn basic_storage_test() {
