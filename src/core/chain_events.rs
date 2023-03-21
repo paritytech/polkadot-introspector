@@ -30,11 +30,11 @@ compile_error!("`rococo` and `polkadot` are mutually exclusive features");
 compile_error!("Must build with either `rococo`, `polkadot` features");
 
 #[cfg(feature = "rococo")]
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata_v2.scale")]
+#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
 pub mod polkadot {}
 
 #[cfg(feature = "polkadot")]
-#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
+#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
 pub mod polkadot {}
 
 use polkadot::{
