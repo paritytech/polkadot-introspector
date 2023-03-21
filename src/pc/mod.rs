@@ -32,13 +32,12 @@ use crate::core::{
 	EventConsumerInit, RequestExecutor, SubxtEvent,
 };
 use clap::Parser;
-use color_eyre::eyre::eyre;
 use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use log::{error, info, warn};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
-use std::{collections::HashMap, default::Default, str::FromStr, time::Duration};
+use std::{collections::HashMap, default::Default, time::Duration};
 use subxt::utils::H256;
 use tokio::sync::{
 	broadcast::{error::TryRecvError, Receiver as BroadcastReceiver, Sender as BroadcastSender},
@@ -67,26 +66,6 @@ pub(crate) enum ParachainCommanderMode {
 	Prometheus(ParachainCommanderPrometheusOptions),
 }
 
-#[derive(Clone, Debug, strum::Display)]
-enum ParachainCommanderParaId {
-	All,
-	ParaId(u32),
-}
-
-impl FromStr for ParachainCommanderParaId {
-	type Err = color_eyre::Report;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s.to_lowercase().as_str() {
-			"all" => Ok(ParachainCommanderParaId::All),
-			_ => {
-				let para_id: u32 = s.parse().map_err(|e| eyre!("{} is invalid number: {:?}", s, e))?;
-				Ok(ParachainCommanderParaId::ParaId(para_id))
-			},
-		}
-	}
-}
-
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) struct ParachainCommanderOptions {
@@ -94,8 +73,10 @@ pub(crate) struct ParachainCommanderOptions {
 	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
 	pub node: String,
 	/// Parachain id.
-	#[clap(long)]
-	para_id: Vec<ParachainCommanderParaId>,
+	#[clap(long, conflicts_with = "all")]
+	para_id: Vec<u32>,
+	#[clap(long, conflicts_with = "para_id", default_value = "false")]
+	all: bool,
 	/// Run for a number of blocks then stop.
 	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
@@ -158,25 +139,22 @@ impl ParachainCommander {
 				.bold()
 		);
 
-		for para_id in self.opts.para_id.iter() {
-			match para_id {
-				ParachainCommanderParaId::All => {
-					let from_collector = collector.subscribe_broadcast_updates().await?;
-					output_futures.push(tokio::spawn(ParachainCommander::watch_node_broadcast(
-						self.clone(),
-						from_collector,
-						collector.api(),
-					)));
-				},
-				ParachainCommanderParaId::ParaId(para_id) => {
-					let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
-					output_futures.push(tokio::spawn(ParachainCommander::watch_node_for_parachain(
-						self.clone(),
-						from_collector,
-						*para_id,
-						collector.api(),
-					)));
-				},
+		if self.opts.all {
+			let from_collector = collector.subscribe_broadcast_updates().await?;
+			output_futures.push(tokio::spawn(ParachainCommander::watch_node_broadcast(
+				self.clone(),
+				from_collector,
+				collector.api(),
+			)));
+		} else {
+			for para_id in self.opts.para_id.iter() {
+				let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
+				output_futures.push(tokio::spawn(ParachainCommander::watch_node_for_parachain(
+					self.clone(),
+					from_collector,
+					*para_id,
+					collector.api(),
+				)));
 			}
 		}
 

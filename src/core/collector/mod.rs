@@ -50,6 +50,9 @@ use ws::*;
 
 use super::{decode_chain_event, SubxtEvent};
 
+const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;
+const COLLECTOR_BROADCAST_CHANNEL_CAPACITY: usize = 32768;
+
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub struct CollectorOptions {
@@ -262,7 +265,7 @@ impl Collector {
 		&mut self,
 		para_id: u32,
 	) -> color_eyre::Result<BroadcastReceiver<CollectorUpdateEvent>> {
-		let (sender, receiver) = broadcast::channel(32);
+		let (sender, receiver) = broadcast::channel(COLLECTOR_NORMAL_CHANNEL_CAPACITY);
 		self.subscribe_channels.entry(para_id).or_default().push(sender);
 
 		Ok(receiver)
@@ -271,7 +274,7 @@ impl Collector {
 	/// Subscribe for broadcast updates
 	pub async fn subscribe_broadcast_updates(&mut self) -> color_eyre::Result<BroadcastReceiver<CollectorUpdateEvent>> {
 		// We create much larger channel for broadcast events to avoid potential issues with lagging
-		let (sender, receiver) = broadcast::channel(32768);
+		let (sender, receiver) = broadcast::channel(COLLECTOR_BROADCAST_CHANNEL_CAPACITY);
 		self.broadcast_channels.push(sender);
 
 		Ok(receiver)
