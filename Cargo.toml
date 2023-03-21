@@ -16,7 +16,7 @@ typed-builder = "0.14.0"
 futures = "0.3.27"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
 warp = { version = "0.3.3", features = ["tls"] }
-reqwest = { version = "0.11.14" }
+reqwest = { version = "0.11.15" }
 rasciigraph = "0.2.0"
 crossterm = "0.26.1"
 colored = "2.0.0"
