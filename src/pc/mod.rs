@@ -36,10 +36,17 @@ use colored::Colorize;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use log::{error, info, warn};
-use std::{default::Default, time::Duration};
+use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
+use std::{collections::HashMap, default::Default, ops::DerefMut, time::Duration};
+use subxt::utils::H256;
 use tokio::sync::{
 	broadcast::{error::TryRecvError, Receiver as BroadcastReceiver, Sender as BroadcastSender},
 	mpsc::Receiver,
+};
+
+use crate::{
+	core::collector::{CollectorStorageApi, CollectorUpdateEvent},
+	pc::tracker::SubxtTracker,
 };
 
 mod progress;
@@ -47,8 +54,6 @@ pub(crate) mod prometheus;
 pub(crate) mod stats;
 pub(crate) mod tracker;
 
-use crate::core::collector::{CollectorStorageApi, CollectorUpdateEvent};
-use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use tracker::ParachainBlockTracker;
 
 #[derive(Clone, Debug, Parser, Default)]
@@ -68,15 +73,20 @@ pub(crate) struct ParachainCommanderOptions {
 	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
 	pub node: String,
 	/// Parachain id.
-	#[clap(long)]
+	#[clap(long, conflicts_with = "all")]
 	para_id: Vec<u32>,
+	#[clap(long, conflicts_with = "para_id", default_value = "false")]
+	all: bool,
 	/// Run for a number of blocks then stop.
 	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
-	/// Defines subscription mode
 	/// The number of last blocks with missing slots to display
 	#[clap(long = "last-skipped-slot-blocks", default_value = "10")]
 	pub last_skipped_slot_blocks: usize,
+	/// The number of last blocks with missing slots to display
+	#[clap(long, default_value = "32")]
+	max_parachain_stall: u32,
+	/// Defines subscription mode
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
 	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
@@ -132,14 +142,23 @@ impl ParachainCommander {
 				.bold()
 		);
 
-		for para_id in self.opts.para_id.iter() {
-			let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
-			output_futures.push(tokio::spawn(ParachainCommander::watch_node(
+		if self.opts.all {
+			let from_collector = collector.subscribe_broadcast_updates().await?;
+			output_futures.push(tokio::spawn(ParachainCommander::watch_node_broadcast(
 				self.clone(),
 				from_collector,
-				*para_id,
 				collector.api(),
 			)));
+		} else {
+			for para_id in self.opts.para_id.iter() {
+				let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
+				output_futures.push(tokio::spawn(ParachainCommander::watch_node_for_parachain(
+					self.clone(),
+					from_collector,
+					*para_id,
+					collector.api(),
+				)));
+			}
 		}
 
 		let consumer_channels: Vec<Receiver<SubxtEvent>> = consumer_config.into();
@@ -152,7 +171,7 @@ impl ParachainCommander {
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node(
+	async fn watch_node_for_parachain(
 		self,
 		mut from_collector: BroadcastReceiver<CollectorUpdateEvent>,
 		para_id: u32,
@@ -173,19 +192,8 @@ impl ParachainCommander {
 				Ok(update_event) => match update_event {
 					CollectorUpdateEvent::NewHead(new_head) =>
 						for relay_fork in &new_head.relay_parent_hashes {
-							match tracker.inject_block(*relay_fork, new_head.relay_parent_number).await {
-								Ok(_) => {
-									if let Some(progress) = tracker.progress(&self.metrics) {
-										if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-											println!("{}", progress);
-										}
-									}
-									tracker.maybe_reset_state();
-								},
-								Err(e) => {
-									error!("error occurred when processing block {}: {:?}", relay_fork, e)
-								},
-							}
+							self.process_tracker_update(&mut tracker, *relay_fork, new_head.relay_parent_number)
+								.await;
 						},
 					CollectorUpdateEvent::NewSession(idx) => {
 						tracker.new_session(idx).await;
@@ -205,6 +213,98 @@ impl ParachainCommander {
 			print!("{}", stats);
 		} else {
 			info!("{}", stats);
+		}
+	}
+
+	async fn watch_node_broadcast(
+		self,
+		mut from_collector: BroadcastReceiver<CollectorUpdateEvent>,
+		api_service: CollectorStorageApi,
+	) {
+		let mut trackers: HashMap<u32, SubxtTracker> = HashMap::new();
+		// Used to track last block seen in parachain to evict stalled parachains
+		// Another approach would be a BtreeMap indexed by a block number, but
+		// for the practical reasons we are fine to do a hash map scan on each head.
+		let mut last_blocks: HashMap<u32, u32> = HashMap::new();
+		let executor = api_service.subxt();
+
+		loop {
+			match from_collector.try_recv() {
+				Ok(update_event) => match update_event {
+					CollectorUpdateEvent::NewHead(new_head) => {
+						for relay_fork in &new_head.relay_parent_hashes {
+							let para_id = new_head.para_id;
+
+							let tracker = trackers.entry(para_id).or_insert_with(|| {
+								SubxtTracker::new(
+									para_id,
+									self.node.as_str(),
+									executor.clone(),
+									api_service.clone(),
+									self.opts.last_skipped_slot_blocks,
+								)
+							});
+							// Update last block number
+							let _ = std::mem::replace(
+								last_blocks.entry(para_id).or_insert(new_head.relay_parent_number).deref_mut(),
+								new_head.relay_parent_number,
+							);
+							self.process_tracker_update(tracker, *relay_fork, new_head.relay_parent_number)
+								.await;
+						}
+					},
+					CollectorUpdateEvent::NewSession(idx) =>
+						for tracker in trackers.values_mut() {
+							tracker.new_session(idx).await;
+						},
+					CollectorUpdateEvent::Termination => break,
+				},
+				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(500)).await,
+				Err(e) => {
+					info!("Input channel has been closed: {:?}", e);
+					break
+				},
+			}
+			self.evict_stalled(&mut trackers, &mut last_blocks);
+		}
+
+		for tracker in trackers.values() {
+			let stats = tracker.summary();
+			if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+				print!("{}", stats);
+			} else {
+				info!("{}", stats);
+			}
+		}
+	}
+
+	fn evict_stalled(&self, trackers: &mut HashMap<u32, SubxtTracker>, last_blocks: &mut HashMap<u32, u32>) {
+		let max_block = *last_blocks.values().max().unwrap_or(&0_u32);
+		let to_evict: Vec<u32> = last_blocks
+			.iter()
+			.filter(|(_, last_block)| max_block - *last_block > self.opts.max_parachain_stall)
+			.map(|(para_id, _)| *para_id)
+			.collect();
+		for para_id in to_evict {
+			let last_seen = last_blocks.remove(&para_id).expect("checked previously, qed");
+			info!("evicting tracker for parachain {}, stalled for {} blocks", para_id, max_block - last_seen);
+			trackers.remove(&para_id);
+		}
+	}
+
+	async fn process_tracker_update(&self, tracker: &mut SubxtTracker, relay_hash: H256, relay_parent_number: u32) {
+		match tracker.inject_block(relay_hash, relay_parent_number).await {
+			Ok(_) => {
+				if let Some(progress) = tracker.progress(&self.metrics) {
+					if matches!(&self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+						println!("{}", progress);
+					}
+				}
+				tracker.maybe_reset_state();
+			},
+			Err(e) => {
+				error!("error occurred when processing block {}: {:?}", relay_hash, e)
+			},
 		}
 	}
 }
