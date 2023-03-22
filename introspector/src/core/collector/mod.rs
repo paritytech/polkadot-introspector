@@ -49,7 +49,7 @@ use ws::*;
 use super::{decode_chain_event, SubxtEvent};
 
 const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;
-const COLLECTOR_BROADCAST_CHANNEL_CAPACITY: usize = 32768;
+const COLLECTOR_BROADCAST_CHANNEL_CAPACITY: usize = 512;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
