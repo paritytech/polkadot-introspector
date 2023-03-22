@@ -254,7 +254,6 @@ impl ParachainCommander {
 										last_blocks.entry(para_id).or_insert(last_known_block).deref_mut(),
 										new_head.relay_parent_number,
 									);
-									//self.evict_stalled(&mut trackers, &mut last_blocks);
 									futures.push(self.process_tracker_update_locked(tracker.clone(), *relay_fork, last_known_block));
 								}
 							},
@@ -270,7 +269,12 @@ impl ParachainCommander {
 						},
 					};
 				}
-				Some(_) = futures.next() => {}
+				Some(_) = futures.next() => {
+					if last_known_block > best_known_block {
+						best_known_block = last_known_block;
+						self.evict_stalled(&mut trackers, &mut last_blocks);
+					}
+				}
 			}
 		}
 
@@ -285,7 +289,11 @@ impl ParachainCommander {
 		}
 	}
 
-	fn evict_stalled(&self, trackers: &mut HashMap<u32, SubxtTracker>, last_blocks: &mut HashMap<u32, u32>) {
+	fn evict_stalled(
+		&self,
+		trackers: &mut HashMap<u32, Arc<Mutex<SubxtTracker>>>,
+		last_blocks: &mut HashMap<u32, u32>,
+	) {
 		let max_block = *last_blocks.values().max().unwrap_or(&0_u32);
 		let to_evict: Vec<u32> = last_blocks
 			.iter()
