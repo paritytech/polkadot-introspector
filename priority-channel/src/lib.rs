@@ -22,10 +22,18 @@ use async_channel::bounded;
 pub use async_channel::{TryRecvError, TrySendError};
 use futures::Stream;
 
-/// Create a wrapped `mpsc::broadcast` pair of `Sender` and `Receiver`.
+/// Create a wrapped `async_channel` pairs of `Sender` and `Receiver`.
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
 	let (tx, rx) = bounded::<T>(capacity);
 	let (tx_priority, rx_priority) = bounded::<T>(capacity);
+	(Sender { inner_priority: tx_priority, inner: tx }, Receiver { inner_priority: rx_priority, inner: rx })
+}
+
+/// Create a wrapped `async_channel` pairs of `Sender` and `Receiver`, same as `channel` but allows to
+/// define different capacities for bulk and priority messages
+pub fn channel_with_capacities<T>(bulk_capacity: usize, priority_capacity: usize) -> (Sender<T>, Receiver<T>) {
+	let (tx, rx) = bounded::<T>(bulk_capacity);
+	let (tx_priority, rx_priority) = bounded::<T>(priority_capacity);
 	(Sender { inner_priority: tx_priority, inner: tx }, Receiver { inner_priority: rx_priority, inner: rx })
 }
 
