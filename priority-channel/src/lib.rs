@@ -22,14 +22,22 @@ use async_channel::bounded;
 pub use async_channel::{TryRecvError, TrySendError};
 use futures::Stream;
 
-/// Create a wrapped `mpsc::broadcast` pair of `Sender` and `Receiver`.
+/// Creates a new channel with a specified capacity and returns a tuple of Sender and Receiver structs.
+///
+/// The returned Sender and Receiver structs contain both a regular channel and a priority channel.
+/// These channels can be used for asynchronous message passing between threads.
+///
+/// # Arguments
+///
+/// * capacity - The maximum number of messages that can be stored in both the regular and priority channels.
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
 	let (tx, rx) = bounded::<T>(capacity);
 	let (tx_priority, rx_priority) = bounded::<T>(capacity);
 	(Sender { inner_priority: tx_priority, inner: tx }, Receiver { inner_priority: rx_priority, inner: rx })
 }
 
-/// A receiver tracking the messages consumed by itself.
+/// A `Receiver` is a public structure that allows for asynchronous message passing between threads.
+/// It consists of two inner channels: a regular channel and a priority channel, both of type `T`
 #[derive(Debug)]
 pub struct Receiver<T> {
 	inner: async_channel::Receiver<T>,
@@ -72,12 +80,60 @@ impl<T> Clone for Receiver<T> {
 	}
 }
 
+/// A trait for defining the strategy used when selecting between the priority and regular channels
+/// in the `Receiver` struct.
+///
+/// Implementations of this trait should provide their own logic for deciding whether to try the
+/// priority channel first by implementing the `should_try_priority` method.
+pub trait SelectionStrategy {
+	fn should_try_priority() -> bool;
+}
+
+/// A `SelectionStrategy` implementation that always tries the priority channel first.
+///
+/// This is the default strategy used by the `Receiver` struct.
+pub struct PriorityFirst;
+impl SelectionStrategy for PriorityFirst {
+	fn should_try_priority() -> bool {
+		true
+	}
+}
+
+const PROBABILISTIC_THRESHOLD: f64 = 0.9;
+/// A probabilistic send strategy with the probability of checking the priority channel
+/// in 90% of the cases
+pub struct Probabilistic;
+
+/// A `SelectionStrategy` implementation that probabilistically tries the priority channel first.
+///
+/// The likelihood of trying the priority channel first is determined by a threshold value.
+impl SelectionStrategy for Probabilistic {
+	fn should_try_priority() -> bool {
+		rand::random::<f64>() < PROBABILISTIC_THRESHOLD
+	}
+}
+
 impl<T> Receiver<T> {
-	/// Attempt to receive the next item.
+	/// Attempt to receive the next item using the default strategy.
 	pub fn try_next(&mut self) -> Result<T, TryRecvError> {
-		match self.inner_priority.try_recv() {
+		self.try_next_with_strategy::<PriorityFirst>()
+	}
+
+	/// Attempt to receive the next item using the provided selection strategy `S`.
+	///
+	/// # Type Parameters
+	///
+	/// * `S` - The selection strategy to use when choosing between the priority and regular channels.
+	pub fn try_next_with_strategy<S: SelectionStrategy>(&mut self) -> Result<T, TryRecvError> {
+		let (first_channel, second_channel) = if S::should_try_priority() {
+			(&self.inner_priority, &self.inner)
+		} else {
+			(&self.inner, &self.inner_priority)
+		};
+
+		match first_channel.try_recv() {
 			Ok(value) => Ok(value),
-			Err(TryRecvError::Empty) => match self.inner.try_recv() {
+			Err(TryRecvError::Empty) => match second_channel.try_recv() {
 				Ok(value) => Ok(value),
 				Err(err) => Err(err),
 			},
@@ -90,6 +146,7 @@ impl<T> Receiver<T> {
 		self.inner.len() + self.inner_priority.len()
 	}
 
+	/// Returns if the channel is empty (meaning that both `inner` channels are empty)
 	pub fn is_empty(&self) -> bool {
 		self.inner.is_empty() && self.inner_priority.is_empty()
 	}
@@ -101,6 +158,8 @@ impl<T> futures::stream::FusedStream for Receiver<T> {
 	}
 }
 
+/// A `Sender` is a public structure that allows for asynchronous message passing between threads.
+/// It consists of two inner channels: a regular channel and a priority channel, both of type `T`
 #[derive(Debug)]
 pub struct Sender<T> {
 	inner: async_channel::Sender<T>,
@@ -139,17 +198,9 @@ impl<T> Sender<T> {
 	where
 		Self: Unpin,
 	{
-		match self.inner.try_send(msg) {
-			Err(send_err) => {
-				if !send_err.is_full() {
-					return Err(SendError::Disconnected)
-				}
-				let fut = self.inner.send(send_err.into_inner());
-				futures::pin_mut!(fut);
-				fut.await.map_err(|_| SendError::Disconnected)
-			},
-			_ => Ok(()),
-		}
+		let fut = self.inner.send(msg);
+		futures::pin_mut!(fut);
+		fut.await.map_err(|_| SendError::Disconnected)
 	}
 
 	/// Send message over priority channel, wait until capacity is available.
@@ -157,17 +208,9 @@ impl<T> Sender<T> {
 	where
 		Self: Unpin,
 	{
-		match self.inner_priority.try_send(msg) {
-			Err(send_err) => {
-				if !send_err.is_full() {
-					return Err(SendError::Disconnected)
-				}
-				let fut = self.inner_priority.send(send_err.into_inner());
-				futures::pin_mut!(fut);
-				fut.await.map_err(|_| SendError::Disconnected)
-			},
-			_ => Ok(()),
-		}
+		let fut = self.inner_priority.send(msg);
+		futures::pin_mut!(fut);
+		fut.await.map_err(|_| SendError::Disconnected)
 	}
 
 	/// Attempt to send message or fail immediately.
@@ -193,45 +236,70 @@ impl<T> Sender<T> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use futures::executor::block_on;
 	#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 	struct Msg {
 		val: u8,
 	}
 
-	#[test]
-	fn try_send_try_next() {
-		block_on(async move {
-			let (mut tx, mut rx) = channel::<Msg>(5);
-			let msg = Msg::default();
-			tx.try_send(msg).unwrap();
-			tx.try_send(msg).unwrap();
-			tx.try_send(msg).unwrap();
-			tx.try_send_priority(Msg { val: 42 }).unwrap();
-			assert_eq!(rx.try_next().unwrap(), Msg { val: 42 });
-			assert_eq!(rx.try_next().unwrap(), Msg::default());
-			assert_eq!(rx.try_next().unwrap(), Msg::default());
-			assert_eq!(rx.try_next().unwrap(), Msg::default());
-			assert!(rx.try_next().is_err());
-		});
+	#[tokio::test]
+	async fn try_send_try_next() {
+		let (mut tx, mut rx) = channel::<Msg>(5);
+		let msg = Msg::default();
+		tx.try_send(msg).unwrap();
+		tx.try_send(msg).unwrap();
+		tx.try_send(msg).unwrap();
+		tx.try_send_priority(Msg { val: 42 }).unwrap();
+		assert_eq!(rx.try_next().unwrap(), Msg { val: 42 });
+		assert_eq!(rx.try_next().unwrap(), Msg::default());
+		assert_eq!(rx.try_next().unwrap(), Msg::default());
+		assert_eq!(rx.try_next().unwrap(), Msg::default());
+		assert!(rx.try_next().is_err());
 	}
 
-	#[test]
-	fn multi_consumer() {
-		block_on(async move {
-			let (mut tx, mut rx) = channel::<Msg>(5);
-			let mut rx_clone = rx.clone();
-			let msg = Msg::default();
-			tx.try_send(msg).unwrap();
-			tx.try_send(msg).unwrap();
-			tx.try_send(msg).unwrap();
-			tx.try_send_priority(Msg { val: 42 }).unwrap();
-			assert_eq!(rx.try_next().unwrap(), Msg { val: 42 });
-			assert_eq!(rx_clone.try_next().unwrap(), Msg::default());
-			assert_eq!(rx.try_next().unwrap(), Msg::default());
-			assert_eq!(rx_clone.try_next().unwrap(), Msg::default());
-			assert!(rx.try_next().is_err());
-			assert!(rx_clone.try_next().is_err());
-		});
+	#[tokio::test]
+	async fn multi_consumer() {
+		let (mut tx, mut rx) = channel::<Msg>(5);
+		let mut rx_clone = rx.clone();
+		let msg = Msg::default();
+		tx.try_send(msg).unwrap();
+		tx.try_send(msg).unwrap();
+		tx.try_send(msg).unwrap();
+		tx.try_send_priority(Msg { val: 42 }).unwrap();
+		assert_eq!(rx.try_next().unwrap(), Msg { val: 42 });
+		assert_eq!(rx_clone.try_next().unwrap(), Msg::default());
+		assert_eq!(rx.try_next().unwrap(), Msg::default());
+		assert_eq!(rx_clone.try_next().unwrap(), Msg::default());
+		assert!(rx.try_next().is_err());
+		assert!(rx_clone.try_next().is_err());
+	}
+
+	/// A `SelectionStrategy` implementation that always tries the regular channel first.
+	pub struct RegularFirst;
+	impl SelectionStrategy for RegularFirst {
+		fn should_try_priority() -> bool {
+			false
+		}
+	}
+
+	#[tokio::test]
+	async fn test_priority_first_strategy() {
+		let (mut tx, mut rx) = channel(1);
+
+		tx.send(43).await.unwrap();
+		tx.send_priority(42).await.unwrap();
+
+		let received_value = rx.try_next_with_strategy::<PriorityFirst>().unwrap();
+		assert_eq!(received_value, 42);
+	}
+
+	#[tokio::test]
+	async fn test_regular_first_strategy() {
+		let (mut tx, mut rx) = channel(1);
+
+		tx.send(43).await.unwrap();
+		tx.send_priority(42).await.unwrap();
+
+		let received_value = rx.try_next_with_strategy::<RegularFirst>().unwrap();
+		assert_eq!(received_value, 43);
 	}
 }
