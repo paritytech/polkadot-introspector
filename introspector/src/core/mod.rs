@@ -36,8 +36,10 @@ pub mod consumer;
 
 #[allow(clippy::enum_variant_names)]
 mod subxt_subscription;
+mod telemetry_feed;
+mod telemetry_subscription;
 
-pub use self::subxt_subscription::*;
+pub use self::{subxt_subscription::*, telemetry_feed::*, telemetry_subscription::*};
 pub use api::*;
 pub use chain_events::*;
 pub use constants::*;

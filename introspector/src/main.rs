@@ -49,6 +49,8 @@ enum Command {
 	ParachainCommander(ParachainCommanderOptions),
 	/// Validate statically generated metadata
 	MetadataChecker(MetadataCheckerOptions),
+	/// Test telemetry feed, should be removed soon
+	Telemetry,
 }
 
 #[derive(Debug, Parser)]
@@ -136,6 +138,18 @@ async fn main() -> color_eyre::Result<()> {
 			if let Err(err) = MetadataChecker::new(opts)?.run().await {
 				error!("FATAL: cannot start metadata checker: {}", err)
 			};
+		},
+		Command::Telemetry => {
+			let mut core = core::TelemetrySubscription::new();
+			let _consumer_init = core.create_consumer();
+			let (shutdown_tx, _) = broadcast::channel(1);
+			let shutdown_tx_cpy = shutdown_tx.clone();
+			let mut futures = vec![];
+			futures.push(tokio::spawn(async move {
+				signal::ctrl_c().await.unwrap();
+				let _ = shutdown_tx_cpy.send(());
+			}));
+			core.run(futures, shutdown_tx.clone()).await?;
 		},
 	}
 
