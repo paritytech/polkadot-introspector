@@ -4,12 +4,29 @@ use subxt::utils::H256;
 type BlockHash = H256;
 type BlockNumber = u64;
 type Timestamp = u64;
+type FeedNodeId = usize;
 
 #[derive(Debug, PartialEq)]
 pub enum TelemetryFeed {
 	Version(usize),
 	BestBlock { block_number: BlockNumber, timestamp: Timestamp, avg_block_time: Option<u64> },
 	BestFinalized { block_number: BlockNumber, block_hash: BlockHash },
+	// AddedNode
+	RemovedNode { node_id: FeedNodeId },
+	LocatedNode { node_id: FeedNodeId, lat: f32, long: f32, city: String },
+	// ImportedBlock
+	// FinalizedBlock
+	// NodeStatsUpdate
+	// Hardware
+	// TimeSync
+	// AddedChain
+	// RemovedChain
+	// SubscribedTo
+	// UnsubscribedFrom
+	// Pong
+	// StaleNode
+	// NodeIOUpdate
+	// ChainStatsUpdate
 	UnknownValue { action: u8, value: String },
 }
 
@@ -51,8 +68,16 @@ impl TelemetryFeed {
 			},
 			// TODO: Add the following messages
 			//  3: AddedNode
-			//  4: RemovedNode
-			//  5: LocatedNode
+			// RemovedNode
+			4 => {
+				let node_id = serde_json::from_str(raw_payload.get())?;
+				TelemetryFeed::RemovedNode { node_id }
+			},
+			// LocatedNode
+			5 => {
+				let (node_id, lat, long, city) = serde_json::from_str(raw_payload.get())?;
+				TelemetryFeed::LocatedNode { node_id, lat, long, city }
+			},
 			//  6: ImportedBlock
 			//  7: FinalizedBlock
 			//  8: NodeStatsUpdate
@@ -91,6 +116,19 @@ mod test {
 					avg_block_time: Some(5998)
 				},
 				TelemetryFeed::BestFinalized { block_number: 14783934, block_hash: BlockHash::zero() }
+			]
+		);
+	}
+
+	#[test]
+	fn decode_removed_node_located_node() {
+		let msg = r#"[4,42,5[1560,35.6893,139.6899,"Tokyo"]]"#;
+
+		assert_eq!(
+			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
+			vec![
+				TelemetryFeed::RemovedNode { node_id: 42 },
+				TelemetryFeed::LocatedNode { node_id: 1560, lat: 35.6893, long: 139.6899, city: "Tokyo".to_owned() }
 			]
 		);
 	}
