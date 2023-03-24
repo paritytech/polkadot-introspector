@@ -20,7 +20,7 @@ use serde_json::value::RawValue;
 use subxt::utils::H256;
 
 type BlockHash = H256;
-type BlockNumber = u64;
+type BlockNumber = u32;
 type Timestamp = u64;
 type FeedNodeId = usize;
 
