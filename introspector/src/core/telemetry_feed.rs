@@ -164,7 +164,10 @@ pub enum TelemetryFeed {
 	StaleNode {
 		node_id: FeedNodeId,
 	},
-	// NodeIOUpdate
+	NodeIOUpdate {
+		node_id: usize,
+		io: NodeIO,
+	},
 	// ChainStatsUpdate
 	UnknownValue {
 		action: u8,
@@ -312,7 +315,11 @@ impl TelemetryFeed {
 				let node_id = serde_json::from_str(raw_payload.get())?;
 				TelemetryFeed::StaleNode { node_id }
 			},
-			// 21: NodeIOUpdate
+			// NodeIOUpdate
+			21 => {
+				let (node_id, (used_state_cache_size,)) = serde_json::from_str(raw_payload.get())?;
+				TelemetryFeed::NodeIOUpdate { node_id, io: NodeIO { used_state_cache_size } }
+			},
 			// 22: ChainStatsUpdate
 			_ => TelemetryFeed::UnknownValue { action, value: raw_payload.to_string() },
 		};
@@ -484,6 +491,18 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![TelemetryFeed::Pong { msg: "pong".to_owned() }, TelemetryFeed::StaleNode { node_id: 297 }]
+		);
+	}
+
+	#[test]
+	fn decode_node_io_update() {
+		let msg = r#"[21,[555,[[48442256,54228400,52903216]]]]"#;
+		assert_eq!(
+			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
+			vec![TelemetryFeed::NodeIOUpdate {
+				node_id: 555,
+				io: NodeIO { used_state_cache_size: vec![48442256.0, 54228400.0, 52903216.0] }
+			}]
 		);
 	}
 
