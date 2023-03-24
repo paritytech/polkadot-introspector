@@ -133,8 +133,14 @@ pub enum TelemetryFeed {
 		block_number: BlockNumber,
 		block_hash: BlockHash,
 	},
-	// NodeStatsUpdate
-	// Hardware
+	NodeStatsUpdate {
+		node_id: usize,
+		stats: NodeStats,
+	},
+	Hardware {
+		node_id: usize,
+		hardware: NodeHardware,
+	},
 	TimeSync {
 		time: Timestamp,
 	},
@@ -261,8 +267,16 @@ impl TelemetryFeed {
 				let (node_id, block_number, block_hash) = serde_json::from_str(raw_payload.get())?;
 				TelemetryFeed::FinalizedBlock { node_id, block_number, block_hash }
 			},
-			//  8: NodeStatsUpdate
-			//  9: Hardware
+			// NodeStatsUpdate
+			8 => {
+				let (node_id, (peers, txcount)) = serde_json::from_str(raw_payload.get())?;
+				TelemetryFeed::NodeStatsUpdate { node_id, stats: NodeStats { peers, txcount } }
+			},
+			// Hardware
+			9 => {
+				let (node_id, (upload, download, chart_stamps)) = serde_json::from_str(raw_payload.get())?;
+				TelemetryFeed::Hardware { node_id, hardware: NodeHardware { upload, download, chart_stamps } }
+			},
 			// TimeSync
 			10 => {
 				let time = serde_json::from_str(raw_payload.get())?;
@@ -404,6 +418,25 @@ mod test {
 					}
 				},
 				TelemetryFeed::FinalizedBlock { node_id: 92, block_number: 12085, block_hash: BlockHash::zero() }
+			]
+		);
+	}
+
+	#[test]
+	fn decode_node_stats_update_telemetry_feed() {
+		let msg = r#"[8,[1645,[8,0]],9,[514,[[10758,554,20534],[12966,13631,17685],[1679678136573,1679678136573,1679678141574]]]]"#;
+		assert_eq!(
+			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
+			vec![
+				TelemetryFeed::NodeStatsUpdate { node_id: 1645, stats: NodeStats { peers: 8, txcount: 0 } },
+				TelemetryFeed::Hardware {
+					node_id: 514,
+					hardware: NodeHardware {
+						upload: vec![10758.0, 554.0, 20534.0],
+						download: vec![12966.0, 13631.0, 17685.0],
+						chart_stamps: vec![1679678136573.0, 1679678136573.0, 1679678141574.0]
+					}
+				}
 			]
 		);
 	}
