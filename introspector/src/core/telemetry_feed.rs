@@ -24,14 +24,12 @@ type BlockNumber = u64;
 type Timestamp = u64;
 type FeedNodeId = usize;
 
-/// Concise block details
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 pub struct Block {
 	pub hash: BlockHash,
 	pub height: BlockNumber,
 }
 
-/// Verbose block details
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 pub struct BlockDetails {
 	pub block: Block,
@@ -41,27 +39,131 @@ pub struct BlockDetails {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct NodeDetails {
+	pub name: String,
+	pub implementation: String,
+	pub version: String,
+	pub validator: Option<String>,
+	pub network_id: Option<String>,
+	pub ip: Option<String>,
+	pub sysinfo: Option<NodeSysInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct NodeSysInfo {
+	pub cpu: Option<Box<str>>,
+	pub memory: Option<u64>,
+	pub core_count: Option<u32>,
+	pub linux_kernel: Option<Box<str>>,
+	pub linux_distro: Option<Box<str>>,
+	pub is_virtual_machine: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NodeStats {
+	pub peers: u64,
+	pub txcount: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NodeLocation {
+	lat: f32,
+	long: f32,
+	city: String,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct NodeIO {
+	pub used_state_cache_size: Vec<f32>,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct NodeHardware {
+	pub upload: Vec<f64>,
+	pub download: Vec<f64>,
+	pub chart_stamps: Vec<f64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct NodeHwBench {
+	pub cpu_hashrate_score: u64,
+	pub memory_memcpy_score: u64,
+	pub disk_sequential_write_score: Option<u64>,
+	pub disk_random_write_score: Option<u64>,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum TelemetryFeed {
 	Version(usize),
-	BestBlock { block_number: BlockNumber, timestamp: Timestamp, avg_block_time: Option<u64> },
-	BestFinalized { block_number: BlockNumber, block_hash: BlockHash },
-	// AddedNode
-	RemovedNode { node_id: FeedNodeId },
-	LocatedNode { node_id: FeedNodeId, lat: f32, long: f32, city: String },
-	ImportedBlock { node_id: FeedNodeId, block_details: BlockDetails },
-	FinalizedBlock { node_id: FeedNodeId, block_number: BlockNumber, block_hash: BlockHash },
+	BestBlock {
+		block_number: BlockNumber,
+		timestamp: Timestamp,
+		avg_block_time: Option<u64>,
+	},
+	BestFinalized {
+		block_number: BlockNumber,
+		block_hash: BlockHash,
+	},
+	AddedNode {
+		node_id: FeedNodeId,
+		details: NodeDetails,
+		stats: NodeStats,
+		io: NodeIO,
+		hardware: NodeHardware,
+		block_details: BlockDetails,
+		location: NodeLocation,
+		startup_time: Option<Timestamp>,
+		hwbench: Option<NodeHwBench>,
+	},
+	RemovedNode {
+		node_id: FeedNodeId,
+	},
+	LocatedNode {
+		node_id: FeedNodeId,
+		lat: f32,
+		long: f32,
+		city: String,
+	},
+	ImportedBlock {
+		node_id: FeedNodeId,
+		block_details: BlockDetails,
+	},
+	FinalizedBlock {
+		node_id: FeedNodeId,
+		block_number: BlockNumber,
+		block_hash: BlockHash,
+	},
 	// NodeStatsUpdate
 	// Hardware
-	TimeSync { time: Timestamp },
-	AddedChain { name: String, genesis_hash: BlockHash, node_count: usize },
-	RemovedChain { genesis_hash: BlockHash },
-	SubscribedTo { genesis_hash: BlockHash },
-	UnsubscribedFrom { genesis_hash: BlockHash },
-	Pong { msg: String },
-	StaleNode { node_id: FeedNodeId },
+	TimeSync {
+		time: Timestamp,
+	},
+	AddedChain {
+		name: String,
+		genesis_hash: BlockHash,
+		node_count: usize,
+	},
+	RemovedChain {
+		genesis_hash: BlockHash,
+	},
+	SubscribedTo {
+		genesis_hash: BlockHash,
+	},
+	UnsubscribedFrom {
+		genesis_hash: BlockHash,
+	},
+	Pong {
+		msg: String,
+	},
+	StaleNode {
+		node_id: FeedNodeId,
+	},
 	// NodeIOUpdate
 	// ChainStatsUpdate
-	UnknownValue { action: u8, value: String },
+	UnknownValue {
+		action: u8,
+		value: String,
+	},
 }
 
 impl TelemetryFeed {
@@ -100,8 +202,36 @@ impl TelemetryFeed {
 				let (block_number, block_hash) = serde_json::from_str(raw_payload.get())?;
 				TelemetryFeed::BestFinalized { block_number, block_hash }
 			},
-			// TODO: Add the following messages
-			//  3: AddedNode
+			// AddNode
+			3 => {
+				let (
+					node_id,
+					(name, implementation, version, validator, network_id, ip, sysinfo, hwbench),
+					(peers, txcount),
+					(used_state_cache_size,),
+					(upload, download, chart_stamps),
+					(height, hash, block_time, block_timestamp, propagation_time),
+					(lat, long, city),
+					startup_time,
+				) = serde_json::from_str(raw_payload.get())?;
+
+				TelemetryFeed::AddedNode {
+					node_id,
+					details: NodeDetails { name, implementation, version, validator, network_id, ip, sysinfo },
+					stats: NodeStats { peers, txcount },
+					io: NodeIO { used_state_cache_size },
+					hardware: NodeHardware { upload, download, chart_stamps },
+					block_details: BlockDetails {
+						block: Block { hash, height },
+						block_time,
+						block_timestamp,
+						propagation_time,
+					},
+					location: NodeLocation { lat, long, city },
+					startup_time,
+					hwbench,
+				}
+			},
 			// RemovedNode
 			4 => {
 				let node_id = serde_json::from_str(raw_payload.get())?;
@@ -196,6 +326,53 @@ mod test {
 				},
 				TelemetryFeed::BestFinalized { block_number: 14783934, block_hash: BlockHash::zero() }
 			]
+		);
+	}
+
+	#[test]
+	fn decode_added_node() {
+		let msg = r#"[
+			3,[
+				2324,
+				["literate-burn-3334","Parity Polkadot","0.8.30-4b86755c3",null,"12D3KooWQXtq1V6DP9SuPzZFL4VY3ye96XW4NdxR8KxnqfNvS7Vo",null,null,null],
+				[1,0],
+				[[51238524,51238524,51238524]],
+				[[5865.8125,7220.9375,8373.84375],[103230.375,195559.8125,517880.0625],[1679673031643.2812,1679673120180.5312,1679673200282.875]],
+				[6321619,"0x0000000000000000000000000000000000000000000000000000000000000000",0,1679660148935,null],
+				[50.0804,14.5045,"Prague"],
+				1619604694363
+			]
+		]"#;
+		assert_eq!(
+			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
+			vec![TelemetryFeed::AddedNode {
+				node_id: 2324,
+				details: NodeDetails {
+					name: "literate-burn-3334".to_owned(),
+					implementation: "Parity Polkadot".to_owned(),
+					version: "0.8.30-4b86755c3".to_owned(),
+					validator: None,
+					network_id: Some("12D3KooWQXtq1V6DP9SuPzZFL4VY3ye96XW4NdxR8KxnqfNvS7Vo".to_owned()),
+					ip: None,
+					sysinfo: None
+				},
+				stats: NodeStats { peers: 1, txcount: 0 },
+				io: NodeIO { used_state_cache_size: vec![51238524.0, 51238524.0, 51238524.0] },
+				hardware: NodeHardware {
+					upload: vec![5865.8125, 7220.9375, 8373.84375],
+					download: vec![103230.375, 195559.8125, 517880.0625],
+					chart_stamps: vec![1679673031643.2812, 1679673120180.5312, 1679673200282.875,]
+				},
+				block_details: BlockDetails {
+					block: Block { hash: BlockHash::zero(), height: 6321619 },
+					block_time: 0,
+					block_timestamp: 1679660148935,
+					propagation_time: None
+				},
+				location: NodeLocation { lat: 50.0804, long: 14.5045, city: "Prague".to_owned() },
+				startup_time: Some(1619604694363),
+				hwbench: None
+			}]
 		);
 	}
 
