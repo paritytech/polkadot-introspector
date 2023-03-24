@@ -92,6 +92,30 @@ pub struct NodeHwBench {
 	pub disk_random_write_score: Option<u64>,
 }
 
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
+pub struct Ranking<K> {
+	pub list: Vec<(K, u64)>,
+	pub other: u64,
+	pub unknown: u64,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
+pub struct ChainStats {
+	pub version: Ranking<String>,
+	pub target_os: Ranking<String>,
+	pub target_arch: Ranking<String>,
+	pub cpu: Ranking<String>,
+	pub memory: Ranking<(u32, Option<u32>)>,
+	pub core_count: Ranking<u32>,
+	pub linux_kernel: Ranking<String>,
+	pub linux_distro: Ranking<String>,
+	pub is_virtual_machine: Ranking<bool>,
+	pub cpu_hashrate_score: Ranking<(u32, Option<u32>)>,
+	pub memory_memcpy_score: Ranking<(u32, Option<u32>)>,
+	pub disk_sequential_write_score: Ranking<(u32, Option<u32>)>,
+	pub disk_random_write_score: Ranking<(u32, Option<u32>)>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum TelemetryFeed {
 	Version(usize),
@@ -168,7 +192,9 @@ pub enum TelemetryFeed {
 		node_id: usize,
 		io: NodeIO,
 	},
-	// ChainStatsUpdate
+	ChainStatsUpdate {
+		stats: ChainStats,
+	},
 	UnknownValue {
 		action: u8,
 		value: String,
@@ -320,7 +346,11 @@ impl TelemetryFeed {
 				let (node_id, (used_state_cache_size,)) = serde_json::from_str(raw_payload.get())?;
 				TelemetryFeed::NodeIOUpdate { node_id, io: NodeIO { used_state_cache_size } }
 			},
-			// 22: ChainStatsUpdate
+			// ChainStatsUpdate
+			22 => {
+				let stats = serde_json::from_str::<ChainStats>(raw_payload.get())?;
+				TelemetryFeed::ChainStatsUpdate { stats }
+			},
 			_ => TelemetryFeed::UnknownValue { action, value: raw_payload.to_string() },
 		};
 
@@ -353,7 +383,8 @@ mod test {
 	#[test]
 	fn decode_added_node() {
 		let msg = r#"[
-			3,[
+			3,
+			[
 				2324,
 				["literate-burn-3334","Parity Polkadot","0.8.30-4b86755c3",null,"12D3KooWQXtq1V6DP9SuPzZFL4VY3ye96XW4NdxR8KxnqfNvS7Vo",null,null,null],
 				[1,0],
@@ -502,6 +533,112 @@ mod test {
 			vec![TelemetryFeed::NodeIOUpdate {
 				node_id: 555,
 				io: NodeIO { used_state_cache_size: vec![48442256.0, 54228400.0, 52903216.0] }
+			}]
+		);
+	}
+
+	#[test]
+	fn decode_() {
+		let msg = r#"[
+			22,
+			{
+				"version": {"list": [["0.9.37-645723987cf",378],["0.9.37-b4b818d89bf",257],["0.9.32-2bfbb4adb7e",213]],"other": 473,"unknown": 0},
+				"target_os": {"list": [["linux",1981],["freebsd",1],["7",1]],"other": 0,"unknown": 0},
+				"target_arch": {"list": [["x86_64",1969],["aarch64",6],["a5d1737 runtime 109.0.0 node 7.2.0 x86_64",5]],"other": 0,"unknown": 0},
+				"cpu": {"list": [["AMD Ryzen 9 5950X 16-Core Processor",138],["Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz",108],["Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz",89]],"other": 1173,"unknown": 106},
+				"memory": {"list": [[[1,2],2],[[2,4],15],[[4,6],4]],"other": 0,"unknown": 100},
+				"core_count": {"list": [[8,530],[4,352],[16,265]],"other": 68,"unknown": 106},
+				"linux_kernel": {"list": [["5.4.0-144-generic",86],["5.15.0-67-generic",81],["5.10.147+",59]],"other": 1382,"unknown": 100},
+				"linux_distro": {"list": [["Ubuntu 20.04.5 LTS",690],["Debian GNU/Linux 10 (buster)",254],["Ubuntu 20.04.4 LTS",238]],"other": 122,"unknown": 111},
+				"is_virtual_machine": {"list": [[false,810],[true,1073]],"other": 0,"unknown": 100},
+				"cpu_hashrate_score": {"list": [[[70,90],428],[[50,70],356],[[90,110],257]],"other": 0,"unknown": 686},
+				"memory_memcpy_score": {"list": [[[0,10],4],[[10,30],135],[[30,50],375]],"other": 0,"unknown": 686},
+				"disk_sequential_write_score": {"list": [[[0,10],12],[[10,30],80],[[30,50],79]],"other": 0,"unknown": 686},
+				"disk_random_write_score": {"list": [[[0,10],22],[[10,30],218],[[30,50],96]],"other": 0,"unknown": 686}
+			}
+		]"#;
+		assert_eq!(
+			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
+			vec![TelemetryFeed::ChainStatsUpdate {
+				stats: ChainStats {
+					version: Ranking {
+						list: vec![
+							("0.9.37-645723987cf".to_owned(), 378),
+							("0.9.37-b4b818d89bf".to_owned(), 257),
+							("0.9.32-2bfbb4adb7e".to_owned(), 213),
+						],
+						other: 473,
+						unknown: 0
+					},
+					target_os: Ranking {
+						list: vec![("linux".to_owned(), 1981), ("freebsd".to_owned(), 1), ("7".to_owned(), 1)],
+						other: 0,
+						unknown: 0
+					},
+					target_arch: Ranking {
+						list: vec![
+							("x86_64".to_owned(), 1969),
+							("aarch64".to_owned(), 6),
+							("a5d1737 runtime 109.0.0 node 7.2.0 x86_64".to_owned(), 5)
+						],
+						other: 0,
+						unknown: 0
+					},
+					cpu: Ranking {
+						list: vec![
+							("AMD Ryzen 9 5950X 16-Core Processor".to_owned(), 138),
+							("Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz".to_owned(), 108),
+							("Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz".to_owned(), 89),
+						],
+						other: 1173,
+						unknown: 106
+					},
+					memory: Ranking {
+						list: vec![((1, Some(2)), 2), ((2, Some(4)), 15), ((4, Some(6)), 4)],
+						other: 0,
+						unknown: 100
+					},
+					core_count: Ranking { list: vec![(8, 530), (4, 352), (16, 265)], other: 68, unknown: 106 },
+					linux_kernel: Ranking {
+						list: vec![
+							("5.4.0-144-generic".to_owned(), 86),
+							("5.15.0-67-generic".to_owned(), 81),
+							("5.10.147+".to_owned(), 59)
+						],
+						other: 1382,
+						unknown: 100
+					},
+					linux_distro: Ranking {
+						list: vec![
+							("Ubuntu 20.04.5 LTS".to_owned(), 690),
+							("Debian GNU/Linux 10 (buster)".to_owned(), 254),
+							("Ubuntu 20.04.4 LTS".to_owned(), 238)
+						],
+						other: 122,
+						unknown: 111
+					},
+					is_virtual_machine: Ranking { list: vec![(false, 810), (true, 1073)], other: 0, unknown: 100 },
+					cpu_hashrate_score: Ranking {
+						list: vec![((70, Some(90)), 428), ((50, Some(70)), 356), ((90, Some(110)), 257)],
+						other: 0,
+						unknown: 686
+					},
+					memory_memcpy_score: Ranking {
+						list: vec![((0, Some(10)), 4), ((10, Some(30)), 135), ((30, Some(50)), 375)],
+						other: 0,
+						unknown: 686
+					},
+					disk_sequential_write_score: Ranking {
+						list: vec![((0, Some(10)), 12), ((10, Some(30)), 80), ((30, Some(50)), 79)],
+						other: 0,
+						unknown: 686
+					},
+					disk_random_write_score: Ranking {
+						list: vec![((0, Some(10)), 22), ((10, Some(30)), 218), ((30, Some(50)), 96)],
+						other: 0,
+						unknown: 686
+					}
+				}
 			}]
 		);
 	}
