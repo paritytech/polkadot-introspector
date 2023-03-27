@@ -15,17 +15,15 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::{EventConsumerInit, EventStream, TelemetryFeed, MAX_MSG_QUEUE_SIZE};
-use async_trait::async_trait;
+use super::TelemetryFeed;
 use color_eyre::Report;
-use futures::future;
 use futures_util::StreamExt;
 use log::info;
 use tokio::{
 	net::TcpStream,
 	sync::{
 		broadcast::Sender as BroadcastSender,
-		mpsc::{channel, error::SendError, Sender},
+		mpsc::{error::SendError, Sender},
 	},
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
@@ -42,45 +40,15 @@ pub struct TelemetrySubscription {
 	consumers: Vec<Sender<TelemetryEvent>>,
 }
 
-#[async_trait]
-impl EventStream for TelemetrySubscription {
-	type Event = TelemetryEvent;
-
-	/// Create a new consumer of events. Returns consumer initialization data.
-	fn create_consumer(&mut self) -> EventConsumerInit<Self::Event> {
-		let (update_tx, update_rx) = channel(MAX_MSG_QUEUE_SIZE);
-		self.consumers.push(update_tx);
-
-		EventConsumerInit::new(vec![update_rx])
-	}
-
-	async fn run(
-		self,
-		tasks: Vec<tokio::task::JoinHandle<()>>,
-		shutdown_tx: BroadcastSender<()>,
-	) -> color_eyre::Result<()> {
-		let mut futures = self
-			.consumers
-			.into_iter()
-			.map(|update_channel| tokio::spawn(Self::run_per_consumer(update_channel, shutdown_tx.clone())))
-			.collect::<Vec<_>>();
-
-		futures.extend(tasks);
-		future::try_join_all(futures).await?;
-
-		Ok(())
-	}
-}
-
 impl TelemetrySubscription {
-	pub fn new() -> Self {
-		Self { consumers: Vec::new() }
+	pub fn new(consumers: Vec<Sender<TelemetryEvent>>) -> Self {
+		Self { consumers }
 	}
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.
-	async fn run_per_consumer(update_channel: Sender<TelemetryEvent>, shutdown_tx: BroadcastSender<()>) {
+	async fn run_per_consumer(update_channel: Sender<TelemetryEvent>, url: String, shutdown_tx: BroadcastSender<()>) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut ws_stream = telemetry_stream().await;
+		let mut ws_stream = telemetry_stream(&url).await;
 
 		loop {
 			tokio::select! {
@@ -97,8 +65,7 @@ impl TelemetrySubscription {
 					}
 
 					for message in feed.unwrap() {
-						// TODO: change to info
-						println!("[telemetry] {:?}", message);
+						info!("[telemetry] {:?}", message);
 						if let Err(e) = update_channel.send(TelemetryEvent::NewMessage(message)).await {
 							return on_consumer_error(e);
 						}
@@ -110,10 +77,24 @@ impl TelemetrySubscription {
 			}
 		}
 	}
+
+	pub async fn run(
+		self,
+		url: String,
+		shutdown_tx: BroadcastSender<()>,
+	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+		Ok(self
+			.consumers
+			.into_iter()
+			.map(|update_channel| {
+				tokio::spawn(Self::run_per_consumer(update_channel, url.clone(), shutdown_tx.clone()))
+			})
+			.collect::<Vec<_>>())
+	}
 }
 
-async fn telemetry_stream() -> WebSocketStream<MaybeTlsStream<TcpStream>> {
-	let url = Url::parse("wss://feed.telemetry.polkadot.io/feed/").unwrap();
+async fn telemetry_stream(url: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+	let url = Url::parse(url).unwrap();
 	let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
 
 	ws_stream

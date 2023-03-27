@@ -18,12 +18,16 @@ use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use futures::future;
 use log::{error, LevelFilter};
-use tokio::{signal, sync::broadcast};
+use tokio::{
+	signal,
+	sync::broadcast::{self, Sender},
+};
 
 use block_time::BlockTimeOptions;
 use jaeger::JaegerOptions;
 use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
 use pc::ParachainCommanderOptions;
+use whois::WhoIsOptions;
 
 mod block_time;
 mod core;
@@ -31,6 +35,7 @@ mod jaeger;
 mod kvdb;
 mod metadata_checker;
 mod pc;
+mod whois;
 
 use crate::{core::EventStream, kvdb::KvdbOptions};
 
@@ -49,8 +54,8 @@ enum Command {
 	ParachainCommander(ParachainCommanderOptions),
 	/// Validate statically generated metadata
 	MetadataChecker(MetadataCheckerOptions),
-	/// Test telemetry feed, should be removed soon
-	Telemetry,
+	/// Define the
+	WhoIs(WhoIsOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -139,19 +144,38 @@ async fn main() -> color_eyre::Result<()> {
 				error!("FATAL: cannot start metadata checker: {}", err)
 			};
 		},
-		Command::Telemetry => {
-			let mut core = core::TelemetrySubscription::new();
-			let _consumer_init = core.create_consumer();
-			let (shutdown_tx, _) = broadcast::channel(1);
-			let shutdown_tx_cpy = shutdown_tx.clone();
-			let mut futures = vec![];
-			futures.push(tokio::spawn(async move {
-				signal::ctrl_c().await.unwrap();
-				let _ = shutdown_tx_cpy.send(());
-			}));
-			core.run(futures, shutdown_tx.clone()).await?;
+		Command::WhoIs(opts) => {
+			let shutdown_tx = init_shutdown();
+			let futures = init_futures_with_shutdown(
+				whois::WhoIs::new(opts)?.run(shutdown_tx.clone()).await?,
+				shutdown_tx.clone(),
+			);
+			run(futures).await?
 		},
 	}
 
+	Ok(())
+}
+
+fn init_shutdown() -> Sender<()> {
+	let (shutdown_tx, _) = broadcast::channel(1);
+	shutdown_tx
+}
+
+fn init_futures_with_shutdown(
+	mut futures: Vec<tokio::task::JoinHandle<()>>,
+	shutdown_tx: Sender<()>,
+) -> Vec<tokio::task::JoinHandle<()>> {
+	futures.push(tokio::spawn(on_shutdown(shutdown_tx)));
+	futures
+}
+
+async fn on_shutdown(shutdown_tx: Sender<()>) {
+	signal::ctrl_c().await.unwrap();
+	let _ = shutdown_tx.send(());
+}
+
+async fn run(futures: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()> {
+	future::try_join_all(futures).await?;
 	Ok(())
 }
