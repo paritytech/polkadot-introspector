@@ -28,17 +28,19 @@
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
 use crate::core::{
+	collector,
 	collector::{Collector, CollectorOptions},
 	EventConsumerInit, RequestExecutor, SubxtEvent,
 };
 use clap::Parser;
 use colored::Colorize;
 use crossterm::style::Stylize;
+use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
-use priority_channel::{Receiver, TryRecvError};
+use priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
-use std::{collections::HashMap, default::Default, ops::DerefMut, time::Duration};
+use std::{collections::HashMap, default::Default, ops::DerefMut};
 use subxt::utils::H256;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 
@@ -150,12 +152,12 @@ impl ParachainCommander {
 		} else {
 			for para_id in self.opts.para_id.iter() {
 				let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
-				output_futures.push(tokio::spawn(ParachainCommander::watch_node_for_parachain(
+				output_futures.push(ParachainCommander::watch_node_for_parachain(
 					self.clone(),
 					from_collector,
 					*para_id,
 					collector.api(),
-				)));
+				));
 			}
 		}
 
@@ -169,12 +171,12 @@ impl ParachainCommander {
 
 	// This is the main loop for our subxt subscription.
 	// Follows the stream of events and updates the application state.
-	async fn watch_node_for_parachain(
+	fn watch_node_for_parachain(
 		self,
 		from_collector: Receiver<CollectorUpdateEvent>,
 		para_id: u32,
 		api_service: CollectorStorageApi,
-	) {
+	) -> tokio::task::JoinHandle<()> {
 		// The subxt API request executor.
 		let executor = api_service.subxt();
 		let mut tracker = tracker::SubxtTracker::new(
@@ -185,125 +187,152 @@ impl ParachainCommander {
 			self.opts.last_skipped_slot_blocks,
 		);
 
-		loop {
-			match from_collector.try_recv() {
-				Ok(update_event) => match update_event {
-					CollectorUpdateEvent::NewHead(new_head) =>
-						for relay_fork in &new_head.relay_parent_hashes {
-							self.process_tracker_update(&mut tracker, *relay_fork, new_head.relay_parent_number)
-								.await;
-						},
-					CollectorUpdateEvent::NewSession(idx) => {
-						tracker.new_session(idx).await;
-					},
-					CollectorUpdateEvent::Termination => break,
-				},
-				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(500)).await,
-				Err(_) => {
-					info!("Input channel has been closed");
-					break
-				},
-			}
-		}
+		let metrics = self.metrics.clone();
+		let is_cli = matches!(&self.opts.mode, Some(ParachainCommanderMode::Cli));
 
-		let stats = tracker.summary();
-		if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-			print!("{}", stats);
-		} else {
-			info!("{}", stats);
-		}
-	}
-
-	async fn watch_node_broadcast(
-		self,
-		from_collector: Receiver<CollectorUpdateEvent>,
-		api_service: CollectorStorageApi,
-	) {
-		let mut trackers: HashMap<u32, SubxtTracker> = HashMap::new();
-		// Used to track last block seen in parachain to evict stalled parachains
-		// Another approach would be a BtreeMap indexed by a block number, but
-		// for the practical reasons we are fine to do a hash map scan on each head.
-		let mut last_blocks: HashMap<u32, u32> = HashMap::new();
-		let executor = api_service.subxt();
-
-		loop {
-			match from_collector.try_recv() {
-				Ok(update_event) => match update_event {
-					CollectorUpdateEvent::NewHead(new_head) => {
-						for relay_fork in &new_head.relay_parent_hashes {
-							let para_id = new_head.para_id;
-
-							let tracker = trackers.entry(para_id).or_insert_with(|| {
-								SubxtTracker::new(
-									para_id,
-									self.node.as_str(),
-									executor.clone(),
-									api_service.clone(),
-									self.opts.last_skipped_slot_blocks,
+		tokio::spawn(async move {
+			loop {
+				match from_collector.recv().await {
+					Ok(update_event) => match update_event {
+						CollectorUpdateEvent::NewHead(new_head) =>
+							for relay_fork in &new_head.relay_parent_hashes {
+								process_tracker_update(
+									&mut tracker,
+									*relay_fork,
+									new_head.relay_parent_number,
+									&metrics,
+									is_cli,
 								)
-							});
-							// Update last block number
-							let _ = std::mem::replace(
-								last_blocks.entry(para_id).or_insert(new_head.relay_parent_number).deref_mut(),
-								new_head.relay_parent_number,
-							);
-							self.process_tracker_update(tracker, *relay_fork, new_head.relay_parent_number)
 								.await;
-						}
-					},
-					CollectorUpdateEvent::NewSession(idx) =>
-						for tracker in trackers.values_mut() {
+							},
+						CollectorUpdateEvent::NewSession(idx) => {
 							tracker.new_session(idx).await;
 						},
-					CollectorUpdateEvent::Termination => break,
-				},
-				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(500)).await,
-				Err(e) => {
-					info!("Input channel has been closed: {:?}", e);
-					break
-				},
+						CollectorUpdateEvent::Termination => {
+							info!("collector is terminating");
+							break
+						},
+					},
+					Err(_) => {
+						info!("Input channel has been closed");
+						break
+					},
+				}
 			}
-			self.evict_stalled(&mut trackers, &mut last_blocks);
-		}
 
-		for tracker in trackers.values() {
 			let stats = tracker.summary();
-			if matches!(self.opts.mode, Some(ParachainCommanderMode::Cli)) {
+			if is_cli {
 				print!("{}", stats);
 			} else {
 				info!("{}", stats);
 			}
-		}
+		})
 	}
 
-	fn evict_stalled(&self, trackers: &mut HashMap<u32, SubxtTracker>, last_blocks: &mut HashMap<u32, u32>) {
-		let max_block = *last_blocks.values().max().unwrap_or(&0_u32);
-		let to_evict: Vec<u32> = last_blocks
-			.iter()
-			.filter(|(_, last_block)| max_block - *last_block > self.opts.max_parachain_stall)
-			.map(|(para_id, _)| *para_id)
-			.collect();
-		for para_id in to_evict {
-			let last_seen = last_blocks.remove(&para_id).expect("checked previously, qed");
-			info!("evicting tracker for parachain {}, stalled for {} blocks", para_id, max_block - last_seen);
-			trackers.remove(&para_id);
-		}
-	}
+	async fn watch_node_broadcast(
+		self,
+		mut from_collector: Receiver<CollectorUpdateEvent>,
+		api_service: CollectorStorageApi,
+	) {
+		let mut trackers = HashMap::new();
+		// Used to track last block seen in parachain to evict stalled parachains
+		// Another approach would be a BtreeMap indexed by a block number, but
+		// for the practical reasons we are fine to do a hash map scan on each head.
+		let mut last_blocks: HashMap<u32, u32> = HashMap::new();
+		let mut best_known_block: u32 = 0;
+		let max_stall = self.opts.max_parachain_stall;
+		let mut futures = FuturesUnordered::new();
 
-	async fn process_tracker_update(&self, tracker: &mut SubxtTracker, relay_hash: H256, relay_parent_number: u32) {
-		match tracker.inject_block(relay_hash, relay_parent_number).await {
-			Ok(_) => {
-				if let Some(progress) = tracker.progress(&self.metrics) {
-					if matches!(&self.opts.mode, Some(ParachainCommanderMode::Cli)) {
-						println!("{}", progress);
-					}
+		loop {
+			tokio::select! {
+				message = from_collector.next() => {
+					match message {
+						Some(update_event) => match update_event {
+							CollectorUpdateEvent::NewHead(new_head) => {
+								let para_id = new_head.para_id;
+								let last_known_block = new_head.relay_parent_number;
+
+								let to_tracker = trackers.entry(para_id).or_insert_with(|| {
+									let (tx, rx) = channel_with_capacities(collector::COLLECTOR_NORMAL_CHANNEL_CAPACITY, 1);
+									futures.push(ParachainCommander::watch_node_for_parachain(self.clone(), rx, para_id, api_service.clone()));
+
+									tx
+								});
+								to_tracker.send(CollectorUpdateEvent::NewHead(new_head.clone())).await.unwrap();
+								// Update last block number
+								let _ = std::mem::replace(
+									last_blocks.entry(para_id).or_insert(last_known_block).deref_mut(),
+									last_known_block,
+								);
+
+								if last_known_block > best_known_block {
+									best_known_block = last_known_block;
+									evict_stalled(&mut trackers, &mut last_blocks, max_stall);
+								}
+							},
+							CollectorUpdateEvent::NewSession(idx) =>
+								for to_tracker in trackers.values_mut() {
+									to_tracker.send(CollectorUpdateEvent::NewSession(idx)).await.unwrap();
+								},
+							CollectorUpdateEvent::Termination => {
+								info!("Received termination event");
+								break;
+							},
+						},
+						None => {
+							info!("Input channel has been closed");
+							break;
+						},
+					};
+				},
+				Some(_) = futures.next() => {},
+				else => break,
+			}
+		}
+
+		// Drop all trackers channels to initiate their termination
+		trackers.clear();
+		future::try_join_all(futures).await.unwrap();
+	}
+}
+
+async fn process_tracker_update(
+	tracker: &mut SubxtTracker,
+	relay_hash: H256,
+	relay_parent_number: u32,
+	metrics: &Metrics,
+	is_cli: bool,
+) {
+	match tracker.inject_block(relay_hash, relay_parent_number).await {
+		Ok(_) => {
+			if let Some(progress) = tracker.progress(metrics) {
+				if is_cli {
+					println!("{}", progress);
 				}
-				tracker.maybe_reset_state();
-			},
-			Err(e) => {
-				error!("error occurred when processing block {}: {:?}", relay_hash, e)
-			},
-		}
+			}
+			tracker.maybe_reset_state();
+		},
+		Err(e) => {
+			error!("error occurred when processing block {}: {:?}", relay_hash, e)
+		},
+	}
+}
+
+fn evict_stalled(
+	trackers: &mut HashMap<u32, Sender<CollectorUpdateEvent>>,
+	last_blocks: &mut HashMap<u32, u32>,
+	max_stall: u32,
+) {
+	let max_block = *last_blocks.values().max().unwrap_or(&0_u32);
+	let to_evict: Vec<u32> = last_blocks
+		.iter()
+		.filter(|(_, last_block)| max_block - *last_block > max_stall)
+		.map(|(para_id, _)| *para_id)
+		.collect();
+	for para_id in to_evict {
+		let last_seen = last_blocks.remove(&para_id).expect("checked previously, qed");
+		info!("evicting tracker for parachain {}, stalled for {} blocks", para_id, max_block - last_seen);
+		trackers.remove(&para_id);
 	}
 }
 

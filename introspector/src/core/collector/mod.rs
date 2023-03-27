@@ -51,8 +51,10 @@ use ws::*;
 
 use super::{decode_chain_event, SubxtEvent};
 
-const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;
-const COLLECTOR_BROADCAST_CHANNEL_CAPACITY: usize = 32768;
+/// Used for bulk messages in the normal channels
+pub const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;
+/// Used for bulk messages in the broadcast channels
+pub const COLLECTOR_BROADCAST_CHANNEL_CAPACITY: usize = 512;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -271,7 +273,7 @@ impl Collector {
 		&mut self,
 		para_id: u32,
 	) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
-		let (sender, receiver) = priority_channel::channel(COLLECTOR_NORMAL_CHANNEL_CAPACITY);
+		let (sender, receiver) = priority_channel::channel_with_capacities(COLLECTOR_NORMAL_CHANNEL_CAPACITY, 1);
 		self.subscribe_channels.entry(para_id).or_default().push(sender);
 
 		Ok(receiver)
@@ -279,8 +281,7 @@ impl Collector {
 
 	/// Subscribe for broadcast updates
 	pub async fn subscribe_broadcast_updates(&mut self) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
-		// We create much larger channel for broadcast events to avoid potential issues with lagging
-		let (sender, receiver) = priority_channel::channel(COLLECTOR_BROADCAST_CHANNEL_CAPACITY);
+		let (sender, receiver) = priority_channel::channel_with_capacities(COLLECTOR_BROADCAST_CHANNEL_CAPACITY, 1);
 		self.broadcast_channels.push(sender);
 
 		Ok(receiver)

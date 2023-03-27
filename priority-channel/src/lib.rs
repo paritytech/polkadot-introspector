@@ -36,8 +36,15 @@ pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
 	(Sender { inner_priority: tx_priority, inner: tx }, Receiver { inner_priority: rx_priority, inner: rx })
 }
 
-/// A `Receiver` is a public structure that allows for asynchronous message passing between threads.
-/// It consists of two inner channels: a regular channel and a priority channel, both of type `T`
+/// Create a wrapped `async_channel` pairs of `Sender` and `Receiver`, same as `channel` but allows to
+/// define different capacities for bulk and priority messages
+pub fn channel_with_capacities<T>(bulk_capacity: usize, priority_capacity: usize) -> (Sender<T>, Receiver<T>) {
+	let (tx, rx) = bounded::<T>(bulk_capacity);
+	let (tx_priority, rx_priority) = bounded::<T>(priority_capacity);
+	(Sender { inner_priority: tx_priority, inner: tx }, Receiver { inner_priority: rx_priority, inner: rx })
+}
+
+/// A receiver tracking the messages consumed by itself.
 #[derive(Debug)]
 pub struct Receiver<T> {
 	inner: async_channel::Receiver<T>,
