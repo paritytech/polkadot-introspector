@@ -27,7 +27,7 @@ use block_time::BlockTimeOptions;
 use jaeger::JaegerOptions;
 use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
 use pc::ParachainCommanderOptions;
-use whois::WhoIsOptions;
+use whois::WhoisOptions;
 
 mod block_time;
 mod core;
@@ -55,7 +55,7 @@ enum Command {
 	/// Validate statically generated metadata
 	MetadataChecker(MetadataCheckerOptions),
 	/// Define the
-	WhoIs(WhoIsOptions),
+	Whois(WhoisOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -144,10 +144,10 @@ async fn main() -> color_eyre::Result<()> {
 				error!("FATAL: cannot start metadata checker: {}", err)
 			};
 		},
-		Command::WhoIs(opts) => {
+		Command::Whois(opts) => {
 			let shutdown_tx = init_shutdown();
 			let futures = init_futures_with_shutdown(
-				whois::WhoIs::new(opts)?.run(shutdown_tx.clone()).await?,
+				whois::Whois::new(opts)?.run(shutdown_tx.clone()).await?,
 				shutdown_tx.clone(),
 			);
 			run(futures).await?

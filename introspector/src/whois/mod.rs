@@ -26,20 +26,20 @@ use crate::core::{TelemetryEvent, TelemetrySubscription, MAX_MSG_QUEUE_SIZE};
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
-pub(crate) struct WhoIsOptions {
+pub(crate) struct WhoisOptions {
 	/// Web-Socket URL of a telemetry backend
 	#[clap(name = "ws", long)]
 	pub url: String,
 }
 
-pub(crate) struct WhoIs {
-	opts: WhoIsOptions,
+pub(crate) struct Whois {
+	opts: WhoisOptions,
 	subscription: TelemetrySubscription,
 	update_channel: Receiver<TelemetryEvent>,
 }
 
-impl WhoIs {
-	pub(crate) fn new(opts: WhoIsOptions) -> color_eyre::Result<Self> {
+impl Whois {
+	pub(crate) fn new(opts: WhoisOptions) -> color_eyre::Result<Self> {
 		let (update_tx, update_rx) = channel(MAX_MSG_QUEUE_SIZE);
 		Ok(Self { opts, subscription: TelemetrySubscription::new(vec![update_tx]), update_channel: update_rx })
 	}
