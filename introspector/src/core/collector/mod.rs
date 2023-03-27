@@ -48,10 +48,10 @@ use ws::*;
 
 use super::{decode_chain_event, SubxtEvent};
 
-// Used for bulk messages in the normal channels
-const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;
-// Used for bulk messages in the broadcast channels
-const COLLECTOR_BROADCAST_CHANNEL_CAPACITY: usize = 512;
+/// Used for bulk messages in the normal channels
+pub const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;
+/// Used for bulk messages in the broadcast channels
+pub const COLLECTOR_BROADCAST_CHANNEL_CAPACITY: usize = 512;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
