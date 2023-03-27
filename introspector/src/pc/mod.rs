@@ -234,7 +234,7 @@ impl ParachainCommander {
 		mut from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) {
-		let mut trackers: HashMap<u32, Sender<CollectorUpdateEvent>> = HashMap::new();
+		let mut trackers = HashMap::new();
 		// Used to track last block seen in parachain to evict stalled parachains
 		// Another approach would be a BtreeMap indexed by a block number, but
 		// for the practical reasons we are fine to do a hash map scan on each head.
