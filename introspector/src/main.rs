@@ -22,12 +22,14 @@ use tokio::{signal, sync::broadcast};
 
 use block_time::BlockTimeOptions;
 use jaeger::JaegerOptions;
+use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
 use pc::ParachainCommanderOptions;
 
 mod block_time;
 mod core;
 mod jaeger;
 mod kvdb;
+mod metadata_checker;
 mod pc;
 
 use crate::{core::EventStream, kvdb::KvdbOptions};
@@ -45,6 +47,8 @@ enum Command {
 	/// Observe parachain state
 	#[clap(aliases = &["pc"])]
 	ParachainCommander(ParachainCommanderOptions),
+	/// Validate statically generated metadata
+	MetadataChecker(MetadataCheckerOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -127,6 +131,11 @@ async fn main() -> color_eyre::Result<()> {
 				},
 				Err(err) => error!("FATAL: cannot start parachain commander: {}", err),
 			}
+		},
+		Command::MetadataChecker(opts) => {
+			if let Err(err) = MetadataChecker::new(opts)?.run().await {
+				error!("FATAL: cannot start metadata checker: {}", err)
+			};
 		},
 	}
 

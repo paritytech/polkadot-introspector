@@ -25,24 +25,16 @@ use subxt::{
 
 #[cfg(all(feature = "rococo", feature = "polkadot"))]
 compile_error!("`rococo` and `polkadot` are mutually exclusive features");
-#[cfg(all(feature = "rococo", feature = "versi"))]
-compile_error!("`rococo` and `versi` are mutually exclusive features");
-#[cfg(all(feature = "versi", feature = "polkadot"))]
-compile_error!("`versi` and `polkadot` are mutually exclusive features");
 
-#[cfg(not(any(feature = "rococo", feature = "polkadot", feature = "versi")))]
-compile_error!("Must build with either `rococo`, `polkadot`, `versi` features");
-
-#[cfg(feature = "versi")]
-#[subxt::subxt(runtime_metadata_path = "assets/versi_metadata_v2.scale")]
-pub mod polkadot {}
+#[cfg(not(any(feature = "rococo", feature = "polkadot")))]
+compile_error!("Must build with either `rococo`, `polkadot` features");
 
 #[cfg(feature = "rococo")]
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata_v2.scale")]
+#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
 pub mod polkadot {}
 
 #[cfg(feature = "polkadot")]
-#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata_v2.scale")]
+#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
 pub mod polkadot {}
 
 use polkadot::{
@@ -53,8 +45,10 @@ use polkadot::{
 
 #[derive(Debug)]
 pub enum ChainEvent {
-	/// New relay chain head
-	NewHead(<PolkadotConfig as subxt::Config>::Hash),
+	/// New best relay chain head
+	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
+	/// New finalized relay chain head
+	NewFinalizedHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// Dispute for a specific candidate hash
 	DisputeInitiated(SubxtDispute),
 	/// Conclusion for a dispute

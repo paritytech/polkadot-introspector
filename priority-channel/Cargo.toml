@@ -14,4 +14,7 @@ async-channel = "1.8.0"
 derive_more = "0.99"
 tracing = "0.1.35"
 thiserror = "1.0.31"
+rand = "0.8.5"
 
+[dev-dependencies]
+tokio = { version = "1.26.0", features = ["macros", "rt"] }
