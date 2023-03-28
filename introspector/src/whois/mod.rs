@@ -30,6 +30,9 @@ pub(crate) struct WhoisOptions {
 	/// Web-Socket URL of a telemetry backend
 	#[clap(name = "ws", long)]
 	pub url: String,
+	// Chain's genesis hash
+	#[clap(name = "chain", long)]
+	pub chain: String,
 }
 
 pub(crate) struct Whois {
@@ -48,7 +51,10 @@ impl Whois {
 		self,
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let mut futures = self.subscription.run(self.opts.url.clone(), shutdown_tx).await?;
+		let mut futures = self
+			.subscription
+			.run(self.opts.url.clone(), self.opts.chain.clone(), shutdown_tx)
+			.await?;
 		futures.push(tokio::spawn(Self::watch(self.update_channel)));
 
 		Ok(futures)

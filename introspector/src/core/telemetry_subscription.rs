@@ -17,6 +17,7 @@
 
 use super::TelemetryFeed;
 use color_eyre::Report;
+use futures::SinkExt;
 use futures_util::StreamExt;
 use log::info;
 use tokio::{
@@ -46,9 +47,17 @@ impl TelemetrySubscription {
 	}
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.
-	async fn run_per_consumer(update_channel: Sender<TelemetryEvent>, url: String, shutdown_tx: BroadcastSender<()>) {
+	async fn run_per_consumer(
+		update_channel: Sender<TelemetryEvent>,
+		url: String,
+		chain: String,
+		shutdown_tx: BroadcastSender<()>,
+	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut ws_stream = telemetry_stream(&url).await;
+		if let Err(e) = ws_stream.send(Message::Text(format!("subscribe:{}", chain))).await {
+			info!("Cannot subscribe to chain with hash {}: {:?}", chain, e);
+		}
 
 		loop {
 			tokio::select! {
@@ -81,13 +90,14 @@ impl TelemetrySubscription {
 	pub async fn run(
 		self,
 		url: String,
+		chain: String,
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		Ok(self
 			.consumers
 			.into_iter()
 			.map(|update_channel| {
-				tokio::spawn(Self::run_per_consumer(update_channel, url.clone(), shutdown_tx.clone()))
+				tokio::spawn(Self::run_per_consumer(update_channel, url.clone(), chain.clone(), shutdown_tx.clone()))
 			})
 			.collect::<Vec<_>>())
 	}
