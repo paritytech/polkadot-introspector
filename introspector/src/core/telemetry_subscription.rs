@@ -20,6 +20,7 @@ use color_eyre::Report;
 use futures::SinkExt;
 use futures_util::StreamExt;
 use log::info;
+use subxt::utils::H256;
 use tokio::{
 	net::TcpStream,
 	sync::{
@@ -50,14 +51,11 @@ impl TelemetrySubscription {
 	async fn run_per_consumer(
 		update_channel: Sender<TelemetryEvent>,
 		url: String,
-		chain: String,
+		chain_hash: H256,
 		shutdown_tx: BroadcastSender<()>,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut ws_stream = telemetry_stream(&url).await;
-		if let Err(e) = ws_stream.send(Message::Text(format!("subscribe:{}", chain))).await {
-			info!("Cannot subscribe to chain with hash {}: {:?}", chain, e);
-		}
 
 		loop {
 			tokio::select! {
@@ -75,6 +73,13 @@ impl TelemetrySubscription {
 
 					for message in feed.unwrap() {
 						info!("[telemetry] {:?}", message);
+						if let TelemetryFeed::AddedChain {genesis_hash, ..} = message {
+							if genesis_hash == chain_hash {
+								if let Err(e) = ws_stream.send(Message::Text(format!("subscribe:{:?}", chain_hash))).await {
+									info!("Cannot subscribe to chain with hash {}: {:?}", chain_hash, e);
+								}
+							}
+						}
 						if let Err(e) = update_channel.send(TelemetryEvent::NewMessage(message)).await {
 							return on_consumer_error(e);
 						}
@@ -90,14 +95,19 @@ impl TelemetrySubscription {
 	pub async fn run(
 		self,
 		url: String,
-		chain: String,
+		chain_hash: H256,
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		Ok(self
 			.consumers
 			.into_iter()
 			.map(|update_channel| {
-				tokio::spawn(Self::run_per_consumer(update_channel, url.clone(), chain.clone(), shutdown_tx.clone()))
+				tokio::spawn(Self::run_per_consumer(
+					update_channel,
+					url.clone(),
+					chain_hash.clone(),
+					shutdown_tx.clone(),
+				))
 			})
 			.collect::<Vec<_>>())
 	}

@@ -17,6 +17,7 @@
 use std::time::Duration;
 
 use clap::Parser;
+use subxt::utils::H256;
 use tokio::sync::{
 	broadcast::Sender as BroadcastSender,
 	mpsc::{channel, error::TryRecvError, Receiver},
@@ -32,7 +33,7 @@ pub(crate) struct WhoisOptions {
 	pub url: String,
 	// Chain's genesis hash
 	#[clap(name = "chain", long)]
-	pub chain: String,
+	pub chain_hash: H256,
 }
 
 pub(crate) struct Whois {
@@ -53,7 +54,7 @@ impl Whois {
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut futures = self
 			.subscription
-			.run(self.opts.url.clone(), self.opts.chain.clone(), shutdown_tx)
+			.run(self.opts.url.clone(), self.opts.chain_hash.clone(), shutdown_tx)
 			.await?;
 		futures.push(tokio::spawn(Self::watch(self.update_channel)));
 
