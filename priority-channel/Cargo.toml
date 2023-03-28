@@ -17,4 +17,4 @@ thiserror = "1.0.31"
 rand = "0.8.5"
 
 [dev-dependencies]
-tokio = { version = "1.26.0", features = ["macros", "rt"] }
+tokio = { version = "1.27.0", features = ["macros", "rt"] }
