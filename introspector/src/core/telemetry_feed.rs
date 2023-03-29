@@ -65,7 +65,7 @@ pub struct NodeStats {
 	pub txcount: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct NodeLocation {
 	lat: f32,
 	long: f32,
@@ -135,7 +135,7 @@ pub enum TelemetryFeed {
 		io: NodeIO,
 		hardware: NodeHardware,
 		block_details: BlockDetails,
-		location: NodeLocation,
+		location: Option<NodeLocation>,
 		startup_time: Option<Timestamp>,
 		hwbench: Option<NodeHwBench>,
 	},
@@ -246,7 +246,7 @@ impl TelemetryFeed {
 					(used_state_cache_size,),
 					(upload, download, chart_stamps),
 					(height, hash, block_time, block_timestamp, propagation_time),
-					(lat, long, city),
+					location,
 					startup_time,
 				) = serde_json::from_str(raw_payload.get())?;
 
@@ -262,7 +262,7 @@ impl TelemetryFeed {
 						block_timestamp,
 						propagation_time,
 					},
-					location: NodeLocation { lat, long, city },
+					location,
 					startup_time,
 					hwbench,
 				}
@@ -421,7 +421,7 @@ mod test {
 					block_timestamp: 1679660148935,
 					propagation_time: None
 				},
-				location: NodeLocation { lat: 50.0804, long: 14.5045, city: "Prague".to_owned() },
+				location: Some(NodeLocation { lat: 50.0804, long: 14.5045, city: "Prague".to_owned() }),
 				startup_time: Some(1619604694363),
 				hwbench: None
 			}]
