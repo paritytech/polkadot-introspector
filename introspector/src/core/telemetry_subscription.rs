@@ -20,14 +20,9 @@ use color_eyre::Report;
 use futures::SinkExt;
 use futures_util::StreamExt;
 use log::{info, warn};
+use priority_channel::{SendError, Sender};
 use subxt::utils::H256;
-use tokio::{
-	net::TcpStream,
-	sync::{
-		broadcast::Sender as BroadcastSender,
-		mpsc::{error::SendError, Sender},
-	},
-};
+use tokio::{net::TcpStream, sync::broadcast::Sender as BroadcastSender};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
@@ -49,7 +44,7 @@ impl TelemetrySubscription {
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.
 	async fn run_per_consumer(
-		update_channel: Sender<TelemetryEvent>,
+		mut update_channel: Sender<TelemetryEvent>,
 		url: String,
 		chain_hash: H256,
 		shutdown_tx: BroadcastSender<()>,
@@ -116,7 +111,7 @@ async fn telemetry_stream(url: &str, chain_hash: H256) -> WebSocketStream<MaybeT
 	ws_stream
 }
 
-fn on_consumer_error(e: SendError<TelemetryEvent>) {
+fn on_consumer_error(e: SendError) {
 	info!("Event consumer has terminated: {:?}, shutting down", e);
 }
 

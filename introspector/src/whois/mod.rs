@@ -17,11 +17,9 @@
 use std::time::Duration;
 
 use clap::Parser;
+use priority_channel::{Receiver, TryRecvError};
 use subxt::utils::H256;
-use tokio::sync::{
-	broadcast::Sender as BroadcastSender,
-	mpsc::{channel, error::TryRecvError, Receiver},
-};
+use tokio::sync::broadcast::Sender as BroadcastSender;
 
 use crate::core::{TelemetryEvent, TelemetrySubscription, MAX_MSG_QUEUE_SIZE};
 
@@ -44,7 +42,7 @@ pub(crate) struct Whois {
 
 impl Whois {
 	pub(crate) fn new(opts: WhoisOptions) -> color_eyre::Result<Self> {
-		let (update_tx, update_rx) = channel(MAX_MSG_QUEUE_SIZE);
+		let (update_tx, update_rx) = priority_channel::channel(MAX_MSG_QUEUE_SIZE);
 		Ok(Self { opts, subscription: TelemetrySubscription::new(vec![update_tx]), update_channel: update_rx })
 	}
 
@@ -61,13 +59,13 @@ impl Whois {
 		Ok(futures)
 	}
 
-	async fn watch(mut update: Receiver<TelemetryEvent>) {
+	async fn watch(update: Receiver<TelemetryEvent>) {
 		loop {
 			match update.try_recv() {
 				Ok(event) => {
 					println!("{:?}", event);
 				},
-				Err(TryRecvError::Disconnected) => break,
+				Err(TryRecvError::Closed) => break,
 				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			}
 		}
