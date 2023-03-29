@@ -55,7 +55,7 @@ impl TelemetrySubscription {
 		shutdown_tx: BroadcastSender<()>,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut ws_stream = telemetry_stream(&url).await;
+		let mut ws_stream = telemetry_stream(&url, chain_hash).await;
 
 		loop {
 			tokio::select! {
@@ -73,13 +73,6 @@ impl TelemetrySubscription {
 
 					for message in feed.unwrap() {
 						info!("[telemetry] {:?}", message);
-						if let TelemetryFeed::AddedChain {genesis_hash, ..} = message {
-							if genesis_hash == chain_hash {
-								if let Err(e) = ws_stream.send(Message::Text(format!("subscribe:{:?}", chain_hash))).await {
-									info!("Cannot subscribe to chain with hash {}: {:?}", chain_hash, e);
-								}
-							}
-						}
 						if let Err(e) = update_channel.send(TelemetryEvent::NewMessage(message)).await {
 							return on_consumer_error(e);
 						}
@@ -113,9 +106,12 @@ impl TelemetrySubscription {
 	}
 }
 
-async fn telemetry_stream(url: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+async fn telemetry_stream(url: &str, chain_hash: H256) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
 	let url = Url::parse(url).unwrap();
-	let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
+	let (mut ws_stream, _) = connect_async(url).await.expect("Failed to connect");
+	if let Err(e) = ws_stream.send(Message::Text(format!("subscribe:{:?}", chain_hash))).await {
+		info!("Cannot subscribe to chain with hash {}: {:?}", chain_hash, e);
+	}
 
 	ws_stream
 }
