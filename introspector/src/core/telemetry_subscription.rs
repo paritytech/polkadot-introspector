@@ -19,7 +19,7 @@ use super::TelemetryFeed;
 use color_eyre::Report;
 use futures::SinkExt;
 use futures_util::StreamExt;
-use log::info;
+use log::{info, warn};
 use subxt::utils::H256;
 use tokio::{
 	net::TcpStream,
@@ -121,7 +121,7 @@ fn on_consumer_error(e: SendError<TelemetryEvent>) {
 }
 
 fn on_error(e: Report) {
-	info!("Cannot parse telemetry feed: {:?}", e);
+	warn!("Cannot parse telemetry feed: {:?}", e);
 }
 
 fn on_ctrl_c() {
