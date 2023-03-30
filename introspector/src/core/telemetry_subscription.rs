@@ -90,12 +90,7 @@ impl TelemetrySubscription {
 			.consumers
 			.into_iter()
 			.map(|update_channel| {
-				tokio::spawn(Self::run_per_consumer(
-					update_channel,
-					url.clone(),
-					chain_hash,
-					shutdown_tx.clone(),
-				))
+				tokio::spawn(Self::run_per_consumer(update_channel, url.clone(), chain_hash, shutdown_tx.clone()))
 			})
 			.collect::<Vec<_>>())
 	}
