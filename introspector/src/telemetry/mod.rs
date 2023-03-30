@@ -25,7 +25,7 @@ use crate::core::{TelemetryEvent, TelemetrySubscription, MAX_MSG_QUEUE_SIZE};
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
-pub(crate) struct WhoisOptions {
+pub(crate) struct TelemetryOptions {
 	/// Web-Socket URL of a telemetry backend
 	#[clap(name = "ws", long)]
 	pub url: String,
@@ -34,14 +34,14 @@ pub(crate) struct WhoisOptions {
 	pub chain_hash: H256,
 }
 
-pub(crate) struct Whois {
-	opts: WhoisOptions,
+pub(crate) struct Telemetry {
+	opts: TelemetryOptions,
 	subscription: TelemetrySubscription,
 	update_channel: Receiver<TelemetryEvent>,
 }
 
-impl Whois {
-	pub(crate) fn new(opts: WhoisOptions) -> color_eyre::Result<Self> {
+impl Telemetry {
+	pub(crate) fn new(opts: TelemetryOptions) -> color_eyre::Result<Self> {
 		let (update_tx, update_rx) = priority_channel::channel(MAX_MSG_QUEUE_SIZE);
 		Ok(Self { opts, subscription: TelemetrySubscription::new(vec![update_tx]), update_channel: update_rx })
 	}
@@ -62,8 +62,8 @@ impl Whois {
 	async fn watch(update: Receiver<TelemetryEvent>) {
 		loop {
 			match update.try_recv() {
-				Ok(event) => {
-					println!("{:?}", event);
+				Ok(event) => match event {
+					TelemetryEvent::NewMessage(message) => println!("{:?}", message),
 				},
 				Err(TryRecvError::Closed) => break,
 				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,

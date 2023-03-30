@@ -27,7 +27,7 @@ use block_time::BlockTimeOptions;
 use jaeger::JaegerOptions;
 use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
 use pc::ParachainCommanderOptions;
-use whois::WhoisOptions;
+use telemetry::TelemetryOptions;
 
 mod block_time;
 mod core;
@@ -35,7 +35,7 @@ mod jaeger;
 mod kvdb;
 mod metadata_checker;
 mod pc;
-mod whois;
+mod telemetry;
 
 use crate::{core::EventStream, kvdb::KvdbOptions};
 
@@ -54,8 +54,8 @@ enum Command {
 	ParachainCommander(ParachainCommanderOptions),
 	/// Validate statically generated metadata
 	MetadataChecker(MetadataCheckerOptions),
-	/// Define the
-	Whois(WhoisOptions),
+	/// Simple telemetry feed
+	Telemetry(TelemetryOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -144,10 +144,10 @@ async fn main() -> color_eyre::Result<()> {
 				error!("FATAL: cannot start metadata checker: {}", err)
 			};
 		},
-		Command::Whois(opts) => {
+		Command::Telemetry(opts) => {
 			let shutdown_tx = init_shutdown();
 			let futures = init_futures_with_shutdown(
-				whois::Whois::new(opts)?.run(shutdown_tx.clone()).await?,
+				telemetry::Telemetry::new(opts)?.run(shutdown_tx.clone()).await?,
 				shutdown_tx.clone(),
 			);
 			run(futures).await?
