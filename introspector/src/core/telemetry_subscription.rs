@@ -93,7 +93,7 @@ impl TelemetrySubscription {
 				tokio::spawn(Self::run_per_consumer(
 					update_channel,
 					url.clone(),
-					chain_hash.clone(),
+					chain_hash,
 					shutdown_tx.clone(),
 				))
 			})

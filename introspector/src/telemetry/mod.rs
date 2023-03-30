@@ -52,7 +52,7 @@ impl Telemetry {
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut futures = self
 			.subscription
-			.run(self.opts.url.clone(), self.opts.chain_hash.clone(), shutdown_tx)
+			.run(self.opts.url.clone(), self.opts.chain_hash, shutdown_tx)
 			.await?;
 		futures.push(tokio::spawn(Self::watch(self.update_channel)));
 
