@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use common::storage::{RecordTime, RecordsStorageConfig, StorageEntry};
+use essentials::storage::{RecordTime, RecordsStorageConfig, StorageEntry};
 use log::{debug, info, warn};
 use std::{
 	cmp::Ordering,

@@ -47,7 +47,7 @@ snap = "1.1.0"
 rand = "0.8.5"
 time = { version = "0.3.20", features = ["formatting"] }
 priority-channel = { path = "../priority-channel" }
-common = { path = "../common" }
+essentials = { path = "../essentials" }
 
 [features]
 default = ["versi"]

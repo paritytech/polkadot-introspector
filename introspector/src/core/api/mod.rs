@@ -17,7 +17,7 @@
 #![allow(dead_code)]
 
 use crate::core::MAX_MSG_QUEUE_SIZE;
-use common::storage::RecordsStorageConfig;
+use essentials::storage::RecordsStorageConfig;
 use std::{fmt::Debug, hash::Hash};
 use tokio::sync::mpsc::{channel, Sender};
 
@@ -78,7 +78,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use common::storage::StorageEntry;
+	use essentials::storage::StorageEntry;
 	use subxt::{
 		config::{substrate::BlakeTwo256, Hasher, Header},
 		utils::H256,

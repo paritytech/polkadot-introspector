@@ -17,7 +17,7 @@
 #![allow(dead_code)]
 
 use color_eyre::eyre::eyre;
-use common::storage::{
+use essentials::storage::{
 	HashedPlainRecordsStorage, HashedPrefixedRecordsStorage, PrefixedRecordsStorage, RecordsStorage,
 	RecordsStorageConfig, StorageEntry,
 };

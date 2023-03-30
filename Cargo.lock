@@ -403,45 +403,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "common"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bincode",
- "clap",
- "color-eyre",
- "colored",
- "crossterm",
- "env_logger",
- "erased-serde",
- "futures",
- "hex",
- "itertools",
- "log",
- "parity-db",
- "parity-scale-codec",
- "priority-channel",
- "rand",
- "rasciigraph",
- "reqwest",
- "rocksdb",
- "serde",
- "serde_bytes",
- "serde_derive",
- "serde_json",
- "serde_urlencoded",
- "snap",
- "strum",
- "substrate-prometheus-endpoint",
- "subxt",
- "thiserror",
- "time",
- "tokio",
- "typed-builder",
- "warp",
-]
-
-[[package]]
 name = "concolor-override"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -690,6 +651,45 @@ checksum = "aa68f1b12764fab894d2755d2518754e71b4fd80ecfb822714a1206c2aab39bf"
 dependencies = [
  "cc",
  "libc",
+]
+
+[[package]]
+name = "essentials"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "clap",
+ "color-eyre",
+ "colored",
+ "crossterm",
+ "env_logger",
+ "erased-serde",
+ "futures",
+ "hex",
+ "itertools",
+ "log",
+ "parity-db",
+ "parity-scale-codec",
+ "priority-channel",
+ "rand",
+ "rasciigraph",
+ "reqwest",
+ "rocksdb",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_urlencoded",
+ "snap",
+ "strum",
+ "substrate-prometheus-endpoint",
+ "subxt",
+ "thiserror",
+ "time",
+ "tokio",
+ "typed-builder",
+ "warp",
 ]
 
 [[package]]
@@ -1740,10 +1740,10 @@ dependencies = [
  "clap",
  "color-eyre",
  "colored",
- "common",
  "crossterm",
  "env_logger",
  "erased-serde",
+ "essentials",
  "futures",
  "hex",
  "itertools",

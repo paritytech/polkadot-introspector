@@ -21,12 +21,12 @@ use crate::core::{
 };
 use clap::Parser;
 use colored::Colorize;
-use common::storage::RecordsStorageConfig;
 use crossterm::{
 	cursor,
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
+use essentials::storage::RecordsStorageConfig;
 use log::{debug, info, warn};
 use priority_channel::Receiver;
 use prometheus_endpoint::{HistogramVec, Registry};
