@@ -33,7 +33,6 @@ mod chain_events;
 pub mod collector;
 pub mod constants;
 pub mod consumer;
-pub mod storage;
 
 #[allow(clippy::enum_variant_names)]
 mod subxt_subscription;
@@ -43,4 +42,3 @@ pub use api::*;
 pub use chain_events::*;
 pub use constants::*;
 pub use consumer::*;
-pub use storage::*;

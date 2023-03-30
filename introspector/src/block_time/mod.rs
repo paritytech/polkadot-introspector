@@ -17,10 +17,11 @@
 use crate::core::{
 	api::ApiService,
 	collector::{new_head_hash, CollectorSubscribeMode},
-	EventConsumerInit, RecordsStorageConfig, SubxtEvent,
+	EventConsumerInit, SubxtEvent,
 };
 use clap::Parser;
 use colored::Colorize;
+use common::storage::RecordsStorageConfig;
 use crossterm::{
 	cursor,
 	terminal::{Clear, ClearType},
