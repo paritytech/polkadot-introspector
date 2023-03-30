@@ -164,6 +164,10 @@ pub trait RecordsStorage<K> {
 		K: Borrow<Q>;
 	/// Size of the storage
 	fn len(&self) -> usize;
+	/// Checks if the storage is empty
+	fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
 	/// Returns all keys in the storage
 	fn keys(&self) -> Vec<K>;
 }
