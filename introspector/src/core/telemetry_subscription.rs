@@ -19,7 +19,7 @@ use super::TelemetryFeed;
 use color_eyre::Report;
 use futures::SinkExt;
 use futures_util::StreamExt;
-use log::{info, warn};
+use log::{debug, info, warn};
 use priority_channel::{SendError, Sender};
 use subxt::utils::H256;
 use tokio::{net::TcpStream, sync::broadcast::Sender as BroadcastSender};
@@ -42,7 +42,7 @@ impl TelemetrySubscription {
 		Self { consumers }
 	}
 
-	// Sets up per websocket tasks to handle updates and reconnects on errors.
+	// Subscribes to a telemetry feed handling graceful shutdown.
 	async fn run_per_consumer(
 		mut update_channel: Sender<TelemetryEvent>,
 		url: String,
@@ -67,7 +67,7 @@ impl TelemetrySubscription {
 					}
 
 					for message in feed.unwrap() {
-						info!("[telemetry] {:?}", message);
+						debug!("[telemetry] {:?}", message);
 						if let Err(e) = update_channel.send(TelemetryEvent::NewMessage(message)).await {
 							return on_consumer_error(e);
 						}
