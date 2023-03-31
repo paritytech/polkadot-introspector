@@ -22,7 +22,7 @@ use subxt::utils::H256;
 type BlockHash = H256;
 type BlockNumber = u32;
 type Timestamp = u64;
-type FeedNodeId = usize;
+pub type FeedNodeId = usize;
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 pub struct Block {
@@ -117,88 +117,148 @@ pub struct ChainStats {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Version(usize);
+
+#[derive(Debug, PartialEq)]
+pub struct BestBlock {
+	block_number: BlockNumber,
+	timestamp: Timestamp,
+	avg_block_time: Option<u64>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct BestFinalized {
+	block_number: BlockNumber,
+	block_hash: BlockHash,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct AddedNode {
+	pub node_id: FeedNodeId,
+	pub details: NodeDetails,
+	stats: NodeStats,
+	io: NodeIO,
+	hardware: NodeHardware,
+	block_details: BlockDetails,
+	location: Option<NodeLocation>,
+	startup_time: Option<Timestamp>,
+	hwbench: Option<NodeHwBench>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RemovedNode {
+	pub node_id: FeedNodeId,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct LocatedNode {
+	pub node_id: FeedNodeId,
+	lat: f32,
+	long: f32,
+	city: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ImportedBlock {
+	pub node_id: FeedNodeId,
+	block_details: BlockDetails,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FinalizedBlock {
+	pub node_id: FeedNodeId,
+	block_number: BlockNumber,
+	block_hash: BlockHash,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NodeStatsUpdate {
+	pub node_id: FeedNodeId,
+	stats: NodeStats,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Hardware {
+	pub node_id: FeedNodeId,
+	hardware: NodeHardware,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TimeSync {
+	time: Timestamp,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct AddedChain {
+	name: String,
+	genesis_hash: BlockHash,
+	node_count: usize,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RemovedChain {
+	genesis_hash: BlockHash,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SubscribedTo {
+	genesis_hash: BlockHash,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct UnsubscribedFrom {
+	genesis_hash: BlockHash,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Pong {
+	msg: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct StaleNode {
+	pub node_id: FeedNodeId,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NodeIOUpdate {
+	pub node_id: FeedNodeId,
+	io: NodeIO,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ChainStatsUpdate {
+	stats: ChainStats,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct UnknownValue {
+	action: u8,
+	value: String,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum TelemetryFeed {
-	Version(usize),
-	BestBlock {
-		block_number: BlockNumber,
-		timestamp: Timestamp,
-		avg_block_time: Option<u64>,
-	},
-	BestFinalized {
-		block_number: BlockNumber,
-		block_hash: BlockHash,
-	},
-	AddedNode {
-		node_id: FeedNodeId,
-		details: NodeDetails,
-		stats: NodeStats,
-		io: NodeIO,
-		hardware: NodeHardware,
-		block_details: BlockDetails,
-		location: Option<NodeLocation>,
-		startup_time: Option<Timestamp>,
-		hwbench: Option<NodeHwBench>,
-	},
-	RemovedNode {
-		node_id: FeedNodeId,
-	},
-	LocatedNode {
-		node_id: FeedNodeId,
-		lat: f32,
-		long: f32,
-		city: String,
-	},
-	ImportedBlock {
-		node_id: FeedNodeId,
-		block_details: BlockDetails,
-	},
-	FinalizedBlock {
-		node_id: FeedNodeId,
-		block_number: BlockNumber,
-		block_hash: BlockHash,
-	},
-	NodeStatsUpdate {
-		node_id: usize,
-		stats: NodeStats,
-	},
-	Hardware {
-		node_id: usize,
-		hardware: NodeHardware,
-	},
-	TimeSync {
-		time: Timestamp,
-	},
-	AddedChain {
-		name: String,
-		genesis_hash: BlockHash,
-		node_count: usize,
-	},
-	RemovedChain {
-		genesis_hash: BlockHash,
-	},
-	SubscribedTo {
-		genesis_hash: BlockHash,
-	},
-	UnsubscribedFrom {
-		genesis_hash: BlockHash,
-	},
-	Pong {
-		msg: String,
-	},
-	StaleNode {
-		node_id: FeedNodeId,
-	},
-	NodeIOUpdate {
-		node_id: usize,
-		io: NodeIO,
-	},
-	ChainStatsUpdate {
-		stats: ChainStats,
-	},
-	UnknownValue {
-		action: u8,
-		value: String,
-	},
+	Version(Version),
+	BestBlock(BestBlock),
+	BestFinalized(BestFinalized),
+	AddedNode(AddedNode),
+	RemovedNode(RemovedNode),
+	LocatedNode(LocatedNode),
+	ImportedBlock(ImportedBlock),
+	FinalizedBlock(FinalizedBlock),
+	NodeStatsUpdate(NodeStatsUpdate),
+	Hardware(Hardware),
+	TimeSync(TimeSync),
+	AddedChain(AddedChain),
+	RemovedChain(RemovedChain),
+	SubscribedTo(SubscribedTo),
+	UnsubscribedFrom(UnsubscribedFrom),
+	Pong(Pong),
+	StaleNode(StaleNode),
+	NodeIOUpdate(NodeIOUpdate),
+	ChainStatsUpdate(ChainStatsUpdate),
+	UnknownValue(UnknownValue),
 }
 
 impl TelemetryFeed {
@@ -225,17 +285,17 @@ impl TelemetryFeed {
 			// Version:
 			0 => {
 				let version = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::Version(version)
+				TelemetryFeed::Version(Version(version))
 			},
 			// BestBlock
 			1 => {
 				let (block_number, timestamp, avg_block_time) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::BestBlock { block_number, timestamp, avg_block_time }
+				TelemetryFeed::BestBlock(BestBlock { block_number, timestamp, avg_block_time })
 			},
 			// BestFinalized
 			2 => {
 				let (block_number, block_hash) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::BestFinalized { block_number, block_hash }
+				TelemetryFeed::BestFinalized(BestFinalized { block_number, block_hash })
 			},
 			// AddNode
 			3 => {
@@ -250,7 +310,7 @@ impl TelemetryFeed {
 					startup_time,
 				) = serde_json::from_str(raw_payload.get())?;
 
-				TelemetryFeed::AddedNode {
+				TelemetryFeed::AddedNode(AddedNode {
 					node_id,
 					details: NodeDetails { name, implementation, version, validator, network_id, ip, sysinfo },
 					stats: NodeStats { peers, txcount },
@@ -265,23 +325,23 @@ impl TelemetryFeed {
 					location,
 					startup_time,
 					hwbench,
-				}
+				})
 			},
 			// RemovedNode
 			4 => {
 				let node_id = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::RemovedNode { node_id }
+				TelemetryFeed::RemovedNode(RemovedNode { node_id })
 			},
 			// LocatedNode
 			5 => {
 				let (node_id, lat, long, city) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::LocatedNode { node_id, lat, long, city }
+				TelemetryFeed::LocatedNode(LocatedNode { node_id, lat, long, city })
 			},
 			// ImportedBlock
 			6 => {
 				let (node_id, (height, hash, block_time, block_timestamp, propagation_time)) =
 					serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::ImportedBlock {
+				TelemetryFeed::ImportedBlock(ImportedBlock {
 					node_id,
 					block_details: BlockDetails {
 						block: Block { hash, height },
@@ -289,69 +349,69 @@ impl TelemetryFeed {
 						block_timestamp,
 						propagation_time,
 					},
-				}
+				})
 			},
 			// FinalizedBlock
 			7 => {
 				let (node_id, block_number, block_hash) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::FinalizedBlock { node_id, block_number, block_hash }
+				TelemetryFeed::FinalizedBlock(FinalizedBlock { node_id, block_number, block_hash })
 			},
 			// NodeStatsUpdate
 			8 => {
 				let (node_id, (peers, txcount)) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::NodeStatsUpdate { node_id, stats: NodeStats { peers, txcount } }
+				TelemetryFeed::NodeStatsUpdate(NodeStatsUpdate { node_id, stats: NodeStats { peers, txcount } })
 			},
 			// Hardware
 			9 => {
 				let (node_id, (upload, download, chart_stamps)) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::Hardware { node_id, hardware: NodeHardware { upload, download, chart_stamps } }
+				TelemetryFeed::Hardware(Hardware { node_id, hardware: NodeHardware { upload, download, chart_stamps } })
 			},
 			// TimeSync
 			10 => {
 				let time = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::TimeSync { time }
+				TelemetryFeed::TimeSync(TimeSync { time })
 			},
 			// AddedChain
 			11 => {
 				let (name, genesis_hash, node_count) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::AddedChain { name, genesis_hash, node_count }
+				TelemetryFeed::AddedChain(AddedChain { name, genesis_hash, node_count })
 			},
 			// RemovedChain
 			12 => {
 				let genesis_hash = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::RemovedChain { genesis_hash }
+				TelemetryFeed::RemovedChain(RemovedChain { genesis_hash })
 			},
 			// SubscribedTo
 			13 => {
 				let genesis_hash = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::SubscribedTo { genesis_hash }
+				TelemetryFeed::SubscribedTo(SubscribedTo { genesis_hash })
 			},
 			// UnsubscribedFrom
 			14 => {
 				let genesis_hash = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::UnsubscribedFrom { genesis_hash }
+				TelemetryFeed::UnsubscribedFrom(UnsubscribedFrom { genesis_hash })
 			},
 			// Pong
 			15 => {
 				let msg = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::Pong { msg }
+				TelemetryFeed::Pong(Pong { msg })
 			},
 			// StaleNode
 			20 => {
 				let node_id = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::StaleNode { node_id }
+				TelemetryFeed::StaleNode(StaleNode { node_id })
 			},
 			// NodeIOUpdate
 			21 => {
 				let (node_id, (used_state_cache_size,)) = serde_json::from_str(raw_payload.get())?;
-				TelemetryFeed::NodeIOUpdate { node_id, io: NodeIO { used_state_cache_size } }
+				TelemetryFeed::NodeIOUpdate(NodeIOUpdate { node_id, io: NodeIO { used_state_cache_size } })
 			},
 			// ChainStatsUpdate
 			22 => {
 				let stats = serde_json::from_str::<ChainStats>(raw_payload.get())?;
-				TelemetryFeed::ChainStatsUpdate { stats }
+				TelemetryFeed::ChainStatsUpdate(ChainStatsUpdate { stats })
 			},
-			_ => TelemetryFeed::UnknownValue { action, value: raw_payload.to_string() },
+			_ => TelemetryFeed::UnknownValue(UnknownValue { action, value: raw_payload.to_string() }),
 		};
 
 		Ok(feed_message)
@@ -369,13 +429,13 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::Version(32),
-				TelemetryFeed::BestBlock {
+				TelemetryFeed::Version(Version(32)),
+				TelemetryFeed::BestBlock(BestBlock {
 					block_number: 14783932,
 					timestamp: 1679657352067,
 					avg_block_time: Some(5998)
-				},
-				TelemetryFeed::BestFinalized { block_number: 14783934, block_hash: BlockHash::zero() }
+				}),
+				TelemetryFeed::BestFinalized(BestFinalized { block_number: 14783934, block_hash: BlockHash::zero() })
 			]
 		);
 	}
@@ -397,7 +457,7 @@ mod test {
 		]"#;
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::AddedNode {
+			vec![TelemetryFeed::AddedNode(AddedNode {
 				node_id: 2324,
 				details: NodeDetails {
 					name: "literate-burn-3334".to_owned(),
@@ -424,7 +484,7 @@ mod test {
 				location: Some(NodeLocation { lat: 50.0804, long: 14.5045, city: "Prague".to_owned() }),
 				startup_time: Some(1619604694363),
 				hwbench: None
-			}]
+			})]
 		);
 	}
 
@@ -434,8 +494,13 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::RemovedNode { node_id: 42 },
-				TelemetryFeed::LocatedNode { node_id: 1560, lat: 35.6893, long: 139.6899, city: "Tokyo".to_owned() }
+				TelemetryFeed::RemovedNode(RemovedNode { node_id: 42 }),
+				TelemetryFeed::LocatedNode(LocatedNode {
+					node_id: 1560,
+					lat: 35.6893,
+					long: 139.6899,
+					city: "Tokyo".to_owned()
+				})
 			]
 		);
 	}
@@ -446,7 +511,7 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::ImportedBlock {
+				TelemetryFeed::ImportedBlock(ImportedBlock {
 					node_id: 297,
 					block_details: BlockDetails {
 						block: Block { hash: BlockHash::zero(), height: 11959 },
@@ -454,8 +519,12 @@ mod test {
 						block_timestamp: 1679669286310,
 						propagation_time: Some(233)
 					}
-				},
-				TelemetryFeed::FinalizedBlock { node_id: 92, block_number: 12085, block_hash: BlockHash::zero() }
+				}),
+				TelemetryFeed::FinalizedBlock(FinalizedBlock {
+					node_id: 92,
+					block_number: 12085,
+					block_hash: BlockHash::zero()
+				})
 			]
 		);
 	}
@@ -466,15 +535,18 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::NodeStatsUpdate { node_id: 1645, stats: NodeStats { peers: 8, txcount: 0 } },
-				TelemetryFeed::Hardware {
+				TelemetryFeed::NodeStatsUpdate(NodeStatsUpdate {
+					node_id: 1645,
+					stats: NodeStats { peers: 8, txcount: 0 }
+				}),
+				TelemetryFeed::Hardware(Hardware {
 					node_id: 514,
 					hardware: NodeHardware {
 						upload: vec![10758.0, 554.0, 20534.0],
 						download: vec![12966.0, 13631.0, 17685.0],
 						chart_stamps: vec![1679678136573.0, 1679678136573.0, 1679678141574.0]
 					}
-				}
+				})
 			]
 		);
 	}
@@ -484,7 +556,7 @@ mod test {
 		let msg = r#"[10,1679670187855]"#;
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::TimeSync { time: 1679670187855 }]
+			vec![TelemetryFeed::TimeSync(TimeSync { time: 1679670187855 })]
 		);
 	}
 
@@ -494,12 +566,12 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::AddedChain {
+				TelemetryFeed::AddedChain(AddedChain {
 					name: "Tick 558".to_owned(),
 					genesis_hash: BlockHash::zero(),
 					node_count: 2
-				},
-				TelemetryFeed::RemovedChain { genesis_hash: BlockHash::zero() }
+				}),
+				TelemetryFeed::RemovedChain(RemovedChain { genesis_hash: BlockHash::zero() })
 			]
 		);
 	}
@@ -510,8 +582,8 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::SubscribedTo { genesis_hash: BlockHash::zero() },
-				TelemetryFeed::UnsubscribedFrom { genesis_hash: BlockHash::zero() }
+				TelemetryFeed::SubscribedTo(SubscribedTo { genesis_hash: BlockHash::zero() }),
+				TelemetryFeed::UnsubscribedFrom(UnsubscribedFrom { genesis_hash: BlockHash::zero() })
 			]
 		);
 	}
@@ -521,7 +593,10 @@ mod test {
 		let msg = r#"[15,"pong",20,297]"#;
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::Pong { msg: "pong".to_owned() }, TelemetryFeed::StaleNode { node_id: 297 }]
+			vec![
+				TelemetryFeed::Pong(Pong { msg: "pong".to_owned() }),
+				TelemetryFeed::StaleNode(StaleNode { node_id: 297 })
+			]
 		);
 	}
 
@@ -530,10 +605,10 @@ mod test {
 		let msg = r#"[21,[555,[[48442256,54228400,52903216]]]]"#;
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::NodeIOUpdate {
+			vec![TelemetryFeed::NodeIOUpdate(NodeIOUpdate {
 				node_id: 555,
 				io: NodeIO { used_state_cache_size: vec![48442256.0, 54228400.0, 52903216.0] }
-			}]
+			})]
 		);
 	}
 
@@ -559,7 +634,7 @@ mod test {
 		]"#;
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::ChainStatsUpdate {
+			vec![TelemetryFeed::ChainStatsUpdate(ChainStatsUpdate {
 				stats: ChainStats {
 					version: Ranking {
 						list: vec![
@@ -639,7 +714,7 @@ mod test {
 						unknown: 686
 					}
 				}
-			}]
+			})]
 		);
 	}
 
@@ -650,11 +725,11 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::Version(32),
-				TelemetryFeed::UnknownValue {
+				TelemetryFeed::Version(Version(32)),
+				TelemetryFeed::UnknownValue(UnknownValue {
 					action: 42,
 					value: "[\"0x0000000000000000000000000000000000000000000000000000000000000000\", 1]".to_owned()
-				}
+				})
 			]
 		);
 	}

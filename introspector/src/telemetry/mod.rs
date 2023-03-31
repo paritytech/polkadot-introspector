@@ -21,7 +21,15 @@ use priority_channel::{Receiver, TryRecvError};
 use subxt::utils::H256;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 
-use crate::core::{TelemetryEvent, TelemetrySubscription, MAX_MSG_QUEUE_SIZE};
+use crate::core::{AddedNode, FeedNodeId, TelemetryEvent, TelemetryFeed, TelemetrySubscription, MAX_MSG_QUEUE_SIZE};
+
+macro_rules! print_for_node_id {
+	($node_id:expr, $v:expr) => {
+		if $node_id == Some($v.node_id) {
+			println!("{:?}", $v);
+		}
+	};
+}
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -29,9 +37,12 @@ pub(crate) struct TelemetryOptions {
 	/// Web-Socket URL of a telemetry backend
 	#[clap(name = "ws", long)]
 	pub url: String,
-	// Chain's genesis hash
+	/// Chain's genesis hash (telemetry can collect events from many chains, so we need to specify the chain via its genesis hash)
 	#[clap(name = "chain", long)]
 	pub chain_hash: H256,
+	/// Network id of the desired node to receive only events related to it
+	#[clap(name = "id", long)]
+	pub network_id: String,
 }
 
 pub(crate) struct Telemetry {
@@ -54,20 +65,41 @@ impl Telemetry {
 			.subscription
 			.run(self.opts.url.clone(), self.opts.chain_hash, shutdown_tx)
 			.await?;
-		futures.push(tokio::spawn(Self::watch(self.update_channel)));
+		futures.push(tokio::spawn(Self::watch(self.update_channel, self.opts.network_id)));
 
 		Ok(futures)
 	}
 
-	async fn watch(update: Receiver<TelemetryEvent>) {
+	async fn watch(update: Receiver<TelemetryEvent>, network_id: String) {
+		let mut node_id: Option<FeedNodeId> = None;
+
 		loop {
 			match update.try_recv() {
-				Ok(event) => match event {
-					TelemetryEvent::NewMessage(message) => println!("{:?}", message),
+				Ok(TelemetryEvent::NewMessage(message)) => match message {
+					TelemetryFeed::AddedNode(v) => {
+						save_node_id(&v, network_id.clone(), &mut node_id);
+						print_for_node_id!(node_id, v);
+					},
+					TelemetryFeed::RemovedNode(v) => print_for_node_id!(node_id, v),
+					TelemetryFeed::LocatedNode(v) => print_for_node_id!(node_id, v),
+					TelemetryFeed::ImportedBlock(v) => print_for_node_id!(node_id, v),
+					TelemetryFeed::FinalizedBlock(v) => print_for_node_id!(node_id, v),
+					TelemetryFeed::NodeStatsUpdate(v) => print_for_node_id!(node_id, v),
+					TelemetryFeed::Hardware(v) => print_for_node_id!(node_id, v),
+					TelemetryFeed::StaleNode(v) => print_for_node_id!(node_id, v),
+					TelemetryFeed::NodeIOUpdate(v) => print_for_node_id!(node_id, v),
+					_ => continue,
 				},
 				Err(TryRecvError::Closed) => break,
 				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 			}
 		}
+	}
+}
+
+fn save_node_id(node: &AddedNode, network_id: String, holder: &mut Option<FeedNodeId>) {
+	let node_network_id = node.details.network_id.clone();
+	if node_network_id == Some(network_id) {
+		*holder = Some(node.node_id);
 	}
 }
