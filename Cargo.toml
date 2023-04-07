@@ -1,9 +1,6 @@
 [workspace]
 
-members = [
-    "priority-channel",
-    "introspector"
-]
+members = ["priority-channel", "essentials", "introspector"]
 
 [workspace.package]
 authors = ["Parity Technologies <admin@parity.io>"]

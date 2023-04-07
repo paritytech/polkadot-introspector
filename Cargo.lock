@@ -644,6 +644,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "essentials"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "clap",
+ "color-eyre",
+ "colored",
+ "crossterm",
+ "env_logger",
+ "erased-serde",
+ "futures",
+ "hex",
+ "itertools",
+ "log",
+ "parity-db",
+ "parity-scale-codec",
+ "priority-channel",
+ "rand",
+ "rasciigraph",
+ "reqwest",
+ "rocksdb",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_urlencoded",
+ "snap",
+ "strum",
+ "substrate-prometheus-endpoint",
+ "subxt",
+ "thiserror",
+ "time",
+ "tokio",
+ "typed-builder",
+ "warp",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1690,6 +1729,7 @@ dependencies = [
  "crossterm",
  "env_logger",
  "erased-serde",
+ "essentials",
  "futures",
  "hex",
  "itertools",

@@ -16,12 +16,10 @@
 //
 #![allow(dead_code)]
 
-use crate::{
-	core::storage::{
-		HashedPlainRecordsStorage, HashedPrefixedRecordsStorage, PrefixedRecordsStorage, RecordsStorage,
-		RecordsStorageConfig, StorageEntry,
-	},
-	eyre,
+use color_eyre::eyre::eyre;
+use essentials::storage::{
+	HashedPlainRecordsStorage, HashedPrefixedRecordsStorage, PrefixedRecordsStorage, RecordsStorage,
+	RecordsStorageConfig, StorageEntry,
 };
 use std::{fmt::Debug, hash::Hash};
 use tokio::sync::{
