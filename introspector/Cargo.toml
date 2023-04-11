@@ -53,7 +53,6 @@ priority-channel = { path = "../priority-channel" }
 essentials = { path = "../essentials" }
 
 [features]
-default = ["versi"]
+default = ["rococo"]
 rococo = []
 polkadot = []
-versi = []
