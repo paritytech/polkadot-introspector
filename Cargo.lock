@@ -1731,6 +1731,7 @@ dependencies = [
  "erased-serde",
  "essentials",
  "futures",
+ "futures-util",
  "hex",
  "itertools",
  "log",
@@ -1753,7 +1754,9 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-tungstenite",
  "typed-builder",
+ "url",
  "warp",
 ]
 
@@ -2735,7 +2738,9 @@ checksum = "54319c93411147bced34cb5609a80e0a8e44c5999c93903a81cd866630ec0bfd"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "tokio",
+ "tokio-native-tls",
  "tungstenite",
 ]
 
@@ -2850,6 +2855,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand",
  "sha1",
  "thiserror",

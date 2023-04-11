@@ -18,12 +18,16 @@ use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use futures::future;
 use log::{error, LevelFilter};
-use tokio::{signal, sync::broadcast};
+use tokio::{
+	signal,
+	sync::broadcast::{self, Sender},
+};
 
 use block_time::BlockTimeOptions;
 use jaeger::JaegerOptions;
 use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
 use pc::ParachainCommanderOptions;
+use telemetry::TelemetryOptions;
 
 mod block_time;
 mod core;
@@ -31,6 +35,7 @@ mod jaeger;
 mod kvdb;
 mod metadata_checker;
 mod pc;
+mod telemetry;
 
 use crate::{core::EventStream, kvdb::KvdbOptions};
 
@@ -49,6 +54,8 @@ enum Command {
 	ParachainCommander(ParachainCommanderOptions),
 	/// Validate statically generated metadata
 	MetadataChecker(MetadataCheckerOptions),
+	/// Simple telemetry feed
+	Telemetry(TelemetryOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -137,7 +144,38 @@ async fn main() -> color_eyre::Result<()> {
 				error!("FATAL: cannot start metadata checker: {}", err)
 			};
 		},
+		Command::Telemetry(opts) => {
+			let shutdown_tx = init_shutdown();
+			let futures = init_futures_with_shutdown(
+				telemetry::Telemetry::new(opts)?.run(shutdown_tx.clone()).await?,
+				shutdown_tx.clone(),
+			);
+			run(futures).await?
+		},
 	}
 
+	Ok(())
+}
+
+fn init_shutdown() -> Sender<()> {
+	let (shutdown_tx, _) = broadcast::channel(1);
+	shutdown_tx
+}
+
+fn init_futures_with_shutdown(
+	mut futures: Vec<tokio::task::JoinHandle<()>>,
+	shutdown_tx: Sender<()>,
+) -> Vec<tokio::task::JoinHandle<()>> {
+	futures.push(tokio::spawn(on_shutdown(shutdown_tx)));
+	futures
+}
+
+async fn on_shutdown(shutdown_tx: Sender<()>) {
+	signal::ctrl_c().await.unwrap();
+	let _ = shutdown_tx.send(());
+}
+
+async fn run(futures: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()> {
+	future::try_join_all(futures).await?;
 	Ok(())
 }
