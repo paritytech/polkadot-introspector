@@ -31,6 +31,7 @@
 pub mod api;
 mod chain_events;
 pub mod collector;
+mod metadata;
 
 #[allow(clippy::enum_variant_names)]
 mod subxt_subscription;

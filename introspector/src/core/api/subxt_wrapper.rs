@@ -15,10 +15,14 @@ use std::collections::BTreeMap;
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-pub use crate::core::polkadot::runtime_types::{
-	polkadot_core_primitives::CandidateHash,
-	polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
-	polkadot_runtime_parachains::{configuration::HostConfiguration, scheduler::CoreAssignment},
+pub use crate::core::metadata::polkadot::{
+	self, runtime_types as subxt_runtime_types,
+	runtime_types::{
+		polkadot_core_primitives::CandidateHash,
+		polkadot_primitives as polkadot_rt_primitives,
+		polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
+		polkadot_runtime_parachains::{configuration::HostConfiguration, hrmp::HrmpChannel, scheduler::CoreAssignment},
+	},
 };
 
 pub type BlockNumber = u32;
@@ -27,11 +31,6 @@ use codec::Decode;
 use essentials::constants::{RETRY_COUNT, RETRY_DELAY_MS};
 use log::error;
 use thiserror::Error;
-
-use crate::core::polkadot::{
-	self, runtime_types as subxt_runtime_types,
-	runtime_types::{polkadot_primitives as polkadot_rt_primitives, polkadot_runtime_parachains::hrmp::HrmpChannel},
-};
 
 #[cfg(feature = "rococo")]
 pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;

@@ -15,32 +15,17 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use super::metadata::polkadot::{
+	para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
+	paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut},
+	runtime_types::polkadot_primitives::v2::CandidateDescriptor,
+};
 use codec::{Decode, Encode};
 use color_eyre::{eyre::eyre, Result};
 use serde::Serialize;
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},
 	PolkadotConfig,
-};
-
-#[cfg(all(feature = "rococo", feature = "polkadot"))]
-compile_error!("`rococo` and `polkadot` are mutually exclusive features");
-
-#[cfg(not(any(feature = "rococo", feature = "polkadot")))]
-compile_error!("Must build with either `rococo`, `polkadot` features");
-
-#[cfg(feature = "rococo")]
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
-pub mod polkadot {}
-
-#[cfg(feature = "polkadot")]
-#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
-pub mod polkadot {}
-
-use polkadot::{
-	para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
-	paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut},
-	runtime_types::polkadot_primitives::v2::CandidateDescriptor,
 };
 
 #[derive(Debug)]
@@ -106,7 +91,7 @@ pub async fn decode_chain_event(
 	block_hash: <PolkadotConfig as subxt::Config>::Hash,
 	event: subxt::events::EventDetails,
 ) -> Result<ChainEvent> {
-	use polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
+	use super::metadata::polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
 
 	let subxt_event = if is_specific_event::<DisputeInitiated>(&event) {
 		let decoded = decode_to_specific_event::<DisputeInitiated>(&event)?;
