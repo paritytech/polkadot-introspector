@@ -17,9 +17,9 @@
 //! This module defines structures used for tool progress tracking
 
 use super::tracker::DisputesTracker;
-use crate::core::{api::BlockNumber, SubxtDisputeResult, SubxtHrmpChannel};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use essentials::{api::subxt_wrapper::SubxtHrmpChannel, chain_events::SubxtDisputeResult, storage::BlockNumber};
 use std::{
 	fmt::{self, Display, Formatter, Write},
 	time::Duration,

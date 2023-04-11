@@ -20,16 +20,16 @@ use super::{
 	prometheus::Metrics,
 	stats::ParachainStats,
 };
-use crate::core::{
-	api::{
-		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
-		RequestExecutor, ValidatorIndex,
-	},
-	collector::{CollectorPrefixType, CollectorStorageApi, DisputeInfo},
-	polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
-	SubxtDisputeResult, SubxtHrmpChannel,
-};
 use codec::{Decode, Encode};
+use essentials::{
+	api::subxt_wrapper::{
+		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
+		RequestExecutor, SubxtHrmpChannel, ValidatorIndex,
+	},
+	chain_events::SubxtDisputeResult,
+	collector::{CollectorPrefixType, CollectorStorageApi, DisputeInfo},
+	metadata::polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
+};
 use log::{debug, error, info, warn};
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
 use subxt::{

@@ -27,14 +27,17 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use crate::core::{
-	collector,
-	collector::{Collector, CollectorOptions},
-	EventConsumerInit, RequestExecutor, SubxtEvent,
-};
+use crate::pc::tracker::SubxtTracker;
 use clap::Parser;
 use colored::Colorize;
 use crossterm::style::Stylize;
+use essentials::{
+	api::subxt_wrapper::RequestExecutor,
+	collector,
+	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent},
+	consumer::EventConsumerInit,
+	subxt_subscription::SubxtEvent,
+};
 use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
@@ -43,18 +46,12 @@ use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
 use subxt::utils::H256;
 use tokio::sync::broadcast::Sender as BroadcastSender;
-
-use crate::{
-	core::collector::{CollectorStorageApi, CollectorUpdateEvent},
-	pc::tracker::SubxtTracker,
-};
+use tracker::ParachainBlockTracker;
 
 mod progress;
 pub(crate) mod prometheus;
 pub(crate) mod stats;
 pub(crate) mod tracker;
-
-use tracker::ParachainBlockTracker;
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]

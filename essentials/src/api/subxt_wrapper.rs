@@ -15,22 +15,21 @@ use std::collections::BTreeMap;
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-pub use crate::core::polkadot::runtime_types::{
-	polkadot_core_primitives::CandidateHash,
-	polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
-	polkadot_runtime_parachains::{configuration::HostConfiguration, scheduler::CoreAssignment},
+use crate::constants::{RETRY_COUNT, RETRY_DELAY_MS};
+pub use crate::metadata::polkadot::{
+	self, runtime_types as subxt_runtime_types,
+	runtime_types::{
+		polkadot_core_primitives::CandidateHash,
+		polkadot_primitives as polkadot_rt_primitives,
+		polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
+		polkadot_runtime_parachains::{configuration::HostConfiguration, hrmp::HrmpChannel, scheduler::CoreAssignment},
+	},
 };
-
-pub type BlockNumber = u32;
-
 use codec::Decode;
 use log::error;
 use thiserror::Error;
 
-use crate::core::polkadot::{
-	self, runtime_types as subxt_runtime_types,
-	runtime_types::{polkadot_primitives as polkadot_rt_primitives, polkadot_runtime_parachains::hrmp::HrmpChannel},
-};
+pub type BlockNumber = u32;
 
 #[cfg(feature = "rococo")]
 pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
@@ -38,7 +37,6 @@ pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
 #[cfg(feature = "polkadot")]
 pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
 
-use crate::core::RETRY_COUNT;
 use std::{collections::hash_map::HashMap, fmt::Debug};
 use subxt::{
 	utils::{AccountId32, H256},
@@ -241,7 +239,7 @@ impl RequestExecutor {
 				Ok(rep) => return Ok(rep),
 				Err(err) => match &err {
 					SubxtWrapperError::SubxtError(subxt::Error::Io(io_err)) => {
-						let next_reconnect = crate::core::RETRY_DELAY_MS * (i + 1);
+						let next_reconnect = RETRY_DELAY_MS * (i + 1);
 						error!("[{}] Subxt IO error: {:?}, reconnecting in {}ms", url, io_err, next_reconnect);
 						connection_pool.remove(url);
 						tokio::time::sleep(std::time::Duration::from_millis(next_reconnect)).await;
@@ -389,12 +387,12 @@ impl RequestExecutor {
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
 async fn new_client_fn(url: &str) -> Option<OnlineClient<PolkadotConfig>> {
-	for i in 0..crate::core::RETRY_COUNT {
+	for i in 0..RETRY_COUNT {
 		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {
 			Ok(api) => return Some(api),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
-				tokio::time::sleep(std::time::Duration::from_millis(crate::core::RETRY_DELAY_MS * (i + 1))).await;
+				tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS * (i + 1))).await;
 				continue
 			},
 		};

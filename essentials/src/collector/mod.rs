@@ -14,9 +14,23 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+pub mod candidate_record;
+mod ws;
+
+use crate::{
+	api::{subxt_wrapper::RequestExecutor, ApiService},
+	chain_events::{
+		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
+	},
+	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
+	subxt_subscription::SubxtEvent,
+};
+use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::Parser;
-use essentials::storage::{RecordTime, RecordsStorageConfig, StorageEntry};
+use codec::{Decode, Encode};
+use color_eyre::eyre::eyre;
 use log::{debug, info, warn};
+use priority_channel::{Receiver, Sender, TryRecvError};
 use std::{
 	cmp::Ordering,
 	collections::BTreeMap,
@@ -25,10 +39,6 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-use codec::{Decode, Encode};
-use color_eyre::eyre::eyre;
-use priority_channel::{Receiver, Sender, TryRecvError};
 use subxt::{
 	config::{
 		substrate::{BlakeTwo256, SubstrateHeader},
@@ -38,19 +48,7 @@ use subxt::{
 	PolkadotConfig,
 };
 use tokio::sync::broadcast::Sender as BroadcastSender;
-
-pub mod candidate_record;
-mod ws;
-
-use crate::core::{
-	ApiService, ChainEvent, RequestExecutor, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute,
-	SubxtDisputeResult,
-};
-
-use candidate_record::*;
-use ws::*;
-
-use super::{decode_chain_event, SubxtEvent};
+use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
 
 /// Used for bulk messages in the normal channels
 pub const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;
@@ -100,7 +98,7 @@ pub enum CollectorPrefixType {
 }
 
 /// A type that defines prefix + hash itself
-pub(crate) type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
+pub type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
 
 /// A structure used to track disputes progress
 #[derive(Clone, Debug, Encode, Decode)]

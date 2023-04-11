@@ -14,30 +14,29 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+use block_time::BlockTimeOptions;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
+use essentials::{consumer::EventStream, subxt_subscription::SubxtSubscription};
 use futures::future;
+use jaeger::JaegerOptions;
 use log::{error, LevelFilter};
+use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
+use pc::ParachainCommanderOptions;
+use telemetry::TelemetryOptions;
 use tokio::{
 	signal,
 	sync::broadcast::{self, Sender},
 };
 
-use block_time::BlockTimeOptions;
-use jaeger::JaegerOptions;
-use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
-use pc::ParachainCommanderOptions;
-use telemetry::TelemetryOptions;
-
 mod block_time;
-mod core;
 mod jaeger;
 mod kvdb;
 mod metadata_checker;
 mod pc;
 mod telemetry;
 
-use crate::{core::EventStream, kvdb::KvdbOptions};
+use crate::kvdb::KvdbOptions;
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -88,7 +87,7 @@ async fn main() -> color_eyre::Result<()> {
 
 	match opts.command {
 		Command::BlockTimeMonitor(opts) => {
-			let mut core = core::SubxtSubscription::new(opts.nodes.clone());
+			let mut core = SubxtSubscription::new(opts.nodes.clone());
 			let block_time_consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -123,7 +122,7 @@ async fn main() -> color_eyre::Result<()> {
 			kvdb::introspect_kvdb(opts).await?;
 		},
 		Command::ParachainCommander(opts) => {
-			let mut core = core::SubxtSubscription::new(vec![opts.node.clone()]);
+			let mut core = SubxtSubscription::new(vec![opts.node.clone()]);
 			let consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 

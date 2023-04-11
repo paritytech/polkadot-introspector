@@ -16,11 +16,11 @@
 //
 #![allow(dead_code)]
 
-use color_eyre::eyre::eyre;
-use essentials::storage::{
+use crate::storage::{
 	HashedPlainRecordsStorage, HashedPrefixedRecordsStorage, PrefixedRecordsStorage, RecordsStorage,
 	RecordsStorageConfig, StorageEntry,
 };
+use color_eyre::eyre::eyre;
 use std::{fmt::Debug, hash::Hash};
 use tokio::sync::{
 	mpsc::{Receiver, Sender},
