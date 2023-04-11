@@ -14,10 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::time::Duration;
-
 use clap::Parser;
-use priority_channel::{Receiver, TryRecvError};
+use priority_channel::Receiver;
 use subxt::utils::H256;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 
@@ -73,24 +71,21 @@ impl Telemetry {
 	async fn watch(update: Receiver<TelemetryEvent>, network_id: String) {
 		let mut node_id: Option<FeedNodeId> = None;
 
-		loop {
-			match update.recv().await {
-				Ok(TelemetryEvent::NewMessage(message)) => match message {
-					TelemetryFeed::AddedNode(v) => {
-						save_node_id(&v, network_id.clone(), &mut node_id);
-						print_for_node_id!(node_id, v);
-					},
-					TelemetryFeed::RemovedNode(v) => print_for_node_id!(node_id, v),
-					TelemetryFeed::LocatedNode(v) => print_for_node_id!(node_id, v),
-					TelemetryFeed::ImportedBlock(v) => print_for_node_id!(node_id, v),
-					TelemetryFeed::FinalizedBlock(v) => print_for_node_id!(node_id, v),
-					TelemetryFeed::NodeStatsUpdate(v) => print_for_node_id!(node_id, v),
-					TelemetryFeed::Hardware(v) => print_for_node_id!(node_id, v),
-					TelemetryFeed::StaleNode(v) => print_for_node_id!(node_id, v),
-					TelemetryFeed::NodeIOUpdate(v) => print_for_node_id!(node_id, v),
-					_ => continue,
+		while let Ok(TelemetryEvent::NewMessage(message)) = update.recv().await {
+			match message {
+				TelemetryFeed::AddedNode(v) => {
+					save_node_id(&v, network_id.clone(), &mut node_id);
+					print_for_node_id!(node_id, v);
 				},
-				Err(_) => break,
+				TelemetryFeed::RemovedNode(v) => print_for_node_id!(node_id, v),
+				TelemetryFeed::LocatedNode(v) => print_for_node_id!(node_id, v),
+				TelemetryFeed::ImportedBlock(v) => print_for_node_id!(node_id, v),
+				TelemetryFeed::FinalizedBlock(v) => print_for_node_id!(node_id, v),
+				TelemetryFeed::NodeStatsUpdate(v) => print_for_node_id!(node_id, v),
+				TelemetryFeed::Hardware(v) => print_for_node_id!(node_id, v),
+				TelemetryFeed::StaleNode(v) => print_for_node_id!(node_id, v),
+				TelemetryFeed::NodeIOUpdate(v) => print_for_node_id!(node_id, v),
+				_ => continue,
 			}
 		}
 	}
