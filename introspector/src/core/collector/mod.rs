@@ -15,7 +15,10 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use essentials::storage::{RecordTime, RecordsStorageConfig, StorageEntry};
+use essentials::{
+	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
+	subxt_subscription::SubxtEvent,
+};
 use log::{debug, info, warn};
 use std::{
 	cmp::Ordering,
@@ -50,7 +53,7 @@ use crate::core::{
 use candidate_record::*;
 use ws::*;
 
-use super::{decode_chain_event, SubxtEvent};
+use super::decode_chain_event;
 
 /// Used for bulk messages in the normal channels
 pub const COLLECTOR_NORMAL_CHANNEL_CAPACITY: usize = 32;

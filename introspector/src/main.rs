@@ -16,7 +16,7 @@
 
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
-use essentials::consumer::EventStream;
+use essentials::{consumer::EventStream, subxt_subscription::SubxtSubscription};
 use futures::future;
 use log::{error, LevelFilter};
 use tokio::{
@@ -89,7 +89,7 @@ async fn main() -> color_eyre::Result<()> {
 
 	match opts.command {
 		Command::BlockTimeMonitor(opts) => {
-			let mut core = core::SubxtSubscription::new(opts.nodes.clone());
+			let mut core = SubxtSubscription::new(opts.nodes.clone());
 			let block_time_consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -124,7 +124,7 @@ async fn main() -> color_eyre::Result<()> {
 			kvdb::introspect_kvdb(opts).await?;
 		},
 		Command::ParachainCommander(opts) => {
-			let mut core = core::SubxtSubscription::new(vec![opts.node.clone()]);
+			let mut core = SubxtSubscription::new(vec![opts.node.clone()]);
 			let consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 
