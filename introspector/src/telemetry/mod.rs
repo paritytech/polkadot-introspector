@@ -15,11 +15,12 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
+use essentials::constants::MAX_MSG_QUEUE_SIZE;
 use priority_channel::Receiver;
 use subxt::utils::H256;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 
-use crate::core::{AddedNode, FeedNodeId, TelemetryEvent, TelemetryFeed, TelemetrySubscription, MAX_MSG_QUEUE_SIZE};
+use crate::core::{AddedNode, FeedNodeId, TelemetryEvent, TelemetryFeed, TelemetrySubscription};
 
 macro_rules! print_for_node_id {
 	($node_id:expr, $v:expr) => {

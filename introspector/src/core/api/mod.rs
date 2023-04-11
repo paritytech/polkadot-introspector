@@ -16,8 +16,7 @@
 //
 #![allow(dead_code)]
 
-use crate::core::MAX_MSG_QUEUE_SIZE;
-use essentials::storage::RecordsStorageConfig;
+use essentials::{constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
 use std::{fmt::Debug, hash::Hash};
 use tokio::sync::mpsc::{channel, Sender};
 
