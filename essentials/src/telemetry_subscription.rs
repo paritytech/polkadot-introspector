@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::TelemetryFeed;
+use super::telemetry_feed::TelemetryFeed;
 use color_eyre::Report;
 use futures::SinkExt;
 use futures_util::StreamExt;

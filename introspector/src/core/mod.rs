@@ -32,9 +32,6 @@ pub mod api;
 mod chain_events;
 pub mod collector;
 mod metadata;
-mod telemetry_feed;
-mod telemetry_subscription;
 
-pub use self::{telemetry_feed::*, telemetry_subscription::*};
 pub use api::*;
 pub use chain_events::*;
