@@ -14,16 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-#![allow(dead_code)]
-
-use essentials::{constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
-use std::{fmt::Debug, hash::Hash};
-use tokio::sync::mpsc::{channel, Sender};
 
 mod storage;
-mod subxt_wrapper;
+pub mod subxt_wrapper;
 
-pub use subxt_wrapper::*;
+use crate::{constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
+use std::{fmt::Debug, hash::Hash};
+use subxt_wrapper::RequestExecutor;
+use tokio::sync::mpsc::{channel, Sender};
 
 // Provides access to subxt and storage APIs, more to come.
 #[derive(Clone)]
@@ -77,7 +75,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use essentials::storage::StorageEntry;
+	use crate::storage::StorageEntry;
 	use subxt::{
 		config::{substrate::BlakeTwo256, Hasher, Header},
 		utils::H256,

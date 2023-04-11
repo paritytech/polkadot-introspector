@@ -18,7 +18,7 @@ use clap::Parser;
 use crossterm::style::Stylize;
 use subxt::{OnlineClient, PolkadotConfig};
 
-use crate::core::polkadot;
+use essentials::metadata::polkadot;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]

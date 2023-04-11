@@ -13,9 +13,9 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
-use crate::core::{
+use crate::{
+	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi},
-	SubxtDisputeResult,
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};

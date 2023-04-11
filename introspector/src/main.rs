@@ -14,24 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+use block_time::BlockTimeOptions;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use essentials::{consumer::EventStream, subxt_subscription::SubxtSubscription};
 use futures::future;
+use jaeger::JaegerOptions;
 use log::{error, LevelFilter};
+use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
+use pc::ParachainCommanderOptions;
+use telemetry::TelemetryOptions;
 use tokio::{
 	signal,
 	sync::broadcast::{self, Sender},
 };
 
-use block_time::BlockTimeOptions;
-use jaeger::JaegerOptions;
-use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
-use pc::ParachainCommanderOptions;
-use telemetry::TelemetryOptions;
-
 mod block_time;
-mod core;
 mod jaeger;
 mod kvdb;
 mod metadata_checker;

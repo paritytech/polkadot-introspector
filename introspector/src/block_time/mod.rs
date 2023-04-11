@@ -14,10 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::{
-	api::ApiService,
-	collector::{new_head_hash, CollectorSubscribeMode},
-};
 use clap::Parser;
 use colored::Colorize;
 use crossterm::{
@@ -25,7 +21,13 @@ use crossterm::{
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use essentials::{consumer::EventConsumerInit, storage::RecordsStorageConfig, subxt_subscription::SubxtEvent};
+use essentials::{
+	api::ApiService,
+	collector::{new_head_hash, CollectorSubscribeMode},
+	consumer::EventConsumerInit,
+	storage::RecordsStorageConfig,
+	subxt_subscription::SubxtEvent,
+};
 use log::{debug, info, warn};
 use priority_channel::Receiver;
 use prometheus_endpoint::{HistogramVec, Registry};

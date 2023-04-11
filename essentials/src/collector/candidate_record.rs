@@ -14,15 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::polkadot::runtime_types::polkadot_primitives::v2 as polkadot_rt_primitives;
+use crate::{
+	chain_events::SubxtDisputeResult,
+	metadata::polkadot::runtime_types::polkadot_primitives::v2 as polkadot_rt_primitives,
+};
+use codec::{Decode, Encode};
 use serde::{
 	ser::{SerializeStruct, Serializer},
 	Deserialize, Serialize,
 };
 use serde_bytes::Bytes;
-
-use crate::core::SubxtDisputeResult;
-use codec::{Decode, Encode};
 use std::{hash::Hash, time::Duration};
 use subxt::utils::H256;
 
