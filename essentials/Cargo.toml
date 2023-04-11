@@ -56,6 +56,5 @@ futures-util = "0.3.27"
 priority-channel = { path = "../priority-channel" }
 
 [features]
-default = ["rococo"]
 rococo = []
 polkadot = []
