@@ -17,7 +17,7 @@
 use crate::core::{
 	api::ApiService,
 	collector::{new_head_hash, CollectorSubscribeMode},
-	EventConsumerInit, SubxtEvent,
+	SubxtEvent,
 };
 use clap::Parser;
 use colored::Colorize;
@@ -26,7 +26,7 @@ use crossterm::{
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use essentials::storage::RecordsStorageConfig;
+use essentials::{consumer::EventConsumerInit, storage::RecordsStorageConfig};
 use log::{debug, info, warn};
 use priority_channel::Receiver;
 use prometheus_endpoint::{HistogramVec, Registry};

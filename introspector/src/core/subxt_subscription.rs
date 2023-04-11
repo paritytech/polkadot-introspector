@@ -15,9 +15,11 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::{EventConsumerInit, EventStream};
 use async_trait::async_trait;
-use essentials::constants::{MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS};
+use essentials::{
+	constants::{MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS},
+	consumer::{EventConsumerInit, EventStream},
+};
 use futures::future;
 use log::{error, info};
 use priority_channel::{channel, SendError, Sender};

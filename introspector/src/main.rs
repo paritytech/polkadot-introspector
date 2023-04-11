@@ -16,6 +16,7 @@
 
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
+use essentials::consumer::EventStream;
 use futures::future;
 use log::{error, LevelFilter};
 use tokio::{
@@ -37,7 +38,7 @@ mod metadata_checker;
 mod pc;
 mod telemetry;
 
-use crate::{core::EventStream, kvdb::KvdbOptions};
+use crate::kvdb::KvdbOptions;
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]

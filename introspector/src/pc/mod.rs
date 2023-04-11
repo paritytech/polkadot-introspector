@@ -30,11 +30,12 @@
 use crate::core::{
 	collector,
 	collector::{Collector, CollectorOptions},
-	EventConsumerInit, RequestExecutor, SubxtEvent,
+	RequestExecutor, SubxtEvent,
 };
 use clap::Parser;
 use colored::Colorize;
 use crossterm::style::Stylize;
+use essentials::consumer::EventConsumerInit;
 use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
