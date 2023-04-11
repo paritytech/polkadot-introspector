@@ -74,7 +74,7 @@ impl Telemetry {
 		let mut node_id: Option<FeedNodeId> = None;
 
 		loop {
-			match update.try_recv() {
+			match update.recv().await {
 				Ok(TelemetryEvent::NewMessage(message)) => match message {
 					TelemetryFeed::AddedNode(v) => {
 						save_node_id(&v, network_id.clone(), &mut node_id);
@@ -90,8 +90,7 @@ impl Telemetry {
 					TelemetryFeed::NodeIOUpdate(v) => print_for_node_id!(node_id, v),
 					_ => continue,
 				},
-				Err(TryRecvError::Closed) => break,
-				Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
+				Err(_) => break,
 			}
 		}
 	}
