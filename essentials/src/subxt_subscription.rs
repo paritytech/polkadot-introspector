@@ -16,9 +16,10 @@
 //
 
 use crate::{
-	constants::{MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS},
+	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
 	types::H256,
+	utils::Retry,
 };
 use async_trait::async_trait;
 use futures::future;
@@ -155,6 +156,7 @@ impl SubxtSubscription {
 }
 
 async fn subxt_client(url: String, mut shutdown_rx: BroadcastReceiver<()>) -> Option<OnlineClient<PolkadotConfig>> {
+	let mut retry = Retry::default();
 	loop {
 		tokio::select! {
 			client = OnlineClient::<PolkadotConfig>::from_url(url.clone()) => {
@@ -164,10 +166,10 @@ async fn subxt_client(url: String, mut shutdown_rx: BroadcastReceiver<()>) -> Op
 						return Some(api)
 					},
 					Err(err) => {
-						error!("[{}] Disconnected ({:?}) ", url, err);
-						// TODO (sometime): Add exponential backoff.
-						tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-						info!("[{}] retrying connection ... ", url);
+						error!("[{}] Disconnected ({:?})", url, err);
+						if (retry.sleep().await).is_err() {
+							return None
+						}
 					},
 				}
 			}
