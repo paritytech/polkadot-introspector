@@ -41,7 +41,7 @@ use essentials::{
 };
 use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
-use log::{error, info, warn};
+use log::{error, info};
 use priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
@@ -121,13 +121,9 @@ impl ParachainCommander {
 
 		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone());
 		collector.spawn(shutdown_tx).await?;
-		print_host_configuration(self.opts.node.as_str(), &mut collector.executor())
-			.await
-			.map_err(|e| {
-				warn!("Cannot get host configuration: {}", e);
-				e
-			})
-			.unwrap_or_default();
+		if let Err(e) = print_host_configuration(self.opts.node.as_str(), &mut collector.executor()).await {
+			panic!("Cannot get host configuration: {}", e);
+		}
 
 		println!(
 			"{} will trace parachain(s) {} on {}\n{}",
