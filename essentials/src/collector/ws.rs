@@ -16,6 +16,7 @@
 use crate::{
 	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi},
+	types::{Timestamp, H256},
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
@@ -32,7 +33,6 @@ use std::{
 	str::FromStr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::utils::H256;
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 use typed_builder::TypedBuilder;
 use warp::{
@@ -91,7 +91,7 @@ struct CandidatesQuery {
 	/// Filter candidates by parachain
 	parachain_id: Option<u32>,
 	/// Filter candidates by time
-	not_before: Option<u64>,
+	not_before: Option<Timestamp>,
 }
 
 /// Used to handle requests to get a specific candidate info
@@ -105,7 +105,7 @@ struct CandidateGetQuery {
 #[derive(Deserialize, Serialize)]
 struct HealthQuery {
 	/// Ping like field (optional)
-	ts: u64,
+	ts: Timestamp,
 }
 
 /// Common functions for a listener
@@ -201,7 +201,7 @@ pub struct HealthReply {
 	/// How many candidates have we processed
 	pub candidates_stored: usize,
 	/// Timestamp from a request or our local timestamp
-	pub ts: u64,
+	pub ts: Timestamp,
 }
 
 async fn health_handler(api: CollectorStorageApi, ping: Option<HealthQuery>) -> Result<impl Reply, Rejection> {

@@ -19,12 +19,15 @@
 use super::tracker::DisputesTracker;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
-use essentials::{api::subxt_wrapper::SubxtHrmpChannel, chain_events::SubxtDisputeResult, storage::BlockNumber};
+use essentials::{
+	api::subxt_wrapper::SubxtHrmpChannel,
+	chain_events::SubxtDisputeResult,
+	types::{BlockNumber, Timestamp, H256},
+};
 use std::{
 	fmt::{self, Display, Formatter, Write},
 	time::Duration,
 };
-use subxt::utils::H256;
 
 #[derive(Clone, Default)]
 pub struct BitfieldsHealth {
@@ -66,9 +69,9 @@ pub struct ParachainProgressUpdate {
 	/// Parachain id.
 	pub para_id: u32,
 	/// Block timestamp.
-	pub timestamp: u64,
+	pub timestamp: Timestamp,
 	/// Previous timestamp
-	pub prev_timestamp: u64,
+	pub prev_timestamp: Timestamp,
 	/// Relay chain block number.
 	pub block_number: BlockNumber,
 	/// Relay chain block hash.
@@ -86,7 +89,7 @@ pub struct ParachainProgressUpdate {
 }
 
 /// Format the current block inherent timestamp.
-fn format_ts(duration: Duration, current_block_ts: u64) -> String {
+fn format_ts(duration: Duration, current_block_ts: Timestamp) -> String {
 	let dt = time::OffsetDateTime::from_unix_timestamp_nanos(current_block_ts as i128 * 1_000_000).unwrap();
 	format!(
 		"{} +{}",

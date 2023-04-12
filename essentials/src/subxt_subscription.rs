@@ -18,6 +18,7 @@
 use crate::{
 	constants::{MAX_MSG_QUEUE_SIZE, RETRY_DELAY_MS},
 	consumer::{EventConsumerInit, EventStream},
+	types::H256,
 };
 use async_trait::async_trait;
 use futures::future;
@@ -25,7 +26,6 @@ use log::{error, info};
 use priority_channel::{channel, SendError, Sender};
 use subxt::{
 	rpc::{types::FollowEvent, Subscription},
-	utils::H256,
 	OnlineClient, PolkadotConfig,
 };
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};

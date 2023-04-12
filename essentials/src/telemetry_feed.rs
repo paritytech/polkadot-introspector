@@ -17,16 +17,14 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use subxt::utils::H256;
 
-type BlockHash = H256;
-type BlockNumber = u32;
-type Timestamp = u64;
+use crate::types::{BlockNumber, Timestamp, H256};
+
 pub type FeedNodeId = usize;
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 pub struct Block {
-	pub hash: BlockHash,
+	pub hash: H256,
 	pub height: BlockNumber,
 }
 
@@ -34,7 +32,7 @@ pub struct Block {
 pub struct BlockDetails {
 	pub block: Block,
 	pub block_time: u64,
-	pub block_timestamp: u64,
+	pub block_timestamp: Timestamp,
 	pub propagation_time: Option<u64>,
 }
 
@@ -129,7 +127,7 @@ pub struct BestBlock {
 #[derive(Debug, PartialEq)]
 pub struct BestFinalized {
 	block_number: BlockNumber,
-	block_hash: BlockHash,
+	block_hash: H256,
 }
 
 #[derive(Debug, PartialEq)]
@@ -168,7 +166,7 @@ pub struct ImportedBlock {
 pub struct FinalizedBlock {
 	pub node_id: FeedNodeId,
 	block_number: BlockNumber,
-	block_hash: BlockHash,
+	block_hash: H256,
 }
 
 #[derive(Debug, PartialEq)]
@@ -191,23 +189,23 @@ pub struct TimeSync {
 #[derive(Debug, PartialEq)]
 pub struct AddedChain {
 	name: String,
-	genesis_hash: BlockHash,
+	genesis_hash: H256,
 	node_count: usize,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct RemovedChain {
-	genesis_hash: BlockHash,
+	genesis_hash: H256,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct SubscribedTo {
-	genesis_hash: BlockHash,
+	genesis_hash: H256,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct UnsubscribedFrom {
-	genesis_hash: BlockHash,
+	genesis_hash: H256,
 }
 
 #[derive(Debug, PartialEq)]
@@ -435,7 +433,7 @@ mod test {
 					timestamp: 1679657352067,
 					avg_block_time: Some(5998)
 				}),
-				TelemetryFeed::BestFinalized(BestFinalized { block_number: 14783934, block_hash: BlockHash::zero() })
+				TelemetryFeed::BestFinalized(BestFinalized { block_number: 14783934, block_hash: H256::zero() })
 			]
 		);
 	}
@@ -476,7 +474,7 @@ mod test {
 					chart_stamps: vec![1679673031643.2812, 1679673120180.5312, 1679673200282.875,]
 				},
 				block_details: BlockDetails {
-					block: Block { hash: BlockHash::zero(), height: 6321619 },
+					block: Block { hash: H256::zero(), height: 6321619 },
 					block_time: 0,
 					block_timestamp: 1679660148935,
 					propagation_time: None
@@ -514,7 +512,7 @@ mod test {
 				TelemetryFeed::ImportedBlock(ImportedBlock {
 					node_id: 297,
 					block_details: BlockDetails {
-						block: Block { hash: BlockHash::zero(), height: 11959 },
+						block: Block { hash: H256::zero(), height: 11959 },
 						block_time: 6073,
 						block_timestamp: 1679669286310,
 						propagation_time: Some(233)
@@ -523,7 +521,7 @@ mod test {
 				TelemetryFeed::FinalizedBlock(FinalizedBlock {
 					node_id: 92,
 					block_number: 12085,
-					block_hash: BlockHash::zero()
+					block_hash: H256::zero()
 				})
 			]
 		);
@@ -568,10 +566,10 @@ mod test {
 			vec![
 				TelemetryFeed::AddedChain(AddedChain {
 					name: "Tick 558".to_owned(),
-					genesis_hash: BlockHash::zero(),
+					genesis_hash: H256::zero(),
 					node_count: 2
 				}),
-				TelemetryFeed::RemovedChain(RemovedChain { genesis_hash: BlockHash::zero() })
+				TelemetryFeed::RemovedChain(RemovedChain { genesis_hash: H256::zero() })
 			]
 		);
 	}
@@ -582,8 +580,8 @@ mod test {
 		assert_eq!(
 			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
 			vec![
-				TelemetryFeed::SubscribedTo(SubscribedTo { genesis_hash: BlockHash::zero() }),
-				TelemetryFeed::UnsubscribedFrom(UnsubscribedFrom { genesis_hash: BlockHash::zero() })
+				TelemetryFeed::SubscribedTo(SubscribedTo { genesis_hash: H256::zero() }),
+				TelemetryFeed::UnsubscribedFrom(UnsubscribedFrom { genesis_hash: H256::zero() })
 			]
 		);
 	}
