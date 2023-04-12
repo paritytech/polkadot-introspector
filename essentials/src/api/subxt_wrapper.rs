@@ -25,8 +25,8 @@ pub use crate::metadata::polkadot::{
 	},
 };
 use crate::{
-	constants::{RETRY_COUNT, RETRY_DELAY_MS},
 	types::{AccountId32, Timestamp, H256},
+	utils::Retry,
 };
 use codec::Decode;
 use log::error;
@@ -197,8 +197,9 @@ impl RequestExecutor {
 	async fn execute_request(&mut self, request: RequestType, url: &str) -> Result {
 		let connection_pool = &mut self.connection_pool;
 		let maybe_api = connection_pool.get(url).cloned();
+		let mut retry = Retry::default();
 
-		for i in 0..RETRY_COUNT {
+		loop {
 			let api = match maybe_api {
 				Some(ref api) => api.clone(),
 				None => {
@@ -237,18 +238,16 @@ impl RequestExecutor {
 				Ok(rep) => return Ok(rep),
 				Err(err) => match &err {
 					SubxtWrapperError::SubxtError(subxt::Error::Io(io_err)) => {
-						let next_reconnect = RETRY_DELAY_MS * (i + 1);
-						error!("[{}] Subxt IO error: {:?}, reconnecting in {}ms", url, io_err, next_reconnect);
 						connection_pool.remove(url);
-						tokio::time::sleep(std::time::Duration::from_millis(next_reconnect)).await;
-						continue
+						error!("[{}] Subxt IO error: {:?}", url, io_err);
+						if let Err(_) = retry.sleep().await {
+							return Err(SubxtWrapperError::Timeout)
+						}
 					},
 					_ => return Err(err),
 				},
 			}
 		}
-
-		Err(SubxtWrapperError::Timeout)
 	}
 
 	pub async fn get_block_timestamp(
@@ -385,17 +384,19 @@ impl RequestExecutor {
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
 async fn new_client_fn(url: &str) -> Option<OnlineClient<PolkadotConfig>> {
-	for i in 0..RETRY_COUNT {
+	let mut retry = Retry::default();
+
+	loop {
 		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {
 			Ok(api) => return Some(api),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
-				tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS * (i + 1))).await;
-				continue
+				if let Err(_) = retry.sleep().await {
+					return None
+				}
 			},
 		};
 	}
-	None
 }
 
 async fn subxt_get_head(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {

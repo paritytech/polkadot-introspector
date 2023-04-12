@@ -15,15 +15,36 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-pub mod api;
-pub mod chain_events;
-pub mod collector;
-pub mod constants;
-pub mod consumer;
-pub mod metadata;
-pub mod storage;
-pub mod subxt_subscription;
-pub mod telemetry_feed;
-pub mod telemetry_subscription;
-pub mod types;
-pub mod utils;
+use std::time::Duration;
+
+use log::info;
+use thiserror::Error;
+use tokio::time::sleep;
+
+use crate::constants::{RETRY_COUNT, RETRY_DELAY_MS};
+
+#[derive(Default)]
+pub struct Retry {
+	count: u64,
+}
+
+#[derive(Debug, Error)]
+pub enum RetryError {
+	#[error("Max count reached")]
+	MaxCountReached,
+}
+
+impl Retry {
+	pub async fn sleep(&mut self) -> color_eyre::Result<(), RetryError> {
+		self.count += 1;
+		if self.count > RETRY_COUNT {
+			return Err(RetryError::MaxCountReached)
+		}
+
+		let ms = RETRY_DELAY_MS * (self.count + 1);
+		info!("Retrying in {}ms...", ms);
+		sleep(Duration::from_millis(ms)).await;
+
+		Ok(())
+	}
+}
