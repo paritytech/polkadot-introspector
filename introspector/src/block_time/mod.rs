@@ -27,6 +27,7 @@ use essentials::{
 	consumer::EventConsumerInit,
 	storage::RecordsStorageConfig,
 	subxt_subscription::SubxtEvent,
+	types::H256,
 };
 use log::{debug, info, warn};
 use priority_channel::Receiver;
@@ -40,7 +41,7 @@ use std::{
 		Arc, Mutex,
 	},
 };
-use subxt::{config::Header, utils::H256};
+use subxt::config::Header;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(rename_all = "kebab-case")]

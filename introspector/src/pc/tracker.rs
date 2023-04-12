@@ -23,19 +23,17 @@ use super::{
 use codec::{Decode, Encode};
 use essentials::{
 	api::subxt_wrapper::{
-		AvailabilityBitfield, BackedCandidate, BlockNumber, CoreAssignment, CoreOccupied, InherentData,
-		RequestExecutor, SubxtHrmpChannel, ValidatorIndex,
+		AvailabilityBitfield, BackedCandidate, CoreAssignment, CoreOccupied, InherentData, RequestExecutor,
+		SubxtHrmpChannel, ValidatorIndex,
 	},
 	chain_events::SubxtDisputeResult,
 	collector::{CollectorPrefixType, CollectorStorageApi, DisputeInfo},
 	metadata::polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
+	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
 use log::{debug, error, info, warn};
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
-use subxt::{
-	config::{substrate::BlakeTwo256, Hasher},
-	utils::{AccountId32, H256},
-};
+use subxt::config::{substrate::BlakeTwo256, Hasher};
 
 /// An abstract definition of a parachain block tracker.
 #[async_trait::async_trait]
@@ -146,11 +144,11 @@ pub struct SubxtTracker {
 	/// Disputes information if any disputes are there.
 	disputes: Vec<DisputesTracker>,
 	/// Current relay chain block timestamp.
-	current_relay_block_ts: Option<u64>,
+	current_relay_block_ts: Option<Timestamp>,
 	/// Last observed finality lag
 	finality_lag: Option<u32>,
 	/// Last relay chain block timestamp.
-	last_relay_block_ts: Option<u64>,
+	last_relay_block_ts: Option<Timestamp>,
 	/// Last included candidate in relay parent number
 	last_included_block: Option<BlockNumber>,
 	/// Messages queues status

@@ -15,14 +15,9 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-pub mod api;
-pub mod chain_events;
-pub mod collector;
-pub mod constants;
-pub mod consumer;
-pub mod metadata;
-pub mod storage;
-pub mod subxt_subscription;
-pub mod telemetry_feed;
-pub mod telemetry_subscription;
-pub mod types;
+use subxt::utils;
+
+pub type BlockNumber = u32;
+pub type H256 = utils::H256;
+pub type AccountId32 = utils::AccountId32;
+pub type Timestamp = u64;

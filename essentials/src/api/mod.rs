@@ -75,11 +75,8 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::storage::StorageEntry;
-	use subxt::{
-		config::{substrate::BlakeTwo256, Hasher, Header},
-		utils::H256,
-	};
+	use crate::{storage::StorageEntry, types::H256};
+	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
 	#[cfg(feature = "polkadot")]
 	const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
 	#[cfg(feature = "rococo")]

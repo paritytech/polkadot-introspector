@@ -19,13 +19,13 @@
 use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use essentials::types::H256;
 use std::{
 	collections::VecDeque,
 	default::Default,
 	fmt::{self, Display, Formatter},
 	time::Duration,
 };
-use subxt::utils::H256;
 
 trait UsableNumber: PartialOrd + PartialEq + Into<f64> + Copy {
 	fn max() -> Self;

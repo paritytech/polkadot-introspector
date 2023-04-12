@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-use crate::constants::{RETRY_COUNT, RETRY_DELAY_MS};
 pub use crate::metadata::polkadot::{
 	self, runtime_types as subxt_runtime_types,
 	runtime_types::{
@@ -25,11 +24,13 @@ pub use crate::metadata::polkadot::{
 		polkadot_runtime_parachains::{configuration::HostConfiguration, hrmp::HrmpChannel, scheduler::CoreAssignment},
 	},
 };
+use crate::{
+	constants::{RETRY_COUNT, RETRY_DELAY_MS},
+	types::{AccountId32, Timestamp, H256},
+};
 use codec::Decode;
 use log::error;
 use thiserror::Error;
-
-pub type BlockNumber = u32;
 
 #[cfg(feature = "rococo")]
 pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
@@ -38,10 +39,7 @@ pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
 pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
 
 use std::{collections::hash_map::HashMap, fmt::Debug};
-use subxt::{
-	utils::{AccountId32, H256},
-	OnlineClient, PolkadotConfig,
-};
+use subxt::{OnlineClient, PolkadotConfig};
 
 /// Subxt based APIs for fetching via RPC and processing of extrinsics.
 pub enum RequestType {
@@ -140,7 +138,7 @@ pub type InherentData = polkadot_rt_primitives::v2::InherentData<
 /// Response types for APIs.
 pub enum Response {
 	/// A timestamp.
-	Timestamp(u64),
+	Timestamp(Timestamp),
 	/// A block header.
 	MaybeHead(Option<<PolkadotConfig as subxt::Config>::Header>),
 	/// A full block.
@@ -257,7 +255,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
-	) -> std::result::Result<u64, SubxtWrapperError> {
+	) -> std::result::Result<Timestamp, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetBlockTimestamp, Timestamp, url, maybe_hash)
 	}
 

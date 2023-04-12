@@ -16,7 +16,7 @@
 
 use crate::{
 	chain_events::SubxtDisputeResult,
-	metadata::polkadot::runtime_types::polkadot_primitives::v2 as polkadot_rt_primitives,
+	metadata::polkadot::runtime_types::polkadot_primitives::v2 as polkadot_rt_primitives, types::H256,
 };
 use codec::{Decode, Encode};
 use serde::{
@@ -25,7 +25,6 @@ use serde::{
 };
 use serde_bytes::Bytes;
 use std::{hash::Hash, time::Duration};
-use subxt::utils::H256;
 
 /// Tracks candidate inclusion as seen by a node(s)
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]

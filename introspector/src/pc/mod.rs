@@ -37,6 +37,7 @@ use essentials::{
 	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent},
 	consumer::EventConsumerInit,
 	subxt_subscription::SubxtEvent,
+	types::H256,
 };
 use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
@@ -44,7 +45,6 @@ use log::{error, info, warn};
 use priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
-use subxt::utils::H256;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::ParachainBlockTracker;
 

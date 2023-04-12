@@ -24,6 +24,7 @@ use crate::{
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	subxt_subscription::SubxtEvent,
+	types::{Timestamp, H256},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::Parser;
@@ -44,7 +45,6 @@ use subxt::{
 		substrate::{BlakeTwo256, SubstrateHeader},
 		Hasher,
 	},
-	utils::H256,
 	PolkadotConfig,
 };
 use tokio::sync::broadcast::Sender as BroadcastSender;
@@ -442,7 +442,7 @@ impl Collector {
 		&mut self,
 		block_hash: H256,
 		header: SubstrateHeader<u32, BlakeTwo256>,
-		ts: u64,
+		ts: Timestamp,
 		block_number: u32,
 	) -> color_eyre::Result<()> {
 		info!(

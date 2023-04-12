@@ -33,7 +33,7 @@ use std::{
 	time::Duration,
 };
 
-pub type BlockNumber = u32;
+use crate::types::BlockNumber;
 
 /// A type to identify the record type
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]

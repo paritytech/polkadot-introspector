@@ -15,13 +15,14 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use crate::types::H256;
+
 use super::telemetry_feed::TelemetryFeed;
 use color_eyre::Report;
 use futures::SinkExt;
 use futures_util::StreamExt;
 use log::{debug, info, warn};
 use priority_channel::{SendError, Sender};
-use subxt::utils::H256;
 use tokio::{net::TcpStream, sync::broadcast::Sender as BroadcastSender};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use url::Url;
