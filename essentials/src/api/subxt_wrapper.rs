@@ -240,7 +240,7 @@ impl RequestExecutor {
 					SubxtWrapperError::SubxtError(subxt::Error::Io(io_err)) => {
 						connection_pool.remove(url);
 						error!("[{}] Subxt IO error: {:?}", url, io_err);
-						if let Err(_) = retry.sleep().await {
+						if (retry.sleep().await).is_err() {
 							return Err(SubxtWrapperError::Timeout)
 						}
 					},
@@ -391,7 +391,7 @@ async fn new_client_fn(url: &str) -> Option<OnlineClient<PolkadotConfig>> {
 			Ok(api) => return Some(api),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
-				if let Err(_) = retry.sleep().await {
+				if (retry.sleep().await).is_err() {
 					return None
 				}
 			},

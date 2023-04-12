@@ -167,7 +167,7 @@ async fn subxt_client(url: String, mut shutdown_rx: BroadcastReceiver<()>) -> Op
 					},
 					Err(err) => {
 						error!("[{}] Disconnected ({:?})", url, err);
-						if let Err(_) = retry.sleep().await {
+						if (retry.sleep().await).is_err() {
 							return None
 						}
 					},
