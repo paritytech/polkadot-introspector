@@ -450,49 +450,25 @@ fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeEx
 
 async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().para_scheduler().scheduled();
-	let scheduled_paras = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let scheduled_paras = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::ScheduledParas(scheduled_paras))
 }
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().para_scheduler().availability_cores();
-	let occupied_cores = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let occupied_cores = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::OccupiedCores(occupied_cores))
 }
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().para_scheduler().validator_groups();
-	let groups = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let groups = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::BackingGroups(groups))
 }
 
 async fn subxt_get_session_index(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().session().current_index();
-	let session_index = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let session_index = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::SessionIndex(session_index))
 }
 
@@ -539,20 +515,13 @@ impl From<HrmpChannel> for SubxtHrmpChannel {
 async fn subxt_get_inbound_hrmp_channels(api: &OnlineClient<PolkadotConfig>, block_hash: H256, para_id: u32) -> Result {
 	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 	let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(&Id(para_id));
-	let hrmp_channels = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
 	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
 		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
 		api.storage()
-			.at(Some(block_hash))
-			.await?
+			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.map(|hrmp_channel_configuration| {
@@ -570,20 +539,13 @@ async fn subxt_get_outbound_hrmp_channels(
 	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(&Id(para_id));
-	let hrmp_channels = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
 	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
 		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
 		api.storage()
-			.at(Some(block_hash))
-			.await?
+			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.map(|hrmp_channel_configuration| {
@@ -603,13 +565,7 @@ async fn subxt_get_hrmp_content(
 
 	let id = HrmpChannelId { sender: Id(sender), recipient: Id(receiver) };
 	let addr = polkadot::storage().hrmp().hrmp_channel_contents(&id);
-	let hrmp_content = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let hrmp_content = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::HRMPContent(hrmp_content.into_iter().map(|hrmp_content| hrmp_content.data).collect()))
 }
 
