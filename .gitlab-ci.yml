@@ -109,14 +109,14 @@ check-polkadot-metadata:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - cargo run --features=polkadot metadata-checker --ws=wss://rpc.polkadot.io:443
+    - cargo run --features=polkadot --bin metadata-checker -- --ws=wss://rpc.polkadot.io:443
 
 check-rococo-metadata:
   stage:                           test
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - cargo run --features=rococo metadata-checker --ws=wss://rococo-rpc.polkadot.io:443
+    - cargo run --features=rococo --bin metadata-checker -- --ws=wss://rococo-rpc.polkadot.io:443
 
 #### stage:                       build
 

@@ -21,7 +21,6 @@ use essentials::{consumer::EventStream, subxt_subscription::SubxtSubscription};
 use futures::future;
 use jaeger::JaegerOptions;
 use log::{error, LevelFilter};
-use metadata_checker::{MetadataChecker, MetadataCheckerOptions};
 use pc::ParachainCommanderOptions;
 use telemetry::TelemetryOptions;
 use tokio::{
@@ -32,7 +31,6 @@ use tokio::{
 mod block_time;
 mod jaeger;
 mod kvdb;
-mod metadata_checker;
 mod pc;
 mod telemetry;
 
@@ -51,8 +49,6 @@ enum Command {
 	/// Observe parachain state
 	#[clap(aliases = &["pc"])]
 	ParachainCommander(ParachainCommanderOptions),
-	/// Validate statically generated metadata
-	MetadataChecker(MetadataCheckerOptions),
 	/// Simple telemetry feed
 	Telemetry(TelemetryOptions),
 }
@@ -137,11 +133,6 @@ async fn main() -> color_eyre::Result<()> {
 				},
 				Err(err) => error!("FATAL: cannot start parachain commander: {}", err),
 			}
-		},
-		Command::MetadataChecker(opts) => {
-			if let Err(err) = MetadataChecker::new(opts)?.run().await {
-				error!("FATAL: cannot start metadata checker: {}", err)
-			};
 		},
 		Command::Telemetry(opts) => {
 			let shutdown_tx = init_shutdown();

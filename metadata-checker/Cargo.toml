@@ -1,0 +1,23 @@
+[package]
+name = "metadata-checker"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+color-eyre = "0.6.2"
+clap = { version = "4.2.1", features = ["derive"] }
+crossterm = "0.26.1"
+env_logger = "0.10.0"
+log = "0.4.17"
+subxt = { git = "https://github.com/paritytech/subxt", rev = "v0.27.1", default-features = false, features = [
+    "jsonrpsee-ws",
+] }
+tokio = { version = "1.27.0", features = [
+    "macros",
+    "rt-multi-thread",
+    "signal",
+] }
+essentials = { path = "../essentials" }
