@@ -498,13 +498,13 @@ async fn subxt_get_session_index(api: &OnlineClient<PolkadotConfig>, block_hash:
 
 async fn subxt_get_session_info(api: &OnlineClient<PolkadotConfig>, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().sessions(session_index);
-	let session_info = api.storage().at(None).await?.fetch(&addr).await?;
+	let session_info = api.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionInfo(session_info))
 }
 
 async fn subxt_get_session_account_keys(api: &OnlineClient<PolkadotConfig>, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().account_keys(session_index);
-	let session_keys = api.storage().at(None).await?.fetch(&addr).await?;
+	let session_keys = api.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionAccountKeys(session_keys))
 }
 
@@ -615,7 +615,7 @@ async fn subxt_get_hrmp_content(
 
 async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Result {
 	let addr = polkadot::storage().configuration().active_config();
-	let host_configuration = api.storage().at(None).await?.fetch(&addr).await?.unwrap();
+	let host_configuration = api.storage().at_latest().await?.fetch(&addr).await?.unwrap();
 	Ok(Response::HostConfiguration(host_configuration))
 }
 
