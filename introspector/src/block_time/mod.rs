@@ -269,7 +269,7 @@ impl BlockTimeMonitor {
 				debug!("New event: {:?}", event);
 				if let Some(hash) = new_head_hash(&event, opts.subscribe_mode) {
 					let hash = *hash;
-					let ts = executor.get_block_timestamp(url, Some(hash)).await;
+					let ts = executor.get_block_timestamp(url, hash).await;
 					let header = executor.get_block_head(url, Some(hash)).await;
 
 					if let Ok(ts) = ts {
@@ -332,7 +332,7 @@ async fn populate_view(
 
 	for _ in 0..blocks_to_fetch {
 		if let Ok(Some(header)) = executor.get_block_head(url, parent_hash).await {
-			let ts = executor.get_block_timestamp(url, Some(header.hash())).await.unwrap();
+			let ts = executor.get_block_timestamp(url, header.hash()).await.unwrap();
 
 			if prev_ts != 0 {
 				// We are walking backwards.

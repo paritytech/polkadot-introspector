@@ -101,7 +101,7 @@ mod tests {
 		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
-		let timestamp = subxt.get_block_timestamp(RPC_NODE_URL, Some(head.hash())).await.unwrap();
+		let timestamp = subxt.get_block_timestamp(RPC_NODE_URL, head.hash()).await.unwrap();
 		let _block = subxt.get_block(RPC_NODE_URL, Some(head.hash())).await.unwrap().unwrap();
 		assert!(timestamp > 0);
 	}
