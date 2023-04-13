@@ -44,13 +44,13 @@ use subxt::{OnlineClient, PolkadotConfig};
 /// Subxt based APIs for fetching via RPC and processing of extrinsics.
 pub enum RequestType {
 	/// Returns the block TS from the inherent data.
-	GetBlockTimestamp(Option<<PolkadotConfig as subxt::Config>::Hash>),
+	GetBlockTimestamp(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get a block header.
 	GetHead(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get a full block.
 	GetBlock(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get block events.
-	GetEvents(Option<<PolkadotConfig as subxt::Config>::Hash>),
+	GetEvents(<PolkadotConfig as subxt::Config>::Hash),
 	/// Extract the `ParaInherentData` from a given block.
 	ExtractParaInherent(subxt::rpc::types::ChainBlock<PolkadotConfig>),
 	/// Get the availability core scheduling information at a given block.
@@ -213,10 +213,10 @@ impl RequestExecutor {
 				},
 			};
 			let reply = match request {
-				RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(&api, maybe_hash).await,
+				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(&api, hash).await,
 				RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
 				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
-				RequestType::GetEvents(maybe_hash) => subxt_get_events(&api, maybe_hash).await,
+				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
@@ -253,9 +253,9 @@ impl RequestExecutor {
 	pub async fn get_block_timestamp(
 		&mut self,
 		url: &str,
-		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+		hash: <PolkadotConfig as subxt::Config>::Hash,
 	) -> std::result::Result<Timestamp, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetBlockTimestamp, Timestamp, url, maybe_hash)
+		wrap_subxt_call!(self, GetBlockTimestamp, Timestamp, url, hash)
 	}
 
 	pub async fn get_block_head(
@@ -277,9 +277,9 @@ impl RequestExecutor {
 	pub async fn get_events(
 		&mut self,
 		url: &str,
-		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+		hash: <PolkadotConfig as subxt::Config>::Hash,
 	) -> std::result::Result<Option<subxt::events::Events<PolkadotConfig>>, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetEvents, MaybeEvents, url, maybe_hash)
+		wrap_subxt_call!(self, GetEvents, MaybeEvents, url, hash)
 	}
 
 	pub async fn extract_parainherent_data(
@@ -403,17 +403,17 @@ async fn subxt_get_head(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H
 	Ok(Response::MaybeHead(api.rpc().header(maybe_hash).await?))
 }
 
-async fn subxt_get_block_ts(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
+async fn subxt_get_block_ts(api: &OnlineClient<PolkadotConfig>, hash: H256) -> Result {
 	let timestamp = polkadot::storage().timestamp().now();
-	Ok(Response::Timestamp(api.storage().at(maybe_hash).await?.fetch(&timestamp).await?.unwrap_or_default()))
+	Ok(Response::Timestamp(api.storage().at(hash).fetch(&timestamp).await?.unwrap_or_default()))
 }
 
 async fn subxt_get_block(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
 	Ok(Response::MaybeBlock(api.rpc().block(maybe_hash).await?.map(|response| response.block)))
 }
 
-async fn subxt_get_events(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
-	Ok(Response::MaybeEvents(Some(api.events().at(maybe_hash).await?)))
+async fn subxt_get_events(api: &OnlineClient<PolkadotConfig>, hash: H256) -> Result {
+	Ok(Response::MaybeEvents(Some(api.events().at(hash).await?)))
 }
 
 /// Error originated from decoding an extrinsic.
