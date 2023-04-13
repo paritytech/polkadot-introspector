@@ -13,9 +13,7 @@ codec = { package = "parity-scale-codec", version = "3.2.1", default-features = 
     "full",
     "bit-vec",
 ] }
-subxt = { git = "https://github.com/paritytech/subxt", rev = "v0.27.1", default-features = false, features = [
-    "jsonrpsee-ws",
-] }
+subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.28.0" }
 tokio = { version = "1.27.0", features = [
     "macros",
     "rt-multi-thread",

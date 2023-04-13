@@ -44,13 +44,13 @@ use subxt::{OnlineClient, PolkadotConfig};
 /// Subxt based APIs for fetching via RPC and processing of extrinsics.
 pub enum RequestType {
 	/// Returns the block TS from the inherent data.
-	GetBlockTimestamp(Option<<PolkadotConfig as subxt::Config>::Hash>),
+	GetBlockTimestamp(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get a block header.
 	GetHead(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get a full block.
 	GetBlock(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get block events.
-	GetEvents(Option<<PolkadotConfig as subxt::Config>::Hash>),
+	GetEvents(<PolkadotConfig as subxt::Config>::Hash),
 	/// Extract the `ParaInherentData` from a given block.
 	ExtractParaInherent(subxt::rpc::types::ChainBlock<PolkadotConfig>),
 	/// Get the availability core scheduling information at a given block.
@@ -213,10 +213,10 @@ impl RequestExecutor {
 				},
 			};
 			let reply = match request {
-				RequestType::GetBlockTimestamp(maybe_hash) => subxt_get_block_ts(&api, maybe_hash).await,
+				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(&api, hash).await,
 				RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
 				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
-				RequestType::GetEvents(maybe_hash) => subxt_get_events(&api, maybe_hash).await,
+				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
@@ -253,9 +253,9 @@ impl RequestExecutor {
 	pub async fn get_block_timestamp(
 		&mut self,
 		url: &str,
-		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+		hash: <PolkadotConfig as subxt::Config>::Hash,
 	) -> std::result::Result<Timestamp, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetBlockTimestamp, Timestamp, url, maybe_hash)
+		wrap_subxt_call!(self, GetBlockTimestamp, Timestamp, url, hash)
 	}
 
 	pub async fn get_block_head(
@@ -277,9 +277,9 @@ impl RequestExecutor {
 	pub async fn get_events(
 		&mut self,
 		url: &str,
-		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
+		hash: <PolkadotConfig as subxt::Config>::Hash,
 	) -> std::result::Result<Option<subxt::events::Events<PolkadotConfig>>, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetEvents, MaybeEvents, url, maybe_hash)
+		wrap_subxt_call!(self, GetEvents, MaybeEvents, url, hash)
 	}
 
 	pub async fn extract_parainherent_data(
@@ -403,17 +403,17 @@ async fn subxt_get_head(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H
 	Ok(Response::MaybeHead(api.rpc().header(maybe_hash).await?))
 }
 
-async fn subxt_get_block_ts(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
+async fn subxt_get_block_ts(api: &OnlineClient<PolkadotConfig>, hash: H256) -> Result {
 	let timestamp = polkadot::storage().timestamp().now();
-	Ok(Response::Timestamp(api.storage().at(maybe_hash).await?.fetch(&timestamp).await?.unwrap_or_default()))
+	Ok(Response::Timestamp(api.storage().at(hash).fetch(&timestamp).await?.unwrap_or_default()))
 }
 
 async fn subxt_get_block(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
 	Ok(Response::MaybeBlock(api.rpc().block(maybe_hash).await?.map(|response| response.block)))
 }
 
-async fn subxt_get_events(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
-	Ok(Response::MaybeEvents(Some(api.events().at(maybe_hash).await?)))
+async fn subxt_get_events(api: &OnlineClient<PolkadotConfig>, hash: H256) -> Result {
+	Ok(Response::MaybeEvents(Some(api.events().at(hash).await?)))
 }
 
 /// Error originated from decoding an extrinsic.
@@ -450,61 +450,37 @@ fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeEx
 
 async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().para_scheduler().scheduled();
-	let scheduled_paras = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let scheduled_paras = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::ScheduledParas(scheduled_paras))
 }
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().para_scheduler().availability_cores();
-	let occupied_cores = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let occupied_cores = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::OccupiedCores(occupied_cores))
 }
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().para_scheduler().validator_groups();
-	let groups = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let groups = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::BackingGroups(groups))
 }
 
 async fn subxt_get_session_index(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().session().current_index();
-	let session_index = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let session_index = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::SessionIndex(session_index))
 }
 
 async fn subxt_get_session_info(api: &OnlineClient<PolkadotConfig>, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().sessions(session_index);
-	let session_info = api.storage().at(None).await?.fetch(&addr).await?;
+	let session_info = api.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionInfo(session_info))
 }
 
 async fn subxt_get_session_account_keys(api: &OnlineClient<PolkadotConfig>, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().account_keys(session_index);
-	let session_keys = api.storage().at(None).await?.fetch(&addr).await?;
+	let session_keys = api.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionAccountKeys(session_keys))
 }
 
@@ -539,20 +515,13 @@ impl From<HrmpChannel> for SubxtHrmpChannel {
 async fn subxt_get_inbound_hrmp_channels(api: &OnlineClient<PolkadotConfig>, block_hash: H256, para_id: u32) -> Result {
 	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 	let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(&Id(para_id));
-	let hrmp_channels = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
 	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
 		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
 		api.storage()
-			.at(Some(block_hash))
-			.await?
+			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.map(|hrmp_channel_configuration| {
@@ -570,20 +539,13 @@ async fn subxt_get_outbound_hrmp_channels(
 	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(&Id(para_id));
-	let hrmp_channels = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
 	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
 		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
 		api.storage()
-			.at(Some(block_hash))
-			.await?
+			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.map(|hrmp_channel_configuration| {
@@ -603,19 +565,13 @@ async fn subxt_get_hrmp_content(
 
 	let id = HrmpChannelId { sender: Id(sender), recipient: Id(receiver) };
 	let addr = polkadot::storage().hrmp().hrmp_channel_contents(&id);
-	let hrmp_content = api
-		.storage()
-		.at(Some(block_hash))
-		.await?
-		.fetch(&addr)
-		.await?
-		.unwrap_or_default();
+	let hrmp_content = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::HRMPContent(hrmp_content.into_iter().map(|hrmp_content| hrmp_content.data).collect()))
 }
 
 async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Result {
 	let addr = polkadot::storage().configuration().active_config();
-	let host_configuration = api.storage().at(None).await?.fetch(&addr).await?.unwrap();
+	let host_configuration = api.storage().at_latest().await?.fetch(&addr).await?.unwrap();
 	Ok(Response::HostConfiguration(host_configuration))
 }
 

@@ -428,7 +428,7 @@ impl SubxtTracker {
 
 		self.current_relay_block_ts = Some(
 			self.executor
-				.get_block_timestamp(self.node_rpc_url.as_str(), Some(block_hash))
+				.get_block_timestamp(self.node_rpc_url.as_str(), block_hash)
 				.await?,
 		);
 
