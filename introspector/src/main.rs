@@ -17,7 +17,7 @@
 use block_time::BlockTimeOptions;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
-use essentials::{consumer::EventStream, subxt_subscription::SubxtSubscription};
+use essentials::{consumer::EventStream, subxt_subscription::SubxtSubscription, utils::RetryOptions};
 use futures::future;
 use jaeger::JaegerOptions;
 use log::{error, LevelFilter};
@@ -61,6 +61,9 @@ pub(crate) struct IntrospectorCli {
 	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
 	#[clap(short = 'v', long, action = ArgAction::Count)]
 	pub verbose: u8,
+	/// Defines parameters for connection retry attempts
+	#[clap(flatten)]
+	pub retry_opts: RetryOptions,
 }
 
 #[tokio::main]

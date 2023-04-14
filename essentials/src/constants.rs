@@ -16,5 +16,3 @@
 //
 
 pub const MAX_MSG_QUEUE_SIZE: usize = 1024;
-pub const RETRY_COUNT: u64 = 3;
-pub const RETRY_DELAY_MS: u64 = 100;
