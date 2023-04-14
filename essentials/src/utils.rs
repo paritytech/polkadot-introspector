@@ -21,7 +21,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 
-#[derive(Clone, Debug, Parser, Default)]
+#[derive(Clone, Debug, Parser)]
 #[clap(
 	rename_all = "kebab-case",
 	allow_external_subcommands = true, // HACK: to parse it as a standalone config
@@ -45,6 +45,12 @@ pub struct Retry {
 pub enum RetryError {
 	#[error("Max count reached")]
 	MaxCountReached,
+}
+
+impl Default for Retry {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl Retry {
