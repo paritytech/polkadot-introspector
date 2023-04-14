@@ -11,7 +11,7 @@ repository.workspace = true
 env_logger = "0.10.0"
 log = "0.4.17"
 color-eyre = "0.6.2"
-clap = { version = "4.1.8", features = ["derive"] }
+clap = { version = "4.2.2", features = ["derive"] }
 codec = { package = "parity-scale-codec", version = "3.2.1", default-features = false, features = [
     "derive",
     "full",
