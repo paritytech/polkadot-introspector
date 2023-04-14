@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 #[cfg(test)]
-use crate::kvdb::IntrospectorKvdb;
+use crate::IntrospectorKvdb;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use std::path::PathBuf;
 
@@ -76,17 +76,17 @@ fn check_db<D: IntrospectorKvdb>(db: &D, ncolumns: usize) {
 fn test_migration_rocksdb_rocksdb() {
 	let ncolumns = 10;
 	let src_dir = make_temp_dir();
-	let src_db = crate::kvdb::rocksdb::tests::new_test_rocks_db(src_dir.as_path(), ncolumns);
+	let src_db = crate::rocksdb::tests::new_test_rocks_db(src_dir.as_path(), ncolumns);
 
 	write_db(&src_db, ncolumns);
 	let dst_dir = make_temp_dir();
 
 	{
-		let dest_db = crate::kvdb::rocksdb::IntrospectorRocksDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
+		let dest_db = crate::rocksdb::IntrospectorRocksDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
 		copy_db(&src_db, &dest_db, ncolumns);
 	}
 
-	let dest_db = crate::kvdb::rocksdb::IntrospectorRocksDB::new(dst_dir.as_path()).unwrap();
+	let dest_db = crate::rocksdb::IntrospectorRocksDB::new(dst_dir.as_path()).unwrap();
 	check_db(&dest_db, ncolumns);
 	std::fs::remove_dir_all(src_dir).unwrap();
 	std::fs::remove_dir_all(dst_dir).unwrap();
@@ -96,17 +96,17 @@ fn test_migration_rocksdb_rocksdb() {
 fn test_migration_paritydb_paritydb() {
 	let ncolumns = 10;
 	let src_dir = make_temp_dir();
-	let src_db = crate::kvdb::paritydb::tests::new_test_parity_db(src_dir.as_path(), ncolumns);
+	let src_db = crate::paritydb::tests::new_test_parity_db(src_dir.as_path(), ncolumns);
 
 	write_db(&src_db, ncolumns);
 	let dst_dir = make_temp_dir();
 
 	{
-		let dest_db = crate::kvdb::paritydb::IntrospectorParityDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
+		let dest_db = crate::paritydb::IntrospectorParityDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
 		copy_db(&src_db, &dest_db, ncolumns);
 	}
 
-	let dest_db = crate::kvdb::paritydb::IntrospectorParityDB::new(dst_dir.as_path()).unwrap();
+	let dest_db = crate::paritydb::IntrospectorParityDB::new(dst_dir.as_path()).unwrap();
 	check_db(&dest_db, ncolumns);
 	std::fs::remove_dir_all(src_dir).unwrap();
 	std::fs::remove_dir_all(dst_dir).unwrap();
@@ -116,17 +116,17 @@ fn test_migration_paritydb_paritydb() {
 fn test_migration_paritydb_rocksdb() {
 	let ncolumns = 10;
 	let src_dir = make_temp_dir();
-	let src_db = crate::kvdb::paritydb::tests::new_test_parity_db(src_dir.as_path(), ncolumns);
+	let src_db = crate::paritydb::tests::new_test_parity_db(src_dir.as_path(), ncolumns);
 
 	write_db(&src_db, ncolumns);
 	let dst_dir = make_temp_dir();
 
 	{
-		let dest_db = crate::kvdb::rocksdb::IntrospectorRocksDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
+		let dest_db = crate::rocksdb::IntrospectorRocksDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
 		copy_db(&src_db, &dest_db, ncolumns);
 	}
 
-	let dest_db = crate::kvdb::rocksdb::IntrospectorRocksDB::new(dst_dir.as_path()).unwrap();
+	let dest_db = crate::rocksdb::IntrospectorRocksDB::new(dst_dir.as_path()).unwrap();
 	check_db(&dest_db, ncolumns);
 	std::fs::remove_dir_all(src_dir).unwrap();
 	std::fs::remove_dir_all(dst_dir).unwrap();
@@ -136,17 +136,17 @@ fn test_migration_paritydb_rocksdb() {
 fn test_migration_rocksdb_paritydb() {
 	let ncolumns = 10;
 	let src_dir = make_temp_dir();
-	let src_db = crate::kvdb::rocksdb::tests::new_test_rocks_db(src_dir.as_path(), ncolumns);
+	let src_db = crate::rocksdb::tests::new_test_rocks_db(src_dir.as_path(), ncolumns);
 
 	write_db(&src_db, ncolumns);
 	let dst_dir = make_temp_dir();
 
 	{
-		let dest_db = crate::kvdb::paritydb::IntrospectorParityDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
+		let dest_db = crate::paritydb::IntrospectorParityDB::new_dumper(&src_db, dst_dir.as_path()).unwrap();
 		copy_db(&src_db, &dest_db, ncolumns);
 	}
 
-	let dest_db = crate::kvdb::paritydb::IntrospectorParityDB::new(dst_dir.as_path()).unwrap();
+	let dest_db = crate::paritydb::IntrospectorParityDB::new(dst_dir.as_path()).unwrap();
 	check_db(&dest_db, ncolumns);
 	std::fs::remove_dir_all(src_dir).unwrap();
 	std::fs::remove_dir_all(dst_dir).unwrap();
