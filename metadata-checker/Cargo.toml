@@ -12,12 +12,6 @@ clap = { version = "4.2.1", features = ["derive"] }
 crossterm = "0.26.1"
 env_logger = "0.10.0"
 log = "0.4.17"
-subxt = { git = "https://github.com/paritytech/subxt", rev = "v0.27.1", default-features = false, features = [
-    "jsonrpsee-ws",
-] }
-tokio = { version = "1.27.0", features = [
-    "macros",
-    "rt-multi-thread",
-    "signal",
-] }
+subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.28.0" }
+tokio = { version = "1.27.0", features = ["macros", "rt-multi-thread", "signal"] }
 essentials = { path = "../essentials" }
