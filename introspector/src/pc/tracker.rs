@@ -222,6 +222,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		if let Some(inherent_data) = inherent_data {
 			let inherent: InherentData = inherent_data.into_inner().unwrap();
 			self.set_relay_block(block_number, block_hash);
+			self.on_inherent_data(block_hash, block_number, inherent, is_fork).await?;
 
 			let inbound_hrmp_channels = self
 				.executor
@@ -233,7 +234,6 @@ impl ParachainBlockTracker for SubxtTracker {
 				.await?;
 			self.message_queues
 				.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
-			self.on_inherent_data(block_hash, block_number, inherent, is_fork).await?;
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
