@@ -56,7 +56,6 @@ impl Default for Retry {
 impl Retry {
 	pub fn new() -> Self {
 		let opts = RetryOptions::parse();
-		println!("{:?}", opts);
 
 		Self { count: 0, max_count: opts.max_count, delay: opts.retry_delay }
 	}
