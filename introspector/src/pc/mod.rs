@@ -80,8 +80,8 @@ pub(crate) struct ParachainCommanderOptions {
 	/// The number of last blocks with missing slots to display
 	#[clap(long = "last-skipped-slot-blocks", default_value = "10")]
 	pub last_skipped_slot_blocks: usize,
-	/// The number of last blocks with missing slots to display
-	#[clap(long, default_value = "32")]
+	/// Evict a stalled parachain after this amount of skipped blocks
+	#[clap(long, default_value = "256")]
 	max_parachain_stall: u32,
 	/// Defines subscription mode
 	#[clap(flatten)]
