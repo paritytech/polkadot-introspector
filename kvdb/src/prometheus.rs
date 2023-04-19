@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::kvdb::IntrospectorKvdb;
+use crate::IntrospectorKvdb;
 use clap::Parser;
 use color_eyre::Result;
 use log::{error, info, trace};

@@ -23,7 +23,7 @@
 //! - `%h` - blake2 hash represented as hex string
 //! - `%s<d>` - string of length `d` (for example `%s10` represents a string of size 10)
 
-use crate::kvdb::IntrospectorKvdb;
+use crate::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};
 use erased_serde::{serialize_trait_object, Serialize};
 use essentials::types::H256;

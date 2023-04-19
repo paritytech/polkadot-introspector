@@ -23,14 +23,11 @@ mod prometheus;
 #[cfg(test)]
 mod tests;
 
-use crate::{
-	eyre,
-	kvdb::{paritydb::IntrospectorParityDB, prometheus::KvdbPrometheusOptions, rocksdb::IntrospectorRocksDB},
-};
+use crate::{paritydb::IntrospectorParityDB, prometheus::KvdbPrometheusOptions, rocksdb::IntrospectorRocksDB};
 use clap::{ArgAction, Parser};
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use futures::future;
-use log::{error, info};
+use log::{error, info, LevelFilter};
 use serde::Serialize;
 use std::{
 	fmt::{Display, Formatter},
@@ -42,7 +39,7 @@ use std::{
 };
 use strum::{Display, EnumString};
 
-pub use crate::kvdb::traits::*;
+pub use crate::traits::*;
 
 /// Specific options for the usage subcommand
 #[derive(Clone, Debug, Parser)]
@@ -168,7 +165,7 @@ pub(crate) enum KvdbDumpMode {
 }
 
 #[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
+#[clap(author, version, about = "Examine RocksDB and ParityDB databases", rename_all = "kebab-case")]
 pub struct KvdbOptions {
 	/// Path to the database
 	#[clap(long)]
@@ -184,6 +181,9 @@ pub struct KvdbOptions {
 	/// Compress output with snappy
 	#[clap(long, short = 'c', action = ArgAction::SetTrue)]
 	compress: bool,
+	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
+	#[clap(short = 'v', long, action = ArgAction::Count)]
+	pub verbose: u8,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -241,6 +241,33 @@ pub async fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
 		KvdbType::ParityDB =>
 			run_with_db(paritydb::IntrospectorParityDB::new(Path::new(opts.db.as_str()))?, opts).await,
 	}
+}
+
+fn init_cli() -> Result<KvdbOptions> {
+	color_eyre::install()?;
+	let opts = KvdbOptions::parse();
+	let log_level = match opts.verbose {
+		0 => LevelFilter::Warn,
+		1 => LevelFilter::Info,
+		2 => LevelFilter::Debug,
+		_ => LevelFilter::Trace,
+	};
+	env_logger::Builder::from_default_env()
+		.filter(None, log_level)
+		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
+		.try_init()?;
+
+	Ok(opts)
+}
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+	let opts = init_cli()?;
+	if let Err(err) = introspect_kvdb(opts).await {
+		error!("FATAL: cannot start kvdb tool: {}", err)
+	}
+
+	Ok(())
 }
 
 async fn run_with_db<D: IntrospectorKvdb + Sync + Send + 'static>(db: D, opts: KvdbOptions) -> Result<()> {

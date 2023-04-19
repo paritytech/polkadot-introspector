@@ -30,11 +30,8 @@ use tokio::{
 
 mod block_time;
 mod jaeger;
-mod kvdb;
 mod pc;
 mod telemetry;
-
-use crate::kvdb::KvdbOptions;
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -44,8 +41,6 @@ enum Command {
 	BlockTimeMonitor(BlockTimeOptions),
 	/// Examine jaeger traces
 	Jaeger(JaegerOptions),
-	/// Examine key-value database for both relay chain and parachains
-	Kvdb(KvdbOptions),
 	/// Observe parachain state
 	#[clap(aliases = &["pc"])]
 	ParachainCommander(ParachainCommanderOptions),
@@ -116,9 +111,6 @@ async fn main() -> color_eyre::Result<()> {
 				},
 				Err(err) => error!("FATAL: cannot start jaeger command: {}", err),
 			}
-		},
-		Command::Kvdb(opts) => {
-			kvdb::introspect_kvdb(opts).await?;
 		},
 		Command::ParachainCommander(opts) => {
 			let mut core = SubxtSubscription::new(vec![opts.node.clone()]);

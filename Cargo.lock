@@ -1768,6 +1768,38 @@ dependencies = [
  "colored",
  "crossterm",
  "env_logger",
+ "essentials",
+ "futures",
+ "itertools",
+ "log",
+ "parity-scale-codec",
+ "priority-channel",
+ "rand",
+ "rasciigraph",
+ "reqwest",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_urlencoded",
+ "strum",
+ "substrate-prometheus-endpoint",
+ "subxt",
+ "thiserror",
+ "time",
+ "tokio",
+ "typed-builder",
+ "warp",
+]
+
+[[package]]
+name = "polkadot-kvdb"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "clap",
+ "color-eyre",
+ "env_logger",
  "erased-serde",
  "essentials",
  "futures",
@@ -1775,11 +1807,7 @@ dependencies = [
  "itertools",
  "log",
  "parity-db",
- "parity-scale-codec",
- "priority-channel",
  "rand",
- "rasciigraph",
- "reqwest",
  "rocksdb",
  "serde",
  "serde_bytes",
@@ -1789,12 +1817,7 @@ dependencies = [
  "snap",
  "strum",
  "substrate-prometheus-endpoint",
- "subxt",
- "thiserror",
- "time",
  "tokio",
- "typed-builder",
- "warp",
 ]
 
 [[package]]
