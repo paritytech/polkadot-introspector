@@ -165,7 +165,7 @@ pub(crate) enum KvdbDumpMode {
 }
 
 #[derive(Clone, Debug, Parser)]
-#[clap(author, version, about = "Examine Polkadot and Substrate key-value databases", rename_all = "kebab-case")]
+#[clap(author, version, about = "Examine RocksDB and ParityDB databases", rename_all = "kebab-case")]
 pub struct KvdbOptions {
 	/// Path to the database
 	#[clap(long)]
