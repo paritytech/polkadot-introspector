@@ -156,7 +156,7 @@ impl SubxtSubscription {
 }
 
 async fn subxt_client(url: String, mut shutdown_rx: BroadcastReceiver<()>) -> Option<OnlineClient<PolkadotConfig>> {
-	let mut retry = Retry::default();
+	let mut retry = Retry::new();
 	loop {
 		tokio::select! {
 			client = OnlineClient::<PolkadotConfig>::from_url(url.clone()) => {

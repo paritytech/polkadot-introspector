@@ -197,7 +197,7 @@ impl RequestExecutor {
 	async fn execute_request(&mut self, request: RequestType, url: &str) -> Result {
 		let connection_pool = &mut self.connection_pool;
 		let maybe_api = connection_pool.get(url).cloned();
-		let mut retry = Retry::default();
+		let mut retry = Retry::new();
 
 		loop {
 			let api = match maybe_api {
@@ -384,7 +384,7 @@ impl RequestExecutor {
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
 async fn new_client_fn(url: &str) -> Option<OnlineClient<PolkadotConfig>> {
-	let mut retry = Retry::default();
+	let mut retry = Retry::new();
 
 	loop {
 		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {

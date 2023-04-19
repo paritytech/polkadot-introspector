@@ -15,17 +15,30 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use std::time::Duration;
-
+use clap::Parser;
 use log::info;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 
-use crate::constants::{RETRY_COUNT, RETRY_DELAY_MS};
+#[derive(Clone, Debug, Parser)]
+#[clap(
+	rename_all = "kebab-case",
+	allow_external_subcommands = true, // HACK: to parse it as a standalone config
+)]
+pub struct RetryOptions {
+	/// Max of times to retry a failed connection before giving up.
+	#[clap(name = "retry", default_value = "10", long)]
+	max_count: u32,
+	/// Delay in ms to wait between retry attempts
+	#[clap(default_value = "100", long)]
+	retry_delay: u32,
+}
 
-#[derive(Default)]
 pub struct Retry {
-	count: u64,
+	count: u32,
+	max_count: u32,
+	delay: u32,
 }
 
 #[derive(Debug, Error)]
@@ -34,16 +47,28 @@ pub enum RetryError {
 	MaxCountReached,
 }
 
+impl Default for Retry {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl Retry {
+	pub fn new() -> Self {
+		let opts = RetryOptions::parse();
+
+		Self { count: 0, max_count: opts.max_count, delay: opts.retry_delay }
+	}
+
 	pub async fn sleep(&mut self) -> color_eyre::Result<(), RetryError> {
 		self.count += 1;
-		if self.count > RETRY_COUNT {
+		if self.count > self.max_count {
 			return Err(RetryError::MaxCountReached)
 		}
 
-		let ms = RETRY_DELAY_MS * (self.count + 1);
+		let ms = self.delay * (self.count + 1);
 		info!("Retrying in {}ms...", ms);
-		sleep(Duration::from_millis(ms)).await;
+		sleep(Duration::from_millis(ms.into())).await;
 
 		Ok(())
 	}
