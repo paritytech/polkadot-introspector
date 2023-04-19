@@ -162,7 +162,7 @@ async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<
 		},
 		1 => {
 			println!("Found 1 chain.\n{}", list[0]);
-			return Ok(list[0].genesis_hash.clone())
+			return Ok(list[0].genesis_hash)
 		},
 		size => {
 			println!("Found {} chains.\n", size);
@@ -183,12 +183,12 @@ async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<
 		);
 		stdin().lock().read_line(&mut buf).expect("Failed to read line");
 
-		if buf == "\n".to_owned() {
+		if buf == *"\n" {
 			cursor = if cursor + CHAINS_CHUNK_SIZE < list_size { cursor + CHAINS_CHUNK_SIZE } else { 0 };
 			continue
 		}
 
-		if buf.trim().to_lowercase() == "q".to_owned() {
+		if buf.trim().to_lowercase() == *"q" {
 			return Err(())
 		}
 
@@ -210,7 +210,7 @@ async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<
 	let selected = &list[chain_index];
 	println!("\nSelected {}\n", selected);
 
-	Ok(selected.genesis_hash.clone())
+	Ok(selected.genesis_hash)
 }
 
 fn on_consumer_error(e: SendError) {
