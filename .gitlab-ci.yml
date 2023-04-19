@@ -22,9 +22,6 @@ variables:
 
 .publish-refs:                     &publish-refs
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-    - if: $CI_COMMIT_REF_NAME == "master"
     - if: $CI_COMMIT_REF_NAME =~ /^v[0-9]+\.[0-9]+.*$/              # i.e. v1.0, v2.1rc1
 
 .common-refs:                      &common-refs
@@ -203,8 +200,8 @@ publish-docker-image-description:
     DOCKERHUB_REPOSITORY:          paritytech/polkadot-introspector
     SHORT_DESCRIPTION:             "Collection of tools for monitoring and introspection of Substrate based blockchains like Polkadot"
   rules:
-  - if: $CI_COMMIT_REF_NAME == "master"
-    changes:
-    - scripts/ci/dockerfiles/Dockerfile.README.md
+    - if: $CI_COMMIT_REF_NAME == "master"
+      changes:
+        - scripts/ci/dockerfiles/Dockerfile.README.md
   script:
     - cd / && sh entrypoint.sh
