@@ -19,7 +19,6 @@ use essentials::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	telemetry_feed::{AddedNode, FeedNodeId, TelemetryFeed},
 	telemetry_subscription::{TelemetryEvent, TelemetrySubscription},
-	types::H256,
 };
 use priority_channel::Receiver;
 use tokio::sync::broadcast::Sender as BroadcastSender;
@@ -27,7 +26,7 @@ use tokio::sync::broadcast::Sender as BroadcastSender;
 macro_rules! print_for_node_id {
 	($node_id:expr, $v:expr) => {
 		if $node_id == Some($v.node_id) {
-			println!("{:?}", $v);
+			println!("{:?}\n", $v);
 		}
 	};
 }
@@ -38,9 +37,6 @@ pub(crate) struct TelemetryOptions {
 	/// Web-Socket URL of a telemetry backend
 	#[clap(name = "ws", long)]
 	pub url: String,
-	/// Chain's genesis hash (telemetry can collect events from many chains, so we need to specify the chain via its genesis hash)
-	#[clap(name = "chain", long)]
-	pub chain_hash: H256,
 	/// Network id of the desired node to receive only events related to it
 	#[clap(name = "id", long)]
 	pub network_id: String,
@@ -62,10 +58,7 @@ impl Telemetry {
 		self,
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let mut futures = self
-			.subscription
-			.run(self.opts.url.clone(), self.opts.chain_hash, shutdown_tx)
-			.await?;
+		let mut futures = self.subscription.run(self.opts.url.clone(), shutdown_tx).await?;
 		futures.push(tokio::spawn(Self::watch(self.update_channel, self.opts.network_id)));
 
 		Ok(futures)

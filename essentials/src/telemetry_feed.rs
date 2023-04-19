@@ -186,11 +186,22 @@ pub struct TimeSync {
 	time: Timestamp,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct AddedChain {
-	name: String,
-	genesis_hash: H256,
-	node_count: usize,
+	pub name: String,
+	pub genesis_hash: H256,
+	pub node_count: usize,
+}
+
+impl std::fmt::Display for AddedChain {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		let node_count = match self.node_count {
+			0 => "no nodes".to_owned(),
+			1 => "1 node".to_owned(),
+			count => format!("{} nodes", count),
+		};
+		write!(f, "{}, {}, {}", self.name, self.genesis_hash, node_count)
+	}
 }
 
 #[derive(Debug, PartialEq)]
