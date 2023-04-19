@@ -28,7 +28,7 @@ use tokio::time::sleep;
 )]
 pub struct RetryOptions {
 	/// Max of times to retry a failed connection before giving up.
-	#[clap(name = "retry", default_value = "3", long)]
+	#[clap(name = "retry", default_value = "10", long)]
 	max_count: u32,
 	/// Delay in ms to wait between retry attempts
 	#[clap(default_value = "100", long)]
