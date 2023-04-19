@@ -24,7 +24,7 @@ use itertools::Itertools;
 use log::{debug, info, warn};
 use priority_channel::{SendError, Sender};
 use std::{
-	cmp::Reverse,
+	cmp::{min, Reverse},
 	collections::HashMap,
 	io::{stdin, BufRead},
 };
@@ -37,7 +37,7 @@ struct TelemetryStream {
 
 impl TelemetryStream {
 	async fn connect(url: &str) -> Self {
-		println!("Connecting to the telemetry server on {}", url);
+		println!("Connecting to the telemetry server on {}\n", url);
 		let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
 		Self { ws_stream }
 	}
@@ -145,6 +145,8 @@ impl TelemetrySubscription {
 	}
 }
 
+const CHAINS_CHUNK_SIZE: usize = 10;
+
 async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<H256, ()> {
 	let list: Vec<AddedChain> = chains
 		.iter()
@@ -162,19 +164,33 @@ async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<
 			println!("Found 1 chain.\n{}", list[0]);
 			return Ok(list[0].genesis_hash.clone())
 		},
-		_ => {
-			println!("Found {} chains.\nPlease input the number of chain you want to follow", list_size);
-			for (i, chain) in list.iter().enumerate() {
-				println!("{}. {}", i, chain);
-			}
+		size => {
+			println!("Found {} chains.\n", size);
 		},
 	}
 
 	let chain_index: usize;
-	print!("> ");
+	let indexed_list: Vec<(usize, &AddedChain)> = list.iter().enumerate().map(|(i, c)| (i + 1, c)).collect();
+	let mut cursor: usize = 0;
 	loop {
 		let mut buf = String::new();
+		for (i, chain) in indexed_list[cursor..min(cursor + CHAINS_CHUNK_SIZE, list_size)].iter() {
+			println!("{}. {}", i, chain);
+		}
+		println!(
+			"\nInput the number of a chain you want to follow (1-{}).\nENTER to loop throw the list, Q to exit.\n",
+			list_size
+		);
 		stdin().lock().read_line(&mut buf).expect("Failed to read line");
+
+		if buf == "\n".to_owned() {
+			cursor = if cursor + CHAINS_CHUNK_SIZE < list_size { cursor + CHAINS_CHUNK_SIZE } else { 0 };
+			continue
+		}
+
+		if buf.trim().to_lowercase() == "q".to_owned() {
+			return Err(())
+		}
 
 		match buf.trim().parse::<usize>() {
 			Ok(num) => match num {
@@ -182,13 +198,19 @@ async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<
 					chain_index = num - 1;
 					break
 				},
-				_ => continue,
+				_ => {
+					println!("\nThe number should be between 1 and {}\n", list_size);
+					continue
+				},
 			},
 			Err(_) => continue,
 		};
 	}
 
-	Ok(list[chain_index].genesis_hash.clone())
+	let selected = &list[chain_index];
+	println!("\nSelected {}\n", selected);
+
+	Ok(selected.genesis_hash.clone())
 }
 
 fn on_consumer_error(e: SendError) {
