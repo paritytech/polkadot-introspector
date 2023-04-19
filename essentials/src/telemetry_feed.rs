@@ -195,12 +195,7 @@ pub struct AddedChain {
 
 impl std::fmt::Display for AddedChain {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		let node_count = match self.node_count {
-			0 => "no nodes".to_owned(),
-			1 => "1 node".to_owned(),
-			count => format!("{} nodes", count),
-		};
-		write!(f, "{}, {}, {}", self.name, self.genesis_hash, node_count)
+		write!(f, "{}, {}, {} node(s)", self.name, self.genesis_hash, self.node_count)
 	}
 }
 

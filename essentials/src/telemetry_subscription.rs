@@ -18,8 +18,7 @@
 use super::telemetry_feed::TelemetryFeed;
 use crate::{telemetry_feed::AddedChain, types::H256};
 use color_eyre::Report;
-use futures::{stream::Next, SinkExt};
-use futures_util::StreamExt;
+use futures::{SinkExt, Stream, StreamExt};
 use itertools::Itertools;
 use log::{debug, info, warn};
 use priority_channel::{SendError, Sender};
@@ -29,34 +28,36 @@ use std::{
 	io::{stdin, BufRead},
 };
 use tokio::{net::TcpStream, sync::broadcast::Sender as BroadcastSender};
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+	connect_async,
+	tungstenite::{Error as WsError, Message},
+	MaybeTlsStream, WebSocketStream,
+};
 
-struct TelemetryStream {
-	ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
-}
+struct TelemetryStream(WebSocketStream<MaybeTlsStream<TcpStream>>);
 
 impl TelemetryStream {
-	async fn connect(url: &str) -> Self {
-		println!("Connecting to the telemetry server on {}\n", url);
-		let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
-		Self { ws_stream }
-	}
-
-	async fn subscribe_to(&mut self, chain: &H256) -> color_eyre::Result<()> {
-		match self.ws_stream.send(Message::Text(format!("subscribe:{:?}", chain))).await {
-			Ok(_) => {
-				info!("Subscribed to chain with hash {}", chain);
-				Ok(())
-			},
-			Err(e) => {
-				info!("Cannot subscribe to chain with hash {}: {:?}", chain, e);
-				Err(e.into())
-			},
+	async fn connect(url: &str) -> color_eyre::Result<Self, WsError> {
+		info!("Connecting to the telemetry server on {}", url);
+		match connect_async(url).await {
+			Ok((ws_stream, _)) => Ok(Self(ws_stream)),
+			Err(e) => Err(e),
 		}
 	}
 
-	fn next(&mut self) -> Next<'_, WebSocketStream<MaybeTlsStream<TcpStream>>> {
-		self.ws_stream.next()
+	async fn subscribe_to(&mut self, chain: &H256) -> color_eyre::Result<(), WsError> {
+		self.0.send(Message::Text(format!("subscribe:{:?}", chain))).await
+	}
+}
+
+impl Stream for TelemetryStream {
+	type Item = <WebSocketStream<MaybeTlsStream<TcpStream>> as Stream>::Item;
+
+	fn poll_next(
+		mut self: std::pin::Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Option<Self::Item>> {
+		std::pin::Pin::new(&mut self.0).poll_next(cx)
 	}
 }
 
@@ -83,8 +84,11 @@ impl TelemetrySubscription {
 		shutdown_tx: BroadcastSender<()>,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut stream = TelemetryStream::connect(&url).await;
-		let mut current_chain: H256 = H256::zero();
+		let mut stream = match TelemetryStream::connect(&url).await {
+			Ok(v) => v,
+			Err(e) => return on_stream_error(e),
+		};
+		let mut subscribed: bool = false;
 		let mut chains: HashMap<H256, AddedChain> = Default::default();
 
 		loop {
@@ -102,23 +106,28 @@ impl TelemetrySubscription {
 					}
 
 					for message in feed.unwrap() {
-						if let TelemetryFeed::AddedChain(chain) = &message {
-							chains.insert(chain.genesis_hash, chain.clone());
-						}
 						debug!("[telemetry] {:?}", message);
+						if !subscribed {
+							if let TelemetryFeed::AddedChain(chain) = &message {
+								chains.insert(chain.genesis_hash, chain.clone());
+							}
+						}
 						if let Err(e) = update_channel.send(TelemetryEvent::NewMessage(message)).await {
 							return on_consumer_error(e);
 						}
 					}
 
-					if H256::is_zero(&current_chain) {
+					if !subscribed {
 						match choose_chain(&chains).await {
 							Ok(hash) => {
-								current_chain = hash;
-								let _ = stream.subscribe_to(&current_chain).await;
+								if let Err(e) = stream.subscribe_to(&hash).await {
+									on_stream_error(e);
+								} else {
+									subscribed = true;
+								}
 							},
-							Err(_) => {
-								return on_no_chains();
+							Err(e) => {
+								return on_choose_chain_error(e);
 							}
 						}
 					}
@@ -145,61 +154,70 @@ impl TelemetrySubscription {
 	}
 }
 
+/// Number of chain choices displayed on a single screen
 const CHAINS_CHUNK_SIZE: usize = 10;
+/// Command that interupts user input
+const EXIT_COMMAND: &str = "q";
 
-async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<H256, ()> {
+#[derive(Debug, thiserror::Error)]
+pub enum ChooseChainError {
+	#[error("No chains found")]
+	NoChains,
+	#[error("Chain choice interupted by user")]
+	NoChoice,
+}
+
+async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<H256, ChooseChainError> {
 	let list: Vec<AddedChain> = chains
 		.iter()
-		.map(|(_, v)| v.clone())
+		.map(|(_, v)| v)
+		.cloned()
 		.sorted_by_key(|c| Reverse(c.node_count))
 		.collect();
-	let list_size = list.len();
 
-	match list_size {
-		0 => {
-			println!("No chains found...");
-			return Err(())
-		},
-		1 => {
-			println!("Found 1 chain.\n{}", list[0]);
-			return Ok(list[0].genesis_hash)
-		},
-		size => {
-			println!("Found {} chains.\n", size);
-		},
+	if list.is_empty() {
+		return Err(ChooseChainError::NoChains)
 	}
+	if list.len() == 1 {
+		return Ok(list[0].genesis_hash)
+	}
+
+	println!("Found {} chains.\n", list.len());
 
 	let chain_index: usize;
 	let indexed_list: Vec<(usize, &AddedChain)> = list.iter().enumerate().map(|(i, c)| (i + 1, c)).collect();
 	let mut cursor: usize = 0;
 	loop {
 		let mut buf = String::new();
-		for (i, chain) in indexed_list[cursor..min(cursor + CHAINS_CHUNK_SIZE, list_size)].iter() {
+		let chunk_range = cursor..min(cursor + CHAINS_CHUNK_SIZE, list.len());
+		for (i, chain) in indexed_list[chunk_range].iter() {
 			println!("{}. {}", i, chain);
 		}
 		println!(
-			"\nInput the number of a chain you want to follow (1-{}).\nENTER to loop throw the list, Q to exit.\n",
-			list_size
+			"\nInput the number of a chain you want to follow (1-{}).\nENTER to loop throw the list, {} to exit.\n",
+			list.len(),
+			EXIT_COMMAND.to_uppercase()
 		);
 		stdin().lock().read_line(&mut buf).expect("Failed to read line");
 
-		if buf == *"\n" {
-			cursor = if cursor + CHAINS_CHUNK_SIZE < list_size { cursor + CHAINS_CHUNK_SIZE } else { 0 };
+		buf = buf.trim().to_lowercase();
+
+		if buf.is_empty() {
+			cursor = if cursor + CHAINS_CHUNK_SIZE < list.len() { cursor + CHAINS_CHUNK_SIZE } else { 0 };
 			continue
 		}
-
-		if buf.trim().to_lowercase() == *"q" {
-			return Err(())
+		if buf == EXIT_COMMAND {
+			return Err(ChooseChainError::NoChoice)
 		}
 
-		match buf.trim().parse::<usize>() {
+		match buf.parse::<usize>() {
 			Ok(num) => match num {
-				1.. if num < list_size => {
+				1.. if num < list.len() => {
 					chain_index = num - 1;
 					break
 				},
 				_ => {
-					println!("\nThe number should be between 1 and {}\n", list_size);
+					println!("\nThe number should be between 1 and {}\n", list.len());
 					continue
 				},
 			},
@@ -217,12 +235,16 @@ fn on_consumer_error(e: SendError) {
 	info!("Event consumer has terminated: {:?}, shutting down", e);
 }
 
+fn on_stream_error(e: WsError) {
+	warn!("WebSocketError: {:?}", e);
+}
+
 fn on_error(e: Report) {
 	warn!("Cannot parse telemetry feed: {:?}", e);
 }
 
-fn on_no_chains() {
-	warn!("No chains found, terminating...");
+fn on_choose_chain_error(e: ChooseChainError) {
+	warn!("Chain hasn't been chosen: {:?}", e);
 }
 
 fn on_ctrl_c() {
