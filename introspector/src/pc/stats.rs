@@ -19,7 +19,7 @@
 use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
-use essentials::types::H256;
+use polkadot_introspector_essentials::types::H256;
 use std::{
 	collections::VecDeque,
 	default::Default,

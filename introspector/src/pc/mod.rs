@@ -31,7 +31,10 @@ use crate::pc::tracker::SubxtTracker;
 use clap::Parser;
 use colored::Colorize;
 use crossterm::style::Stylize;
-use essentials::{
+use futures::{future, stream::FuturesUnordered, StreamExt};
+use itertools::Itertools;
+use log::{error, info, warn};
+use polkadot_introspector_essentials::{
 	api::subxt_wrapper::RequestExecutor,
 	collector,
 	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent},
@@ -39,9 +42,6 @@ use essentials::{
 	subxt_subscription::SubxtEvent,
 	types::H256,
 };
-use futures::{future, stream::FuturesUnordered, StreamExt};
-use itertools::Itertools;
-use log::{error, info, warn};
 use priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};

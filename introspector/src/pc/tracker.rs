@@ -21,7 +21,8 @@ use super::{
 	stats::ParachainStats,
 };
 use codec::{Decode, Encode};
-use essentials::{
+use log::{debug, error, info, warn};
+use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{
 		AvailabilityBitfield, BackedCandidate, CoreAssignment, CoreOccupied, InherentData, RequestExecutor,
 		SubxtHrmpChannel, ValidatorIndex,
@@ -31,7 +32,6 @@ use essentials::{
 	metadata::polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
-use log::{debug, error, info, warn};
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
 use subxt::config::{substrate::BlakeTwo256, Hasher};
 

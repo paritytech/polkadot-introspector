@@ -1,11 +1,10 @@
 [package]
-name = "essentials"
+name = "polkadot-introspector-essentials"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-
 
 [dependencies]
 env_logger = "0.10.0"
@@ -17,7 +16,9 @@ codec = { package = "parity-scale-codec", version = "3.2.1", default-features = 
     "full",
     "bit-vec",
 ] }
-subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.28.0" }
+subxt = { default-features = false, features = [
+    "jsonrpsee-ws",
+], version = "0.28.0" }
 tokio = { version = "1.26.0", features = [
     "macros",
     "rt-multi-thread",

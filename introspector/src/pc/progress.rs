@@ -19,7 +19,7 @@
 use super::tracker::DisputesTracker;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
-use essentials::{
+use polkadot_introspector_essentials::{
 	api::subxt_wrapper::SubxtHrmpChannel,
 	chain_events::SubxtDisputeResult,
 	types::{BlockNumber, Timestamp, H256},

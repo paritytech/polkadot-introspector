@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use essentials::{
+use polkadot_introspector_essentials::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	telemetry_feed::{AddedNode, FeedNodeId, TelemetryFeed},
 	telemetry_subscription::{TelemetryEvent, TelemetrySubscription},

@@ -17,11 +17,13 @@
 use block_time::BlockTimeOptions;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
-use essentials::{consumer::EventStream, subxt_subscription::SubxtSubscription, utils::RetryOptions};
 use futures::future;
 use jaeger::JaegerOptions;
 use log::{error, LevelFilter};
 use pc::ParachainCommanderOptions;
+use polkadot_introspector_essentials::{
+	consumer::EventStream, subxt_subscription::SubxtSubscription, utils::RetryOptions,
+};
 use telemetry::TelemetryOptions;
 use tokio::{
 	signal,
