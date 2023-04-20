@@ -24,7 +24,7 @@ use crate::{
 use async_trait::async_trait;
 use futures::future;
 use log::{error, info};
-use priority_channel::{channel, SendError, Sender};
+use polkadot_introspector_priority_channel::{channel, SendError, Sender};
 use subxt::{
 	rpc::{types::FollowEvent, Subscription},
 	OnlineClient, PolkadotConfig,

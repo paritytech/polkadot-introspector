@@ -42,7 +42,7 @@ use polkadot_introspector_essentials::{
 	subxt_subscription::SubxtEvent,
 	types::H256,
 };
-use priority_channel::{channel_with_capacities, Receiver, Sender};
+use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;

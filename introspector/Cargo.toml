@@ -31,5 +31,5 @@ strum = { version = "0.24.1", features = ["derive"] }
 itertools = "0.10.5"
 rand = "0.8.5"
 time = { version = "0.3.20", features = ["formatting"] }
-priority-channel = { path = "../priority-channel" }
+polkadot-introspector-priority-channel = { path = "../priority-channel" }
 polkadot-introspector-essentials = { path = "../essentials" }

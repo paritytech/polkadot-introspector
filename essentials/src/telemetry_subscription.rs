@@ -21,7 +21,7 @@ use color_eyre::Report;
 use futures::{SinkExt, Stream, StreamExt};
 use itertools::Itertools;
 use log::{debug, info, warn};
-use priority_channel::{SendError, Sender};
+use polkadot_introspector_priority_channel::{SendError, Sender};
 use std::{
 	cmp::{min, Reverse},
 	collections::HashMap,

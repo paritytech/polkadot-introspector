@@ -1731,7 +1731,7 @@ dependencies = [
  "log",
  "parity-scale-codec",
  "polkadot-introspector-essentials",
- "priority-channel",
+ "polkadot-introspector-priority-channel",
  "rand",
  "rasciigraph",
  "reqwest",
@@ -1769,7 +1769,7 @@ dependencies = [
  "log",
  "parity-db",
  "parity-scale-codec",
- "priority-channel",
+ "polkadot-introspector-priority-channel",
  "rand",
  "rasciigraph",
  "reqwest",
@@ -1790,6 +1790,20 @@ dependencies = [
  "typed-builder",
  "url",
  "warp",
+]
+
+[[package]]
+name = "polkadot-introspector-priority-channel"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "derive_more",
+ "futures",
+ "futures-timer",
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1837,20 +1851,6 @@ dependencies = [
  "impl-serde",
  "scale-info",
  "uint",
-]
-
-[[package]]
-name = "priority-channel"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "derive_more",
- "futures",
- "futures-timer",
- "rand",
- "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [package]
-name = "priority-channel"
+name = "polkadot-introspector-priority-channel"
 version = "0.1.0"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2021"
