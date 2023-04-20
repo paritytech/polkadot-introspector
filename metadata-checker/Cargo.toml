@@ -1,5 +1,5 @@
 [package]
-name = "metadata-checker"
+name = "polkadot-metadata-checker"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
