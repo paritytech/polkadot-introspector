@@ -15,12 +15,12 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use essentials::{
+use polkadot_introspector_essentials::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	telemetry_feed::{AddedNode, FeedNodeId, TelemetryFeed},
 	telemetry_subscription::{TelemetryEvent, TelemetrySubscription},
 };
-use priority_channel::Receiver;
+use polkadot_introspector_priority_channel::{channel as priority_channel, Receiver};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 
 macro_rules! print_for_node_id {
@@ -50,7 +50,7 @@ pub(crate) struct Telemetry {
 
 impl Telemetry {
 	pub(crate) fn new(opts: TelemetryOptions) -> color_eyre::Result<Self> {
-		let (update_tx, update_rx) = priority_channel::channel(MAX_MSG_QUEUE_SIZE);
+		let (update_tx, update_rx) = priority_channel(MAX_MSG_QUEUE_SIZE);
 		Ok(Self { opts, subscription: TelemetrySubscription::new(vec![update_tx]), update_channel: update_rx })
 	}
 

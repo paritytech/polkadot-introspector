@@ -1,28 +1,19 @@
 [package]
-name = "essentials"
+name = "polkadot-introspector-essentials"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
-
 [dependencies]
 env_logger = "0.10.0"
 log = "0.4.17"
 color-eyre = "0.6.2"
 clap = { version = "4.2.4", features = ["derive"] }
-codec = { package = "parity-scale-codec", version = "3.2.1", default-features = false, features = [
-    "derive",
-    "full",
-    "bit-vec",
-] }
+codec = { package = "parity-scale-codec", version = "3.2.1", default-features = false, features = ["derive", "full", "bit-vec"] }
 subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.28.0" }
-tokio = { version = "1.26.0", features = [
-    "macros",
-    "rt-multi-thread",
-    "signal",
-] }
+tokio = { version = "1.26.0", features = ["macros", "rt-multi-thread", "signal"] }
 thiserror = "1.0.39"
 typed-builder = "0.14.0"
 futures = "0.3.27"
@@ -51,7 +42,7 @@ time = { version = "0.3.20", features = ["formatting"] }
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls"] }
 url = "2.3.1"
 futures-util = "0.3.27"
-priority-channel = { path = "../priority-channel" }
+polkadot-introspector-priority-channel = { path = "../priority-channel" }
 
 [features]
 rococo = []

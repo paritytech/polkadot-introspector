@@ -20,7 +20,7 @@ use crate::{
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
-use priority_channel::Receiver;
+use polkadot_introspector_priority_channel::Receiver;
 use serde::{Deserialize, Serialize};
 use std::{
 	convert::Infallible,

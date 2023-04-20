@@ -21,7 +21,8 @@ use crossterm::{
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use essentials::{
+use log::{debug, info, warn};
+use polkadot_introspector_essentials::{
 	api::ApiService,
 	collector::{new_head_hash, CollectorSubscribeMode},
 	consumer::EventConsumerInit,
@@ -29,8 +30,7 @@ use essentials::{
 	subxt_subscription::SubxtEvent,
 	types::H256,
 };
-use log::{debug, info, warn};
-use priority_channel::Receiver;
+use polkadot_introspector_priority_channel::Receiver;
 use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
 	collections::VecDeque,

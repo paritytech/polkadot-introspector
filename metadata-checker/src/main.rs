@@ -16,8 +16,8 @@
 
 use clap::{ArgAction, Parser};
 use crossterm::style::Stylize;
-use essentials::metadata::polkadot;
 use log::{error, LevelFilter};
+use polkadot_introspector_essentials::metadata::polkadot;
 use subxt::{OnlineClient, PolkadotConfig};
 
 #[derive(Debug, Parser)]

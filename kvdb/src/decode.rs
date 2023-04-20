@@ -26,8 +26,8 @@
 use crate::IntrospectorKvdb;
 use color_eyre::{eyre::eyre, Result};
 use erased_serde::{serialize_trait_object, Serialize};
-use essentials::types::H256;
 use itertools::Itertools;
+use polkadot_introspector_essentials::types::H256;
 use std::fmt::{Debug, Display, Formatter};
 
 /// Decode result trait, used to display and format output of the decoder

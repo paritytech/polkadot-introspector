@@ -31,7 +31,10 @@ use clap::Parser;
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use log::{debug, info, warn};
-use priority_channel::{Receiver, Sender, TryRecvError};
+use polkadot_introspector_priority_channel::{
+	channel as priority_channel, channel_with_capacities as priority_channel_with_capacities, Receiver, Sender,
+	TryRecvError,
+};
 use std::{
 	cmp::Ordering,
 	collections::BTreeMap,
@@ -195,7 +198,7 @@ impl Collector {
 	/// Spawns a collector futures (e.g. websocket server)
 	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<()> {
 		if let Some(ws_listener) = &self.ws_listener {
-			let (to_websocket, from_collector) = priority_channel::channel(32);
+			let (to_websocket, from_collector) = priority_channel(32);
 			ws_listener
 				.spawn(shutdown_tx.subscribe(), from_collector)
 				.await
@@ -272,7 +275,7 @@ impl Collector {
 		&mut self,
 		para_id: u32,
 	) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
-		let (sender, receiver) = priority_channel::channel_with_capacities(COLLECTOR_NORMAL_CHANNEL_CAPACITY, 1);
+		let (sender, receiver) = priority_channel_with_capacities(COLLECTOR_NORMAL_CHANNEL_CAPACITY, 1);
 		self.subscribe_channels.entry(para_id).or_default().push(sender);
 
 		Ok(receiver)
@@ -280,7 +283,7 @@ impl Collector {
 
 	/// Subscribe for broadcast updates
 	pub async fn subscribe_broadcast_updates(&mut self) -> color_eyre::Result<Receiver<CollectorUpdateEvent>> {
-		let (sender, receiver) = priority_channel::channel_with_capacities(COLLECTOR_BROADCAST_CHANNEL_CAPACITY, 1);
+		let (sender, receiver) = priority_channel_with_capacities(COLLECTOR_BROADCAST_CHANNEL_CAPACITY, 1);
 		self.broadcast_channels.push(sender);
 
 		Ok(receiver)

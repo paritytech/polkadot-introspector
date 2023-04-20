@@ -667,48 +667,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "essentials"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bincode",
- "clap",
- "color-eyre",
- "colored",
- "crossterm",
- "env_logger",
- "erased-serde",
- "futures",
- "futures-util",
- "hex",
- "itertools",
- "log",
- "parity-db",
- "parity-scale-codec",
- "priority-channel",
- "rand",
- "rasciigraph",
- "reqwest",
- "rocksdb",
- "serde",
- "serde_bytes",
- "serde_derive",
- "serde_json",
- "serde_urlencoded",
- "snap",
- "strum",
- "substrate-prometheus-endpoint",
- "subxt",
- "thiserror",
- "time",
- "tokio",
- "tokio-tungstenite",
- "typed-builder",
- "url",
- "warp",
-]
-
-[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1458,20 +1416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metadata-checker"
-version = "0.1.0"
-dependencies = [
- "clap",
- "color-eyre",
- "crossterm",
- "env_logger",
- "essentials",
- "log",
- "subxt",
- "tokio",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1768,12 +1712,12 @@ dependencies = [
  "colored",
  "crossterm",
  "env_logger",
- "essentials",
  "futures",
  "itertools",
  "log",
  "parity-scale-codec",
- "priority-channel",
+ "polkadot-introspector-essentials",
+ "polkadot-introspector-priority-channel",
  "rand",
  "rasciigraph",
  "reqwest",
@@ -1793,6 +1737,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "polkadot-introspector-essentials"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "clap",
+ "color-eyre",
+ "colored",
+ "crossterm",
+ "env_logger",
+ "erased-serde",
+ "futures",
+ "futures-util",
+ "hex",
+ "itertools",
+ "log",
+ "parity-db",
+ "parity-scale-codec",
+ "polkadot-introspector-priority-channel",
+ "rand",
+ "rasciigraph",
+ "reqwest",
+ "rocksdb",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_urlencoded",
+ "snap",
+ "strum",
+ "substrate-prometheus-endpoint",
+ "subxt",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-tungstenite",
+ "typed-builder",
+ "url",
+ "warp",
+]
+
+[[package]]
+name = "polkadot-introspector-priority-channel"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "derive_more",
+ "futures",
+ "futures-timer",
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "polkadot-kvdb"
 version = "0.1.0"
 dependencies = [
@@ -1801,12 +1801,12 @@ dependencies = [
  "color-eyre",
  "env_logger",
  "erased-serde",
- "essentials",
  "futures",
  "hex",
  "itertools",
  "log",
  "parity-db",
+ "polkadot-introspector-essentials",
  "rand",
  "rocksdb",
  "serde",
@@ -1817,6 +1817,20 @@ dependencies = [
  "snap",
  "strum",
  "substrate-prometheus-endpoint",
+ "tokio",
+]
+
+[[package]]
+name = "polkadot-metadata-checker"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "crossterm",
+ "env_logger",
+ "log",
+ "polkadot-introspector-essentials",
+ "subxt",
  "tokio",
 ]
 
@@ -1837,20 +1851,6 @@ dependencies = [
  "impl-serde",
  "scale-info",
  "uint",
-]
-
-[[package]]
-name = "priority-channel"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "derive_more",
- "futures",
- "futures-timer",
- "rand",
- "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]
