@@ -10,7 +10,7 @@ repository.workspace = true
 env_logger = "0.10.0"
 log = "0.4.17"
 color-eyre = "0.6.2"
-clap = { version = "4.2.2", features = ["derive"] }
+clap = { version = "4.2.4", features = ["derive"] }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
 rocksdb = "0.20.1"
 parity-db = "0.4.4"

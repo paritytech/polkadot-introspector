@@ -8,7 +8,7 @@ repository.workspace = true
 
 [dependencies]
 color-eyre = "0.6.2"
-clap = { version = "4.2.3", features = ["derive"] }
+clap = { version = "4.2.4", features = ["derive"] }
 crossterm = "0.26.1"
 env_logger = "0.10.0"
 log = "0.4.17"
