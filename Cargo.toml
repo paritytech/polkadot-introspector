@@ -1,6 +1,13 @@
 [workspace]
 
-members = ["priority-channel", "essentials", "introspector", "metadata-checker", "kvdb"]
+members = [
+    "block-time",
+    "essentials",
+    "introspector",
+    "kvdb",
+    "metadata-checker",
+    "priority-channel",
+]
 
 [workspace.package]
 authors = ["Parity Technologies <admin@parity.io>"]
