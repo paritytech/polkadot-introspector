@@ -1,15 +1,14 @@
-## Key-Value Database inspection tool
+## polkadot-kvdb
 
 This tool is designed to extract useful data from the key value database (RocksDB and ParityDB are supported so far).
 Subcommands supported:
 
-* **columns** - list available columns
-* **usage** - show disk usage for keys and values with the ability to limit scan by specific column and/or a set of key prefixes
-* **decode-keys** - decode keys from the database using a format string
-* **dump** - dump a live[^1] database to another directory in a set of different formats
+- **columns** - list available columns
+- **usage** - show disk usage for keys and values with the ability to limit scan by specific column and/or a set of key prefixes
+- **decode-keys** - decode keys from the database using a format string
+- **dump** - dump a live[^1] database to another directory in a set of different formats
 
 `usage` and `keys` subcommands support both human-readable and JSON output formats for automatic checks.
-
 
 ### Usage mode
 
@@ -25,10 +24,10 @@ OPTIONS:
     -p, --keys-prefix <KEYS_PREFIX>    Limit scan by specific key prefix(es)
 ```
 
-* `--db <DB>` (required): Specifies the path to the database that the tool will operate on. Replace <DB> with the path to your database.
-* `-c`, `--column <COLUMN>` (optional): This option allows you to check only specific column(s) in the database. Replace <COLUMN> with the column number or a comma-separated list of column numbers you want to check.
-* `-h`, `--help` (optional): Prints help information about the usage of the CLI tool.
-* `-p`, `--keys-prefix <KEYS_PREFIX>` (optional): This option allows you to limit the scan to specific key prefix(es). Replace <KEYS_PREFIX> with the desired key prefix or a comma-separated list of key prefixes you want to scan.
+- `--db <DB>` (required): Specifies the path to the database that the tool will operate on. Replace <DB> with the path to your database.
+- `-c`, `--column <COLUMN>` (optional): This option allows you to check only specific column(s) in the database. Replace <COLUMN> with the column number or a comma-separated list of column numbers you want to check.
+- `-h`, `--help` (optional): Prints help information about the usage of the CLI tool.
+- `-p`, `--keys-prefix <KEYS_PREFIX>` (optional): This option allows you to limit the scan to specific key prefix(es). Replace <KEYS_PREFIX> with the desired key prefix or a comma-separated list of key prefixes you want to scan.
 
 ### Decode keys mode
 
@@ -58,7 +57,8 @@ OPTIONS:
 
 #### Keys format string specification
 
-Format string can currently include plain strings, and one or more percent encoding values, such as `key_%i`. Currently, this module supports the  following percent strings:
+Format string can currently include plain strings, and one or more percent encoding values, such as `key_%i`. Currently, this module supports the following percent strings:
+
 - `%i` - big endian i32 value
 - `%t` - big endian u64 value (timestamp)
 - `%h` - blake2b hash represented as hex string
@@ -68,9 +68,9 @@ Format string can currently include plain strings, and one or more percent encod
 
 This subcommand is designed to dump the database to another output directory in a set of output formats:
 
-* **RocksDB** - dump database in RocksDB format
-* **ParityDB** - dump database in ParityDB format, in this mode all input columns are treated as ordered columns (btree), dump of non-ordered columns is currently limited
-* **JSON** - output database as a set of [new-line separated JSON](http://ndjson.org/) files, one for each column
+- **RocksDB** - dump database in RocksDB format
+- **ParityDB** - dump database in ParityDB format, in this mode all input columns are treated as ordered columns (btree), dump of non-ordered columns is currently limited
+- **JSON** - output database as a set of [new-line separated JSON](http://ndjson.org/) files, one for each column
 
 ```
 USAGE:
@@ -100,17 +100,18 @@ For Kubernetes based deployments of the `polkadot-kvdb`, it is important to stat
 extraContainers:
   - name: relaychain-kvdb-introspector
     image: registry/<image-name>:<tag>
-    command: [
-      "polkadot-kvdb",
-      "-v",
-      "--db",
-      "/data/chains/testnet-01/db/full",
-      "--db-type",
-      "rocksdb",
-      "prometheus",
-      "--port",
-      "9620"
-    ]
+    command:
+      [
+        "polkadot-kvdb",
+        "-v",
+        "--db",
+        "/data/chains/testnet-01/db/full",
+        "--db-type",
+        "rocksdb",
+        "prometheus",
+        "--port",
+        "9620",
+      ]
     resources:
       limits:
         memory: "1Gi"
@@ -124,4 +125,4 @@ extraContainers:
 
 Here the `RocksDB` path is specified as `/data/chains/testnet-01/db/full`. This path must be reachable from the `Pod`.
 
-Note also that the `prometheus` option is specified. This is useful whenever Prometheus scraping endpoint should be allowed for. The port opened for this purpose is thereafter named `relay-kvdb-prom` which can be used by a Prometheus [`PodMonitor`](https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/design.md#podmonitor) in a separate release. It is worthwhile mentioning that the `extraContainers` field is defined [on this line in the node helm chart](https://github.com/paritytech/helm-charts/blob/79b8196a9751de50fde21069c9ba4ceebcc858c4/charts/node/values.yaml#L459)._
+Note also that the `prometheus` option is specified. This is useful whenever Prometheus scraping endpoint should be allowed for. The port opened for this purpose is thereafter named `relay-kvdb-prom` which can be used by a Prometheus [`PodMonitor`](https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/design.md#podmonitor) in a separate release. It is worthwhile mentioning that the `extraContainers` field is defined [on this line in the node helm chart](https://github.com/paritytech/helm-charts/blob/79b8196a9751de50fde21069c9ba4ceebcc858c4/charts/node/values.yaml#L459).
