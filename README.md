@@ -30,23 +30,6 @@ Use the output file to replace the older in the `assets` folder then rebuild.
 
 ## Tools available
 
-- [Block time monitor](#block-time-monitor) - display the current block time in the substrate based network
-- [KVDB tool](#kvdb-introspection-tool) - inspect key-value database used by parachains or the relay chain
-- [Parachain commander](#parachain-commander) - Parachain progress monitoring and debugging utility
-
-### Parachain commander
-
-A parachain progress monitor and debugger which uses `on-chain` data to trace parachain candidates during backing and inclusion.
-
-The tool documentation is available [here](introspector/src/pc/README.md).
-
-This is how it looks when it's running:
-![Tracing a parachain on Kusama](img/pc1.png)
-
-### Block time monitor
-
-The tool documentation is available [here](block-time/README.md).
-
-### KVDB introspection tool
-
-The tool documentation is available [here](kvdb/README.md).
+- [parachain-commander](introspector/src/pc/README.md) - Parachain progress monitoring and debugging utility
+- [polkadot-block-time](block-time/README.md) - display the current block time in the substrate based network
+- [polkadot-kvdb](kvdb/README.md) - inspect key-value database used by parachains or the relay chain

@@ -1,4 +1,4 @@
-# Polkadot Block Time Monitor
+# polkadot-block-time
 
 RPC based block production time monitoring of multiple chains via inherent timestamps. The tool runs in either CLI or Prometheus mode. CLI mode outputs live ASCII charts on the terminal while Prometheus mode exposes an endpoint for scraping the observed block times.
 
