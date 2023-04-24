@@ -9,7 +9,7 @@ use tokio::{signal, sync::broadcast};
 )]
 pub struct VerbosityOptions {
 	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, action = ArgAction::Count)]
+	#[clap(short = 'v', long, action = ArgAction::Count, global = true)]
 	pub verbose: u8,
 }
 
