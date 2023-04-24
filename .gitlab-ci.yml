@@ -128,11 +128,9 @@ build:
     - mkdir ./artifacts/polkadot || echo "dir exists"
     - mkdir ./artifacts/rococo || echo "dir exists"
     - time cargo build --release --no-default-features --features=polkadot
-    - cp target/release/polkadot-introspector ./artifacts/polkadot/
-    - cp target/release/polkadot-block-time ./artifacts/polkadot/
+    - cp target/release/{polkadot-introspector,polkadot-block-time,polkadot-kvdb} ./artifacts/polkadot/
     - time cargo build --release --no-default-features --features=rococo
-    - cp target/release/polkadot-introspector ./artifacts/rococo/
-    - cp target/release/polkadot-block-time ./artifacts/rococo/
+    - cp target/release/{polkadot-introspector,polkadot-block-time,polkadot-kvdb} ./artifacts/rococo/
 
 # test that image can be built
 build-docker:
