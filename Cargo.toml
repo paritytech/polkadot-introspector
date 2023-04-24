@@ -8,7 +8,6 @@ members = [
     "kvdb",
     "metadata-checker",
     "priority-channel",
-    "whois",
 ]
 
 [workspace.package]
