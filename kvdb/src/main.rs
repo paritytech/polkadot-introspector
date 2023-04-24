@@ -27,7 +27,8 @@ use crate::{paritydb::IntrospectorParityDB, prometheus::KvdbPrometheusOptions, r
 use clap::{ArgAction, Parser};
 use color_eyre::{eyre::eyre, Result};
 use futures::future;
-use log::{error, info, LevelFilter};
+use log::{error, info};
+use polkadot_introspector_essentials::init;
 use serde::Serialize;
 use std::{
 	fmt::{Display, Formatter},
@@ -181,9 +182,8 @@ pub struct KvdbOptions {
 	/// Compress output with snappy
 	#[clap(long, short = 'c', action = ArgAction::SetTrue)]
 	compress: bool,
-	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, action = ArgAction::Count)]
-	pub verbose: u8,
+	#[clap(flatten)]
+	pub verbose: init::VerbosityOptions,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -243,26 +243,11 @@ pub async fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
 	}
 }
 
-fn init_cli() -> Result<KvdbOptions> {
-	color_eyre::install()?;
-	let opts = KvdbOptions::parse();
-	let log_level = match opts.verbose {
-		0 => LevelFilter::Warn,
-		1 => LevelFilter::Info,
-		2 => LevelFilter::Debug,
-		_ => LevelFilter::Trace,
-	};
-	env_logger::Builder::from_default_env()
-		.filter(None, log_level)
-		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
-		.try_init()?;
-
-	Ok(opts)
-}
-
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	let opts = init_cli()?;
+	init::init_cli()?;
+
+	let opts = KvdbOptions::parse();
 	if let Err(err) = introspect_kvdb(opts).await {
 		error!("FATAL: cannot start kvdb tool: {}", err)
 	}

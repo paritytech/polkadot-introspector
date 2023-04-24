@@ -14,18 +14,19 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use colored::Colorize;
 use crossterm::{
 	cursor,
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use log::{debug, error, info, warn, LevelFilter};
+use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
 	api::ApiService,
 	collector::{new_head_hash, CollectorSubscribeMode},
 	consumer::{EventConsumerInit, EventStream},
+	init,
 	storage::RecordsStorageConfig,
 	subxt_subscription::{SubxtEvent, SubxtSubscription},
 	types::H256,
@@ -42,10 +43,7 @@ use std::{
 	},
 };
 use subxt::config::Header;
-use tokio::{
-	signal,
-	sync::broadcast::{self, Sender},
-};
+use tokio::sync::broadcast;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Observe block times using an RPC node")]
@@ -62,12 +60,11 @@ struct BlockTimeOptions {
 	/// Defines subscription mode
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum, global = true)]
 	pub subscribe_mode: CollectorSubscribeMode,
-	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, action = ArgAction::Count, global = true)]
-	pub verbose: u8,
 	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
 	mode: BlockTimeMode,
+	#[clap(flatten)]
+	pub verbose: init::VerbosityOptions,
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -373,26 +370,11 @@ fn register_metric(registry: &Registry) -> HistogramVec {
 	.expect("Failed to register metric")
 }
 
-fn init_cli() -> color_eyre::Result<BlockTimeOptions> {
-	color_eyre::install()?;
-	let opts = BlockTimeOptions::parse();
-	let log_level = match opts.verbose {
-		0 => LevelFilter::Warn,
-		1 => LevelFilter::Info,
-		2 => LevelFilter::Debug,
-		_ => LevelFilter::Trace,
-	};
-	env_logger::Builder::from_default_env()
-		.filter(None, log_level)
-		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
-		.try_init()?;
-
-	Ok(opts)
-}
-
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	let opts = init_cli()?;
+	init::init_cli()?;
+
+	let opts = BlockTimeOptions::parse();
 	let mut core = SubxtSubscription::new(opts.nodes.clone());
 	let block_time_consumer_init = core.create_consumer();
 	let (shutdown_tx, _) = broadcast::channel(1);
@@ -400,16 +382,11 @@ async fn main() -> color_eyre::Result<()> {
 	match BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
 		Ok(mut futures) => {
 			let shutdown_tx_cpy = shutdown_tx.clone();
-			futures.push(tokio::spawn(on_shutdown(shutdown_tx_cpy)));
+			futures.push(tokio::spawn(init::on_shutdown(shutdown_tx_cpy)));
 			core.run(futures, shutdown_tx.clone()).await?
 		},
 		Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
 	}
 
 	Ok(())
-}
-
-async fn on_shutdown(shutdown_tx: Sender<()>) {
-	signal::ctrl_c().await.unwrap();
-	let _ = shutdown_tx.send(());
 }

@@ -20,6 +20,7 @@ pub mod chain_events;
 pub mod collector;
 pub mod constants;
 pub mod consumer;
+pub mod init;
 pub mod metadata;
 pub mod storage;
 pub mod subxt_subscription;

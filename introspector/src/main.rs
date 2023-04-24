@@ -18,7 +18,7 @@ use clap::{ArgAction, Parser};
 use log::{error, LevelFilter};
 use pc::ParachainCommanderOptions;
 use polkadot_introspector_essentials::{
-	consumer::EventStream, subxt_subscription::SubxtSubscription, utils::RetryOptions,
+	consumer::EventStream, init, subxt_subscription::SubxtSubscription, utils::RetryOptions,
 };
 use tokio::{signal, sync::broadcast};
 
@@ -37,32 +37,17 @@ enum Command {
 pub(crate) struct IntrospectorCli {
 	#[clap(subcommand)]
 	pub command: Command,
-	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, action = ArgAction::Count)]
-	pub verbose: u8,
-	/// Defines parameters for connection retry attempts
+	#[clap(flatten)]
+	pub verbose_opts: init::VerbosityOptions,
 	#[clap(flatten)]
 	pub retry_opts: RetryOptions,
 }
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	color_eyre::install()?;
+	init::init_cli()?;
 
 	let opts = IntrospectorCli::parse();
-
-	let log_level = match opts.verbose {
-		0 => LevelFilter::Warn,
-		1 => LevelFilter::Info,
-		2 => LevelFilter::Debug,
-		_ => LevelFilter::Trace,
-	};
-
-	env_logger::Builder::from_default_env()
-		.filter(None, log_level)
-		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
-		.try_init()?;
-
 	match opts.command {
 		Command::ParachainCommander(opts) => {
 			let mut core = SubxtSubscription::new(vec![opts.node.clone()]);
