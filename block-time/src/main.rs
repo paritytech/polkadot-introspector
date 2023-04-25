@@ -64,7 +64,7 @@ struct BlockTimeOptions {
 	#[clap(subcommand)]
 	mode: BlockTimeMode,
 	#[clap(flatten)]
-	pub verbose: init::VerbosityOptions,
+	pub verbose_opts: init::VerbosityOptions,
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -372,9 +372,8 @@ fn register_metric(registry: &Registry) -> HistogramVec {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	init::init_cli()?;
-
 	let opts = BlockTimeOptions::parse();
+	init::init_cli(&opts.verbose_opts)?;
 	let mut core = SubxtSubscription::new(opts.nodes.clone());
 	let block_time_consumer_init = core.create_consumer();
 	let (shutdown_tx, _) = broadcast::channel(1);

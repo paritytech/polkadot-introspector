@@ -24,10 +24,10 @@ use subxt::{OnlineClient, PolkadotConfig};
 #[clap(author, version, about = "Validate statically generated metadata")]
 pub(crate) struct MetadataCheckerOptions {
 	/// Web-Socket URL of a relay chain node.
-	#[clap(name = "ws", long)]
+	#[clap(name = "ws", long, global = true)]
 	pub url: String,
 	#[clap(flatten)]
-	pub verbose: init::VerbosityOptions,
+	pub verbose_opts: init::VerbosityOptions,
 }
 
 pub(crate) struct MetadataChecker {
@@ -57,9 +57,9 @@ impl MetadataChecker {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	init::init_cli()?;
-
 	let opts = MetadataCheckerOptions::parse();
+	init::init_cli(&opts.verbose_opts)?;
+
 	if let Err(err) = MetadataChecker::new(opts)?.run().await {
 		error!("FATAL: cannot start metadata checker: {}", err)
 	}

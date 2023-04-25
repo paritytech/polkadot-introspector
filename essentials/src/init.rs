@@ -1,22 +1,17 @@
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Args};
 use futures::future;
 use log::LevelFilter;
 use tokio::{signal, sync::broadcast};
 
-#[derive(Clone, Debug, Parser)]
-#[clap(
-    allow_external_subcommands = true, // HACK: to parse it as a standalone config
-)]
+#[derive(Clone, Debug, Args)]
 pub struct VerbosityOptions {
 	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
 	#[clap(short = 'v', long, action = ArgAction::Count, global = true)]
 	pub verbose: u8,
 }
 
-pub fn init_cli() -> color_eyre::Result<()> {
+pub fn init_cli(opts: &VerbosityOptions) -> color_eyre::Result<()> {
 	color_eyre::install()?;
-
-	let opts = VerbosityOptions::parse();
 	let log_level = match opts.verbose {
 		0 => LevelFilter::Warn,
 		1 => LevelFilter::Info,

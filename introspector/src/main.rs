@@ -45,9 +45,9 @@ pub(crate) struct IntrospectorCli {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	init::init_cli()?;
-
 	let opts = IntrospectorCli::parse();
+	init::init_cli(&opts.verbose_opts)?;
+
 	match opts.command {
 		Command::ParachainCommander(opts) => {
 			let mut core = SubxtSubscription::new(vec![opts.node.clone()]);
