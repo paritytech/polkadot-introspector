@@ -1,4 +1,4 @@
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -17,12 +17,11 @@
 
 //! A wrapper for Jaeger HTTP API
 
+use super::primitives::*;
 use log::debug;
 use serde::Deserialize;
 use std::{error::Error, time::Duration};
 use typed_builder::TypedBuilder;
-
-use super::primitives::*;
 
 /// `/api/traces`
 /// Parameters:

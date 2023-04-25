@@ -16,9 +16,7 @@
 
 use block_time::BlockTimeOptions;
 use clap::{ArgAction, Parser};
-use color_eyre::eyre::eyre;
 use futures::future;
-use jaeger::JaegerOptions;
 use log::{error, LevelFilter};
 use pc::ParachainCommanderOptions;
 use polkadot_introspector_essentials::{
@@ -31,7 +29,6 @@ use tokio::{
 };
 
 mod block_time;
-mod jaeger;
 mod pc;
 mod telemetry;
 
@@ -41,8 +38,6 @@ enum Command {
 	/// Observe block times using an RPC node
 	#[clap(aliases = &["blockmon"])]
 	BlockTimeMonitor(BlockTimeOptions),
-	/// Examine jaeger traces
-	Jaeger(JaegerOptions),
 	/// Observe parachain state
 	#[clap(aliases = &["pc"])]
 	ParachainCommander(ParachainCommanderOptions),
@@ -97,21 +92,6 @@ async fn main() -> color_eyre::Result<()> {
 					core.run(futures, shutdown_tx.clone()).await?
 				},
 				Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
-			}
-		},
-		Command::Jaeger(opts) => {
-			let jaeger_cli = jaeger::JaegerTool::new(opts)?;
-			match jaeger_cli.run().await {
-				Ok(futures) => {
-					let results = future::try_join_all(futures).await.map_err(|e| eyre!("Join error: {:?}", e))?;
-
-					for res in results.iter() {
-						if let Err(err) = res {
-							error!("FATAL: {}", err);
-						}
-					}
-				},
-				Err(err) => error!("FATAL: cannot start jaeger command: {}", err),
 			}
 		},
 		Command::ParachainCommander(opts) => {

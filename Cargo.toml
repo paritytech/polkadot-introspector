@@ -4,6 +4,7 @@ members = [
     "block-time",
     "essentials",
     "introspector",
+    "jaeger",
     "kvdb",
     "metadata-checker",
     "priority-channel",
