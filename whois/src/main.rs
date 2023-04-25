@@ -14,14 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
+use futures::future;
+use log::LevelFilter;
 use polkadot_introspector_essentials::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	telemetry_feed::{AddedNode, FeedNodeId, TelemetryFeed},
 	telemetry_subscription::{TelemetryEvent, TelemetrySubscription},
 };
 use polkadot_introspector_priority_channel::{channel as priority_channel, Receiver};
-use tokio::sync::broadcast::Sender as BroadcastSender;
+use tokio::{signal, sync::broadcast};
 
 macro_rules! print_for_node_id {
 	($node_id:expr, $v:expr) => {
@@ -32,7 +34,7 @@ macro_rules! print_for_node_id {
 }
 
 #[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
+#[clap(author, version, about = "Simple telemetry feed")]
 pub(crate) struct TelemetryOptions {
 	/// Web-Socket URL of a telemetry backend
 	#[clap(name = "ws", long)]
@@ -40,6 +42,9 @@ pub(crate) struct TelemetryOptions {
 	/// Network id of the desired node to receive only events related to it
 	#[clap(name = "id", long)]
 	pub network_id: String,
+	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
+	#[clap(short = 'v', long, action = ArgAction::Count)]
+	pub verbose: u8,
 }
 
 pub(crate) struct Telemetry {
@@ -56,7 +61,7 @@ impl Telemetry {
 
 	pub(crate) async fn run(
 		self,
-		shutdown_tx: BroadcastSender<()>,
+		shutdown_tx: broadcast::Sender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut futures = self.subscription.run(self.opts.url.clone(), shutdown_tx).await?;
 		futures.push(tokio::spawn(Self::watch(self.update_channel, self.opts.network_id)));
@@ -92,4 +97,51 @@ fn save_node_id(node: &AddedNode, network_id: String, holder: &mut Option<FeedNo
 	if node_network_id == Some(network_id) {
 		*holder = Some(node.node_id);
 	}
+}
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+	color_eyre::install()?;
+	let opts = TelemetryOptions::parse();
+	let log_level = match opts.verbose {
+		0 => LevelFilter::Warn,
+		1 => LevelFilter::Info,
+		2 => LevelFilter::Debug,
+		_ => LevelFilter::Trace,
+	};
+
+	env_logger::Builder::from_default_env()
+		.filter(None, log_level)
+		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
+		.try_init()?;
+
+	let shutdown_tx = init_shutdown();
+	let futures =
+		init_futures_with_shutdown(Telemetry::new(opts)?.run(shutdown_tx.clone()).await?, shutdown_tx.clone());
+	run(futures).await?;
+
+	Ok(())
+}
+
+fn init_shutdown() -> broadcast::Sender<()> {
+	let (shutdown_tx, _) = broadcast::channel(1);
+	shutdown_tx
+}
+
+fn init_futures_with_shutdown(
+	mut futures: Vec<tokio::task::JoinHandle<()>>,
+	shutdown_tx: broadcast::Sender<()>,
+) -> Vec<tokio::task::JoinHandle<()>> {
+	futures.push(tokio::spawn(on_shutdown(shutdown_tx)));
+	futures
+}
+
+async fn on_shutdown(shutdown_tx: broadcast::Sender<()>) {
+	signal::ctrl_c().await.unwrap();
+	let _ = shutdown_tx.send(());
+}
+
+async fn run(futures: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()> {
+	future::try_join_all(futures).await?;
+	Ok(())
 }
