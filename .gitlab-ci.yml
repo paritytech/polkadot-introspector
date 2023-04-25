@@ -23,7 +23,7 @@ variables:
 
 .publish-refs:                     &publish-refs
   rules:
-    - if: $CI_COMMIT_REF_NAME =~ /^v[0-9]+\.[0-9]+\.[0-9].*$/              # i.e. v0.1.0, v0.2.1rc1
+    - if: $CI_COMMIT_REF_NAME =~ /^v[0-9]+\.[0-9]+\.[0-9].*$/       # i.e. v0.1.0, v0.2.1rc1
 
 .common-refs:                      &common-refs
   rules:
@@ -31,6 +31,7 @@ variables:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_COMMIT_REF_NAME == "master"
     - if: $CI_COMMIT_REF_NAME =~ /^[0-9]+$/                         # PRs
+    - if: $CI_COMMIT_REF_NAME =~ /^v[0-9]+\.[0-9]+\.[0-9].*$/       # i.e. v0.1.0, v0.2.1rc1
 
 .test-refs:                        &test-refs
   rules:
