@@ -127,9 +127,13 @@ impl ParachainCommander {
 		}
 
 		println!(
-			"{} will trace parachain(s) {} on {}\n{}",
+			"{} will trace {} on {}\n{}",
 			"Parachain Commander(TM)".to_string().purple(),
-			self.opts.para_id.iter().join(","),
+			if self.opts.all {
+				"all parachain(s)".to_string()
+			} else {
+				format!("parachain(s) {}", self.opts.para_id.iter().join(","))
+			},
 			&self.node,
 			"-----------------------------------------------------------------------"
 				.to_string()
@@ -249,6 +253,7 @@ impl ParachainCommander {
 								let to_tracker = trackers.entry(para_id).or_insert_with(|| {
 									let (tx, rx) = channel_with_capacities(collector::COLLECTOR_NORMAL_CHANNEL_CAPACITY, 1);
 									futures.push(ParachainCommander::watch_node_for_parachain(self.clone(), rx, para_id, api_service.clone()));
+									info!("Added tracker for parachain {}", para_id);
 
 									tx
 								});
