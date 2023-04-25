@@ -1,5 +1,4 @@
-use std::borrow::Borrow;
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -15,14 +14,15 @@ use std::borrow::Borrow;
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-use crate::{
-	eyre,
-	jaeger::{api::JaegerApi, primitives::TraceObject},
-};
-use clap::Parser;
-use log::debug;
+
+use api::JaegerApi;
+use clap::{ArgAction, Parser};
+use color_eyre::eyre::eyre;
+use futures::future;
+use log::{debug, error, LevelFilter};
+use primitives::TraceObject;
 use serde::Serialize;
-use std::str::FromStr;
+use std::{borrow::Borrow, str::FromStr};
 
 mod api;
 mod primitives;
@@ -69,7 +69,7 @@ impl FromStr for OutputMode {
 }
 
 #[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
+#[clap(author, version, about = "Examine jaeger traces")]
 pub(crate) struct JaegerOptions {
 	/// Name a specific node that reports to the Jaeger Agent from which to query traces.
 	#[clap(long)]
@@ -92,6 +92,9 @@ pub(crate) struct JaegerOptions {
 	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
 	mode: JaegerMode,
+	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
+	#[clap(short = 'v', long, action = ArgAction::Count)]
+	pub verbose: u8,
 }
 
 #[derive(Clone, Debug, Parser, Default)]
@@ -189,6 +192,37 @@ fn format_output<T: Serialize>(input: &Vec<T>, mode: OutputMode) -> color_eyre::
 	};
 
 	println!("{}", res);
+
+	Ok(())
+}
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+	let opts = JaegerOptions::parse();
+	color_eyre::install()?;
+	let log_level = match opts.verbose {
+		0 => LevelFilter::Warn,
+		1 => LevelFilter::Info,
+		2 => LevelFilter::Debug,
+		_ => LevelFilter::Trace,
+	};
+	env_logger::Builder::from_default_env()
+		.filter(None, log_level)
+		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
+		.try_init()?;
+
+	let jaeger_cli = JaegerTool::new(opts)?;
+	match jaeger_cli.run().await {
+		Ok(futures) => {
+			let results = future::try_join_all(futures).await.map_err(|e| eyre!("Join error: {:?}", e))?;
+			for res in results.iter() {
+				if let Err(err) = res {
+					error!("FATAL: {}", err);
+				}
+			}
+		},
+		Err(err) => error!("FATAL: cannot start jaeger command: {}", err),
+	};
 
 	Ok(())
 }

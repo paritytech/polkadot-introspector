@@ -1811,6 +1811,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "polkadot-jaeger"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "env_logger",
+ "futures",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_urlencoded",
+ "tokio",
+ "typed-builder",
+]
+
+[[package]]
 name = "polkadot-kvdb"
 version = "0.2.0"
 dependencies = [
