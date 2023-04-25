@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use block_time::BlockTimeOptions;
 use clap::{ArgAction, Parser};
 use futures::future;
 use log::{error, LevelFilter};
@@ -28,16 +27,12 @@ use tokio::{
 	sync::broadcast::{self, Sender},
 };
 
-mod block_time;
 mod pc;
 mod telemetry;
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
 enum Command {
-	/// Observe block times using an RPC node
-	#[clap(aliases = &["blockmon"])]
-	BlockTimeMonitor(BlockTimeOptions),
 	/// Observe parachain state
 	#[clap(aliases = &["pc"])]
 	ParachainCommander(ParachainCommanderOptions),
@@ -77,23 +72,6 @@ async fn main() -> color_eyre::Result<()> {
 		.try_init()?;
 
 	match opts.command {
-		Command::BlockTimeMonitor(opts) => {
-			let mut core = SubxtSubscription::new(opts.nodes.clone());
-			let block_time_consumer_init = core.create_consumer();
-			let (shutdown_tx, _) = broadcast::channel(1);
-
-			match block_time::BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
-				Ok(mut futures) => {
-					let shutdown_tx_cpy = shutdown_tx.clone();
-					futures.push(tokio::spawn(async move {
-						signal::ctrl_c().await.unwrap();
-						let _ = shutdown_tx_cpy.send(());
-					}));
-					core.run(futures, shutdown_tx.clone()).await?
-				},
-				Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
-			}
-		},
 		Command::ParachainCommander(opts) => {
 			let mut core = SubxtSubscription::new(vec![opts.node.clone()]);
 			let consumer_init = core.create_consumer();
