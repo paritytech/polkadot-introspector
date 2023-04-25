@@ -24,7 +24,7 @@ use subxt::{OnlineClient, PolkadotConfig};
 #[clap(author, version, about = "Validate statically generated metadata")]
 pub(crate) struct MetadataCheckerOptions {
 	/// Web-Socket URL of a relay chain node.
-	#[clap(name = "ws", long, global = true)]
+	#[clap(name = "ws", long)]
 	pub url: String,
 	#[clap(flatten)]
 	pub verbose_opts: init::VerbosityOptions,
