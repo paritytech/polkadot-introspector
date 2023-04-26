@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::{ArgAction, Parser};
-use log::{error, LevelFilter};
+use clap::Parser;
+use log::error;
 use pc::ParachainCommanderOptions;
 use polkadot_introspector_essentials::{
 	consumer::EventStream, init, subxt_subscription::SubxtSubscription, utils::RetryOptions,
