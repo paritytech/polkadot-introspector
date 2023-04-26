@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use crossterm::style::Stylize;
-use log::{error, LevelFilter};
-use polkadot_introspector_essentials::metadata::polkadot;
+use log::error;
+use polkadot_introspector_essentials::{init, metadata::polkadot};
 use subxt::{OnlineClient, PolkadotConfig};
 
 #[derive(Debug, Parser)]
@@ -26,9 +26,8 @@ pub(crate) struct MetadataCheckerOptions {
 	/// Web-Socket URL of a relay chain node.
 	#[clap(name = "ws", long)]
 	pub url: String,
-	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, action = ArgAction::Count)]
-	pub verbose: u8,
+	#[clap(flatten)]
+	pub verbose_opts: init::VerbosityOptions,
 }
 
 pub(crate) struct MetadataChecker {
@@ -56,26 +55,11 @@ impl MetadataChecker {
 	}
 }
 
-fn init_cli() -> color_eyre::Result<MetadataCheckerOptions> {
-	color_eyre::install()?;
-	let opts = MetadataCheckerOptions::parse();
-	let log_level = match opts.verbose {
-		0 => LevelFilter::Warn,
-		1 => LevelFilter::Info,
-		2 => LevelFilter::Debug,
-		_ => LevelFilter::Trace,
-	};
-	env_logger::Builder::from_default_env()
-		.filter(None, log_level)
-		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
-		.try_init()?;
-
-	Ok(opts)
-}
-
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	let opts = init_cli()?;
+	let opts = MetadataCheckerOptions::parse();
+	init::init_cli(&opts.verbose_opts)?;
+
 	if let Err(err) = MetadataChecker::new(opts)?.run().await {
 		error!("FATAL: cannot start metadata checker: {}", err)
 	}

@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::{ArgAction, Parser};
-use log::{error, LevelFilter};
+use clap::Parser;
+use log::error;
 use pc::ParachainCommanderOptions;
 use polkadot_introspector_essentials::{
-	consumer::EventStream, subxt_subscription::SubxtSubscription, utils::RetryOptions,
+	consumer::EventStream, init, subxt_subscription::SubxtSubscription, utils::RetryOptions,
 };
 use tokio::{signal, sync::broadcast};
 
@@ -37,31 +37,16 @@ enum Command {
 pub(crate) struct IntrospectorCli {
 	#[clap(subcommand)]
 	pub command: Command,
-	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, action = ArgAction::Count)]
-	pub verbose: u8,
-	/// Defines parameters for connection retry attempts
+	#[clap(flatten)]
+	pub verbose_opts: init::VerbosityOptions,
 	#[clap(flatten)]
 	pub retry_opts: RetryOptions,
 }
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	color_eyre::install()?;
-
 	let opts = IntrospectorCli::parse();
-
-	let log_level = match opts.verbose {
-		0 => LevelFilter::Warn,
-		1 => LevelFilter::Info,
-		2 => LevelFilter::Debug,
-		_ => LevelFilter::Trace,
-	};
-
-	env_logger::Builder::from_default_env()
-		.filter(None, log_level)
-		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
-		.try_init()?;
+	init::init_cli(&opts.verbose_opts)?;
 
 	match opts.command {
 		Command::ParachainCommander(opts) => {
