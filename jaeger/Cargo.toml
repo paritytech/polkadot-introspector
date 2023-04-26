@@ -7,16 +7,17 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-env_logger = "0.10.0"
-log = "0.4.17"
-color-eyre = "0.6.2"
 clap = { version = "4.2.4", features = ["derive"] }
+color-eyre = "0.6.2"
+env_logger = "0.10.0"
 futures = "0.3.28"
+log = "0.4.17"
+polkadot-introspector-essentials = { path = "../essentials" }
 reqwest = { version = "0.11.16" }
 serde = "1.0.160"
-serde_json = "1.0.96"
-serde_derive = "1.0.138"
 serde_bytes = "0.11.9"
+serde_derive = "1.0.138"
+serde_json = "1.0.96"
 serde_urlencoded = "0.7.1"
 tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread", "signal"] }
 typed-builder = "0.14.0"

@@ -16,10 +16,11 @@
 //
 
 use api::JaegerApi;
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use color_eyre::eyre::eyre;
 use futures::future;
-use log::{debug, error, LevelFilter};
+use log::{debug, error};
+use polkadot_introspector_essentials::init;
 use primitives::TraceObject;
 use serde::Serialize;
 use std::{borrow::Borrow, str::FromStr};
@@ -92,9 +93,8 @@ pub(crate) struct JaegerOptions {
 	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
 	mode: JaegerMode,
-	/// Verbosity level: -v - info, -vv - debug, -vvv - trace
-	#[clap(short = 'v', long, action = ArgAction::Count)]
-	pub verbose: u8,
+	#[clap(flatten)]
+	pub verbose_opts: init::VerbosityOptions,
 }
 
 #[derive(Clone, Debug, Parser, Default)]
@@ -199,17 +199,7 @@ fn format_output<T: Serialize>(input: &Vec<T>, mode: OutputMode) -> color_eyre::
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 	let opts = JaegerOptions::parse();
-	color_eyre::install()?;
-	let log_level = match opts.verbose {
-		0 => LevelFilter::Warn,
-		1 => LevelFilter::Info,
-		2 => LevelFilter::Debug,
-		_ => LevelFilter::Trace,
-	};
-	env_logger::Builder::from_default_env()
-		.filter(None, log_level)
-		.format_timestamp(Some(env_logger::fmt::TimestampPrecision::Micros))
-		.try_init()?;
+	init::init_cli(&opts.verbose_opts)?;
 
 	let jaeger_cli = JaegerTool::new(opts)?;
 	match jaeger_cli.run().await {
