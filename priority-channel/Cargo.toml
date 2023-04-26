@@ -8,13 +8,10 @@ repository = "https://github.com/paritytech/polkadot-introspector.git"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-futures = "0.3.28"
-futures-timer = "3.0.2"
 async-channel = "1.8.0"
-derive_more = "0.99"
-tracing = "0.1.38"
-thiserror = "1.0.31"
+futures = "0.3.28"
 rand = "0.8.5"
+thiserror = "1.0.31"
 
 [dev-dependencies]
 tokio = { version = "1.28.0", features = ["macros", "rt"] }
