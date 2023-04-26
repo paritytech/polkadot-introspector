@@ -12,7 +12,7 @@ futures = "0.3.28"
 futures-timer = "3.0.2"
 async-channel = "1.8.0"
 derive_more = "0.99"
-tracing = "0.1.35"
+tracing = "0.1.38"
 thiserror = "1.0.31"
 rand = "0.8.5"
 
