@@ -15,20 +15,14 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::{ArgAction, Parser};
-use futures::future;
 use log::{error, LevelFilter};
 use pc::ParachainCommanderOptions;
 use polkadot_introspector_essentials::{
 	consumer::EventStream, subxt_subscription::SubxtSubscription, utils::RetryOptions,
 };
-use telemetry::TelemetryOptions;
-use tokio::{
-	signal,
-	sync::broadcast::{self, Sender},
-};
+use tokio::{signal, sync::broadcast};
 
 mod pc;
-mod telemetry;
 
 #[derive(Debug, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -36,8 +30,6 @@ enum Command {
 	/// Observe parachain state
 	#[clap(aliases = &["pc"])]
 	ParachainCommander(ParachainCommanderOptions),
-	/// Simple telemetry feed
-	Telemetry(TelemetryOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -89,38 +81,7 @@ async fn main() -> color_eyre::Result<()> {
 				Err(err) => error!("FATAL: cannot start parachain commander: {}", err),
 			}
 		},
-		Command::Telemetry(opts) => {
-			let shutdown_tx = init_shutdown();
-			let futures = init_futures_with_shutdown(
-				telemetry::Telemetry::new(opts)?.run(shutdown_tx.clone()).await?,
-				shutdown_tx.clone(),
-			);
-			run(futures).await?
-		},
 	}
 
-	Ok(())
-}
-
-fn init_shutdown() -> Sender<()> {
-	let (shutdown_tx, _) = broadcast::channel(1);
-	shutdown_tx
-}
-
-fn init_futures_with_shutdown(
-	mut futures: Vec<tokio::task::JoinHandle<()>>,
-	shutdown_tx: Sender<()>,
-) -> Vec<tokio::task::JoinHandle<()>> {
-	futures.push(tokio::spawn(on_shutdown(shutdown_tx)));
-	futures
-}
-
-async fn on_shutdown(shutdown_tx: Sender<()>) {
-	signal::ctrl_c().await.unwrap();
-	let _ = shutdown_tx.send(());
-}
-
-async fn run(futures: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()> {
-	future::try_join_all(futures).await?;
 	Ok(())
 }

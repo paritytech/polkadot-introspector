@@ -1,0 +1,17 @@
+[package]
+name = "polkadot-whois"
+version = "0.2.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clap = { version = "4.2.4", features = ["derive"] }
+color-eyre = "0.6.2"
+env_logger = "0.10.0"
+futures = "0.3.28"
+log = "0.4.17"
+polkadot-introspector-essentials = { path = "../essentials" }
+polkadot-introspector-priority-channel = { path = "../priority-channel" }
+tokio = { version = "1.27.0", features = ["macros", "rt-multi-thread", "signal"] }
