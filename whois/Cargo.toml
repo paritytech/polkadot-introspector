@@ -14,4 +14,4 @@ futures = "0.3.28"
 log = "0.4.17"
 polkadot-introspector-essentials = { path = "../essentials" }
 polkadot-introspector-priority-channel = { path = "../priority-channel" }
-tokio = { version = "1.27.0", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread", "signal"] }

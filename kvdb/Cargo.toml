@@ -27,5 +27,5 @@ snap = "1.1.0"
 futures = "0.3.28"
 rand = "0.8.5"
 strum = { version = "0.24.1", features = ["derive"] }
-tokio = { version = "1.27.0", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread", "signal"] }
 polkadot-introspector-essentials = { path = "../essentials" }

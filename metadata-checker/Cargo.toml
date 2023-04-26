@@ -13,5 +13,5 @@ crossterm = "0.26.1"
 env_logger = "0.10.0"
 log = "0.4.17"
 subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.28.0" }
-tokio = { version = "1.27.0", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread", "signal"] }
 polkadot-introspector-essentials = { path = "../essentials" }
