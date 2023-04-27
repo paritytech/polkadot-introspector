@@ -95,18 +95,18 @@ pub(crate) struct ParachainCommanderOptions {
 #[derive(Clone)]
 pub(crate) struct ParachainCommander {
 	opts: ParachainCommanderOptions,
-	retry_opts: RetryOptions,
+	retry: RetryOptions,
 	node: String,
 	metrics: Metrics,
 }
 
 impl ParachainCommander {
-	pub(crate) fn new(mut opts: ParachainCommanderOptions, retry_opts: RetryOptions) -> color_eyre::Result<Self> {
+	pub(crate) fn new(mut opts: ParachainCommanderOptions, retry: RetryOptions) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let node = opts.node.clone();
 		opts.mode = opts.mode.or(Some(ParachainCommanderMode::Cli));
 
-		Ok(ParachainCommander { opts, node, metrics: Default::default(), retry_opts })
+		Ok(ParachainCommander { opts, node, metrics: Default::default(), retry })
 	}
 
 	/// Spawn the UI and subxt tasks and return their futures.
@@ -122,7 +122,7 @@ impl ParachainCommander {
 		}
 
 		let mut collector =
-			Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), self.retry_opts.clone());
+			Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), self.retry.clone());
 		collector.spawn(shutdown_tx).await?;
 		if let Err(e) = print_host_configuration(self.opts.node.as_str(), &mut collector.executor()).await {
 			warn!("Cannot get host configuration");

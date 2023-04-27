@@ -171,10 +171,10 @@ pub struct Collector {
 }
 
 impl Collector {
-	pub fn new(endpoint: &str, opts: CollectorOptions, retry_opts: RetryOptions) -> Self {
+	pub fn new(endpoint: &str, opts: CollectorOptions, retry: RetryOptions) -> Self {
 		let api_service: CollectorStorageApi = ApiService::new_with_prefixed_storage(
 			RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) },
-			retry_opts,
+			retry,
 		);
 		let ws_listener = if let Some(listen_addr) = opts.listen_addr {
 			let ws_listener_config = WebSocketListenerConfig::builder().listen_addr(listen_addr).build();

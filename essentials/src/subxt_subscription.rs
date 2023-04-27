@@ -43,7 +43,7 @@ pub struct SubxtSubscription {
 	urls: Vec<String>,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<SubxtEvent>>>,
-	retry_opts: RetryOptions,
+	retry: RetryOptions,
 }
 
 #[async_trait]
@@ -73,7 +73,7 @@ impl EventStream for SubxtSubscription {
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<()> {
 		let futures = self.consumers.into_iter().map(|update_channels| {
-			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.retry_opts.clone())
+			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.retry.clone())
 		});
 
 		let mut flat_futures = futures.flatten().collect::<Vec<_>>();
@@ -85,8 +85,8 @@ impl EventStream for SubxtSubscription {
 }
 
 impl SubxtSubscription {
-	pub fn new(urls: Vec<String>, retry_opts: RetryOptions) -> SubxtSubscription {
-		SubxtSubscription { urls, consumers: Vec::new(), retry_opts }
+	pub fn new(urls: Vec<String>, retry: RetryOptions) -> SubxtSubscription {
+		SubxtSubscription { urls, consumers: Vec::new(), retry }
 	}
 
 	// Per consumer
@@ -94,9 +94,9 @@ impl SubxtSubscription {
 		mut update_channel: Sender<SubxtEvent>,
 		url: String,
 		shutdown_tx: BroadcastSender<()>,
-		retry_opts: RetryOptions,
+		retry: RetryOptions,
 	) {
-		if let Some(api) = subxt_client(url.clone(), shutdown_tx.subscribe(), &retry_opts).await {
+		if let Some(api) = subxt_client(url.clone(), shutdown_tx.subscribe(), &retry).await {
 			let mut shutdown_rx = shutdown_tx.subscribe();
 			let (mut sub, sub_id) = subxt_chain_head_subscription(&api).await;
 
@@ -151,13 +151,13 @@ impl SubxtSubscription {
 		update_channels: Vec<Sender<SubxtEvent>>,
 		urls: Vec<String>,
 		shutdown_tx: BroadcastSender<()>,
-		retry_opts: RetryOptions,
+		retry: RetryOptions,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()
 			.zip(urls.into_iter())
 			.map(|(update_channel, url)| {
-				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), retry_opts.clone()))
+				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), retry.clone()))
 			})
 			.collect()
 	}
@@ -166,9 +166,9 @@ impl SubxtSubscription {
 async fn subxt_client(
 	url: String,
 	mut shutdown_rx: BroadcastReceiver<()>,
-	retry_opts: &RetryOptions,
+	retry: &RetryOptions,
 ) -> Option<OnlineClient<PolkadotConfig>> {
-	let mut retry = Retry::new(retry_opts);
+	let mut retry = Retry::new(retry);
 	loop {
 		tokio::select! {
 			client = OnlineClient::<PolkadotConfig>::from_url(url.clone()) => {

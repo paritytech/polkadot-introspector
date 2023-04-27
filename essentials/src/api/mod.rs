@@ -27,7 +27,7 @@ use tokio::sync::mpsc::{channel, Sender};
 #[derive(Clone)]
 pub struct ApiService<K, P = ()> {
 	storage_tx: Sender<storage::Request<K, P>>,
-	retry_opts: RetryOptions,
+	retry: RetryOptions,
 }
 
 // Common methods
@@ -41,7 +41,7 @@ where
 	}
 
 	pub fn subxt(&self) -> subxt_wrapper::RequestExecutor {
-		RequestExecutor::new(self.retry_opts.clone())
+		RequestExecutor::new(self.retry.clone())
 	}
 }
 
@@ -50,12 +50,12 @@ impl<K> ApiService<K, ()>
 where
 	K: Eq + Sized + Hash + Debug + Clone + Send + 'static,
 {
-	pub fn new_with_storage(storage_config: RecordsStorageConfig, retry_opts: RetryOptions) -> ApiService<K> {
+	pub fn new_with_storage(storage_config: RecordsStorageConfig, retry: RetryOptions) -> ApiService<K> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		tokio::spawn(storage::api_handler_task(storage_rx, storage_config));
 
-		Self { storage_tx, retry_opts }
+		Self { storage_tx, retry }
 	}
 }
 
@@ -65,15 +65,12 @@ where
 	K: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
 	P: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
 {
-	pub fn new_with_prefixed_storage(
-		storage_config: RecordsStorageConfig,
-		retry_opts: RetryOptions,
-	) -> ApiService<K, P> {
+	pub fn new_with_prefixed_storage(storage_config: RecordsStorageConfig, retry: RetryOptions) -> ApiService<K, P> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		tokio::spawn(storage::api_handler_task_prefixed(storage_rx, storage_config));
 
-		Self { storage_tx, retry_opts }
+		Self { storage_tx, retry }
 	}
 }
 #[cfg(test)]
