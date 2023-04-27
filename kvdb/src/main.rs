@@ -183,7 +183,7 @@ pub struct KvdbOptions {
 	#[clap(long, short = 'c', action = ArgAction::SetTrue)]
 	compress: bool,
 	#[clap(flatten)]
-	pub verbose_opts: init::VerbosityOptions,
+	pub verbose: init::VerbosityOptions,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -246,7 +246,7 @@ pub async fn introspect_kvdb(opts: KvdbOptions) -> Result<()> {
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 	let opts = KvdbOptions::parse();
-	init::init_cli(&opts.verbose_opts)?;
+	init::init_cli(&opts.verbose)?;
 
 	if let Err(err) = introspect_kvdb(opts).await {
 		error!("FATAL: cannot start kvdb tool: {}", err)

@@ -26,7 +26,7 @@ pub use crate::metadata::polkadot::{
 };
 use crate::{
 	types::{AccountId32, Timestamp, H256},
-	utils::Retry,
+	utils::{Retry, RetryOptions},
 };
 use codec::Decode;
 use log::error;
@@ -177,6 +177,7 @@ impl Debug for Response {
 #[derive(Clone, Default)]
 pub struct RequestExecutor {
 	connection_pool: HashMap<String, OnlineClient<PolkadotConfig>>,
+	retry_opts: RetryOptions,
 }
 
 macro_rules! wrap_subxt_call {
@@ -190,20 +191,20 @@ macro_rules! wrap_subxt_call {
 }
 
 impl RequestExecutor {
-	pub fn new() -> Self {
-		Default::default()
+	pub fn new(retry_opts: RetryOptions) -> Self {
+		Self { retry_opts, ..Default::default() }
 	}
 
 	async fn execute_request(&mut self, request: RequestType, url: &str) -> Result {
 		let connection_pool = &mut self.connection_pool;
 		let maybe_api = connection_pool.get(url).cloned();
-		let mut retry = Retry::new();
+		let mut retry = Retry::new(&self.retry_opts);
 
 		loop {
 			let api = match maybe_api {
 				Some(ref api) => api.clone(),
 				None => {
-					let new_api = new_client_fn(url).await;
+					let new_api = new_client_fn(url, &self.retry_opts).await;
 					if let Some(api) = new_api {
 						connection_pool.insert(url.to_owned(), api.clone());
 						api
@@ -383,8 +384,8 @@ impl RequestExecutor {
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn new_client_fn(url: &str) -> Option<OnlineClient<PolkadotConfig>> {
-	let mut retry = Retry::new();
+async fn new_client_fn(url: &str, retry_opts: &RetryOptions) -> Option<OnlineClient<PolkadotConfig>> {
+	let mut retry = Retry::new(retry_opts);
 
 	loop {
 		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {

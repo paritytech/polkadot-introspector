@@ -21,7 +21,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 
-#[derive(Clone, Debug, Parser)]
+#[derive(Clone, Debug, Parser, Default)]
 #[clap(
 	rename_all = "kebab-case",
 	allow_external_subcommands = true, // HACK: to parse it as a standalone config
@@ -49,14 +49,12 @@ pub enum RetryError {
 
 impl Default for Retry {
 	fn default() -> Self {
-		Self::new()
+		Retry::new(&RetryOptions::default())
 	}
 }
 
 impl Retry {
-	pub fn new() -> Self {
-		let opts = RetryOptions::parse();
-
+	pub fn new(opts: &RetryOptions) -> Self {
 		Self { count: 0, max_count: opts.max_count, delay: opts.retry_delay }
 	}
 

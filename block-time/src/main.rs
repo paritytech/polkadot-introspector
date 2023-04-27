@@ -24,12 +24,12 @@ use crossterm::{
 use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
 	api::ApiService,
-	collector::{new_head_hash, CollectorSubscribeMode},
 	consumer::{EventConsumerInit, EventStream},
 	init,
 	storage::RecordsStorageConfig,
 	subxt_subscription::{SubxtEvent, SubxtSubscription},
 	types::H256,
+	utils,
 };
 use polkadot_introspector_priority_channel::Receiver;
 use prometheus_endpoint::{HistogramVec, Registry};
@@ -49,22 +49,14 @@ use tokio::sync::broadcast;
 #[clap(author, version, about = "Observe block times using an RPC node")]
 struct BlockTimeOptions {
 	/// Websockets URLs of a substrate nodes.
-	#[clap(
-		name = "ws",
-		long,
-		value_delimiter = ',',
-		default_value = "wss://westmint-rpc.polkadot.io:443",
-		global = true
-	)]
+	#[clap(name = "ws", long, value_delimiter = ',')]
 	pub nodes: Vec<String>,
-	/// Defines subscription mode
-	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum, global = true)]
-	pub subscribe_mode: CollectorSubscribeMode,
-	/// Mode of running - CLI/Prometheus.
 	#[clap(subcommand)]
 	mode: BlockTimeMode,
 	#[clap(flatten)]
-	pub verbose_opts: init::VerbosityOptions,
+	pub verbose: init::VerbosityOptions,
+	#[clap(flatten)]
+	pub retry: utils::RetryOptions,
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -116,7 +108,7 @@ impl BlockTimeMonitor {
 		}
 
 		// This starts the both the storage and subxt APIs.
-		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 });
+		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 }, opts.retry.clone());
 		let active_endpoints = Arc::new(AtomicUsize::new(endpoints.len()));
 
 		match opts.clone().mode {
@@ -274,8 +266,11 @@ impl BlockTimeMonitor {
 			debug!("[{}] New loop - waiting for events", url);
 			if let Ok(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
-				if let Some(hash) = new_head_hash(&event, opts.subscribe_mode) {
-					let hash = *hash;
+				let hash = match event {
+					SubxtEvent::NewBestHead(hash) => Some(hash),
+					SubxtEvent::NewFinalizedHead(hash) => Some(hash),
+				};
+				if let Some(hash) = hash {
 					let ts = executor.get_block_timestamp(url, hash).await;
 					let header = executor.get_block_head(url, Some(hash)).await;
 
@@ -373,8 +368,8 @@ fn register_metric(registry: &Registry) -> HistogramVec {
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
-	init::init_cli(&opts.verbose_opts)?;
-	let mut core = SubxtSubscription::new(opts.nodes.clone());
+	init::init_cli(&opts.verbose)?;
+	let mut core = SubxtSubscription::new(opts.nodes.clone(), opts.retry.clone());
 	let block_time_consumer_init = core.create_consumer();
 	let (shutdown_tx, _) = broadcast::channel(1);
 
