@@ -1,4 +1,4 @@
-## Parachain Commander (TM)
+## polkadot-parachain-tracer
 
 A parachain progress monitor and debugger which uses `on-chain` data to trace parachain candidates during backing and inclusion.
 
@@ -8,7 +8,7 @@ This is how it looks when it's running:
 ### What problem does it solve ?
 
 Provides an automated way to digest the `on-chain` information to reason about why a candidate was not backed or was not included in time.
-There are two modes of running Parachain Commander: `CLI` and `Prometheus`. In both modes, it can trace only a single parachain. The `CLI` mode is purposed for development use, while `Prometheus` is for monitoring.
+There are two modes of running Parachain Tracer: `CLI` and `Prometheus`. In both modes, it can trace only a single parachain. The `CLI` mode is purposed for development use, while `Prometheus` is for monitoring.
 
 ### Modes
 
@@ -37,11 +37,11 @@ It's important to note that the tool cannot further drill down into the details 
 
 Assuming you have cloned the repo, and built the binary, all you need for it to work is a relay chain RPC endpoint.
 
-Example: `polkadot-introspector parachain-commander --ws=wss://kusama-try-runtime-node.parity-chains.parity.io:443 --para-id=2107`
+Example: `polkadot-parachain-tracer --ws=wss://kusama-try-runtime-node.parity-chains.parity.io:443 --para-id=2107`
 
 ```
 USAGE:
-    polkadot-introspector parachain-commander [OPTIONS] --para-id <PARA_ID>
+    polkadot-parachain-tracer [OPTIONS] --para-id <PARA_ID>
 
 OPTIONS:
     -h, --help                 Print help information

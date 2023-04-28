@@ -21,9 +21,9 @@ RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && \
 	useradd -m -u 1000 -U -s /bin/sh -d /polkadot-introspector polkadot-introspector && \
 	rm -rf /var/lib/apt/lists/* && \
 	# Sanity Check
-	/polkadot-introspector/${RUNTIME}/polkadot-introspector --version
+	/polkadot-introspector/${RUNTIME}/polkadot-parachain-tracer --version
 
 USER polkadot-introspector
 
-ENV RUNTIME="/polkadot-introspector/$RUNTIME/polkadot-introspector"
+ENV RUNTIME="/polkadot-introspector/$RUNTIME/polkadot-parachain-tracer"
 ENTRYPOINT exec $RUNTIME

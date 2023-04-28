@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::pc::tracker::DisputesTracker;
+use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use clap::Parser;
 use color_eyre::Result;
 use prometheus_endpoint::{
@@ -23,11 +23,9 @@ use prometheus_endpoint::{
 };
 use std::net::ToSocketAddrs;
 
-use super::progress::ParachainProgressUpdate;
-
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
-pub struct ParachainCommanderPrometheusOptions {
+pub struct ParachainTracerPrometheusOptions {
 	/// Address to bind Prometheus listener
 	#[clap(short = 'a', long = "address", default_value = "0.0.0.0")]
 	address: String,
@@ -72,7 +70,7 @@ struct MetricsInner {
 	finality_lag: Gauge,
 }
 
-/// Parachain commander prometheus metrics
+/// Parachain tracer prometheus metrics
 #[derive(Default, Clone)]
 pub struct Metrics(Option<MetricsInner>);
 
@@ -170,7 +168,7 @@ impl Metrics {
 	}
 }
 
-pub async fn run_prometheus_endpoint(prometheus_opts: &ParachainCommanderPrometheusOptions) -> Result<Metrics> {
+pub async fn run_prometheus_endpoint(prometheus_opts: &ParachainTracerPrometheusOptions) -> Result<Metrics> {
 	let prometheus_registry = Registry::new_custom(Some("introspector".into()), None)?;
 	let metrics = register_metrics(&prometheus_registry)?;
 	let socket_addr_str = format!("{}:{}", prometheus_opts.address, prometheus_opts.port);
