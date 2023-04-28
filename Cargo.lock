@@ -1712,38 +1712,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "polkadot-introspector"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "clap",
- "color-eyre",
- "colored",
- "crossterm",
- "env_logger",
- "futures",
- "itertools",
- "log",
- "parity-scale-codec",
- "polkadot-introspector-essentials",
- "polkadot-introspector-priority-channel",
- "rand",
- "serde",
- "serde_bytes",
- "serde_derive",
- "serde_json",
- "serde_urlencoded",
- "strum",
- "substrate-prometheus-endpoint",
- "subxt",
- "thiserror",
- "time",
- "tokio",
- "typed-builder",
- "warp",
-]
-
-[[package]]
 name = "polkadot-introspector-essentials"
 version = "0.2.0"
 dependencies = [
@@ -1845,6 +1813,38 @@ dependencies = [
  "polkadot-introspector-essentials",
  "subxt",
  "tokio",
+]
+
+[[package]]
+name = "polkadot-parachain-tracer"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "color-eyre",
+ "colored",
+ "crossterm",
+ "env_logger",
+ "futures",
+ "itertools",
+ "log",
+ "parity-scale-codec",
+ "polkadot-introspector-essentials",
+ "polkadot-introspector-priority-channel",
+ "rand",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_urlencoded",
+ "strum",
+ "substrate-prometheus-endpoint",
+ "subxt",
+ "thiserror",
+ "time",
+ "tokio",
+ "typed-builder",
+ "warp",
 ]
 
 [[package]]

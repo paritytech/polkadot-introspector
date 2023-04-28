@@ -30,6 +30,6 @@ Use the output file to replace the older in the `assets` folder then rebuild.
 
 ## Tools available
 
-- [parachain-commander](introspector/src/pc/README.md) - Parachain progress monitoring and debugging utility
+- [polkadot-parachain-tracer](parachain-tracer/README.md) - Parachain progress monitoring and debugging utility
 - [polkadot-block-time](block-time/README.md) - display the current block time in the substrate based network
 - [polkadot-kvdb](kvdb/README.md) - inspect key-value database used by parachains or the relay chain

@@ -27,7 +27,6 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use crate::pc::tracker::SubxtTracker;
 use clap::Parser;
 use colored::Colorize;
 use crossterm::style::Stylize;
@@ -38,35 +37,39 @@ use polkadot_introspector_essentials::{
 	api::subxt_wrapper::RequestExecutor,
 	collector,
 	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent},
-	consumer::EventConsumerInit,
-	subxt_subscription::SubxtEvent,
+	consumer::{EventConsumerInit, EventStream},
+	init,
+	subxt_subscription::{SubxtEvent, SubxtSubscription},
 	types::H256,
 	utils::RetryOptions,
 };
 use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
-use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
+use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
-use tokio::sync::broadcast::Sender as BroadcastSender;
-use tracker::ParachainBlockTracker;
+use tokio::{
+	signal,
+	sync::{broadcast, broadcast::Sender as BroadcastSender},
+};
+use tracker::{ParachainBlockTracker, SubxtTracker};
 
 mod progress;
-pub(crate) mod prometheus;
-pub(crate) mod stats;
-pub(crate) mod tracker;
+mod prometheus;
+mod stats;
+mod tracker;
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
-pub(crate) enum ParachainCommanderMode {
+pub(crate) enum ParachainTracerMode {
 	/// CLI chart mode.
 	#[default]
 	Cli,
 	/// Prometheus endpoint mode.
-	Prometheus(ParachainCommanderPrometheusOptions),
+	Prometheus(ParachainTracerPrometheusOptions),
 }
 
 #[derive(Clone, Debug, Parser)]
-#[clap(rename_all = "kebab-case")]
-pub(crate) struct ParachainCommanderOptions {
+#[clap(author, version, about = "Observe parachain state")]
+pub(crate) struct ParachainTracerOptions {
 	/// Web-Socket URLs of a relay chain node.
 	#[clap(name = "ws", long, value_delimiter = ',', default_value = "wss://rpc.polkadot.io:443")]
 	pub node: String,
@@ -89,24 +92,29 @@ pub(crate) struct ParachainCommanderOptions {
 	collector_opts: CollectorOptions,
 	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
 	#[clap(subcommand)]
-	mode: Option<ParachainCommanderMode>,
+	mode: Option<ParachainTracerMode>,
+	#[clap(flatten)]
+	pub verbose: init::VerbosityOptions,
+	#[clap(flatten)]
+	pub retry: RetryOptions,
 }
 
 #[derive(Clone)]
-pub(crate) struct ParachainCommander {
-	opts: ParachainCommanderOptions,
+pub(crate) struct ParachainTracer {
+	opts: ParachainTracerOptions,
 	retry: RetryOptions,
 	node: String,
 	metrics: Metrics,
 }
 
-impl ParachainCommander {
-	pub(crate) fn new(mut opts: ParachainCommanderOptions, retry: RetryOptions) -> color_eyre::Result<Self> {
+impl ParachainTracer {
+	pub(crate) fn new(mut opts: ParachainTracerOptions) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let node = opts.node.clone();
-		opts.mode = opts.mode.or(Some(ParachainCommanderMode::Cli));
+		let retry = opts.retry.clone();
+		opts.mode = opts.mode.or(Some(ParachainTracerMode::Cli));
 
-		Ok(ParachainCommander { opts, node, metrics: Default::default(), retry })
+		Ok(ParachainTracer { opts, node, metrics: Default::default(), retry })
 	}
 
 	/// Spawn the UI and subxt tasks and return their futures.
@@ -117,7 +125,7 @@ impl ParachainCommander {
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
-		if let Some(ParachainCommanderMode::Prometheus(ref prometheus_opts)) = self.opts.mode {
+		if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = self.opts.mode {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
@@ -131,7 +139,7 @@ impl ParachainCommander {
 
 		println!(
 			"{} will trace {} on {}\n{}",
-			"Parachain Commander(TM)".to_string().purple(),
+			"Parachain Tracer".to_string().purple(),
 			if self.opts.all {
 				"all parachain(s)".to_string()
 			} else {
@@ -145,7 +153,7 @@ impl ParachainCommander {
 
 		if self.opts.all {
 			let from_collector = collector.subscribe_broadcast_updates().await?;
-			output_futures.push(tokio::spawn(ParachainCommander::watch_node_broadcast(
+			output_futures.push(tokio::spawn(ParachainTracer::watch_node_broadcast(
 				self.clone(),
 				from_collector,
 				collector.api(),
@@ -153,7 +161,7 @@ impl ParachainCommander {
 		} else {
 			for para_id in self.opts.para_id.iter() {
 				let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
-				output_futures.push(ParachainCommander::watch_node_for_parachain(
+				output_futures.push(ParachainTracer::watch_node_for_parachain(
 					self.clone(),
 					from_collector,
 					*para_id,
@@ -189,7 +197,7 @@ impl ParachainCommander {
 		);
 
 		let metrics = self.metrics.clone();
-		let is_cli = matches!(&self.opts.mode, Some(ParachainCommanderMode::Cli));
+		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
 
 		tokio::spawn(async move {
 			loop {
@@ -255,7 +263,7 @@ impl ParachainCommander {
 
 								let to_tracker = trackers.entry(para_id).or_insert_with(|| {
 									let (tx, rx) = channel_with_capacities(collector::COLLECTOR_NORMAL_CHANNEL_CAPACITY, 1);
-									futures.push(ParachainCommander::watch_node_for_parachain(self.clone(), rx, para_id, api_service.clone()));
+									futures.push(ParachainTracer::watch_node_for_parachain(self.clone(), rx, para_id, api_service.clone()));
 									info!("Added tracker for parachain {}", para_id);
 
 									tx
@@ -349,5 +357,29 @@ async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> 
 	println!("\t👍 Needed approvals: {}", format!("{}", conf.needed_approvals).bold(),);
 	println!("\t🥔 No show slots: {}", format!("{}", conf.no_show_slots).bold(),);
 	println!("\t⏳ Delay tranches: {}", format!("{}", conf.n_delay_tranches).bold(),);
+	Ok(())
+}
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+	let opts = ParachainTracerOptions::parse();
+	init::init_cli(&opts.verbose)?;
+
+	let mut core = SubxtSubscription::new(vec![opts.node.clone()], opts.retry.clone());
+	let consumer_init = core.create_consumer();
+	let (shutdown_tx, _) = broadcast::channel(1);
+
+	match ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await {
+		Ok(mut futures) => {
+			let shutdown_tx_cpy = shutdown_tx.clone();
+			futures.push(tokio::spawn(async move {
+				signal::ctrl_c().await.unwrap();
+				let _ = shutdown_tx_cpy.send(());
+			}));
+			core.run(futures, shutdown_tx.clone()).await?
+		},
+		Err(err) => error!("FATAL: cannot start parachain tracer: {}", err),
+	}
+
 	Ok(())
 }
