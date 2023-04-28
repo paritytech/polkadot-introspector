@@ -1,6 +1,6 @@
 # Polkadot introspector
 
-**IMPORTANT NOTE: WORK IN PROGRESS!** Do not expect this to be working (or supported).
+**IMPORTANT NOTE: WORK IN PROGRESS!** Some things might not always work as expected.
 
 The introspector is a collection of tools for monitoring and introspection of the Polkadot or other substrate based blockchains
 via a set of tools (for example, [subxt](https://github.com/paritytech/subxt/)).
