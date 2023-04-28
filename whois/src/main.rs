@@ -42,7 +42,7 @@ pub(crate) struct TelemetryOptions {
 	#[clap(name = "id", long)]
 	pub network_id: String,
 	#[clap(flatten)]
-	pub verbose_opts: init::VerbosityOptions,
+	pub verbose: init::VerbosityOptions,
 }
 
 pub(crate) struct Telemetry {
@@ -101,7 +101,7 @@ fn save_node_id(node: &AddedNode, network_id: String, holder: &mut Option<FeedNo
 async fn main() -> color_eyre::Result<()> {
 	color_eyre::install()?;
 	let opts = TelemetryOptions::parse();
-	init::init_cli(&opts.verbose_opts)?;
+	init::init_cli(&opts.verbose)?;
 
 	let shutdown_tx = init::init_shutdown();
 	let futures =

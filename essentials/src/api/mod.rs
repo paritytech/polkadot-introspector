@@ -18,7 +18,7 @@
 mod storage;
 pub mod subxt_wrapper;
 
-use crate::{constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
+use crate::{constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig, utils::RetryOptions};
 use std::{fmt::Debug, hash::Hash};
 use subxt_wrapper::RequestExecutor;
 use tokio::sync::mpsc::{channel, Sender};
@@ -27,6 +27,7 @@ use tokio::sync::mpsc::{channel, Sender};
 #[derive(Clone)]
 pub struct ApiService<K, P = ()> {
 	storage_tx: Sender<storage::Request<K, P>>,
+	retry: RetryOptions,
 }
 
 // Common methods
@@ -40,7 +41,7 @@ where
 	}
 
 	pub fn subxt(&self) -> subxt_wrapper::RequestExecutor {
-		RequestExecutor::new()
+		RequestExecutor::new(self.retry.clone())
 	}
 }
 
@@ -49,12 +50,12 @@ impl<K> ApiService<K, ()>
 where
 	K: Eq + Sized + Hash + Debug + Clone + Send + 'static,
 {
-	pub fn new_with_storage(storage_config: RecordsStorageConfig) -> ApiService<K> {
+	pub fn new_with_storage(storage_config: RecordsStorageConfig, retry: RetryOptions) -> ApiService<K> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		tokio::spawn(storage::api_handler_task(storage_rx, storage_config));
 
-		Self { storage_tx }
+		Self { storage_tx, retry }
 	}
 }
 
@@ -64,12 +65,12 @@ where
 	K: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
 	P: Eq + Sized + Hash + Debug + Clone + Send + Sync + 'static,
 {
-	pub fn new_with_prefixed_storage(storage_config: RecordsStorageConfig) -> ApiService<K, P> {
+	pub fn new_with_prefixed_storage(storage_config: RecordsStorageConfig, retry: RetryOptions) -> ApiService<K, P> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		tokio::spawn(storage::api_handler_task_prefixed(storage_rx, storage_config));
 
-		Self { storage_tx }
+		Self { storage_tx, retry }
 	}
 }
 #[cfg(test)]
@@ -84,7 +85,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn basic_storage_test() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
+		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, RetryOptions::default());
 		let storage = api.storage();
 		let key = BlakeTwo256::hash_of(&100);
 		storage
@@ -97,7 +98,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn basic_subxt_test() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 });
+		let api =
+			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
@@ -108,7 +110,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn extract_parainherent_data() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
 		subxt
@@ -120,7 +122,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_scheduled_paras() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
@@ -130,7 +132,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_occupied_cores() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
@@ -140,7 +142,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_backing_groups() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 });
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();

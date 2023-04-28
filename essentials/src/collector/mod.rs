@@ -25,9 +25,10 @@ use crate::{
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	subxt_subscription::SubxtEvent,
 	types::{Timestamp, H256},
+	utils::RetryOptions,
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use log::{debug, info, warn};
@@ -72,7 +73,7 @@ pub struct CollectorOptions {
 }
 
 /// How to subscribe to subxt blocks
-#[derive(strum::Display, Debug, Clone, Copy, clap::ValueEnum, Default)]
+#[derive(strum::Display, Debug, Clone, Copy, ValueEnum, Default)]
 pub enum CollectorSubscribeMode {
 	/// Subscribe to the best chain
 	Best,
@@ -170,9 +171,11 @@ pub struct Collector {
 }
 
 impl Collector {
-	pub fn new(endpoint: &str, opts: CollectorOptions) -> Self {
-		let api_service: CollectorStorageApi =
-			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) });
+	pub fn new(endpoint: &str, opts: CollectorOptions, retry: RetryOptions) -> Self {
+		let api_service: CollectorStorageApi = ApiService::new_with_prefixed_storage(
+			RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) },
+			retry,
+		);
 		let ws_listener = if let Some(listen_addr) = opts.listen_addr {
 			let ws_listener_config = WebSocketListenerConfig::builder().listen_addr(listen_addr).build();
 			let ws_listener = WebSocketListener::new(ws_listener_config, api_service.clone());

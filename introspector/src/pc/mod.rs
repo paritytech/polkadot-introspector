@@ -41,6 +41,7 @@ use polkadot_introspector_essentials::{
 	consumer::EventConsumerInit,
 	subxt_subscription::SubxtEvent,
 	types::H256,
+	utils::RetryOptions,
 };
 use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainCommanderPrometheusOptions};
@@ -94,17 +95,18 @@ pub(crate) struct ParachainCommanderOptions {
 #[derive(Clone)]
 pub(crate) struct ParachainCommander {
 	opts: ParachainCommanderOptions,
+	retry: RetryOptions,
 	node: String,
 	metrics: Metrics,
 }
 
 impl ParachainCommander {
-	pub(crate) fn new(mut opts: ParachainCommanderOptions) -> color_eyre::Result<Self> {
+	pub(crate) fn new(mut opts: ParachainCommanderOptions, retry: RetryOptions) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let node = opts.node.clone();
 		opts.mode = opts.mode.or(Some(ParachainCommanderMode::Cli));
 
-		Ok(ParachainCommander { opts, node, metrics: Default::default() })
+		Ok(ParachainCommander { opts, node, metrics: Default::default(), retry })
 	}
 
 	/// Spawn the UI and subxt tasks and return their futures.
@@ -119,7 +121,8 @@ impl ParachainCommander {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
-		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone());
+		let mut collector =
+			Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), self.retry.clone());
 		collector.spawn(shutdown_tx).await?;
 		if let Err(e) = print_host_configuration(self.opts.node.as_str(), &mut collector.executor()).await {
 			warn!("Cannot get host configuration");

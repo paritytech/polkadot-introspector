@@ -38,23 +38,26 @@ pub(crate) struct IntrospectorCli {
 	#[clap(subcommand)]
 	pub command: Command,
 	#[clap(flatten)]
-	pub verbose_opts: init::VerbosityOptions,
+	pub verbose: init::VerbosityOptions,
 	#[clap(flatten)]
-	pub retry_opts: RetryOptions,
+	pub retry: RetryOptions,
 }
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	let opts = IntrospectorCli::parse();
-	init::init_cli(&opts.verbose_opts)?;
+	let global_opts = IntrospectorCli::parse();
+	init::init_cli(&global_opts.verbose)?;
 
-	match opts.command {
+	match global_opts.command {
 		Command::ParachainCommander(opts) => {
-			let mut core = SubxtSubscription::new(vec![opts.node.clone()]);
+			let mut core = SubxtSubscription::new(vec![opts.node.clone()], global_opts.retry.clone());
 			let consumer_init = core.create_consumer();
 			let (shutdown_tx, _) = broadcast::channel(1);
 
-			match pc::ParachainCommander::new(opts)?.run(&shutdown_tx, consumer_init).await {
+			match pc::ParachainCommander::new(opts, global_opts.retry)?
+				.run(&shutdown_tx, consumer_init)
+				.await
+			{
 				Ok(mut futures) => {
 					let shutdown_tx_cpy = shutdown_tx.clone();
 					futures.push(tokio::spawn(async move {

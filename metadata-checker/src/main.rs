@@ -27,7 +27,7 @@ pub(crate) struct MetadataCheckerOptions {
 	#[clap(name = "ws", long)]
 	pub url: String,
 	#[clap(flatten)]
-	pub verbose_opts: init::VerbosityOptions,
+	pub verbose: init::VerbosityOptions,
 }
 
 pub(crate) struct MetadataChecker {
@@ -58,7 +58,7 @@ impl MetadataChecker {
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 	let opts = MetadataCheckerOptions::parse();
-	init::init_cli(&opts.verbose_opts)?;
+	init::init_cli(&opts.verbose)?;
 
 	if let Err(err) = MetadataChecker::new(opts)?.run().await {
 		error!("FATAL: cannot start metadata checker: {}", err)

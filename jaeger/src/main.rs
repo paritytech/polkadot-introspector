@@ -94,7 +94,7 @@ pub(crate) struct JaegerOptions {
 	#[clap(subcommand)]
 	mode: JaegerMode,
 	#[clap(flatten)]
-	pub verbose_opts: init::VerbosityOptions,
+	verbose: init::VerbosityOptions,
 }
 
 #[derive(Clone, Debug, Parser, Default)]
@@ -199,7 +199,7 @@ fn format_output<T: Serialize>(input: &Vec<T>, mode: OutputMode) -> color_eyre::
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 	let opts = JaegerOptions::parse();
-	init::init_cli(&opts.verbose_opts)?;
+	init::init_cli(&opts.verbose)?;
 
 	let jaeger_cli = JaegerTool::new(opts)?;
 	match jaeger_cli.run().await {
