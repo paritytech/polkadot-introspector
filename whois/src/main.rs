@@ -16,12 +16,16 @@
 
 use clap::Parser;
 use polkadot_introspector_essentials::{
+	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
 	constants::MAX_MSG_QUEUE_SIZE,
 	init,
 	telemetry_feed::{AddedNode, FeedNodeId, TelemetryFeed},
 	telemetry_subscription::{TelemetryEvent, TelemetrySubscription},
+	types::{AccountId32, SessionKeys},
+	utils,
 };
 use polkadot_introspector_priority_channel::{channel as priority_channel, Receiver};
+use std::str::FromStr;
 use tokio::sync::broadcast;
 
 macro_rules! print_for_node_id {
@@ -35,14 +39,28 @@ macro_rules! print_for_node_id {
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Simple telemetry feed")]
 pub(crate) struct TelemetryOptions {
-	/// Web-Socket URL of a telemetry backend
+	/// SS58-formated validator's address
+	pub validator: AccountId32,
+	/// Web-Socket URLs of a relay chain node.
 	#[clap(name = "ws", long)]
-	pub url: String,
-	/// Network id of the desired node to receive only events related to it
-	#[clap(name = "id", long)]
-	pub network_id: String,
+	pub ws: String,
+	/// Web-Socket URL of a telemetry backend
+	#[clap(name = "feed", long)]
+	pub feed: String,
 	#[clap(flatten)]
 	pub verbose: init::VerbosityOptions,
+	#[clap(flatten)]
+	pub retry: utils::RetryOptions,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WhoisError {
+	#[error("Validator's next keys not found")]
+	NoNextKeys,
+	#[error("Can't connect to relay chain")]
+	SubxtError(SubxtWrapperError),
+	#[error("Can't connect to telemetry feed")]
+	TelemetryError(color_eyre::Report),
 }
 
 pub(crate) struct Telemetry {
@@ -60,20 +78,32 @@ impl Telemetry {
 	pub(crate) async fn run(
 		self,
 		shutdown_tx: broadcast::Sender<()>,
-	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let mut futures = self.subscription.run(self.opts.url.clone(), shutdown_tx).await?;
-		futures.push(tokio::spawn(Self::watch(self.update_channel, self.opts.network_id)));
+	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
+		let mut executor = RequestExecutor::new(self.opts.retry.clone());
+		let session_keys = match executor.get_session_next_keys(&self.opts.ws, self.opts.validator.clone()).await {
+			Ok(Some(v)) => v,
+			Err(e) => return Err(WhoisError::SubxtError(e)),
+			_ => return Err(WhoisError::NoNextKeys),
+		};
+		let authority_key = get_authority_key(session_keys);
+		println!("Looking for a validator {} with authority key {}.\n", self.opts.validator, authority_key);
+
+		let mut futures = match self.subscription.run(self.opts.feed.clone(), shutdown_tx).await {
+			Ok(v) => v,
+			Err(e) => return Err(WhoisError::TelemetryError(e)),
+		};
+		futures.push(tokio::spawn(Self::watch(self.update_channel, authority_key)));
 
 		Ok(futures)
 	}
 
-	async fn watch(update: Receiver<TelemetryEvent>, network_id: String) {
+	async fn watch(update: Receiver<TelemetryEvent>, authority_key: AccountId32) {
 		let mut node_id: Option<FeedNodeId> = None;
 
 		while let Ok(TelemetryEvent::NewMessage(message)) = update.recv().await {
 			match message {
 				TelemetryFeed::AddedNode(v) => {
-					save_node_id(&v, network_id.clone(), &mut node_id);
+					save_node_id(&v, authority_key.clone(), &mut node_id);
 					print_for_node_id!(node_id, v);
 				},
 				TelemetryFeed::RemovedNode(v) => print_for_node_id!(node_id, v),
@@ -90,16 +120,25 @@ impl Telemetry {
 	}
 }
 
-fn save_node_id(node: &AddedNode, network_id: String, holder: &mut Option<FeedNodeId>) {
-	let node_network_id = node.details.network_id.clone();
-	if node_network_id == Some(network_id) {
-		*holder = Some(node.node_id);
+fn save_node_id(node: &AddedNode, authority_key: AccountId32, holder: &mut Option<FeedNodeId>) {
+	if node.details.validator.is_none() {
+		return
 	}
+
+	if let Ok(node_authority_key) = AccountId32::from_str(&node.details.validator.clone().unwrap()) {
+		if node_authority_key == authority_key {
+			*holder = Some(node.node_id);
+			println!("Validator's node found, subscribed to its events.\n");
+		}
+	};
+}
+
+fn get_authority_key(keys: SessionKeys) -> AccountId32 {
+	AccountId32::from(keys.grandpa.0 .0)
 }
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	color_eyre::install()?;
 	let opts = TelemetryOptions::parse();
 	init::init_cli(&opts.verbose)?;
 

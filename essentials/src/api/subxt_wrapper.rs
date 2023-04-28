@@ -25,21 +25,14 @@ pub use crate::metadata::polkadot::{
 	},
 };
 use crate::{
-	types::{AccountId32, Timestamp, H256},
+	types::{AccountId32, SessionKeys, SubxtCall, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
 use codec::Decode;
 use log::error;
-use thiserror::Error;
-
-#[cfg(feature = "rococo")]
-pub use subxt_runtime_types::rococo_runtime::RuntimeCall as SubxtCall;
-
-#[cfg(feature = "polkadot")]
-pub use subxt_runtime_types::polkadot_runtime::RuntimeCall as SubxtCall;
-
 use std::{collections::hash_map::HashMap, fmt::Debug};
 use subxt::{OnlineClient, PolkadotConfig};
+use thiserror::Error;
 
 /// Subxt based APIs for fetching via RPC and processing of extrinsics.
 pub enum RequestType {
@@ -65,6 +58,8 @@ pub enum RequestType {
 	GetSessionInfo(u32),
 	/// Get information about validators account keys in some session.
 	GetSessionAccountKeys(u32),
+	/// Get information about validator's next session keys.
+	GetSessionNextKeys(AccountId32),
 	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
 	GetInboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
 	/// Get data from a specific inbound HRMP channel
@@ -111,6 +106,9 @@ impl Debug for RequestType {
 			},
 			RequestType::GetSessionAccountKeys(id) => {
 				format!("get session account keys: {:?}", id)
+			},
+			RequestType::GetSessionNextKeys(account) => {
+				format!("get next session account keys: {:?}", account)
 			},
 			RequestType::GetInboundHRMPChannels(h, para_id) => {
 				format!("get inbound channels: {:?}; para id: {}", h, para_id)
@@ -159,6 +157,8 @@ pub enum Response {
 	SessionInfo(Option<polkadot_rt_primitives::v2::SessionInfo>),
 	/// Session keys
 	SessionAccountKeys(Option<Vec<AccountId32>>),
+	/// Session next keys for a validator
+	SessionNextKeys(Option<SessionKeys>),
 	/// HRMP channels for some parachain (e.g. who are sending messages to us)
 	HRMPChannels(BTreeMap<u32, SubxtHrmpChannel>),
 	/// HRMP content for a specific channel
@@ -226,6 +226,7 @@ impl RequestExecutor {
 				RequestType::GetSessionInfo(session_index) => subxt_get_session_info(&api, session_index).await,
 				RequestType::GetSessionAccountKeys(session_index) =>
 					subxt_get_session_account_keys(&api, session_index).await,
+				RequestType::GetSessionNextKeys(ref account) => subxt_get_session_next_keys(&api, account).await,
 				RequestType::GetInboundHRMPChannels(hash, para_id) =>
 					subxt_get_inbound_hrmp_channels(&api, hash, para_id).await,
 				RequestType::GetOutboundHRMPChannels(hash, para_id) =>
@@ -345,6 +346,14 @@ impl RequestExecutor {
 		session_index: u32,
 	) -> std::result::Result<Option<Vec<AccountId32>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetSessionAccountKeys, SessionAccountKeys, url, session_index)
+	}
+
+	pub async fn get_session_next_keys(
+		&mut self,
+		url: &str,
+		account: AccountId32,
+	) -> std::result::Result<Option<SessionKeys>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetSessionNextKeys, SessionNextKeys, url, account)
 	}
 
 	pub async fn get_inbound_hrmp_channels(
@@ -483,6 +492,12 @@ async fn subxt_get_session_account_keys(api: &OnlineClient<PolkadotConfig>, sess
 	let addr = polkadot::storage().para_session_info().account_keys(session_index);
 	let session_keys = api.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionAccountKeys(session_keys))
+}
+
+async fn subxt_get_session_next_keys(api: &OnlineClient<PolkadotConfig>, account: &AccountId32) -> Result {
+	let addr = polkadot::storage().session().next_keys(account);
+	let next_keys = api.storage().at_latest().await?.fetch(&addr).await?;
+	Ok(Response::SessionNextKeys(next_keys))
 }
 
 /// A wrapper over subxt HRMP channel configuration
