@@ -1,6 +1,6 @@
 # polkadot-whois
 
-Tracking of validators using a substrate telemetry data. The data can be queried by validator's `AccountId` or `(session_index, validator_index)`.
+Tracking of validators using on-chain and substrate telemetry data. The data can be queried by validator's `AccountId` or `(session_index, validator_index)`.
 
 Usage:
 
