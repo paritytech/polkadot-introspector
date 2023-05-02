@@ -1862,6 +1862,7 @@ dependencies = [
  "log",
  "polkadot-introspector-essentials",
  "polkadot-introspector-priority-channel",
+ "thiserror",
  "tokio",
 ]
 

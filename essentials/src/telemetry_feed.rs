@@ -15,10 +15,25 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use crate::types::{BlockNumber, Timestamp, H256};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use crate::types::{BlockNumber, Timestamp, H256};
+macro_rules! display_or {
+	($option:expr, $none:expr) => {
+		if let Some(value) = &$option {
+			format!("{}", value)
+		} else {
+			$none.to_string()
+		}
+	};
+}
+
+macro_rules! join {
+	($iter:expr) => {
+		$iter.iter().map(|x| format!("{}", x)).collect::<Vec<String>>().join(", ")
+	};
+}
 
 pub type FeedNodeId = usize;
 
@@ -36,6 +51,25 @@ pub struct BlockDetails {
 	pub propagation_time: Option<u64>,
 }
 
+impl std::fmt::Display for BlockDetails {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Block
+block_hash: {}
+block_height: {}
+block_time: {}
+block_timestamp: {}
+propagation_time: {}",
+			self.block.hash,
+			self.block.height,
+			self.block_time,
+			self.block_timestamp,
+			display_or!(self.propagation_time, "none"),
+		)
+	}
+}
+
 #[derive(Debug, PartialEq)]
 pub struct NodeDetails {
 	pub name: String,
@@ -45,6 +79,30 @@ pub struct NodeDetails {
 	pub network_id: Option<String>,
 	pub ip: Option<String>,
 	pub sysinfo: Option<NodeSysInfo>,
+}
+
+impl std::fmt::Display for NodeDetails {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Details
+name: {}
+implementation: {}
+version: {}
+validator: {}
+network_id: {}
+ip: {}
+
+{}",
+			self.name,
+			self.implementation,
+			self.version,
+			display_or!(self.validator, "none"),
+			display_or!(self.network_id, "none"),
+			display_or!(self.ip, "none"),
+			display_or!(self.sysinfo, "SysInfo\nnone")
+		)
+	}
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -57,10 +115,43 @@ pub struct NodeSysInfo {
 	pub is_virtual_machine: Option<bool>,
 }
 
+impl std::fmt::Display for NodeSysInfo {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"SysInfo
+cpu: {}
+memory: {}
+core_count: {}
+linux_kernel: {}
+linux_distro: {}
+is_virtual_machine: {}",
+			display_or!(self.cpu, "none"),
+			display_or!(self.memory, "none"),
+			display_or!(self.core_count, "none"),
+			display_or!(self.linux_kernel, "none"),
+			display_or!(self.linux_distro, "none"),
+			display_or!(self.is_virtual_machine, "none"),
+		)
+	}
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct NodeStats {
 	pub peers: u64,
 	pub txcount: u64,
+}
+
+impl std::fmt::Display for NodeStats {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Stats
+peers: {}
+txcount: {}",
+			self.peers, self.txcount
+		)
+	}
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -70,9 +161,33 @@ pub struct NodeLocation {
 	city: String,
 }
 
+impl std::fmt::Display for NodeLocation {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Location
+city: {}
+lat: {}
+long: {}",
+			self.city, self.lat, self.long
+		)
+	}
+}
+
 #[derive(Debug, Default, PartialEq)]
 pub struct NodeIO {
 	pub used_state_cache_size: Vec<f32>,
+}
+
+impl std::fmt::Display for NodeIO {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"IO
+used_state_cache_size: {}",
+			join!(self.used_state_cache_size)
+		)
+	}
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -82,12 +197,44 @@ pub struct NodeHardware {
 	pub chart_stamps: Vec<f64>,
 }
 
+impl std::fmt::Display for NodeHardware {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Hardware
+upload: {}
+download: {}
+chart_stamps: {}",
+			join!(self.upload),
+			join!(self.download),
+			join!(self.chart_stamps)
+		)
+	}
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct NodeHwBench {
 	pub cpu_hashrate_score: u64,
 	pub memory_memcpy_score: u64,
 	pub disk_sequential_write_score: Option<u64>,
 	pub disk_random_write_score: Option<u64>,
+}
+
+impl std::fmt::Display for NodeHwBench {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"NodeHwBench
+cpu_hashrate_score: {}
+memory_memcpy_score: {}
+disk_sequential_write_score: {}
+disk_random_write_score: {}",
+			self.cpu_hashrate_score,
+			self.memory_memcpy_score,
+			display_or!(self.disk_sequential_write_score, "none"),
+			display_or!(self.disk_random_write_score, "none"),
+		)
+	}
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
@@ -141,6 +288,24 @@ pub struct AddedNode {
 	location: Option<NodeLocation>,
 	startup_time: Option<Timestamp>,
 	hwbench: Option<NodeHwBench>,
+}
+
+impl std::fmt::Display for AddedNode {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(
+			f,
+			"node_id: {}\nstartup_time: {}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+			self.node_id,
+			display_or!(self.startup_time, "none"),
+			self.details,
+			self.block_details,
+			display_or!(self.location, "Location:\nnone"),
+			display_or!(self.hwbench, "HwBench:\nnone"),
+			self.stats,
+			self.io,
+			self.hardware
+		)
+	}
 }
 
 #[derive(Debug, PartialEq)]

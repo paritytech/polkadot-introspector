@@ -182,7 +182,7 @@ async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<
 		return Ok(list[0].genesis_hash)
 	}
 
-	println!("Found {} chains.\n", list.len());
+	println!("Connected to telemetry backend, {} chains found.\n", list.len());
 
 	let chain_index: usize;
 	let indexed_list: Vec<(usize, &AddedChain)> = list.iter().enumerate().map(|(i, c)| (i + 1, c)).collect();

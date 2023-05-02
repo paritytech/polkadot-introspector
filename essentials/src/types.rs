@@ -15,9 +15,17 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use crate::metadata::polkadot::runtime_types as subxt_runtime_types;
 use subxt::utils;
+
+#[cfg(feature = "polkadot")]
+use subxt_runtime_types::polkadot_runtime as runtime;
+#[cfg(feature = "rococo")]
+use subxt_runtime_types::rococo_runtime as runtime;
 
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;
 pub type AccountId32 = utils::AccountId32;
 pub type Timestamp = u64;
+pub type SessionKeys = runtime::SessionKeys;
+pub type SubxtCall = runtime::RuntimeCall;
