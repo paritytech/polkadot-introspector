@@ -118,7 +118,7 @@ fn desired_node_id(node: &AddedNode, authority_key: AccountId32) -> bool {
 		}
 	};
 
-	return false
+	false
 }
 
 fn get_authority_key(keys: SessionKeys) -> AccountId32 {
