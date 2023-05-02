@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -30,9 +30,9 @@ use tokio::sync::broadcast;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Simple telemetry feed")]
-pub(crate) struct TelemetryOptions {
-	/// SS58-formated validator's address
-	pub validator: AccountId32,
+struct TelemetryOptions {
+	#[clap(subcommand)]
+	command: WhoisCommand,
 	/// Web-Socket URLs of a relay chain node.
 	#[clap(long)]
 	pub ws: String,
@@ -45,44 +45,77 @@ pub(crate) struct TelemetryOptions {
 	pub retry: utils::RetryOptions,
 }
 
+#[derive(Clone, Debug, Subcommand)]
+enum WhoisCommand {
+	Account(AccountOptions),
+	Session(SessionOptions),
+}
+
+#[derive(Clone, Debug, Args)]
+struct AccountOptions {
+	/// SS58-formated validator's address
+	pub validator: AccountId32,
+}
+
+#[derive(Clone, Debug, Args)]
+struct SessionOptions {
+	pub session_index: u32,
+	pub validator_index: usize,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum WhoisError {
 	#[error("Validator's next keys not found")]
 	NoNextKeys,
+	#[error("Keys for the session with given index not found")]
+	NoSessionKeys,
+	#[error("Validator with given index not found")]
+	NoValidator,
 	#[error("Can't connect to relay chain")]
 	SubxtError(SubxtWrapperError),
 	#[error("Can't connect to telemetry feed")]
 	TelemetryError(color_eyre::Report),
 }
 
-pub(crate) struct Telemetry {
+struct Telemetry {
 	opts: TelemetryOptions,
 	subscription: TelemetrySubscription,
 	update_channel: Receiver<TelemetryEvent>,
 }
 
 impl Telemetry {
-	pub(crate) fn new(opts: TelemetryOptions) -> color_eyre::Result<Self> {
+	fn new(opts: TelemetryOptions) -> color_eyre::Result<Self> {
 		let (update_tx, update_rx) = priority_channel(MAX_MSG_QUEUE_SIZE);
 		Ok(Self { opts, subscription: TelemetrySubscription::new(vec![update_tx]), update_channel: update_rx })
 	}
 
-	pub(crate) async fn run(
+	async fn run(
 		self,
 		shutdown_tx: broadcast::Sender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
 		let mut executor = RequestExecutor::new(self.opts.retry.clone());
-		let session_keys = match executor.get_session_next_keys(&self.opts.ws, self.opts.validator.clone()).await {
+		let validator = match self.opts.command {
+			WhoisCommand::Account(v) => v.validator,
+			WhoisCommand::Session(v) => match executor.get_session_account_keys(&self.opts.ws, v.session_index).await {
+				Ok(Some(validators)) => match validators.get(v.validator_index) {
+					Some(v) => v.clone(),
+					None => return Err(WhoisError::NoValidator),
+				},
+				Err(e) => return Err(WhoisError::SubxtError(e)),
+				_ => return Err(WhoisError::NoSessionKeys),
+			},
+		};
+		let next_keys = match executor.get_session_next_keys(&self.opts.ws, validator.clone()).await {
 			Ok(Some(v)) => v,
 			Err(e) => return Err(WhoisError::SubxtError(e)),
 			_ => return Err(WhoisError::NoNextKeys),
 		};
-		let authority_key = get_authority_key(session_keys);
+		let authority_key = get_authority_key(next_keys);
 		let mut futures = match self.subscription.run(self.opts.feed.clone(), shutdown_tx).await {
 			Ok(v) => v,
 			Err(e) => return Err(WhoisError::TelemetryError(e)),
 		};
-		futures.push(tokio::spawn(Self::watch(self.update_channel, authority_key, self.opts.validator.clone())));
+		futures.push(tokio::spawn(Self::watch(self.update_channel, authority_key, validator.clone())));
 
 		Ok(futures)
 	}
