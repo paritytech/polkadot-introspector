@@ -2,35 +2,28 @@
 
 **IMPORTANT NOTE: WORK IN PROGRESS!** Some things might not always work as expected.
 
-The introspector is a collection of tools for monitoring and introspection of the Polkadot or other substrate based blockchains
-via a set of tools (for example, [subxt](https://github.com/paritytech/subxt/)).
+The Polkadot Introspector is a collection of tools for monitoring and introspection of Polkadot or other substrate-based blockchains.
 
-Depending on the tool, the data source and output might differ. For examples of how this data can be visualised in Grafana, please see the [Grafana dashboards](grafana/README.md) section.
-
-## Building
-
-It is mandatory to specify which `Runtime` the build will target. Currently `Polkadot Introspector` can only build for a single runtime version by enabling one of the features:
-
-- `polkadot` (supports both Kusama and Polkadot)
-- `rococo` (supports Rococo and Versi test networks)
-
-`cargo build --profile=release --features=polkadot`
-
-These features will select which metadata to use for decoding block data.
-
-## Updating or supporting a new `Runtime`
-
-Sometimes the `Runtime` version deployed on a network might be newer and incompatible to the metadata
-bundled in the repo. We can use `subxt` CLI to bring the `Polkadot Introspector` metadata up to date.
-
-Example for Versi:
-`cargo run --release -p subxt-cli -- metadata --format bytes --url wss://versi-rpc-node-0.parity-versi.parity.io:443 > new_metadata.scale`
-
-Use the output file to replace the older in the `assets` folder then rebuild.
+The tools utilize data sources such as [subxt](https://github.com/paritytech/subxt/) or [substrate-telemetry](https://github.com/paritytech/substrate-telemetry/) to generate output. Depending on the tool used, the data source and output may differ. For examples of how this data can be visualized in Grafana, please see the section about [Grafana dashboards](grafana/README.md).
 
 ## Tools available
 
 - [polkadot-parachain-tracer](parachain-tracer/README.md) - Parachain progress monitoring and debugging utility
-- [polkadot-block-time](block-time/README.md) - display the current block time in the substrate based network
+- [polkadot-block-time](block-time/README.md) - display the current block time in the Substrate-based network
 - [polkadot-kvdb](kvdb/README.md) - inspect key-value database used by parachains or the relay chain
-- [polkadot-whois](whois/README.md) - tracking of validators using a substrate telemetry data.
+- [polkadot-whois](whois/README.md) - tracking of validators using on-chain and substrate telemetry data.
+
+## Building
+
+It is mandatory to specify which `Runtime` the build will target. Currently, the tools can only build for a single runtime version by enabling one of the following features:
+
+- `polkadot` - for Kusama and Polkadot production networks
+- `rococo` - for Rococo and Versi test networks
+
+These features will select which metadata to use for decoding block data. To enable a specific feature, use the following command:
+
+```
+cargo build --release --no-default-features --features=polkadot
+```
+
+See also: [Updating or supporting a new `Runtime`](essentials/README.md#updating-or-supporting-a-new-runtime)
