@@ -205,14 +205,18 @@ impl ParachainTracer {
 					Ok(update_event) => match update_event {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
-								process_tracker_update(
+								if let Err(e) = process_tracker_update(
 									&mut tracker,
 									*relay_fork,
 									new_head.relay_parent_number,
 									&metrics,
 									is_cli,
 								)
-								.await;
+								.await
+								{
+									error!("error occurred when processing block {}: {:?}", relay_fork, e);
+									std::process::exit(1);
+								};
 							},
 						CollectorUpdateEvent::NewSession(idx) => {
 							tracker.new_session(idx).await;
@@ -312,7 +316,7 @@ async fn process_tracker_update(
 	relay_parent_number: u32,
 	metrics: &Metrics,
 	is_cli: bool,
-) {
+) -> color_eyre::Result<()> {
 	match tracker.inject_block(relay_hash, relay_parent_number).await {
 		Ok(_) => {
 			if let Some(progress) = tracker.progress(metrics) {
@@ -322,10 +326,10 @@ async fn process_tracker_update(
 			}
 			tracker.maybe_reset_state();
 		},
-		Err(e) => {
-			error!("error occurred when processing block {}: {:?}", relay_hash, e)
-		},
-	}
+		Err(e) => return Err(e),
+	};
+
+	Ok(())
 }
 
 fn evict_stalled(
