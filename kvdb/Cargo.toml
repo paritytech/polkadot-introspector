@@ -21,7 +21,7 @@ polkadot-introspector-essentials = { path = "../essentials" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
 rand = "0.8.5"
 rocksdb = "0.20.1"
-serde = "1.0.160"
+serde = "1.0.162"
 serde_bytes = "0.11.9"
 serde_derive = "1.0.138"
 serde_json = "1.0.96"
