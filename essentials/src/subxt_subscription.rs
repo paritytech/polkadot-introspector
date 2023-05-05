@@ -178,8 +178,9 @@ async fn subxt_client(
 						return Some(api)
 					},
 					Err(err) => {
-						error!("[{}] Disconnected ({:?})", url, err);
+						error!("[subxt_client, {}] Disconnected, will attempt to retry ({:?})", url, err);
 						if (retry.sleep().await).is_err() {
+							error!("[subxt_client, {}] The attempt limit has been reached", url);
 							return None
 						}
 					},

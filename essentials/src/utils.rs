@@ -16,7 +16,7 @@
 //
 
 use clap::Parser;
-use log::info;
+use log::warn;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -65,7 +65,7 @@ impl Retry {
 		}
 
 		let ms = self.delay * (self.count + 1);
-		info!("Retrying in {}ms...", ms);
+		warn!("{} attempt(s), retrying in {}ms...", self.count, ms);
 		sleep(Duration::from_millis(ms.into())).await;
 
 		Ok(())

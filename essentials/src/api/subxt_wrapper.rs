@@ -241,8 +241,12 @@ impl RequestExecutor {
 				Err(err) => match &err {
 					SubxtWrapperError::SubxtError(subxt::Error::Io(io_err)) => {
 						connection_pool.remove(url);
-						error!("[{}] Subxt IO error: {:?}", url, io_err);
+						error!(
+							"[RequestExecutor::execute_request, {}] Subxt IO error, will attempt to retry ({:?})",
+							url, io_err
+						);
 						if (retry.sleep().await).is_err() {
+							error!("[RequestExecutor::execute_request, {}] The attempt limit has been reached", url);
 							return Err(SubxtWrapperError::Timeout)
 						}
 					},
@@ -400,8 +404,9 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<OnlineClient<P
 		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {
 			Ok(api) => return Some(api),
 			Err(err) => {
-				error!("[{}] Client error: {:?}", url, err);
+				error!("[new_client_fn, {}] Client error, will attempt to retry ({:?})", url, err);
 				if (retry.sleep().await).is_err() {
+					error!("[new_client_fn, {}] The attempt limit has been reached", url);
 					return None
 				}
 			},
