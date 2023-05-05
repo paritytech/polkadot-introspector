@@ -1,5 +1,4 @@
 [workspace]
-
 members = [
     "block-time",
     "essentials",
@@ -12,9 +11,9 @@ members = [
 ]
 
 [workspace.package]
+version = "0.2.2"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2021"
-version = "0.1.0"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paritytech/polkadot-introspector"
