@@ -1,11 +1,12 @@
 [package]
 name = "polkadot-introspector-priority-channel"
-version = "0.2.1"
-authors = ["Parity Technologies <admin@parity.io>"]
-edition = "2021"
 description = "Channels with message prioritization"
-repository = "https://github.com/paritytech/polkadot-introspector.git"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
 
 [dependencies]
 async-channel = "1.8.0"

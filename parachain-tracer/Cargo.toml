@@ -1,7 +1,11 @@
 [package]
 name = "polkadot-parachain-tracer"
-version = "0.2.1"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
 
 [dependencies]
 async-trait = "0.1.66"
