@@ -16,7 +16,7 @@
 
 use crate::{
 	chain_events::SubxtDisputeResult,
-	metadata::polkadot::runtime_types::polkadot_primitives::v2 as polkadot_rt_primitives, types::H256,
+	metadata::polkadot::runtime_types::polkadot_primitives::v4 as polkadot_rt_primitives, types::H256,
 };
 use codec::{Decode, Encode};
 use serde::{

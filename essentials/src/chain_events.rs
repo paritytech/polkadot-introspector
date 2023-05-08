@@ -17,8 +17,8 @@
 
 use crate::metadata::polkadot::{
 	para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
-	paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut},
-	runtime_types::polkadot_primitives::v2::CandidateDescriptor,
+	paras_disputes::events::{DisputeConcluded, DisputeInitiated},
+	runtime_types::polkadot_primitives::v4::CandidateDescriptor,
 };
 use codec::{Decode, Encode};
 use color_eyre::{eyre::eyre, Result};
@@ -105,12 +105,6 @@ pub async fn decode_chain_event(
 		ChainEvent::DisputeConcluded(
 			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
 			outcome,
-		)
-	} else if is_specific_event::<DisputeTimedOut>(&event) {
-		let decoded = decode_to_specific_event::<DisputeTimedOut>(&event)?;
-		ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
-			SubxtDisputeResult::TimedOut,
 		)
 	} else if is_specific_event::<CandidateBacked>(&event) {
 		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
