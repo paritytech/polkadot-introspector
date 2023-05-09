@@ -20,7 +20,7 @@ pub use crate::metadata::polkadot::{
 	runtime_types::{
 		polkadot_core_primitives::CandidateHash,
 		polkadot_primitives as polkadot_rt_primitives,
-		polkadot_primitives::v4::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
+		polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
 		polkadot_runtime_parachains::{configuration::HostConfiguration, hrmp::HrmpChannel, scheduler::CoreAssignment},
 	},
 };
@@ -126,7 +126,7 @@ impl Debug for RequestType {
 }
 
 /// The `InherentData` constructed with the subxt API.
-pub type InherentData = polkadot_rt_primitives::v4::InherentData<
+pub type InherentData = polkadot_rt_primitives::v2::InherentData<
 	subxt_runtime_types::sp_runtime::generic::header::Header<
 		::core::primitive::u32,
 		subxt_runtime_types::sp_runtime::traits::BlakeTwo256,
@@ -154,7 +154,7 @@ pub enum Response {
 	/// Returns a session index
 	SessionIndex(u32),
 	/// Session info
-	SessionInfo(Option<polkadot_rt_primitives::v4::SessionInfo>),
+	SessionInfo(Option<polkadot_rt_primitives::v2::SessionInfo>),
 	/// Session keys
 	SessionAccountKeys(Option<Vec<AccountId32>>),
 	/// Session next keys for a validator
@@ -328,7 +328,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		session_index: u32,
-	) -> std::result::Result<Option<polkadot_rt_primitives::v4::SessionInfo>, SubxtWrapperError> {
+	) -> std::result::Result<Option<polkadot_rt_primitives::v2::SessionInfo>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetSessionInfo, SessionInfo, url, session_index)
 	}
 

@@ -29,7 +29,7 @@ use polkadot_introspector_essentials::{
 	},
 	chain_events::SubxtDisputeResult,
 	collector::{CollectorPrefixType, CollectorStorageApi, DisputeInfo},
-	metadata::polkadot::runtime_types::polkadot_primitives::v4::{DisputeStatement, DisputeStatementSet},
+	metadata::polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
 	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
