@@ -96,52 +96,69 @@ impl SubxtSubscription {
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
 	) {
-		if let Some(api) = subxt_client(url.clone(), shutdown_tx.subscribe(), &retry).await {
-			let mut shutdown_rx = shutdown_tx.subscribe();
-			let (mut sub, sub_id) = subxt_chain_head_subscription(&api).await;
+		let api = match subxt_client(url.clone(), shutdown_tx.subscribe(), &retry).await {
+			Some(v) => v,
+			None => {
+				error!("Cannot connect to {url}");
+				std::process::exit(1);
+			},
+		};
+		let mut shutdown_rx = shutdown_tx.subscribe();
+		let (mut sub, sub_id) = subxt_chain_head_subscription(&api).await;
 
-			loop {
-				tokio::select! {
-					Some(Ok(event)) = sub.next() => {
-						match event {
-							// Drain the initialized event
-							FollowEvent::Initialized(init) => {
-								subxt_unpin_hash(&api, sub_id.clone(), init.finalized_block_hash).await;
-							},
-							FollowEvent::NewBlock(_) => continue,
-							FollowEvent::BestBlockChanged(best_block) => {
-								info!("[{}] Best block imported ({:?})", url, best_block.best_block_hash);
-								if let Err(e) = update_channel.send(SubxtEvent::NewBestHead(best_block.best_block_hash)).await {
+		loop {
+			tokio::select! {
+				message = sub.next() => {
+					let event = match message {
+						Some(Ok(v)) => v,
+						Some(Err(e)) => {
+							error!("Subscription to {} failed: {:?}", url, e);
+							std::process::exit(1)
+						},
+						None => {
+							error!("Subscription to {} failed, received None instead of an event", url);
+							std::process::exit(1);
+						}
+					};
+
+					match event {
+						// Drain the initialized event
+						FollowEvent::Initialized(init) => {
+							subxt_unpin_hash(&api, sub_id.clone(), init.finalized_block_hash).await;
+						},
+						FollowEvent::NewBlock(_) => continue,
+						FollowEvent::BestBlockChanged(best_block) => {
+							info!("[{}] Best block imported ({:?})", url, best_block.best_block_hash);
+							if let Err(e) = update_channel.send(SubxtEvent::NewBestHead(best_block.best_block_hash)).await {
+								return on_error(e);
+							}
+						},
+						FollowEvent::Finalized(finalized) => {
+							for hash in finalized.finalized_block_hashes.iter() {
+								info!("[{}] Finalized block imported ({:?})", url, hash);
+								if let Err(e) = update_channel.send(SubxtEvent::NewFinalizedHead(*hash)).await {
 									return on_error(e);
 								}
-							},
-							FollowEvent::Finalized(finalized) => {
-								for hash in finalized.finalized_block_hashes.iter() {
-									info!("[{}] Finalized block imported ({:?})", url, hash);
-									if let Err(e) = update_channel.send(SubxtEvent::NewFinalizedHead(*hash)).await {
-										return on_error(e);
-									}
-								}
+							}
 
-								for hash in finalized
-									.finalized_block_hashes
-									.iter()
-									.chain(finalized.pruned_block_hashes.iter())
-								{
-									subxt_unpin_hash(&api, sub_id.clone(), *hash).await;
-								}
-							},
-							FollowEvent::Stop => {
-								on_subscription_stop();
-								break;
-							},
-						}
-					},
-					_ = shutdown_rx.recv() => {
-						return on_ctrl_c();
+							for hash in finalized
+								.finalized_block_hashes
+								.iter()
+								.chain(finalized.pruned_block_hashes.iter())
+							{
+								subxt_unpin_hash(&api, sub_id.clone(), *hash).await;
+							}
+						},
+						FollowEvent::Stop => {
+							on_subscription_stop();
+							return;
+						},
 					}
-
+				},
+				_ = shutdown_rx.recv() => {
+					return on_ctrl_c();
 				}
+
 			}
 		}
 	}
@@ -206,7 +223,9 @@ async fn subxt_chain_head_subscription(
 }
 
 async fn subxt_unpin_hash(api: &OnlineClient<PolkadotConfig>, sub_id: String, hash: H256) {
-	let _ = api.rpc().chainhead_unstable_unpin(sub_id.clone(), hash).await;
+	if let Err(err) = api.rpc().chainhead_unstable_unpin(sub_id.clone(), hash).await {
+		error!("Cannot unpin the hash {}, {:?}", hash, err)
+	}
 }
 
 fn on_error(e: SendError) {
