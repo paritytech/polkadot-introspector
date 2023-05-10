@@ -23,7 +23,7 @@ use log::{debug, error};
 use polkadot_introspector_essentials::init;
 use primitives::TraceObject;
 use serde::Serialize;
-use std::{borrow::Borrow, str::FromStr};
+use std::str::FromStr;
 
 mod api;
 mod primitives;
@@ -108,8 +108,8 @@ pub(crate) struct JaegerPrometheusOptions {
 	check_interval: f32,
 }
 
-impl From<&JaegerOptions> for api::JaegerApiOptions {
-	fn from(cli_opts: &JaegerOptions) -> Self {
+impl From<JaegerOptions> for api::JaegerApiOptions {
+	fn from(cli_opts: JaegerOptions) -> Self {
 		api::JaegerApiOptions::builder()
 			.limit(cli_opts.limit)
 			.service(cli_opts.service.clone())
@@ -127,7 +127,7 @@ pub(crate) struct JaegerTool {
 impl JaegerTool {
 	/// Returns a new jaeger tool
 	pub fn new(opts: JaegerOptions) -> color_eyre::Result<Self> {
-		let api = JaegerApi::new(opts.url.as_str(), &opts.borrow().into());
+		let api = JaegerApi::new(opts.url.as_str(), &opts.clone().into());
 		debug!("created Jaeger API client");
 		Ok(Self { opts, api })
 	}
