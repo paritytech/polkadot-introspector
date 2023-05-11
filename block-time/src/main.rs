@@ -24,10 +24,10 @@ use crossterm::{
 use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
 	api::ApiService,
+	chain_head_subscription::{ChainHeadEvent, ChainHeadSubscription},
 	consumer::{EventConsumerInit, EventStream},
 	init,
 	storage::RecordsStorageConfig,
-	subxt_subscription::{SubxtEvent, SubxtSubscription},
 	types::H256,
 	utils,
 };
@@ -94,13 +94,13 @@ struct BlockTimeMonitor {
 	opts: BlockTimeOptions,
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
-	consumer_config: EventConsumerInit<SubxtEvent>,
+	consumer_config: EventConsumerInit<ChainHeadEvent>,
 	api_service: ApiService<H256>,
 	active_endpoints: Arc<AtomicUsize>,
 }
 
 impl BlockTimeMonitor {
-	pub fn new(opts: BlockTimeOptions, consumer_config: EventConsumerInit<SubxtEvent>) -> color_eyre::Result<Self> {
+	pub fn new(opts: BlockTimeOptions, consumer_config: EventConsumerInit<ChainHeadEvent>) -> color_eyre::Result<Self> {
 		let endpoints = opts.nodes.clone();
 		let mut values = Vec::new();
 		for _ in 0..endpoints.len() {
@@ -143,7 +143,7 @@ impl BlockTimeMonitor {
 	}
 
 	pub async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let consumer_channels: Vec<Receiver<SubxtEvent>> = self.consumer_config.into();
+		let consumer_channels: Vec<Receiver<ChainHeadEvent>> = self.consumer_config.into();
 
 		let mut futures = self
 			.endpoints
@@ -245,7 +245,7 @@ impl BlockTimeMonitor {
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
 		// TODO: make this a struct.
-		consumer_config: Receiver<SubxtEvent>,
+		consumer_config: Receiver<ChainHeadEvent>,
 		api_service: ApiService<H256>,
 		active_endpoints: Arc<AtomicUsize>,
 	) {
@@ -267,8 +267,8 @@ impl BlockTimeMonitor {
 			if let Ok(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
 				let hash = match event {
-					SubxtEvent::NewBestHead(hash) => Some(hash),
-					SubxtEvent::NewFinalizedHead(hash) => Some(hash),
+					ChainHeadEvent::NewBestHead(hash) => Some(hash),
+					ChainHeadEvent::NewFinalizedHead(hash) => Some(hash),
 				};
 				if let Some(hash) = hash {
 					let ts = executor.get_block_timestamp(url, hash).await;
@@ -369,7 +369,7 @@ fn register_metric(registry: &Registry) -> HistogramVec {
 async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
-	let mut core = SubxtSubscription::new(opts.nodes.clone(), opts.retry.clone());
+	let mut core = ChainHeadSubscription::new(opts.nodes.clone(), opts.retry.clone());
 	let block_time_consumer_init = core.create_consumer();
 	let (shutdown_tx, _) = broadcast::channel(1);
 

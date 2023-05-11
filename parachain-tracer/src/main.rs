@@ -35,11 +35,11 @@ use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::RequestExecutor,
+	chain_head_subscription::{ChainHeadEvent, ChainHeadSubscription},
 	collector,
 	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent},
 	consumer::{EventConsumerInit, EventStream},
 	init,
-	subxt_subscription::{SubxtEvent, SubxtSubscription},
 	types::H256,
 	utils::RetryOptions,
 };
@@ -121,7 +121,7 @@ impl ParachainTracer {
 	pub(crate) async fn run(
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
-		consumer_config: EventConsumerInit<SubxtEvent>,
+		consumer_config: EventConsumerInit<ChainHeadEvent>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -170,7 +170,7 @@ impl ParachainTracer {
 			}
 		}
 
-		let consumer_channels: Vec<Receiver<SubxtEvent>> = consumer_config.into();
+		let consumer_channels: Vec<Receiver<ChainHeadEvent>> = consumer_config.into();
 		let _collector_fut = collector
 			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
 			.await;
@@ -369,7 +369,7 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let mut core = SubxtSubscription::new(vec![opts.node.clone()], opts.retry.clone());
+	let mut core = ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone());
 	let consumer_init = core.create_consumer();
 	let (shutdown_tx, _) = broadcast::channel(1);
 
