@@ -22,7 +22,7 @@ polkadot-introspector-essentials = { path = "../essentials" }
 polkadot-introspector-priority-channel = { path = "../priority-channel" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
 rand = "0.8.5"
-serde = "1.0.162"
+serde = "1.0.163"
 serde_bytes = "0.11.9"
 serde_derive = "1.0.138"
 serde_json = "1.0.96"
