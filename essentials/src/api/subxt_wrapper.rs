@@ -633,8 +633,7 @@ async fn subxt_get_chain_head_subscription(api: &OnlineClient<PolkadotConfig>) -
 }
 
 async fn subxt_unpin_chain_head(api: &OnlineClient<PolkadotConfig>, sub_id: &str, hash: H256) -> Result {
-	let res = api.rpc().chainhead_unstable_unpin(sub_id.to_string(), hash).await?;
-	Ok(Response::UnpinChainHead(res))
+	Ok(Response::UnpinChainHead(api.rpc().chainhead_unstable_unpin(sub_id.to_string(), hash).await?))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::types::ChainBlock<PolkadotConfig>) -> Result {
