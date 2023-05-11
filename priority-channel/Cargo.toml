@@ -15,4 +15,4 @@ rand = "0.8.5"
 thiserror = "1.0.31"
 
 [dev-dependencies]
-tokio = { version = "1.28.0", features = ["macros", "rt"] }
+tokio = { version = "1.28.1", features = ["macros", "rt"] }

@@ -16,4 +16,4 @@ log = "0.4.17"
 polkadot-introspector-essentials = { path = "../essentials" }
 polkadot-introspector-priority-channel = { path = "../priority-channel" }
 thiserror = "1.0.39"
-tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.28.1", features = ["macros", "rt-multi-thread", "signal"] }

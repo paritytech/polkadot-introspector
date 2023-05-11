@@ -31,6 +31,6 @@ strum = { version = "0.24.1", features = ["derive"] }
 subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.28.0" }
 thiserror = "1.0.39"
 time = { version = "0.3.21", features = ["formatting"] }
-tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.28.1", features = ["macros", "rt-multi-thread", "signal"] }
 typed-builder = "0.14.0"
 warp = { version = "0.3.5", features = ["tls"] }
