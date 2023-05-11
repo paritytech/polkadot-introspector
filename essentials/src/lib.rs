@@ -17,13 +17,13 @@
 
 pub mod api;
 pub mod chain_events;
+pub mod chain_head_subscription;
 pub mod collector;
 pub mod constants;
 pub mod consumer;
 pub mod init;
 pub mod metadata;
 pub mod storage;
-pub mod subxt_subscription;
 pub mod telemetry_feed;
 pub mod telemetry_subscription;
 pub mod types;

@@ -22,8 +22,8 @@ use crate::{
 	chain_events::{
 		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 	},
+	chain_head_subscription::ChainHeadEvent,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	subxt_subscription::SubxtEvent,
 	types::{Timestamp, H256},
 	utils::RetryOptions,
 };
@@ -215,7 +215,7 @@ impl Collector {
 	/// Process async channels in the endless loop
 	pub async fn run_with_consumer_channel(
 		mut self,
-		mut consumer_channel: Receiver<SubxtEvent>,
+		mut consumer_channel: Receiver<ChainHeadEvent>,
 	) -> tokio::task::JoinHandle<()> {
 		tokio::spawn(async move {
 			loop {
@@ -242,10 +242,10 @@ impl Collector {
 	}
 
 	/// Collects chain events from new head including block events parsing
-	pub async fn collect_chain_events(&mut self, event: &SubxtEvent) -> color_eyre::Result<Vec<ChainEvent>> {
+	pub async fn collect_chain_events(&mut self, event: &ChainHeadEvent) -> color_eyre::Result<Vec<ChainEvent>> {
 		let new_head_event = match event {
-			SubxtEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
-			SubxtEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
+			ChainHeadEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
+			ChainHeadEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
 		};
 		let mut chain_events = vec![new_head_event];
 
@@ -899,10 +899,10 @@ fn get_unix_time_unwrap() -> Duration {
 	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }
 
-pub fn new_head_hash(event: &SubxtEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
+pub fn new_head_hash(event: &ChainHeadEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
 	match (event, subscribe_mode) {
-		(SubxtEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
-		(SubxtEvent::NewFinalizedHead(hash), CollectorSubscribeMode::Finalized) => Some(hash),
+		(ChainHeadEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
+		(ChainHeadEvent::NewFinalizedHead(hash), CollectorSubscribeMode::Finalized) => Some(hash),
 		_ => None,
 	}
 }

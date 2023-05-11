@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 // Copyright 2022 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
@@ -30,8 +29,14 @@ use crate::{
 };
 use codec::Decode;
 use log::error;
-use std::{collections::hash_map::HashMap, fmt::Debug};
-use subxt::{OnlineClient, PolkadotConfig};
+use std::{
+	collections::{hash_map::HashMap, BTreeMap},
+	fmt::Debug,
+};
+use subxt::{
+	rpc::{types::FollowEvent, Subscription},
+	OnlineClient, PolkadotConfig,
+};
 use thiserror::Error;
 
 /// Subxt based APIs for fetching via RPC and processing of extrinsics.
@@ -68,6 +73,10 @@ pub enum RequestType {
 	GetOutboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
 	/// Get active host configuration
 	GetHostConfiguration(()),
+	/// Get chain head subscription
+	GetChainHeadSubscription(()),
+	/// Unpin hash from chain head subscription
+	UnpinChainHead(String, H256),
 }
 
 // Required after subxt changes that removed Debug trait from the generated structures
@@ -120,6 +129,10 @@ impl Debug for RequestType {
 				format!("get outbount channels: {:?}; para id: {}", h, para_id)
 			},
 			RequestType::GetHostConfiguration(_) => "get host configuration".to_string(),
+			RequestType::GetChainHeadSubscription(_) => "get chain head subscription".to_string(),
+			RequestType::UnpinChainHead(sub_id, hash) => {
+				format!("unpin hash {} from chain hash subscription {}", hash, sub_id)
+			},
 		};
 		write!(f, "Subxt request: {}", description)
 	}
@@ -165,6 +178,10 @@ pub enum Response {
 	HRMPContent(Vec<Vec<u8>>),
 	/// The current host configuration
 	HostConfiguration(HostConfiguration<u32>),
+	/// Chain head subscription
+	ChainHeadSubscription((Subscription<FollowEvent<H256>>, String)),
+	/// Unpin hash from chain head subscription
+	UnpinChainHead(()),
 }
 
 impl Debug for Response {
@@ -234,6 +251,8 @@ impl RequestExecutor {
 				RequestType::GetHRMPData(hash, para_id, sender) =>
 					subxt_get_hrmp_content(&api, hash, para_id, sender).await,
 				RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(&api).await,
+				RequestType::GetChainHeadSubscription(_) => subxt_get_chain_head_subscription(&api).await,
+				RequestType::UnpinChainHead(ref sub_id, hash) => subxt_unpin_chain_head(&api, sub_id, hash).await,
 			};
 
 			match reply {
@@ -389,6 +408,22 @@ impl RequestExecutor {
 		url: &str,
 	) -> std::result::Result<HostConfiguration<u32>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetHostConfiguration, HostConfiguration, url, ())
+	}
+
+	pub async fn get_chain_head_subscription(
+		&mut self,
+		url: &str,
+	) -> std::result::Result<(Subscription<FollowEvent<H256>>, String), SubxtWrapperError> {
+		wrap_subxt_call!(self, GetChainHeadSubscription, ChainHeadSubscription, url, ())
+	}
+
+	pub async fn unpin_chain_head(
+		&mut self,
+		url: &str,
+		sub_id: String,
+		hash: H256,
+	) -> std::result::Result<(), SubxtWrapperError> {
+		wrap_subxt_call!(self, UnpinChainHead, UnpinChainHead, url, sub_id, hash)
 	}
 }
 
@@ -589,6 +624,16 @@ async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Res
 	let addr = polkadot::storage().configuration().active_config();
 	let host_configuration = api.storage().at_latest().await?.fetch(&addr).await?.unwrap();
 	Ok(Response::HostConfiguration(host_configuration))
+}
+
+async fn subxt_get_chain_head_subscription(api: &OnlineClient<PolkadotConfig>) -> Result {
+	let sub = api.rpc().chainhead_unstable_follow(true).await?;
+	let sub_id = sub.subscription_id().expect("A subscription ID must be provided").to_string();
+	Ok(Response::ChainHeadSubscription((sub, sub_id)))
+}
+
+async fn subxt_unpin_chain_head(api: &OnlineClient<PolkadotConfig>, sub_id: &str, hash: H256) -> Result {
+	Ok(Response::UnpinChainHead(api.rpc().chainhead_unstable_unpin(sub_id.to_string(), hash).await?))
 }
 
 fn subxt_extract_parainherent(block: &subxt::rpc::types::ChainBlock<PolkadotConfig>) -> Result {

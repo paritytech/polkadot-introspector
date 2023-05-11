@@ -16,39 +16,36 @@
 //
 
 use crate::{
+	api::subxt_wrapper::RequestExecutor,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
-	types::H256,
-	utils::{Retry, RetryOptions},
+	utils::RetryOptions,
 };
 use async_trait::async_trait;
 use futures::future;
 use log::{error, info};
-use polkadot_introspector_priority_channel::{channel, SendError, Sender};
-use subxt::{
-	rpc::{types::FollowEvent, Subscription},
-	OnlineClient, PolkadotConfig,
-};
-use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
+use polkadot_introspector_priority_channel::{channel, Sender};
+use subxt::{rpc::types::FollowEvent, PolkadotConfig};
+use tokio::sync::broadcast::Sender as BroadcastSender;
 
 #[derive(Debug)]
-pub enum SubxtEvent {
+pub enum ChainHeadEvent {
 	/// New relay chain best head
 	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// New relay chain finalized head
 	NewFinalizedHead(<PolkadotConfig as subxt::Config>::Hash),
 }
 
-pub struct SubxtSubscription {
+pub struct ChainHeadSubscription {
 	urls: Vec<String>,
 	/// One sender per consumer per URL.
-	consumers: Vec<Vec<Sender<SubxtEvent>>>,
+	consumers: Vec<Vec<Sender<ChainHeadEvent>>>,
 	retry: RetryOptions,
 }
 
 #[async_trait]
-impl EventStream for SubxtSubscription {
-	type Event = SubxtEvent;
+impl EventStream for ChainHeadSubscription {
+	type Event = ChainHeadEvent;
 
 	/// Create a new consumer of events. Returns consumer initialization data.
 	fn create_consumer(&mut self) -> EventConsumerInit<Self::Event> {
@@ -84,27 +81,27 @@ impl EventStream for SubxtSubscription {
 	}
 }
 
-impl SubxtSubscription {
-	pub fn new(urls: Vec<String>, retry: RetryOptions) -> SubxtSubscription {
-		SubxtSubscription { urls, consumers: Vec::new(), retry }
+impl ChainHeadSubscription {
+	pub fn new(urls: Vec<String>, retry: RetryOptions) -> ChainHeadSubscription {
+		ChainHeadSubscription { urls, consumers: Vec::new(), retry }
 	}
 
 	// Per consumer
 	async fn run_per_node(
-		mut update_channel: Sender<SubxtEvent>,
+		mut update_channel: Sender<ChainHeadEvent>,
 		url: String,
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
 	) {
-		let api = match subxt_client(url.clone(), shutdown_tx.subscribe(), &retry).await {
-			Some(v) => v,
-			None => {
-				error!("Cannot connect to {url}");
-				std::process::exit(1);
+		let mut shutdown_rx = shutdown_tx.subscribe();
+		let mut executor = RequestExecutor::new(retry);
+		let (mut sub, sub_id) = match executor.get_chain_head_subscription(&url).await {
+			Ok(v) => v,
+			Err(e) => {
+				error!("Subscription to {} failed: {:?}", url, e);
+				std::process::exit(1)
 			},
 		};
-		let mut shutdown_rx = shutdown_tx.subscribe();
-		let (mut sub, sub_id) = subxt_chain_head_subscription(&api).await;
 
 		loop {
 			tokio::select! {
@@ -124,20 +121,24 @@ impl SubxtSubscription {
 					match event {
 						// Drain the initialized event
 						FollowEvent::Initialized(init) => {
-							subxt_unpin_hash(&api, sub_id.clone(), init.finalized_block_hash).await;
+							if let Err(e) = executor.unpin_chain_head(&url, sub_id.clone(), init.finalized_block_hash).await {
+								error!("Cannot unpin hash {}: {:?}", init.finalized_block_hash, e);
+							};
 						},
 						FollowEvent::NewBlock(_) => continue,
 						FollowEvent::BestBlockChanged(best_block) => {
 							info!("[{}] Best block imported ({:?})", url, best_block.best_block_hash);
-							if let Err(e) = update_channel.send(SubxtEvent::NewBestHead(best_block.best_block_hash)).await {
-								return on_error(e);
+							if let Err(e) = update_channel.send(ChainHeadEvent::NewBestHead(best_block.best_block_hash)).await {
+								info!("Event consumer has terminated: {:?}, shutting down", e);
+								return;
 							}
 						},
 						FollowEvent::Finalized(finalized) => {
 							for hash in finalized.finalized_block_hashes.iter() {
 								info!("[{}] Finalized block imported ({:?})", url, hash);
-								if let Err(e) = update_channel.send(SubxtEvent::NewFinalizedHead(*hash)).await {
-									return on_error(e);
+								if let Err(e) = update_channel.send(ChainHeadEvent::NewFinalizedHead(*hash)).await {
+									info!("Event consumer has terminated: {:?}, shutting down", e);
+									return;
 								}
 							}
 
@@ -146,17 +147,20 @@ impl SubxtSubscription {
 								.iter()
 								.chain(finalized.pruned_block_hashes.iter())
 							{
-								subxt_unpin_hash(&api, sub_id.clone(), *hash).await;
+								if let Err(e) = executor.unpin_chain_head(&url, sub_id.clone(), *hash).await {
+									error!("Cannot unpin hash {}: {:?}", hash, e);
+								};
 							}
 						},
 						FollowEvent::Stop => {
-							on_subscription_stop();
+							info!("Chain head subscription stopped");
 							return;
 						},
 					}
 				},
 				_ = shutdown_rx.recv() => {
-					return on_ctrl_c();
+					info!("received interrupt signal shutting down subscription");
+					return;
 				}
 
 			}
@@ -165,7 +169,7 @@ impl SubxtSubscription {
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.
 	fn run_per_consumer(
-		update_channels: Vec<Sender<SubxtEvent>>,
+		update_channels: Vec<Sender<ChainHeadEvent>>,
 		urls: Vec<String>,
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
@@ -178,64 +182,4 @@ impl SubxtSubscription {
 			})
 			.collect()
 	}
-}
-
-async fn subxt_client(
-	url: String,
-	mut shutdown_rx: BroadcastReceiver<()>,
-	retry: &RetryOptions,
-) -> Option<OnlineClient<PolkadotConfig>> {
-	let mut retry = Retry::new(retry);
-	loop {
-		tokio::select! {
-			client = OnlineClient::<PolkadotConfig>::from_url(url.clone()) => {
-				match client {
-					Ok(api) => {
-						info!("[{}] Connected", url);
-						return Some(api)
-					},
-					Err(err) => {
-						error!("[{}] Disconnected ({:?})", url, err);
-						if (retry.sleep().await).is_err() {
-							return None
-						}
-					},
-				}
-			}
-			_ = shutdown_rx.recv() => {
-				on_ctrl_c();
-				return None;
-			}
-		}
-	}
-}
-
-async fn subxt_chain_head_subscription(
-	api: &OnlineClient<PolkadotConfig>,
-) -> (Subscription<FollowEvent<H256>>, String) {
-	match api.rpc().chainhead_unstable_follow(true).await {
-		Ok(sub) => {
-			let sub_id = sub.subscription_id().expect("A subscription ID must be provided").to_string();
-			(sub, sub_id)
-		},
-		Err(err) => panic!("Cannot subscribe to head updates: {:?}", err),
-	}
-}
-
-async fn subxt_unpin_hash(api: &OnlineClient<PolkadotConfig>, sub_id: String, hash: H256) {
-	if let Err(err) = api.rpc().chainhead_unstable_unpin(sub_id.clone(), hash).await {
-		error!("Cannot unpin the hash {}, {:?}", hash, err)
-	}
-}
-
-fn on_error(e: SendError) {
-	info!("Event consumer has terminated: {:?}, shutting down", e);
-}
-
-fn on_subscription_stop() {
-	info!("Chain head subscription stopped");
-}
-
-fn on_ctrl_c() {
-	info!("received interrupt signal shutting down subscription");
 }
