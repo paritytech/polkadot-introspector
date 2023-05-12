@@ -377,12 +377,12 @@ async fn main() -> color_eyre::Result<()> {
 	let (shutdown_tx, _) = broadcast::channel(1);
 
 	match ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await {
-		Ok(mut futures) => {
+		Ok(futures) => {
 			let shutdown_tx_cpy = shutdown_tx.clone();
-			futures.push(tokio::spawn(async move {
+			let _ = tokio::spawn(async move {
 				signal::ctrl_c().await.unwrap();
 				let _ = shutdown_tx_cpy.send(());
-			}));
+			});
 			core.run(futures, shutdown_tx.clone()).await?
 		},
 		Err(err) => error!("FATAL: cannot start parachain tracer: {}", err),
