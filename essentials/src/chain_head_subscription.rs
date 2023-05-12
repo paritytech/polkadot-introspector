@@ -23,10 +23,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use futures::future;
-use log::{error, info};
+use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{channel, Sender};
 use subxt::{rpc::types::FollowEvent, PolkadotConfig};
-use tokio::sync::broadcast::Sender as BroadcastSender;
+use tokio::{
+	sync::broadcast::Sender as BroadcastSender,
+	time::{interval_at, Duration},
+};
 
 #[derive(Debug)]
 pub enum ChainHeadEvent {
@@ -34,6 +37,8 @@ pub enum ChainHeadEvent {
 	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// New relay chain finalized head
 	NewFinalizedHead(<PolkadotConfig as subxt::Config>::Hash),
+	/// Heartbeat event
+	Heartbeat,
 }
 
 pub struct ChainHeadSubscription {
@@ -103,6 +108,9 @@ impl ChainHeadSubscription {
 			},
 		};
 
+		let heartbeat_duration = Duration::from_millis(200);
+		let mut heartbeat_interval = interval_at(tokio::time::Instant::now() + heartbeat_duration, heartbeat_duration);
+
 		loop {
 			tokio::select! {
 				message = sub.next() => {
@@ -162,7 +170,14 @@ impl ChainHeadSubscription {
 					info!("received interrupt signal shutting down subscription");
 					return;
 				}
-
+				_ = heartbeat_interval.tick() => {
+					debug!("sent heartbeat to subscribers");
+					let res = update_channel.send(ChainHeadEvent::Heartbeat).await;
+					if let Err(e) = res {
+						info!("Event consumer has terminated: {:?}, shutting down", e);
+						return;
+					}
+				}
 			}
 		}
 	}

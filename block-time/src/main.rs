@@ -269,6 +269,7 @@ impl BlockTimeMonitor {
 				let hash = match event {
 					ChainHeadEvent::NewBestHead(hash) => Some(hash),
 					ChainHeadEvent::NewFinalizedHead(hash) => Some(hash),
+					ChainHeadEvent::Heartbeat => continue,
 				};
 				if let Some(hash) = hash {
 					let ts = executor.get_block_timestamp(url, hash).await;

@@ -222,23 +222,23 @@ impl Collector {
 				match consumer_channel.next().await {
 					Some(event) => match self.collect_chain_events(&event).await {
 						Ok(subxt_events) =>
-							for e in subxt_events.iter() {
-								if let Err(e) = self.process_chain_event(e).await {
+							for event in subxt_events.iter() {
+								if let Err(e) = self.process_chain_event(event).await {
 									error!("collector service could not process event: {}", e);
 									self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
-									break
+									return
 								}
 							},
 						Err(e) => {
 							error!("collector service could not process events: {}", e);
 							self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
-							break
+							return
 						},
 					},
 					None => {
-						error!("collector service could not process events");
+						error!("no more events from the consumer channel");
 						self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
-						break
+						return
 					},
 				}
 			}
@@ -250,6 +250,7 @@ impl Collector {
 		let new_head_event = match event {
 			ChainHeadEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
 			ChainHeadEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
+			ChainHeadEvent::Heartbeat => return Ok(vec![]),
 		};
 		let mut chain_events = vec![new_head_event];
 

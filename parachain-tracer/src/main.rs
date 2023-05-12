@@ -171,9 +171,11 @@ impl ParachainTracer {
 		}
 
 		let consumer_channels: Vec<Receiver<ChainHeadEvent>> = consumer_config.into();
-		let _collector_fut = collector
+		let collector_fut = collector
 			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
 			.await;
+
+		output_futures.push(collector_fut);
 
 		Ok(output_futures)
 	}
