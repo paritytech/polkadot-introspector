@@ -31,10 +31,10 @@ use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRec
 use clap::{Parser, ValueEnum};
 use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
-use log::{debug, info, warn};
+use futures_util::StreamExt;
+use log::{debug, error, info, warn};
 use polkadot_introspector_priority_channel::{
 	channel as priority_channel, channel_with_capacities as priority_channel_with_capacities, Receiver, Sender,
-	TryRecvError,
 };
 use std::{
 	cmp::Ordering,
@@ -219,23 +219,27 @@ impl Collector {
 	) -> tokio::task::JoinHandle<()> {
 		tokio::spawn(async move {
 			loop {
-				match consumer_channel.try_next() {
-					Ok(event) => match self.collect_chain_events(&event).await {
+				match consumer_channel.next().await {
+					Some(event) => match self.collect_chain_events(&event).await {
 						Ok(subxt_events) =>
 							for e in subxt_events.iter() {
 								if let Err(e) = self.process_chain_event(e).await {
-									info!("collector service could not process event: {}", e);
+									error!("collector service could not process event: {}", e);
+									self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
+									break
 								}
 							},
 						Err(e) => {
-							info!("collector service could not process events: {}", e);
+							error!("collector service could not process events: {}", e);
+							self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
+							break
 						},
 					},
-					Err(TryRecvError::Closed) => {
+					None => {
+						error!("collector service could not process events");
 						self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
 						break
 					},
-					Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(1000)).await,
 				}
 			}
 		})
