@@ -289,7 +289,8 @@ impl ParachainTracer {
 									to_tracker.send(CollectorUpdateEvent::NewSession(idx)).await.unwrap();
 								},
 							CollectorUpdateEvent::Termination => {
-								info!("Received termination event");
+								info!("Received termination event, {} trackers will be terminated, {} futures are pending",
+									trackers.len(), futures.len());
 								break;
 							},
 						},
