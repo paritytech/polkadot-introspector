@@ -108,8 +108,8 @@ impl ChainHeadSubscription {
 			},
 		};
 
-		let heartbeat_duration = Duration::from_millis(200);
-		let mut heartbeat_interval = interval_at(tokio::time::Instant::now() + heartbeat_duration, heartbeat_duration);
+		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
+		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
 		loop {
 			tokio::select! {
@@ -170,7 +170,7 @@ impl ChainHeadSubscription {
 					info!("received interrupt signal shutting down subscription");
 					return;
 				}
-				_ = heartbeat_interval.tick() => {
+				_ = heartbeat_periodic.tick() => {
 					debug!("sent heartbeat to subscribers");
 					let res = update_channel.send(ChainHeadEvent::Heartbeat).await;
 					if let Err(e) = res {
