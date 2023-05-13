@@ -46,10 +46,7 @@ use polkadot_introspector_essentials::{
 use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
-use tokio::{
-	signal,
-	sync::{broadcast, broadcast::Sender as BroadcastSender},
-};
+use tokio::sync::{broadcast, broadcast::Sender as BroadcastSender};
 use tracker::{ParachainBlockTracker, SubxtTracker};
 
 mod progress;
@@ -378,12 +375,8 @@ async fn main() -> color_eyre::Result<()> {
 
 	match ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await {
 		Ok(futures) => {
-			let shutdown_tx_cpy = shutdown_tx.clone();
-			let _ = tokio::spawn(async move {
-				signal::ctrl_c().await.unwrap();
-				let _ = shutdown_tx_cpy.send(());
-			});
-			core.run(futures, shutdown_tx.clone()).await?
+			let shutdown_future = tokio::spawn(init::on_shutdown(shutdown_tx.clone()));
+			core.run(futures, shutdown_tx.clone(), shutdown_future).await?
 		},
 		Err(err) => error!("FATAL: cannot start parachain tracer: {}", err),
 	}

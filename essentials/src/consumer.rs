@@ -30,6 +30,7 @@ pub trait EventStream {
 		self,
 		tasks: Vec<tokio::task::JoinHandle<()>>,
 		shutdown_tx: BroadcastSender<()>,
+		shutdown_future: tokio::task::JoinHandle<()>,
 	) -> color_eyre::Result<()>;
 }
 

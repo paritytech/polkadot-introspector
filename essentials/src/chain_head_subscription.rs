@@ -73,6 +73,7 @@ impl EventStream for ChainHeadSubscription {
 		self,
 		tasks: Vec<tokio::task::JoinHandle<()>>,
 		shutdown_tx: BroadcastSender<()>,
+		shutdown_future: tokio::task::JoinHandle<()>,
 	) -> color_eyre::Result<()> {
 		let futures = self.consumers.into_iter().map(|update_channels| {
 			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.retry.clone())
@@ -80,7 +81,15 @@ impl EventStream for ChainHeadSubscription {
 
 		let mut flat_futures = futures.flatten().collect::<Vec<_>>();
 		flat_futures.extend(tasks);
-		future::try_join_all(flat_futures).await?;
+
+		tokio::select! {
+			_ = shutdown_future => {
+				info!("Shutting down chain head subscription on termination signal");
+			}
+			_ = future::try_join_all(flat_futures) => {
+				info!("Chain head subscription finished");
+			}
+		}
 
 		Ok(())
 	}
@@ -167,7 +176,7 @@ impl ChainHeadSubscription {
 					}
 				},
 				_ = shutdown_rx.recv() => {
-					info!("received interrupt signal shutting down subscription");
+					info!("Received interrupt signal shutting down subscription");
 					return;
 				}
 				_ = heartbeat_periodic.tick() => {
