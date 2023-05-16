@@ -46,10 +46,7 @@ use polkadot_introspector_essentials::{
 use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
-use tokio::{
-	signal,
-	sync::{broadcast, broadcast::Sender as BroadcastSender},
-};
+use tokio::sync::{broadcast, broadcast::Sender as BroadcastSender};
 use tracker::{ParachainBlockTracker, SubxtTracker};
 
 mod progress;
@@ -171,9 +168,11 @@ impl ParachainTracer {
 		}
 
 		let consumer_channels: Vec<Receiver<ChainHeadEvent>> = consumer_config.into();
-		let _collector_fut = collector
+		let collector_fut = collector
 			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
 			.await;
+
+		output_futures.push(collector_fut);
 
 		Ok(output_futures)
 	}
@@ -289,7 +288,8 @@ impl ParachainTracer {
 									to_tracker.send(CollectorUpdateEvent::NewSession(idx)).await.unwrap();
 								},
 							CollectorUpdateEvent::Termination => {
-								info!("Received termination event");
+								info!("Received termination event, {} trackers will be terminated, {} futures are pending",
+									trackers.len(), futures.len());
 								break;
 							},
 						},
@@ -374,13 +374,9 @@ async fn main() -> color_eyre::Result<()> {
 	let (shutdown_tx, _) = broadcast::channel(1);
 
 	match ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await {
-		Ok(mut futures) => {
-			let shutdown_tx_cpy = shutdown_tx.clone();
-			futures.push(tokio::spawn(async move {
-				signal::ctrl_c().await.unwrap();
-				let _ = shutdown_tx_cpy.send(());
-			}));
-			core.run(futures, shutdown_tx.clone()).await?
+		Ok(futures) => {
+			let shutdown_future = tokio::spawn(init::on_shutdown(shutdown_tx.clone()));
+			core.run(futures, shutdown_tx.clone(), shutdown_future).await?
 		},
 		Err(err) => error!("FATAL: cannot start parachain tracer: {}", err),
 	}

@@ -269,6 +269,7 @@ impl BlockTimeMonitor {
 				let hash = match event {
 					ChainHeadEvent::NewBestHead(hash) => Some(hash),
 					ChainHeadEvent::NewFinalizedHead(hash) => Some(hash),
+					ChainHeadEvent::Heartbeat => continue,
 				};
 				if let Some(hash) = hash {
 					let ts = executor.get_block_timestamp(url, hash).await;
@@ -374,11 +375,9 @@ async fn main() -> color_eyre::Result<()> {
 	let (shutdown_tx, _) = broadcast::channel(1);
 
 	match BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
-		Ok(mut futures) => {
-			let shutdown_tx_cpy = shutdown_tx.clone();
-			futures.push(tokio::spawn(init::on_shutdown(shutdown_tx_cpy)));
-			core.run(futures, shutdown_tx.clone()).await?
-		},
+		Ok(futures) =>
+			core.run(futures, shutdown_tx.clone(), tokio::spawn(init::on_shutdown(shutdown_tx.clone())))
+				.await?,
 		Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
 	}
 

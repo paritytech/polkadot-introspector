@@ -23,10 +23,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use futures::future;
-use log::{error, info};
+use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{channel, Sender};
 use subxt::{rpc::types::FollowEvent, PolkadotConfig};
-use tokio::sync::broadcast::Sender as BroadcastSender;
+use tokio::{
+	sync::broadcast::Sender as BroadcastSender,
+	time::{interval_at, Duration},
+};
 
 #[derive(Debug)]
 pub enum ChainHeadEvent {
@@ -34,6 +37,8 @@ pub enum ChainHeadEvent {
 	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// New relay chain finalized head
 	NewFinalizedHead(<PolkadotConfig as subxt::Config>::Hash),
+	/// Heartbeat event
+	Heartbeat,
 }
 
 pub struct ChainHeadSubscription {
@@ -68,6 +73,7 @@ impl EventStream for ChainHeadSubscription {
 		self,
 		tasks: Vec<tokio::task::JoinHandle<()>>,
 		shutdown_tx: BroadcastSender<()>,
+		shutdown_future: tokio::task::JoinHandle<()>,
 	) -> color_eyre::Result<()> {
 		let futures = self.consumers.into_iter().map(|update_channels| {
 			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.retry.clone())
@@ -75,7 +81,15 @@ impl EventStream for ChainHeadSubscription {
 
 		let mut flat_futures = futures.flatten().collect::<Vec<_>>();
 		flat_futures.extend(tasks);
-		future::try_join_all(flat_futures).await?;
+
+		tokio::select! {
+			_ = shutdown_future => {
+				info!("Shutting down chain head subscription on termination signal");
+			}
+			_ = future::try_join_all(flat_futures) => {
+				info!("Chain head subscription finished");
+			}
+		}
 
 		Ok(())
 	}
@@ -102,6 +116,9 @@ impl ChainHeadSubscription {
 				std::process::exit(1)
 			},
 		};
+
+		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
+		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
 		loop {
 			tokio::select! {
@@ -159,10 +176,17 @@ impl ChainHeadSubscription {
 					}
 				},
 				_ = shutdown_rx.recv() => {
-					info!("received interrupt signal shutting down subscription");
+					info!("Received interrupt signal shutting down subscription");
 					return;
 				}
-
+				_ = heartbeat_periodic.tick() => {
+					debug!("sent heartbeat to subscribers");
+					let res = update_channel.send(ChainHeadEvent::Heartbeat).await;
+					if let Err(e) = res {
+						info!("Event consumer has terminated: {:?}, shutting down", e);
+						return;
+					}
+				}
 			}
 		}
 	}
