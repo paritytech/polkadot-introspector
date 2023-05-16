@@ -18,7 +18,10 @@ pub mod candidate_record;
 mod ws;
 
 use crate::{
-	api::{subxt_wrapper::RequestExecutor, ApiService},
+	api::{
+		subxt_wrapper::{RequestExecutor, SubxtWrapperError},
+		ApiService,
+	},
 	chain_events::{
 		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 	},
@@ -51,6 +54,7 @@ use subxt::{
 	},
 	PolkadotConfig,
 };
+use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
 
@@ -158,6 +162,16 @@ pub enum CollectorUpdateEvent {
 	Termination,
 }
 
+#[derive(Debug, Error)]
+pub enum CollectorError {
+	#[error(transparent)]
+	NonFatal(#[from] color_eyre::Report),
+	#[error(transparent)]
+	ExecutorFatal(#[from] SubxtWrapperError),
+	#[error(transparent)]
+	SendFatal(#[from] polkadot_introspector_priority_channel::SendError),
+}
+
 pub struct Collector {
 	api_service: CollectorStorageApi,
 	ws_listener: Option<WebSocketListener>,
@@ -223,10 +237,17 @@ impl Collector {
 					Some(event) => match self.collect_chain_events(&event).await {
 						Ok(subxt_events) =>
 							for event in subxt_events.iter() {
-								if let Err(e) = self.process_chain_event(event).await {
-									error!("collector service could not process event: {}", e);
-									self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
-									return
+								if let Err(error) = self.process_chain_event(event).await {
+									error!("collector service could not process event: {}", error);
+									match error {
+										CollectorError::ExecutorFatal(_) | CollectorError::SendFatal(_) => {
+											self.broadcast_event_priority(CollectorUpdateEvent::Termination)
+												.await
+												.unwrap();
+											return
+										},
+										_ => continue,
+									}
 								}
 							},
 						Err(e) => {
@@ -266,7 +287,7 @@ impl Collector {
 	}
 
 	/// Process a next chain event
-	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<()> {
+	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<(), CollectorError> {
 		match event {
 			ChainEvent::NewBestHead(block_hash) => self.process_new_best_head(*block_hash).await,
 			ChainEvent::NewFinalizedHead(block_hash) => self.process_new_finalized_head(*block_hash).await,
@@ -395,7 +416,7 @@ impl Collector {
 	async fn get_head_details(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<(SubstrateHeader<u32, BlakeTwo256>, u64, u32)> {
+	) -> color_eyre::Result<(SubstrateHeader<u32, BlakeTwo256>, u64, u32), CollectorError> {
 		let header = self
 			.executor
 			.get_block_head(self.endpoint.as_str(), Some(block_hash))
@@ -407,7 +428,7 @@ impl Collector {
 		Ok((header, ts, block_number))
 	}
 
-	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<(), CollectorError> {
 		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
 
 		if self.state.last_finalized_block_number.is_some() {
@@ -430,7 +451,7 @@ impl Collector {
 		}
 	}
 
-	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<(), CollectorError> {
 		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
 
 		if self.state.last_finalized_block_number.is_none() ||
@@ -452,7 +473,7 @@ impl Collector {
 		header: SubstrateHeader<u32, BlakeTwo256>,
 		ts: Timestamp,
 		block_number: u32,
-	) -> color_eyre::Result<()> {
+	) -> color_eyre::Result<(), CollectorError> {
 		info!(
 			"imported new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
 			block_hash,
@@ -469,12 +490,11 @@ impl Collector {
 				// A fork
 				self.state.current_relay_chain_block_hashes.push(block_hash);
 			},
-			Ordering::Less =>
-				return Err(eyre!(
-					"Invalid block number: {}, {} is known in the state",
-					block_number,
-					self.state.current_relay_chain_block_number
-				)),
+			Ordering::Less => Err(eyre!(
+				"Invalid block number: {}, {} is known in the state",
+				block_number,
+				self.state.current_relay_chain_block_number
+			))?,
 		}
 
 		self.api_service
@@ -554,7 +574,10 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn process_candidate_change(&mut self, change_event: &SubxtCandidateEvent) -> color_eyre::Result<()> {
+	async fn process_candidate_change(
+		&mut self,
+		change_event: &SubxtCandidateEvent,
+	) -> color_eyre::Result<(), CollectorError> {
 		let storage = self.api_service.storage();
 		match change_event.event_type {
 			SubxtCandidateEventType::Backed => {
@@ -639,12 +662,12 @@ impl Collector {
 								.await?;
 						}
 					} else {
-						return Err(eyre!(
+						Err(eyre!(
 							"no stored relay parent {:?} for candidate {:?}, parachain id: {}",
 							change_event.candidate_descriptor.relay_parent,
 							change_event.candidate_hash,
 							change_event.parachain_id
-						))
+						))?
 					}
 				}
 			},
@@ -761,7 +784,10 @@ impl Collector {
 		Some(candidate.into_inner().unwrap())
 	}
 
-	async fn process_dispute_initiated(&mut self, dispute_event: &SubxtDispute) -> color_eyre::Result<()> {
+	async fn process_dispute_initiated(
+		&mut self,
+		dispute_event: &SubxtDispute,
+	) -> color_eyre::Result<(), CollectorError> {
 		let mut candidate = self
 			.find_candidate_by_hash(dispute_event.candidate_hash)
 			.await
@@ -829,7 +855,7 @@ impl Collector {
 		&mut self,
 		dispute_event: &SubxtDispute,
 		dispute_outcome: &SubxtDisputeResult,
-	) -> color_eyre::Result<()> {
+	) -> color_eyre::Result<(), CollectorError> {
 		let mut candidate = self
 			.find_candidate_by_hash(dispute_event.candidate_hash)
 			.await
