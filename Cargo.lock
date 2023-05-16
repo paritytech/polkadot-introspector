@@ -560,6 +560,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "data-encoding"
+version = "2.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23d8666cb01533c39dde32bcbab8e227b4ed6679b2c925eba05feabea39508fb"
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1700,7 +1706,7 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 
 [[package]]
 name = "polkadot-block-time"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1718,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-essentials"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "async-trait",
  "clap",
@@ -1741,7 +1747,7 @@ dependencies = [
  "subxt",
  "thiserror",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.19.0",
  "typed-builder",
  "url",
  "warp",
@@ -1749,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-priority-channel"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "async-channel",
  "futures",
@@ -1760,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-jaeger"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1780,7 +1786,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-kvdb"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "bincode",
  "clap",
@@ -1808,7 +1814,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-metadata-checker"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1822,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-parachain-tracer"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "async-trait",
  "clap",
@@ -1854,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-whois"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
@@ -2881,10 +2887,22 @@ checksum = "54319c93411147bced34cb5609a80e0a8e44c5999c93903a81cd866630ec0bfd"
 dependencies = [
  "futures-util",
  "log",
+ "tokio",
+ "tungstenite 0.18.0",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec509ac96e9a0c43427c74f003127d953a265737636129424288d27cb5c4b12c"
+dependencies = [
+ "futures-util",
+ "log",
  "native-tls",
  "tokio",
  "tokio-native-tls",
- "tungstenite",
+ "tungstenite 0.19.0",
 ]
 
 [[package]]
@@ -2994,6 +3012,25 @@ dependencies = [
  "base64 0.13.1",
  "byteorder",
  "bytes",
+ "http",
+ "httparse",
+ "log",
+ "rand",
+ "sha1",
+ "thiserror",
+ "url",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15fba1a6d6bb030745759a9a2a588bfe8490fc8b4751a277db3a0be1c9ebbf67"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
  "http",
  "httparse",
  "log",
@@ -3159,7 +3196,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-stream",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.18.0",
  "tokio-util",
  "tower-service",
  "tracing",
