@@ -17,7 +17,7 @@ futures = "0.3.28"
 hex = "0.4.3"
 itertools = "0.10.5"
 log = "0.4.17"
-parity-db = "0.4.7"
+parity-db = "0.4.8"
 polkadot-introspector-essentials = { path = "../essentials" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
 rand = "0.8.5"
