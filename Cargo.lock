@@ -1581,9 +1581,9 @@ checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 
 [[package]]
 name = "parity-db"
-version = "0.4.7"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd4572a52711e2ccff02b4973ec7e4a5b5c23387ebbfbd6cd42b34755714cefc"
+checksum = "4890dcb9556136a4ec2b0c51fa4a08c8b733b829506af8fff2e853f3a065985b"
 dependencies = [
  "blake2",
  "crc32fast",
@@ -1700,7 +1700,7 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 
 [[package]]
 name = "polkadot-block-time"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1718,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-essentials"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "async-trait",
  "clap",
@@ -1749,7 +1749,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-priority-channel"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "async-channel",
  "futures",
@@ -1760,7 +1760,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-jaeger"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1780,7 +1780,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-kvdb"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "bincode",
  "clap",
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-metadata-checker"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1822,7 +1822,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-parachain-tracer"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "async-trait",
  "clap",
@@ -1854,7 +1854,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-whois"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "clap",
  "color-eyre",
