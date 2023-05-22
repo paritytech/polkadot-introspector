@@ -9,7 +9,7 @@ publish = true
 
 [dependencies]
 async-trait = "0.1.66"
-clap = { version = "4.2.7", features = ["derive"] }
+clap = { version = "4.3.0", features = ["derive"] }
 codec = { package = "parity-scale-codec", version = "3.2.1", default-features = false, features = ["derive", "full", "bit-vec"] }
 color-eyre = "0.6.2"
 colored = "2.0.0"
