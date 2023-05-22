@@ -67,7 +67,7 @@ struct MetricsInner {
 	/// Average candidate inclusion time measured in relay chain blocks.
 	para_block_times: HistogramVec,
 	/// Average candidate inclusion time measured in seconds.
-	para_block_time_sec: HistogramVec,
+	para_block_times_sec: HistogramVec,
 	/// Finality lag
 	finality_lag: Gauge,
 }
@@ -165,7 +165,7 @@ impl Metrics {
 					.para_block_times
 					.with_label_values(&[&para_str[..]])
 					.observe(relay_parent_number.saturating_sub(previous_block_number) as f64);
-				metrics.para_block_time_sec.with_label_values(&[&para_str[..]]).observe(time);
+				metrics.para_block_times_sec.with_label_values(&[&para_str[..]]).observe(time);
 			}
 		}
 	}
@@ -272,7 +272,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			)?,
 			registry,
 		)?,
-		para_block_time_sec: prometheus_endpoint::register(
+		para_block_times_sec: prometheus_endpoint::register(
 			HistogramVec::new(
 				HistogramOpts::new("pc_para_block_time_sec", "Parachain block time measured in seconds.")
 					.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
