@@ -15,10 +15,6 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-// self, runtime_types as polkadot::runtime_types,
-// runtime_types::polkadot_runtime_parachains::{
-// 	configuration::HostConfiguration, hrmp::HrmpChannel, scheduler::scheduler::CoreAssignment,
-// },
 use crate::{
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, SessionKeys, SubxtCall, Timestamp, H256},
