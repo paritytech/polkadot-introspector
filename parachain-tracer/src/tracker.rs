@@ -23,13 +23,10 @@ use super::{
 use codec::{Decode, Encode};
 use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{
-		AvailabilityBitfield, BackedCandidate, CoreAssignment, CoreOccupied, InherentData, RequestExecutor,
-		SubxtHrmpChannel, ValidatorIndex,
-	},
+	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel},
 	chain_events::SubxtDisputeResult,
 	collector::{CollectorPrefixType, CollectorStorageApi, DisputeInfo},
-	metadata::polkadot::runtime_types::polkadot_primitives::v2::{DisputeStatement, DisputeStatementSet},
+	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
 use std::{collections::BTreeMap, default::Default, fmt::Debug};
@@ -167,7 +164,7 @@ pub struct SubxtTracker {
 #[derive(Encode, Decode, Debug, Default)]
 pub struct ParachainBlockInfo {
 	/// The candidate information as observed during backing
-	candidate: Option<BackedCandidate<H256>>,
+	candidate: Option<polkadot_primitives::BackedCandidate<H256>>,
 	/// Candidate hash
 	candidate_hash: Option<H256>,
 	/// The current state.
@@ -410,7 +407,7 @@ impl SubxtTracker {
 			.bitfields
 			.into_iter()
 			.map(|b| b.payload)
-			.collect::<Vec<AvailabilityBitfield>>();
+			.collect::<Vec<polkadot_primitives::AvailabilityBitfield>>();
 
 		self.current_candidate.bitfield_count = bitfields.len() as u32;
 
@@ -494,7 +491,11 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	fn update_backing(&mut self, mut backed_candidates: Vec<BackedCandidate<H256>>, block_number: BlockNumber) -> bool {
+	fn update_backing(
+		&mut self,
+		mut backed_candidates: Vec<polkadot_primitives::BackedCandidate<H256>>,
+		block_number: BlockNumber,
+	) -> bool {
 		let candidate_index = backed_candidates
 			.iter()
 			.position(|candidate| candidate.candidate.descriptor.para_id.0 == self.para_id);
@@ -515,7 +516,10 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_core_assignment(&mut self, core_assignments: Vec<CoreAssignment>) {
+	fn update_core_assignment(
+		&mut self,
+		core_assignments: Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>,
+	) {
 		if let Some(index) = core_assignments
 			.iter()
 			.position(|assignment| assignment.para_id.0 == self.para_id)
@@ -523,11 +527,11 @@ impl SubxtTracker {
 			self.current_candidate.assigned_core = Some(core_assignments[index].core.0);
 		}
 	}
-	fn update_core_occupation(&mut self, core: u32, occupied_cores: Vec<Option<CoreOccupied>>) {
+	fn update_core_occupation(&mut self, core: u32, occupied_cores: Vec<Option<polkadot_primitives::CoreOccupied>>) {
 		self.current_candidate.core_occupied = occupied_cores[core as usize].is_some();
 	}
 
-	async fn update_disputes(&mut self, disputes: &[DisputeStatementSet]) {
+	async fn update_disputes(&mut self, disputes: &[polkadot_primitives::DisputeStatementSet]) {
 		self.disputes = Vec::with_capacity(disputes.len());
 		for dispute_info in disputes {
 			let stored_dispute = self
@@ -548,7 +552,7 @@ impl SubxtTracker {
 				let voted_for = dispute_info
 					.statements
 					.iter()
-					.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+					.filter(|(statement, _, _)| matches!(statement, polkadot_primitives::DisputeStatement::Valid(_)))
 					.count() as u32;
 				let voted_against = dispute_info.statements.len() as u32 - voted_for;
 
@@ -559,14 +563,18 @@ impl SubxtTracker {
 					dispute_info
 						.statements
 						.iter()
-						.filter(|(statement, _, _)| !matches!(statement, DisputeStatement::Valid(_)))
+						.filter(|(statement, _, _)| {
+							!matches!(statement, polkadot_primitives::DisputeStatement::Valid(_))
+						})
 						.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
 						.collect()
 				} else {
 					dispute_info
 						.statements
 						.iter()
-						.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+						.filter(|(statement, _, _)| {
+							matches!(statement, polkadot_primitives::DisputeStatement::Valid(_))
+						})
 						.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
 						.collect()
 				};
@@ -593,8 +601,8 @@ impl SubxtTracker {
 	fn update_availability(
 		&mut self,
 		core: u32,
-		bitfields: Vec<AvailabilityBitfield>,
-		validator_groups: Vec<Vec<ValidatorIndex>>,
+		bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
+		validator_groups: Vec<Vec<polkadot_primitives::ValidatorIndex>>,
 	) {
 		let avail_bits: u32 = bitfields
 			.iter()
@@ -608,7 +616,10 @@ impl SubxtTracker {
 			})
 			.sum();
 
-		let all_bits = validator_groups.into_iter().flatten().collect::<Vec<ValidatorIndex>>();
+		let all_bits = validator_groups
+			.into_iter()
+			.flatten()
+			.collect::<Vec<polkadot_primitives::ValidatorIndex>>();
 
 		self.current_candidate.max_av_bits = all_bits.len() as u32;
 		self.current_candidate.current_av_bits = avail_bits;
