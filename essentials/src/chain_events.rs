@@ -114,16 +114,6 @@ pub async fn decode_chain_event(
 		))
 	}
 
-	#[cfg(feature = "polkadot")]
-	if is_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event) {
-		let decoded =
-			decode_to_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event)?;
-		return Ok(ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
-			SubxtDisputeResult::TimedOut,
-		))
-	}
-
 	if is_specific_event::<CandidateBacked>(&event) {
 		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
