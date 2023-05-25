@@ -93,59 +93,65 @@ pub async fn decode_chain_event(
 	block_hash: <PolkadotConfig as subxt::Config>::Hash,
 	event: subxt::events::EventDetails,
 ) -> Result<ChainEvent> {
-	use crate::metadata::polkadot::runtime_types::polkadot_runtime_parachains::disputes::DisputeResult as RuntimeDisputeResult;
-
-	let subxt_event = if is_specific_event::<DisputeInitiated>(&event) {
+	if is_specific_event::<DisputeInitiated>(&event) {
 		let decoded = decode_to_specific_event::<DisputeInitiated>(&event)?;
-		ChainEvent::DisputeInitiated(SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 })
-	} else if is_specific_event::<DisputeConcluded>(&event) {
+		return Ok(ChainEvent::DisputeInitiated(SubxtDispute {
+			relay_parent_block: block_hash,
+			candidate_hash: decoded.0 .0,
+		}))
+	}
+
+	if is_specific_event::<DisputeConcluded>(&event) {
+		use crate::metadata::polkadot::runtime_types::polkadot_runtime_parachains::disputes;
 		let decoded = decode_to_specific_event::<DisputeConcluded>(&event)?;
 		let outcome = match decoded.1 {
-			RuntimeDisputeResult::Valid => SubxtDisputeResult::Valid,
-			RuntimeDisputeResult::Invalid => SubxtDisputeResult::Invalid,
+			disputes::DisputeResult::Valid => SubxtDisputeResult::Valid,
+			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
 		};
-		ChainEvent::DisputeConcluded(
+		return Ok(ChainEvent::DisputeConcluded(
 			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
 			outcome,
-		)
-	} else if is_specific_event::<CandidateBacked>(&event) {
+		))
+	}
+
+	#[cfg(feature = "polkadot")]
+	if is_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event) {
+		let decoded =
+			decode_to_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event)?;
+		return Ok(ChainEvent::DisputeConcluded(
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
+			SubxtDisputeResult::TimedOut,
+		))
+	}
+
+	if is_specific_event::<CandidateBacked>(&event) {
 		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
-		ChainEvent::CandidateChanged(Box::new(create_candidate_event(
+		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			SubxtCandidateEventType::Backed,
-		)))
-	} else if is_specific_event::<CandidateIncluded>(&event) {
+		))))
+	}
+
+	if is_specific_event::<CandidateIncluded>(&event) {
 		let decoded = decode_to_specific_event::<CandidateIncluded>(&event)?;
-		ChainEvent::CandidateChanged(Box::new(create_candidate_event(
+		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			SubxtCandidateEventType::Included,
-		)))
-	} else if is_specific_event::<CandidateTimedOut>(&event) {
+		))))
+	}
+
+	if is_specific_event::<CandidateTimedOut>(&event) {
 		let decoded = decode_to_specific_event::<CandidateTimedOut>(&event)?;
-		ChainEvent::CandidateChanged(Box::new(create_candidate_event(
+		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			SubxtCandidateEventType::TimedOut,
-		)))
-	} else {
-		ChainEvent::RawEvent(block_hash, event.clone())
-	};
+		))))
+	}
 
-	#[cfg(feature = "polkadot")]
-	let subxt_event = if is_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event) {
-		let decoded =
-			decode_to_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event)?;
-		ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
-			SubxtDisputeResult::TimedOut,
-		)
-	} else {
-		subxt_event
-	};
-
-	Ok(subxt_event)
+	Ok(ChainEvent::RawEvent(block_hash, event))
 }
 
 fn is_specific_event<E: subxt::events::StaticEvent>(raw_event: &subxt::events::EventDetails) -> bool {
