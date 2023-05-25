@@ -136,8 +136,9 @@ build:
   <<:                              *collect-artifacts
   script:
     - mkdir ./artifacts || echo "dir exists"
-    - mkdir ./artifacts/polkadot || echo "dir exists"
     - mkdir ./artifacts/rococo || echo "dir exists"
+    - mkdir ./artifacts/kusama || echo "dir exists"
+    - mkdir ./artifacts/polkadot || echo "dir exists"
     - time cargo build --release --no-default-features --features=rococo
     - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/rococo/
     - time cargo build --release --no-default-features --features=kusama
