@@ -15,10 +15,12 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::polkadot::{
-	para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
-	paras_disputes::events::{DisputeConcluded, DisputeInitiated, DisputeTimedOut},
-	runtime_types::polkadot_primitives::v2::CandidateDescriptor,
+use crate::metadata::{
+	polkadot::{
+		para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
+		paras_disputes::events::{DisputeConcluded, DisputeInitiated},
+	},
+	polkadot_primitives::CandidateDescriptor,
 };
 use codec::{Decode, Encode};
 use color_eyre::{eyre::eyre, Result};
@@ -106,12 +108,6 @@ pub async fn decode_chain_event(
 			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
 			outcome,
 		)
-	} else if is_specific_event::<DisputeTimedOut>(&event) {
-		let decoded = decode_to_specific_event::<DisputeTimedOut>(&event)?;
-		ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
-			SubxtDisputeResult::TimedOut,
-		)
 	} else if is_specific_event::<CandidateBacked>(&event) {
 		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
 		ChainEvent::CandidateChanged(Box::new(create_candidate_event(
@@ -134,7 +130,19 @@ pub async fn decode_chain_event(
 			SubxtCandidateEventType::TimedOut,
 		)))
 	} else {
-		ChainEvent::RawEvent(block_hash, event)
+		ChainEvent::RawEvent(block_hash, event.clone())
+	};
+
+	#[cfg(feature = "polkadot")]
+	let subxt_event = if is_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event) {
+		let decoded =
+			decode_to_specific_event::<crate::metadata::polkadot::paras_disputes::events::DisputeTimedOut>(&event)?;
+		ChainEvent::DisputeConcluded(
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
+			SubxtDisputeResult::TimedOut,
+		)
+	} else {
+		subxt_event
 	};
 
 	Ok(subxt_event)

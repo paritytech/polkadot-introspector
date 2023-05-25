@@ -14,10 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{
-	chain_events::SubxtDisputeResult,
-	metadata::polkadot::runtime_types::polkadot_primitives::v2 as polkadot_rt_primitives, types::H256,
-};
+use crate::{chain_events::SubxtDisputeResult, metadata::polkadot_primitives, types::H256};
 use codec::{Decode, Encode};
 use serde::{
 	ser::{SerializeStruct, Serializer},
@@ -61,7 +58,7 @@ pub struct CandidateDisputed {
 	pub concluded: Option<DisputeResult>,
 }
 
-impl<T> Serialize for polkadot_rt_primitives::CandidateDescriptor<T>
+impl<T> Serialize for polkadot_primitives::CandidateDescriptor<T>
 where
 	T: Hash + Serialize + Decode + Encode,
 {
@@ -83,7 +80,7 @@ where
 	}
 }
 
-impl<T> Serialize for polkadot_rt_primitives::CandidateReceipt<T>
+impl<T> Serialize for polkadot_primitives::CandidateReceipt<T>
 where
 	T: Hash + Serialize + Decode + Encode,
 {

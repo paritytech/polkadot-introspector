@@ -14,16 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
-pub use crate::metadata::polkadot::{
-	self, runtime_types as subxt_runtime_types,
-	runtime_types::{
-		polkadot_core_primitives::CandidateHash,
-		polkadot_primitives as polkadot_rt_primitives,
-		polkadot_primitives::v2::{AvailabilityBitfield, BackedCandidate, CoreOccupied, ValidatorIndex},
-		polkadot_runtime_parachains::{configuration::HostConfiguration, hrmp::HrmpChannel, scheduler::CoreAssignment},
-	},
-};
+
+// self, runtime_types as polkadot::runtime_types,
+// runtime_types::polkadot_runtime_parachains::{
+// 	configuration::HostConfiguration, hrmp::HrmpChannel, scheduler::scheduler::CoreAssignment,
+// },
 use crate::{
+	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, SessionKeys, SubxtCall, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
@@ -139,10 +136,10 @@ impl Debug for RequestType {
 }
 
 /// The `InherentData` constructed with the subxt API.
-pub type InherentData = polkadot_rt_primitives::v2::InherentData<
-	subxt_runtime_types::sp_runtime::generic::header::Header<
+pub type InherentData = polkadot_primitives::InherentData<
+	polkadot::runtime_types::sp_runtime::generic::header::Header<
 		::core::primitive::u32,
-		subxt_runtime_types::sp_runtime::traits::BlakeTwo256,
+		polkadot::runtime_types::sp_runtime::traits::BlakeTwo256,
 	>,
 >;
 
@@ -159,15 +156,15 @@ pub enum Response {
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
-	ScheduledParas(Vec<CoreAssignment>),
+	ScheduledParas(Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>),
 	/// List of the occupied availability cores.
-	OccupiedCores(Vec<Option<CoreOccupied>>),
+	OccupiedCores(Vec<Option<polkadot_primitives::CoreOccupied>>),
 	/// Backing validator groups.
-	BackingGroups(Vec<Vec<ValidatorIndex>>),
+	BackingGroups(Vec<Vec<polkadot_primitives::ValidatorIndex>>),
 	/// Returns a session index
 	SessionIndex(u32),
 	/// Session info
-	SessionInfo(Option<polkadot_rt_primitives::v2::SessionInfo>),
+	SessionInfo(Option<polkadot_primitives::SessionInfo>),
 	/// Session keys
 	SessionAccountKeys(Option<Vec<AccountId32>>),
 	/// Session next keys for a validator
@@ -177,7 +174,7 @@ pub enum Response {
 	/// HRMP content for a specific channel
 	HRMPContent(Vec<Vec<u8>>),
 	/// The current host configuration
-	HostConfiguration(HostConfiguration<u32>),
+	HostConfiguration(polkadot::runtime_types::polkadot_runtime_parachains::configuration::HostConfiguration<u32>),
 	/// Chain head subscription
 	ChainHeadSubscription((Subscription<FollowEvent<H256>>, String)),
 	/// Unpin hash from chain head subscription
@@ -323,7 +320,10 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<CoreAssignment>, SubxtWrapperError> {
+	) -> std::result::Result<
+		Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>,
+		SubxtWrapperError,
+	> {
 		wrap_subxt_call!(self, GetScheduledParas, ScheduledParas, url, block_hash)
 	}
 
@@ -331,7 +331,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<Option<CoreOccupied>>, SubxtWrapperError> {
+	) -> std::result::Result<Vec<Option<polkadot_primitives::CoreOccupied>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetOccupiedCores, OccupiedCores, url, block_hash)
 	}
 
@@ -339,7 +339,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
+	) -> std::result::Result<Vec<Vec<polkadot_primitives::ValidatorIndex>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetBackingGroups, BackingGroups, url, block_hash)
 	}
 
@@ -347,7 +347,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		session_index: u32,
-	) -> std::result::Result<Option<polkadot_rt_primitives::v2::SessionInfo>, SubxtWrapperError> {
+	) -> std::result::Result<Option<polkadot_primitives::SessionInfo>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetSessionInfo, SessionInfo, url, session_index)
 	}
 
@@ -406,7 +406,10 @@ impl RequestExecutor {
 	pub async fn get_host_configuration(
 		&mut self,
 		url: &str,
-	) -> std::result::Result<HostConfiguration<u32>, SubxtWrapperError> {
+	) -> std::result::Result<
+		polkadot::runtime_types::polkadot_runtime_parachains::configuration::HostConfiguration<u32>,
+		SubxtWrapperError,
+	> {
 		wrap_subxt_call!(self, GetHostConfiguration, HostConfiguration, url, ())
 	}
 
@@ -548,8 +551,8 @@ pub struct SubxtHrmpChannel {
 	pub recipient_deposit: u128,
 }
 
-impl From<HrmpChannel> for SubxtHrmpChannel {
-	fn from(channel: HrmpChannel) -> Self {
+impl From<polkadot::runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
+	fn from(channel: polkadot::runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
 		SubxtHrmpChannel {
 			max_capacity: channel.max_capacity,
 			max_total_size: channel.max_total_size,
@@ -564,7 +567,7 @@ impl From<HrmpChannel> for SubxtHrmpChannel {
 }
 
 async fn subxt_get_inbound_hrmp_channels(api: &OnlineClient<PolkadotConfig>, block_hash: H256, para_id: u32) -> Result {
-	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
+	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 	let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(&Id(para_id));
 	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
@@ -587,7 +590,7 @@ async fn subxt_get_outbound_hrmp_channels(
 	block_hash: H256,
 	para_id: u32,
 ) -> Result {
-	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
+	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(&Id(para_id));
 	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
@@ -612,7 +615,7 @@ async fn subxt_get_hrmp_content(
 	receiver: u32,
 	sender: u32,
 ) -> Result {
-	use subxt_runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
+	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let id = HrmpChannelId { sender: Id(sender), recipient: Id(receiver) };
 	let addr = polkadot::storage().hrmp().hrmp_channel_contents(&id);
@@ -642,7 +645,7 @@ fn subxt_extract_parainherent(block: &subxt::rpc::types::ChainBlock<PolkadotConf
 
 	let data = match decode_extrinsic(&mut bytes.as_slice()).expect("Failed to decode `ParaInherent`") {
 		SubxtCall::ParaInherent(
-			subxt_runtime_types::polkadot_runtime_parachains::paras_inherent::pallet::Call::enter { data },
+			polkadot::runtime_types::polkadot_runtime_parachains::paras_inherent::pallet::Call::enter { data },
 		) => data,
 		_ => unimplemented!("Unhandled variant"),
 	};
