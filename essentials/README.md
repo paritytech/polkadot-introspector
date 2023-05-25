@@ -12,6 +12,9 @@ Here's an example of how to update the metadata:
 # Update metadata for Rococo
 subxt metadata --format bytes --url wss://rococo-rpc.polkadot.io:443 > assets/rococo_metadata.scale
 
+# Update metadata for Kusama
+subxt metadata --format bytes --url wss://kusama-rpc.polkadot.io:443 > assets/kusama_metadata.scale
+
 # Update metadata for Polkadot
 subxt metadata --format bytes --url wss://rpc.polkadot.io:443 > assets/polkadot_metadata.scale
 ```

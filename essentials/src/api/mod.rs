@@ -78,10 +78,12 @@ mod tests {
 	use super::*;
 	use crate::{storage::StorageEntry, types::H256};
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
-	#[cfg(feature = "polkadot")]
-	const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
 	#[cfg(feature = "rococo")]
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
+	#[cfg(feature = "kusama")]
+	const RPC_NODE_URL: &str = "wss://kusama-rpc.polkadot.io:443";
+	#[cfg(feature = "polkadot")]
+	const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
 
 	#[tokio::test]
 	async fn basic_storage_test() {
