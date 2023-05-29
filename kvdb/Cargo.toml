@@ -16,7 +16,7 @@ erased-serde = "0.3.25"
 futures = "0.3.28"
 hex = "0.4.3"
 itertools = "0.10.5"
-log = "0.4.17"
+log = "0.4.18"
 parity-db = "0.4.8"
 polkadot-introspector-essentials = { path = "../essentials" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
