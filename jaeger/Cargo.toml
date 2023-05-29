@@ -12,7 +12,7 @@ clap = { version = "4.3.0", features = ["derive"] }
 color-eyre = "0.6.2"
 env_logger = "0.10.0"
 futures = "0.3.28"
-log = "0.4.17"
+log = "0.4.18"
 polkadot-introspector-essentials = { path = "../essentials" }
 reqwest = { version = "0.11.18" }
 serde = "1.0.163"
