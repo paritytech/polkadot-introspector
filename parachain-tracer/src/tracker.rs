@@ -29,7 +29,7 @@ use polkadot_introspector_essentials::{
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
-use std::{collections::BTreeMap, default::Default, fmt::Debug};
+use std::{collections::BTreeMap, default::Default, fmt::Debug, time::Duration};
 use subxt::config::{substrate::BlakeTwo256, Hasher};
 
 /// An abstract definition of a parachain block tracker.
@@ -706,7 +706,7 @@ impl SubxtTracker {
 				metrics.on_included(
 					relay_block_number,
 					self.last_included_block,
-					self.get_candidate_time().as_secs_f64(),
+					self.get_candidate_time(),
 					self.para_id,
 				);
 				self.last_included_block = Some(relay_block_number);
@@ -725,17 +725,21 @@ impl SubxtTracker {
 	}
 
 	/// Returns the time for the current block
-	pub fn get_ts(&self) -> std::time::Duration {
+	pub fn get_ts(&self) -> Duration {
 		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
 		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
-		std::time::Duration::from_millis(cur_ts).saturating_sub(std::time::Duration::from_millis(base_ts))
+		Duration::from_millis(cur_ts).saturating_sub(Duration::from_millis(base_ts))
 	}
 
 	/// Returns the time for the current candidate
-	pub fn get_candidate_time(&self) -> std::time::Duration {
-		let current = self.current_relay_block_ts.unwrap_or_default();
-		let base = self.last_included_at_ts.unwrap_or(current);
-		std::time::Duration::from_millis(current).saturating_sub(std::time::Duration::from_millis(base))
+	pub fn get_candidate_time(&self) -> Option<Duration> {
+		let current = self.current_relay_block_ts;
+		let base = self.last_included_at_ts;
+		match (current, base) {
+			(Some(current), Some(base)) =>
+				Some(Duration::from_millis(current).saturating_sub(Duration::from_millis(base))),
+			_ => None,
+		}
 	}
 
 	/// Returns the stats

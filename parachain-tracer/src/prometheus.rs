@@ -21,7 +21,7 @@ use prometheus_endpoint::{
 	prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
 };
-use std::net::ToSocketAddrs;
+use std::{net::ToSocketAddrs, time::Duration};
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
@@ -153,7 +153,7 @@ impl Metrics {
 		&self,
 		relay_parent_number: u32,
 		previous_included: Option<u32>,
-		time: f64,
+		para_block_time_sec: Option<Duration>,
 		para_id: u32,
 	) {
 		if let Some(metrics) = &self.0 {
@@ -165,7 +165,12 @@ impl Metrics {
 					.para_block_times
 					.with_label_values(&[&para_str[..]])
 					.observe(relay_parent_number.saturating_sub(previous_block_number) as f64);
-				metrics.para_block_times_sec.with_label_values(&[&para_str[..]]).observe(time);
+			}
+			if let Some(time) = para_block_time_sec {
+				metrics
+					.para_block_times_sec
+					.with_label_values(&[&para_str[..]])
+					.observe(time.as_secs_f64());
 			}
 		}
 	}
