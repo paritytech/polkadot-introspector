@@ -29,7 +29,7 @@ use polkadot_introspector_essentials::{
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
-use std::{collections::BTreeMap, default::Default, fmt::Debug};
+use std::{collections::BTreeMap, default::Default, fmt::Debug, time::Duration};
 use subxt::config::{substrate::BlakeTwo256, Hasher};
 
 /// An abstract definition of a parachain block tracker.
@@ -132,6 +132,8 @@ pub struct SubxtTracker {
 	last_assignment: Option<u32>,
 	/// The relay chain block number at which the last candidate was backed at.
 	last_backed_at: Option<BlockNumber>,
+	/// The relay chain timestamp at which the last candidate was included at.
+	last_included_at_ts: Option<Timestamp>,
 	/// Information about current block we track.
 	current_candidate: ParachainBlockInfo,
 	/// Current relay chain block.
@@ -368,6 +370,7 @@ impl SubxtTracker {
 			last_backed_at: None,
 			last_relay_block_ts: None,
 			last_included_block: None,
+			last_included_at_ts: None,
 			message_queues: Default::default(),
 			update: None,
 			relay_forks: vec![],
@@ -680,6 +683,7 @@ impl SubxtTracker {
 
 	fn progress_availability(&mut self, metrics: &Metrics) {
 		let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
+		let relay_block_ts = self.current_relay_block_ts.expect("Checked by caller; qed");
 
 		// Update bitfields health.
 		if let Some(update) = self.update.as_mut() {
@@ -699,8 +703,14 @@ impl SubxtTracker {
 					));
 				}
 				self.stats.on_included(relay_block_number, self.last_included_block);
-				metrics.on_included(relay_block_number, self.last_included_block, self.para_id);
+				metrics.on_included(
+					relay_block_number,
+					self.last_included_block,
+					self.get_candidate_time(),
+					self.para_id,
+				);
 				self.last_included_block = Some(relay_block_number);
+				self.last_included_at_ts = Some(relay_block_ts);
 			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
 			if let Some(update) = self.update.as_mut() {
@@ -715,10 +725,21 @@ impl SubxtTracker {
 	}
 
 	/// Returns the time for the current block
-	pub fn get_ts(&self) -> std::time::Duration {
+	pub fn get_ts(&self) -> Duration {
 		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
 		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
-		std::time::Duration::from_millis(cur_ts).saturating_sub(std::time::Duration::from_millis(base_ts))
+		Duration::from_millis(cur_ts).saturating_sub(Duration::from_millis(base_ts))
+	}
+
+	/// Returns the time for the current candidate
+	pub fn get_candidate_time(&self) -> Option<Duration> {
+		let current = self.current_relay_block_ts;
+		let base = self.last_included_at_ts;
+		match (current, base) {
+			(Some(current), Some(base)) =>
+				Some(Duration::from_millis(current).saturating_sub(Duration::from_millis(base))),
+			_ => None,
+		}
 	}
 
 	/// Returns the stats

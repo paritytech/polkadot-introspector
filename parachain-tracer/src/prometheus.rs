@@ -21,7 +21,7 @@ use prometheus_endpoint::{
 	prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
 };
-use std::net::ToSocketAddrs;
+use std::{net::ToSocketAddrs, time::Duration};
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
@@ -66,6 +66,8 @@ struct MetricsInner {
 	bitfields: IntGaugeVec,
 	/// Average candidate inclusion time measured in relay chain blocks.
 	para_block_times: HistogramVec,
+	/// Average candidate inclusion time measured in seconds.
+	para_block_times_sec: HistogramVec,
 	/// Finality lag
 	finality_lag: Gauge,
 }
@@ -147,7 +149,13 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_included(&self, relay_parent_number: u32, previous_included: Option<u32>, para_id: u32) {
+	pub(crate) fn on_included(
+		&self,
+		relay_parent_number: u32,
+		previous_included: Option<u32>,
+		para_block_time_sec: Option<Duration>,
+		para_id: u32,
+	) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics.included_count.with_label_values(&[&para_str[..]]).inc();
@@ -157,6 +165,12 @@ impl Metrics {
 					.para_block_times
 					.with_label_values(&[&para_str[..]])
 					.observe(relay_parent_number.saturating_sub(previous_block_number) as f64);
+			}
+			if let Some(time) = para_block_time_sec {
+				metrics
+					.para_block_times_sec
+					.with_label_values(&[&para_str[..]])
+					.observe(time.as_secs_f64());
 			}
 		}
 	}
@@ -259,6 +273,14 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			HistogramVec::new(
 				HistogramOpts::new("pc_para_block_time", "Parachain block time measured in relay chain blocks.")
 					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		para_block_times_sec: prometheus_endpoint::register(
+			HistogramVec::new(
+				HistogramOpts::new("pc_para_block_time_sec", "Parachain block time measured in seconds.")
+					.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
 				&["parachain_id"],
 			)?,
 			registry,
