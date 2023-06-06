@@ -267,7 +267,10 @@ impl Collector {
 	}
 
 	/// Collects chain events from new head including block events parsing
-	pub async fn collect_chain_events(&mut self, event: &ChainHeadEvent) -> color_eyre::Result<Vec<ChainEvent>> {
+	pub async fn collect_chain_events(
+		&mut self,
+		event: &ChainHeadEvent,
+	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
 		let new_head_event = match event {
 			ChainHeadEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
 			ChainHeadEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
@@ -287,7 +290,10 @@ impl Collector {
 	}
 
 	/// Process a next chain event
-	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<(), CollectorError> {
+	pub async fn process_chain_event<T: subxt::Config>(
+		&mut self,
+		event: &ChainEvent<T>,
+	) -> color_eyre::Result<(), CollectorError> {
 		match event {
 			ChainEvent::NewBestHead(block_hash) => self.process_new_best_head(*block_hash).await,
 			ChainEvent::NewFinalizedHead(block_hash) => self.process_new_finalized_head(*block_hash).await,

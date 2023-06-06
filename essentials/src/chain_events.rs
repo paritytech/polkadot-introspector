@@ -31,7 +31,7 @@ use subxt::{
 };
 
 #[derive(Debug)]
-pub enum ChainEvent {
+pub enum ChainEvent<T: subxt::Config> {
 	/// New best relay chain head
 	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// New finalized relay chain head
@@ -43,7 +43,7 @@ pub enum ChainEvent {
 	/// Backing, inclusion, time out for a parachain candidate
 	CandidateChanged(Box<SubxtCandidateEvent>),
 	/// Anything undecoded
-	RawEvent(<PolkadotConfig as subxt::Config>::Hash, subxt::events::EventDetails),
+	RawEvent(<PolkadotConfig as subxt::Config>::Hash, subxt::events::EventDetails<T>),
 }
 
 #[derive(Debug)]
@@ -89,21 +89,21 @@ pub enum SubxtDisputeResult {
 	TimedOut,
 }
 
-pub async fn decode_chain_event(
+pub async fn decode_chain_event<T: subxt::Config>(
 	block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	event: subxt::events::EventDetails,
-) -> Result<ChainEvent> {
-	if is_specific_event::<DisputeInitiated>(&event) {
-		let decoded = decode_to_specific_event::<DisputeInitiated>(&event)?;
+	event: subxt::events::EventDetails<T>,
+) -> Result<ChainEvent<T>> {
+	if is_specific_event::<DisputeInitiated, T>(&event) {
+		let decoded = decode_to_specific_event::<DisputeInitiated, T>(&event)?;
 		return Ok(ChainEvent::DisputeInitiated(SubxtDispute {
 			relay_parent_block: block_hash,
 			candidate_hash: decoded.0 .0,
 		}))
 	}
 
-	if is_specific_event::<DisputeConcluded>(&event) {
+	if is_specific_event::<DisputeConcluded, T>(&event) {
 		use crate::metadata::polkadot::runtime_types::polkadot_runtime_parachains::disputes;
-		let decoded = decode_to_specific_event::<DisputeConcluded>(&event)?;
+		let decoded = decode_to_specific_event::<DisputeConcluded, T>(&event)?;
 		let outcome = match decoded.1 {
 			disputes::DisputeResult::Valid => SubxtDisputeResult::Valid,
 			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
@@ -114,8 +114,8 @@ pub async fn decode_chain_event(
 		))
 	}
 
-	if is_specific_event::<CandidateBacked>(&event) {
-		let decoded = decode_to_specific_event::<CandidateBacked>(&event)?;
+	if is_specific_event::<CandidateBacked, T>(&event) {
+		let decoded = decode_to_specific_event::<CandidateBacked, T>(&event)?;
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
@@ -123,8 +123,8 @@ pub async fn decode_chain_event(
 		))))
 	}
 
-	if is_specific_event::<CandidateIncluded>(&event) {
-		let decoded = decode_to_specific_event::<CandidateIncluded>(&event)?;
+	if is_specific_event::<CandidateIncluded, T>(&event) {
+		let decoded = decode_to_specific_event::<CandidateIncluded, T>(&event)?;
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
@@ -132,8 +132,8 @@ pub async fn decode_chain_event(
 		))))
 	}
 
-	if is_specific_event::<CandidateTimedOut>(&event) {
-		let decoded = decode_to_specific_event::<CandidateTimedOut>(&event)?;
+	if is_specific_event::<CandidateTimedOut, T>(&event) {
+		let decoded = decode_to_specific_event::<CandidateTimedOut, T>(&event)?;
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
@@ -144,12 +144,14 @@ pub async fn decode_chain_event(
 	Ok(ChainEvent::RawEvent(block_hash, event))
 }
 
-fn is_specific_event<E: subxt::events::StaticEvent>(raw_event: &subxt::events::EventDetails) -> bool {
+fn is_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
+	raw_event: &subxt::events::EventDetails<C>,
+) -> bool {
 	E::is_event(raw_event.pallet_name(), raw_event.variant_name())
 }
 
-fn decode_to_specific_event<E: subxt::events::StaticEvent>(
-	raw_event: &subxt::events::EventDetails,
+fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
+	raw_event: &subxt::events::EventDetails<C>,
 ) -> color_eyre::Result<E> {
 	raw_event
 		.as_event()
