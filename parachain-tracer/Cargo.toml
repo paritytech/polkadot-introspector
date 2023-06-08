@@ -30,7 +30,7 @@ serde_urlencoded = "0.7.1"
 strum = { version = "0.24.1", features = ["derive"] }
 subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.29.0" }
 thiserror = "1.0.39"
-time = { version = "0.3.21", features = ["formatting"] }
+time = { version = "0.3.22", features = ["formatting"] }
 tokio = { version = "1.28.2", features = ["macros", "rt-multi-thread", "signal"] }
 typed-builder = "0.14.0"
 warp = { version = "0.3.5", features = ["tls"] }
