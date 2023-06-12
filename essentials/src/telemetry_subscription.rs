@@ -78,7 +78,13 @@ impl TelemetrySubscription {
 	}
 
 	// Subscribes to a telemetry feed handling graceful shutdown.
-	async fn run_per_consumer(mut update_channel: Sender<TelemetryEvent>, url: &str, shutdown_tx: BroadcastSender<()>) {
+	async fn run_per_consumer(
+		mut update_channel: Sender<TelemetryEvent>,
+		// Usually, we avoid using String in function arguments to prevent unnecessary cloning.
+		// However, we spawn this particular method as an asynchronous task, so we make an exception here.
+		url: String,
+		shutdown_tx: BroadcastSender<()>,
+	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut stream = match TelemetryStream::connect(&url).await {
 			Ok(v) => v,
@@ -140,10 +146,13 @@ impl TelemetrySubscription {
 		url: &str,
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+		let url = url;
 		Ok(self
 			.consumers
 			.into_iter()
-			.map(|update_channel| tokio::spawn(Self::run_per_consumer(update_channel, url, shutdown_tx.clone())))
+			.map(move |update_channel| {
+				return tokio::spawn(Self::run_per_consumer(update_channel, url.to_string(), shutdown_tx.clone()))
+			})
 			.collect::<Vec<_>>())
 	}
 }
