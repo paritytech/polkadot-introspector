@@ -80,9 +80,7 @@ impl TelemetrySubscription {
 	// Subscribes to a telemetry feed handling graceful shutdown.
 	async fn run_per_consumer(
 		mut update_channel: Sender<TelemetryEvent>,
-		// Usually, we avoid using String in function arguments to prevent unnecessary cloning.
-		// However, we spawn this particular method as an asynchronous task, so we make an exception here.
-		url: String,
+		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		shutdown_tx: BroadcastSender<()>,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();

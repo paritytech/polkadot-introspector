@@ -103,7 +103,7 @@ impl ChainHeadSubscription {
 	// Per consumer
 	async fn run_per_node(
 		mut update_channel: Sender<ChainHeadEvent>,
-		url: &str,
+		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
 	) {
@@ -202,7 +202,7 @@ impl ChainHeadSubscription {
 			.into_iter()
 			.zip(urls.into_iter())
 			.map(|(update_channel, url)| {
-				tokio::spawn(Self::run_per_node(update_channel, &url, shutdown_tx.clone(), retry.clone()))
+				tokio::spawn(Self::run_per_node(update_channel, url.to_string(), shutdown_tx.clone(), retry.clone()))
 			})
 			.collect()
 	}
