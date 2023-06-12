@@ -154,7 +154,7 @@ impl BlockTimeMonitor {
 			.map(|((endpoint, values), update_channel)| {
 				tokio::spawn(Self::watch_node(
 					self.opts.clone(),
-					endpoint,
+					&endpoint,
 					self.block_time_metric.clone(),
 					values,
 					update_channel,
@@ -241,7 +241,7 @@ impl BlockTimeMonitor {
 
 	async fn watch_node(
 		opts: BlockTimeOptions,
-		url: String,
+		url: &str,
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
 		// TODO: make this a struct.
@@ -349,8 +349,8 @@ async fn populate_view(
 	}
 }
 
-fn leak_static_str(string: String) -> &'static str {
-	Box::leak(string.into_boxed_str())
+fn leak_static_str(str: &str) -> &'static str {
+	Box::leak(str.into_boxed_str())
 }
 
 fn register_metric(registry: &Registry) -> HistogramVec {

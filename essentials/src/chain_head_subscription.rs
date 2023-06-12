@@ -103,7 +103,7 @@ impl ChainHeadSubscription {
 	// Per consumer
 	async fn run_per_node(
 		mut update_channel: Sender<ChainHeadEvent>,
-		url: String,
+		url: &str,
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
 	) {
@@ -138,7 +138,7 @@ impl ChainHeadSubscription {
 					match event {
 						// Drain the initialized event
 						FollowEvent::Initialized(init) => {
-							if let Err(e) = executor.unpin_chain_head(&url, sub_id.clone(), init.finalized_block_hash).await {
+							if let Err(e) = executor.unpin_chain_head(&url, &sub_id, init.finalized_block_hash).await {
 								error!("Cannot unpin hash {}: {:?}", init.finalized_block_hash, e);
 							};
 						},
@@ -164,7 +164,7 @@ impl ChainHeadSubscription {
 								.iter()
 								.chain(finalized.pruned_block_hashes.iter())
 							{
-								if let Err(e) = executor.unpin_chain_head(&url, sub_id.clone(), *hash).await {
+								if let Err(e) = executor.unpin_chain_head(&url, &sub_id, *hash).await {
 									error!("Cannot unpin hash {}: {:?}", hash, e);
 								};
 							}
@@ -202,7 +202,7 @@ impl ChainHeadSubscription {
 			.into_iter()
 			.zip(urls.into_iter())
 			.map(|(update_channel, url)| {
-				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), retry.clone()))
+				tokio::spawn(Self::run_per_node(update_channel, &url, shutdown_tx.clone(), retry.clone()))
 			})
 			.collect()
 	}
