@@ -150,8 +150,8 @@ impl TelemetrySubscription {
 		Ok(self
 			.consumers
 			.into_iter()
-			.map(move |update_channel| {
-				return tokio::spawn(Self::run_per_consumer(update_channel, url.to_string(), shutdown_tx.clone()))
+			.map(|update_channel| {
+				tokio::spawn(Self::run_per_consumer(update_channel, url.to_string(), shutdown_tx.clone()))
 			})
 			.collect::<Vec<_>>())
 	}
