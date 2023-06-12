@@ -13,7 +13,7 @@ color-eyre = "0.6.2"
 colored = "2.0.0"
 crossterm = "0.26.1"
 env_logger = "0.10.0"
-log = "0.4.18"
+log = "0.4.19"
 polkadot-introspector-essentials = { path = "../essentials" }
 polkadot-introspector-priority-channel = { path = "../priority-channel" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
