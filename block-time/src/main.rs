@@ -154,7 +154,7 @@ impl BlockTimeMonitor {
 			.map(|((endpoint, values), update_channel)| {
 				tokio::spawn(Self::watch_node(
 					self.opts.clone(),
-					&endpoint,
+					endpoint,
 					self.block_time_metric.clone(),
 					values,
 					update_channel,
@@ -241,7 +241,7 @@ impl BlockTimeMonitor {
 
 	async fn watch_node(
 		opts: BlockTimeOptions,
-		url: &str,
+		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
 		// TODO: make this a struct.
@@ -250,7 +250,7 @@ impl BlockTimeMonitor {
 		active_endpoints: Arc<AtomicUsize>,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
-		let url = leak_static_str(url);
+		let url = leak_static_str(&url);
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(_) => {},
 			BlockTimeMode::Cli(cli_opts) => {
@@ -350,7 +350,7 @@ async fn populate_view(
 }
 
 fn leak_static_str(str: &str) -> &'static str {
-	Box::leak(str.into_boxed_str())
+	Box::leak(str.to_string().into_boxed_str())
 }
 
 fn register_metric(registry: &Registry) -> HistogramVec {
