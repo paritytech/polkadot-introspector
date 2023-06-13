@@ -144,7 +144,6 @@ impl TelemetrySubscription {
 		url: &str,
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let url = url;
 		Ok(self
 			.consumers
 			.into_iter()
