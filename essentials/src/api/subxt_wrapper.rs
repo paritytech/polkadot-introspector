@@ -419,10 +419,10 @@ impl RequestExecutor {
 	pub async fn unpin_chain_head(
 		&mut self,
 		url: &str,
-		sub_id: String,
+		sub_id: &str,
 		hash: H256,
 	) -> std::result::Result<(), SubxtWrapperError> {
-		wrap_subxt_call!(self, UnpinChainHead, UnpinChainHead, url, sub_id, hash)
+		wrap_subxt_call!(self, UnpinChainHead, UnpinChainHead, url, sub_id.to_string(), hash)
 	}
 }
 

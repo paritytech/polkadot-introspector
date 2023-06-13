@@ -241,7 +241,7 @@ impl BlockTimeMonitor {
 
 	async fn watch_node(
 		opts: BlockTimeOptions,
-		url: String,
+		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		values: Arc<Mutex<VecDeque<u64>>>,
 		// TODO: make this a struct.
