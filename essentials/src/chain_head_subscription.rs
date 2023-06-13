@@ -202,7 +202,7 @@ impl ChainHeadSubscription {
 			.into_iter()
 			.zip(urls.into_iter())
 			.map(|(update_channel, url)| {
-				tokio::spawn(Self::run_per_node(update_channel, url.to_string(), shutdown_tx.clone(), retry.clone()))
+				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), retry.clone()))
 			})
 			.collect()
 	}
