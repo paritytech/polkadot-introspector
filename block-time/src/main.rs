@@ -349,8 +349,8 @@ async fn populate_view(
 	}
 }
 
-fn leak_static_str(str: String) -> &'static str {
-	Box::leak(str.into_boxed_str())
+fn leak_static_str(string: String) -> &'static str {
+	Box::leak(string.into_boxed_str())
 }
 
 fn register_metric(registry: &Registry) -> HistogramVec {
