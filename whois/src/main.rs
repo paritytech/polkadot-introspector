@@ -111,7 +111,7 @@ impl Telemetry {
 			_ => return Err(WhoisError::NoNextKeys),
 		};
 		let authority_key = get_authority_key(next_keys);
-		let mut futures = match self.subscription.run(self.opts.feed.clone(), shutdown_tx).await {
+		let mut futures = match self.subscription.run(&self.opts.feed, shutdown_tx).await {
 			Ok(v) => v,
 			Err(e) => return Err(WhoisError::TelemetryError(e)),
 		};
