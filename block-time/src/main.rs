@@ -250,7 +250,7 @@ impl BlockTimeMonitor {
 		active_endpoints: Arc<AtomicUsize>,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
-		let url = leak_static_str(&url);
+		let url = leak_static_str(url);
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(_) => {},
 			BlockTimeMode::Cli(cli_opts) => {
@@ -349,8 +349,8 @@ async fn populate_view(
 	}
 }
 
-fn leak_static_str(str: &str) -> &'static str {
-	Box::leak(str.to_string().into_boxed_str())
+fn leak_static_str(str: String) -> &'static str {
+	Box::leak(str.into_boxed_str())
 }
 
 fn register_metric(registry: &Registry) -> HistogramVec {
