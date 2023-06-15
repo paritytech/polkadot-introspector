@@ -20,13 +20,13 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
+	types::BlockNumber,
 	utils::RetryOptions,
 };
 use async_trait::async_trait;
 use futures::future;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{channel, Sender};
-use subxt::rpc::types::FollowEvent;
 use tokio::{
 	sync::broadcast::Sender as BroadcastSender,
 	time::{interval_at, Duration},
@@ -34,6 +34,8 @@ use tokio::{
 
 pub struct HistoricalSubscription {
 	urls: Vec<String>,
+	from_block_number: BlockNumber,
+	to_block_number: BlockNumber,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<ChainSubscriptionEvent>>>,
 	retry: RetryOptions,
@@ -67,7 +69,14 @@ impl EventStream for HistoricalSubscription {
 		shutdown_future: tokio::task::JoinHandle<()>,
 	) -> color_eyre::Result<()> {
 		let futures = self.consumers.into_iter().map(|update_channels| {
-			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.retry.clone())
+			Self::run_per_consumer(
+				update_channels,
+				self.urls.clone(),
+				self.from_block_number,
+				self.to_block_number,
+				shutdown_tx.clone(),
+				self.retry.clone(),
+			)
 		});
 
 		let mut flat_futures = futures.flatten().collect::<Vec<_>>();
@@ -87,85 +96,31 @@ impl EventStream for HistoricalSubscription {
 }
 
 impl HistoricalSubscription {
-	pub fn new(urls: Vec<String>, retry: RetryOptions) -> HistoricalSubscription {
-		HistoricalSubscription { urls, consumers: Vec::new(), retry }
+	pub fn new(
+		urls: Vec<String>,
+		from_block_number: BlockNumber,
+		to_block_number: BlockNumber,
+		retry: RetryOptions,
+	) -> HistoricalSubscription {
+		HistoricalSubscription { urls, from_block_number, to_block_number, consumers: Vec::new(), retry }
 	}
 
 	// Per consumer
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
+		from_block_number: BlockNumber,
+		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut executor = RequestExecutor::new(retry);
-		let (mut sub, sub_id) = match executor.get_chain_head_subscription(&url).await {
-			Ok(v) => v,
-			Err(e) => {
-				error!("Subscription to {} failed: {:?}", url, e);
-				std::process::exit(1)
-			},
-		};
-
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
-		loop {
+		for block_number in from_block_number..=to_block_number {
 			tokio::select! {
-				message = sub.next() => {
-					let event = match message {
-						Some(Ok(v)) => v,
-						Some(Err(e)) => {
-							error!("Subscription to {} failed: {:?}", url, e);
-							std::process::exit(1)
-						},
-						None => {
-							error!("Subscription to {} failed, received None instead of an event", url);
-							std::process::exit(1);
-						}
-					};
-
-					match event {
-						// Drain the initialized event
-						FollowEvent::Initialized(init) => {
-							if let Err(e) = executor.unpin_chain_head(&url, &sub_id, init.finalized_block_hash).await {
-								error!("Cannot unpin hash {}: {:?}", init.finalized_block_hash, e);
-							};
-						},
-						FollowEvent::NewBlock(_) => continue,
-						FollowEvent::BestBlockChanged(best_block) => {
-							info!("[{}] Best block imported ({:?})", url, best_block.best_block_hash);
-							if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewBestHead(best_block.best_block_hash)).await {
-								info!("Event consumer has terminated: {:?}, shutting down", e);
-								return;
-							}
-						},
-						FollowEvent::Finalized(finalized) => {
-							for hash in finalized.finalized_block_hashes.iter() {
-								info!("[{}] Finalized block imported ({:?})", url, hash);
-								if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedHead(*hash)).await {
-									info!("Event consumer has terminated: {:?}, shutting down", e);
-									return;
-								}
-							}
-
-							for hash in finalized
-								.finalized_block_hashes
-								.iter()
-								.chain(finalized.pruned_block_hashes.iter())
-							{
-								if let Err(e) = executor.unpin_chain_head(&url, &sub_id, *hash).await {
-									error!("Cannot unpin hash {}: {:?}", hash, e);
-								};
-							}
-						},
-						FollowEvent::Stop => {
-							info!("Chain head subscription stopped");
-							return;
-						},
-					}
-				},
 				_ = shutdown_rx.recv() => {
 					info!("Received interrupt signal shutting down subscription");
 					return;
@@ -179,6 +134,25 @@ impl HistoricalSubscription {
 					}
 				}
 			}
+
+			let message = executor.get_block_hash(&url, Some(block_number)).await;
+			let block_hash = match message {
+				Ok(Some(v)) => v,
+				Ok(None) => {
+					error!("Subscription to {} failed, block hash for block #{} not found", url, block_number);
+					std::process::exit(1);
+				},
+				Err(e) => {
+					error!("Subscription to {} failed: {:?}", url, e);
+					std::process::exit(1)
+				},
+			};
+
+			info!("[{}] Block imported ({:?})", url, block_hash);
+			if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedHead(block_hash)).await {
+				info!("Event consumer has terminated: {:?}, shutting down", e);
+				return
+			}
 		}
 	}
 
@@ -186,6 +160,8 @@ impl HistoricalSubscription {
 	fn run_per_consumer(
 		update_channels: Vec<Sender<ChainSubscriptionEvent>>,
 		urls: Vec<String>,
+		from_block_number: BlockNumber,
+		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
 	) -> Vec<tokio::task::JoinHandle<()>> {
@@ -193,7 +169,14 @@ impl HistoricalSubscription {
 			.into_iter()
 			.zip(urls.into_iter())
 			.map(|(update_channel, url)| {
-				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), retry.clone()))
+				tokio::spawn(Self::run_per_node(
+					update_channel,
+					url,
+					from_block_number,
+					to_block_number,
+					shutdown_tx.clone(),
+					retry.clone(),
+				))
 			})
 			.collect()
 	}

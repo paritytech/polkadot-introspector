@@ -386,7 +386,12 @@ async fn main() -> color_eyre::Result<()> {
 		let to_block_number = opts.to_block_number.expect("`--to` must exist in historical mode");
 		assert!(from_block_number < to_block_number, "Block number in `--from` should be less then in `--to`");
 		println!("Historical mode: from {} to {}", from_block_number, to_block_number);
-		let mut core = HistoricalSubscription::new(vec![opts.node.clone()], opts.retry.clone());
+		let mut core = HistoricalSubscription::new(
+			vec![opts.node.clone()],
+			from_block_number,
+			to_block_number,
+			opts.retry.clone(),
+		);
 		let consumer_init = core.create_consumer();
 		let futures = ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await?;
 		core.run(futures, shutdown_tx, shutdown_future).await?;
