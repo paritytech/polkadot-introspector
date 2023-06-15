@@ -24,7 +24,8 @@ use crossterm::{
 use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
 	api::ApiService,
-	chain_head_subscription::{ChainHeadEvent, ChainHeadSubscription},
+	chain_head_subscription::ChainHeadSubscription,
+	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
 	init,
@@ -96,13 +97,22 @@ struct BlockTimeMonitor {
 	opts: BlockTimeOptions,
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
-	consumer_config: EventConsumerInit<ChainHeadEvent>,
+	consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
 	api_service: ApiService<H256>,
 	active_endpoints: usize,
 }
 
 impl BlockTimeMonitor {
-	pub fn new(opts: BlockTimeOptions, consumer_config: EventConsumerInit<ChainHeadEvent>) -> color_eyre::Result<Self> {
+	pub fn new(
+		opts: BlockTimeOptions,
+		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
+	) -> color_eyre::Result<Self> {
+		let endpoints = opts.nodes.clone();
+		let mut values = Vec::new();
+		for _ in 0..endpoints.len() {
+			values.push(Default::default());
+		}
+
 		// This starts the both the storage and subxt APIs.
 		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 }, opts.retry.clone());
 		let endpoints = opts.nodes.clone();
@@ -138,7 +148,7 @@ impl BlockTimeMonitor {
 	}
 
 	pub async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let consumer_channels: Vec<Receiver<ChainHeadEvent>> = self.consumer_config.into();
+		let consumer_channels: Vec<Receiver<ChainSubscriptionEvent>> = self.consumer_config.into();
 		let (message_tx, message_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		let mut futures = self
@@ -260,7 +270,7 @@ impl BlockTimeMonitor {
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		// TODO: make this a struct.
-		consumer_config: Receiver<ChainHeadEvent>,
+		consumer_config: Receiver<ChainSubscriptionEvent>,
 		api_service: ApiService<H256>,
 		mut message_tx: Sender<BlockTimeMessage>,
 	) {
@@ -282,9 +292,9 @@ impl BlockTimeMonitor {
 			if let Ok(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
 				let hash = match event {
-					ChainHeadEvent::NewBestHead(hash) => Some(hash),
-					ChainHeadEvent::NewFinalizedHead(hash) => Some(hash),
-					ChainHeadEvent::Heartbeat => continue,
+					ChainSubscriptionEvent::NewBestHead(hash) => Some(hash),
+					ChainSubscriptionEvent::NewFinalizedHead(hash) => Some(hash),
+					ChainSubscriptionEvent::Heartbeat => continue,
 				};
 				if let Some(hash) = hash {
 					let ts = executor.get_block_timestamp(url, hash).await;

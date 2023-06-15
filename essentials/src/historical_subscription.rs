@@ -32,7 +32,7 @@ use tokio::{
 	time::{interval_at, Duration},
 };
 
-pub struct ChainHeadSubscription {
+pub struct HistoricalSubscription {
 	urls: Vec<String>,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<ChainSubscriptionEvent>>>,
@@ -40,7 +40,7 @@ pub struct ChainHeadSubscription {
 }
 
 #[async_trait]
-impl EventStream for ChainHeadSubscription {
+impl EventStream for HistoricalSubscription {
 	type Event = ChainSubscriptionEvent;
 
 	/// Create a new consumer of events. Returns consumer initialization data.
@@ -86,9 +86,9 @@ impl EventStream for ChainHeadSubscription {
 	}
 }
 
-impl ChainHeadSubscription {
-	pub fn new(urls: Vec<String>, retry: RetryOptions) -> ChainHeadSubscription {
-		ChainHeadSubscription { urls, consumers: Vec::new(), retry }
+impl HistoricalSubscription {
+	pub fn new(urls: Vec<String>, retry: RetryOptions) -> HistoricalSubscription {
+		HistoricalSubscription { urls, consumers: Vec::new(), retry }
 	}
 
 	// Per consumer
