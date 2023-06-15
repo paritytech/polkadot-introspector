@@ -25,19 +25,12 @@ compile_error!("Must build with either `rococo`, `kusama`, `polkadot` features")
 #[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
 pub mod polkadot {}
 
-#[cfg(feature = "rococo")]
-pub use polkadot::runtime_types::polkadot_primitives::v4 as polkadot_primitives;
-
 #[cfg(feature = "kusama")]
 #[subxt::subxt(runtime_metadata_path = "assets/kusama_metadata.scale")]
 pub mod polkadot {}
-
-#[cfg(feature = "kusama")]
-pub use polkadot::runtime_types::polkadot_primitives::v4 as polkadot_primitives;
 
 #[cfg(feature = "polkadot")]
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
 pub mod polkadot {}
 
-#[cfg(feature = "polkadot")]
-pub use polkadot::runtime_types::polkadot_primitives::v2 as polkadot_primitives;
+pub use polkadot::runtime_types::polkadot_primitives::v4 as polkadot_primitives;
