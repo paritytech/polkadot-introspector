@@ -477,7 +477,7 @@ async fn subxt_get_block(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<
 
 async fn subxt_get_block_hash(api: &OnlineClient<PolkadotConfig>, maybe_block_number: Option<BlockNumber>) -> Result {
 	let maybe_subxt_block_number: Option<subxt::rpc::types::BlockNumber> =
-		maybe_block_number.map_or(None, |v| Some(NumberOrHex::Number(v.into()).into()));
+		maybe_block_number.map(|v| NumberOrHex::Number(v.into()).into());
 	Ok(Response::MaybeBlockHash(api.rpc().block_hash(maybe_subxt_block_number).await?))
 }
 
