@@ -77,11 +77,11 @@ pub(crate) struct ParachainTracerOptions {
 	para_id: Vec<u32>,
 	#[clap(long, conflicts_with = "para_id", default_value = "false")]
 	all: bool,
-	/// TODO
-	#[clap(name = "from", long)]
+	/// First block in historical mode
+	#[clap(name = "from", long, conflicts_with = "subscribe_mode")]
 	from_block_number: Option<BlockNumber>,
-	/// TODO
-	#[clap(name = "to", long)]
+	/// Last block in historical mode
+	#[clap(name = "to", long, conflicts_with = "subscribe_mode")]
 	to_block_number: Option<BlockNumber>,
 	/// Run for a number of blocks then stop.
 	#[clap(name = "blocks", long)]
