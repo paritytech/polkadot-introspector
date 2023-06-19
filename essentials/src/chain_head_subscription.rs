@@ -91,7 +91,7 @@ impl ChainHeadSubscription {
 		ChainHeadSubscription { urls, consumers: Vec::new(), retry }
 	}
 
-	// Per consumer
+	// Per node
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
