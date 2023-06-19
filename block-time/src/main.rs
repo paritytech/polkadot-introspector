@@ -293,7 +293,7 @@ impl BlockTimeMonitor {
 				debug!("New event: {:?}", event);
 				let hash = match event {
 					ChainSubscriptionEvent::NewBestHead(hash) => Some(hash),
-					ChainSubscriptionEvent::NewFinalizedHead(hash) => Some(hash),
+					ChainSubscriptionEvent::NewFinalizedBlock(hash) => Some(hash),
 					ChainSubscriptionEvent::Heartbeat => continue,
 				};
 				if let Some(hash) = hash {

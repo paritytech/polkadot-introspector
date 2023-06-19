@@ -273,7 +273,7 @@ impl Collector {
 	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
 		let new_head_event = match event {
 			ChainSubscriptionEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
-			ChainSubscriptionEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
+			ChainSubscriptionEvent::NewFinalizedBlock(hash) => ChainEvent::NewFinalizedHead(*hash),
 			ChainSubscriptionEvent::Heartbeat => return Ok(vec![]),
 		};
 		let mut chain_events = vec![new_head_event];
@@ -939,7 +939,7 @@ fn get_unix_time_unwrap() -> Duration {
 pub fn new_head_hash(event: &ChainSubscriptionEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
 	match (event, subscribe_mode) {
 		(ChainSubscriptionEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
-		(ChainSubscriptionEvent::NewFinalizedHead(hash), CollectorSubscribeMode::Finalized) => Some(hash),
+		(ChainSubscriptionEvent::NewFinalizedBlock(hash), CollectorSubscribeMode::Finalized) => Some(hash),
 		_ => None,
 	}
 }

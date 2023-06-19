@@ -149,7 +149,7 @@ impl HistoricalSubscription {
 			};
 
 			info!("[{}] Block imported ({:?})", url, block_hash);
-			if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedHead(block_hash)).await {
+			if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedBlock(block_hash)).await {
 				info!("Event consumer has terminated: {:?}, shutting down", e);
 				return
 			}

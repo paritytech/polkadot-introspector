@@ -22,7 +22,7 @@ pub enum ChainSubscriptionEvent {
 	/// New relay chain best head
 	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
 	/// New relay chain finalized head
-	NewFinalizedHead(<PolkadotConfig as subxt::Config>::Hash),
+	NewFinalizedBlock(<PolkadotConfig as subxt::Config>::Hash),
 	/// Heartbeat event
 	Heartbeat,
 }

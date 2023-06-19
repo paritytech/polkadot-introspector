@@ -144,7 +144,7 @@ impl ChainHeadSubscription {
 						FollowEvent::Finalized(finalized) => {
 							for hash in finalized.finalized_block_hashes.iter() {
 								info!("[{}] Finalized block imported ({:?})", url, hash);
-								if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedHead(*hash)).await {
+								if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedBlock(*hash)).await {
 									info!("Event consumer has terminated: {:?}, shutting down", e);
 									return;
 								}
