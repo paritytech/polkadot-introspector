@@ -27,7 +27,7 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use clap::Parser;
+use clap::{error::ErrorKind, CommandFactory, Parser};
 use colored::Colorize;
 use crossterm::style::Stylize;
 use futures::{future, stream::FuturesUnordered, StreamExt};
@@ -77,12 +77,6 @@ pub(crate) struct ParachainTracerOptions {
 	para_id: Vec<u32>,
 	#[clap(long, conflicts_with = "para_id", default_value = "false")]
 	all: bool,
-	/// First block in historical mode
-	#[clap(name = "from", long, conflicts_with = "subscribe_mode")]
-	from_block_number: Option<BlockNumber>,
-	/// Last block in historical mode
-	#[clap(name = "to", long, conflicts_with = "subscribe_mode")]
-	to_block_number: Option<BlockNumber>,
 	/// Run for a number of blocks then stop.
 	#[clap(name = "blocks", long)]
 	block_count: Option<u32>,
@@ -95,6 +89,15 @@ pub(crate) struct ParachainTracerOptions {
 	/// Defines subscription mode
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
+	/// Turns on historical mode to trace parachains between specific blocks instead of following chain updates
+	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
+	is_historical: bool,
+	/// First block in historical mode
+	#[clap(name = "from", long)]
+	from_block_number: Option<BlockNumber>,
+	/// Last block in historical mode
+	#[clap(name = "to", long)]
+	to_block_number: Option<BlockNumber>,
 	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
 	#[clap(subcommand)]
 	mode: Option<ParachainTracerMode>,
@@ -379,12 +382,17 @@ async fn main() -> color_eyre::Result<()> {
 
 	let (shutdown_tx, _) = broadcast::channel(1);
 	let shutdown_future = tokio::spawn(init::on_shutdown(shutdown_tx.clone()));
-	let is_historical_mode = opts.from_block_number.is_some() || opts.to_block_number.is_some();
 
-	if is_historical_mode {
+	if opts.is_historical {
 		let from_block_number = opts.from_block_number.expect("`--from` must exist in historical mode");
 		let to_block_number = opts.to_block_number.expect("`--to` must exist in historical mode");
-		assert!(from_block_number < to_block_number, "Block number in `--from` should be less then in `--to`");
+		if from_block_number >= to_block_number {
+			let mut cmd = ParachainTracerOptions::command();
+			cmd // Throws `clap` error instead of just panicking
+				.error(ErrorKind::ArgumentConflict, "`--from` block number should be less then `--to`")
+				.exit();
+		}
+
 		println!("Historical mode: from {} to {}", from_block_number, to_block_number);
 		let mut core = HistoricalSubscription::new(
 			vec![opts.node.clone()],
