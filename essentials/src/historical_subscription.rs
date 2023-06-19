@@ -27,6 +27,7 @@ use async_trait::async_trait;
 use futures::future;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{channel, Sender};
+use subxt::config::Header;
 use tokio::{
 	sync::broadcast::Sender as BroadcastSender,
 	time::{interval_at, Duration},
@@ -118,6 +119,21 @@ impl HistoricalSubscription {
 		let mut executor = RequestExecutor::new(retry);
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
+
+		let last_block_number = match executor.get_block(&url, None).await {
+			Ok(Some(block)) => Some(block.header.number()),
+			Ok(None) => None,
+			Err(_) => None,
+		};
+		if last_block_number.is_none() {
+			error!("Subscription to {} failed, last block not found", url);
+			return
+		}
+		let last_block_number = last_block_number.unwrap();
+		if from_block_number >= last_block_number || to_block_number >= last_block_number {
+			error!("`--from` and `--to` must be less then {}", last_block_number);
+			return
+		}
 
 		for block_number in from_block_number..=to_block_number {
 			tokio::select! {
