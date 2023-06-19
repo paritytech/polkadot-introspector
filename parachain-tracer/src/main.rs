@@ -92,10 +92,10 @@ pub(crate) struct ParachainTracerOptions {
 	/// Turns on historical mode to trace parachains between specific blocks instead of following chain updates
 	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
 	is_historical: bool,
-	/// First block in historical mode
+	/// First block in historical mode, should be less then `--to` and the chain's tip
 	#[clap(name = "from", long)]
 	from_block_number: Option<BlockNumber>,
-	/// Last block in historical mode
+	/// Last block in historical mode, should be greater then `--from` and less then the chain's tip
 	#[clap(name = "to", long)]
 	to_block_number: Option<BlockNumber>,
 	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
