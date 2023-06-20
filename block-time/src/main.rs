@@ -25,25 +25,23 @@ use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
 	api::ApiService,
 	chain_head_subscription::{ChainHeadEvent, ChainHeadSubscription},
+	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
 	init,
 	storage::RecordsStorageConfig,
 	types::H256,
 	utils,
 };
-use polkadot_introspector_priority_channel::Receiver;
+use polkadot_introspector_priority_channel::{channel, Receiver, Sender};
 use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
 	collections::VecDeque,
 	io::{stdout, Write},
 	net::ToSocketAddrs,
-	sync::{
-		atomic::{AtomicUsize, Ordering},
-		Arc, Mutex,
-	},
+	sync::{Arc, Mutex},
 };
 use subxt::config::Header;
-use tokio::sync::broadcast;
+use tokio::{select, sync::broadcast};
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Observe block times using an RPC node")]
@@ -89,6 +87,11 @@ struct BlockTimePrometheusOptions {
 	port: u16,
 }
 
+#[derive(Debug)]
+enum BlockTimeMessage {
+	EndpointDisconected,
+}
+
 struct BlockTimeMonitor {
 	values: Vec<Arc<Mutex<VecDeque<u64>>>>,
 	opts: BlockTimeOptions,
@@ -96,7 +99,7 @@ struct BlockTimeMonitor {
 	endpoints: Vec<String>,
 	consumer_config: EventConsumerInit<ChainHeadEvent>,
 	api_service: ApiService<H256>,
-	active_endpoints: Arc<AtomicUsize>,
+	active_endpoints: usize,
 }
 
 impl BlockTimeMonitor {
@@ -109,7 +112,7 @@ impl BlockTimeMonitor {
 
 		// This starts the both the storage and subxt APIs.
 		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 }, opts.retry.clone());
-		let active_endpoints = Arc::new(AtomicUsize::new(endpoints.len()));
+		let active_endpoints = endpoints.len();
 
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(prometheus_opts) => {
@@ -144,6 +147,7 @@ impl BlockTimeMonitor {
 
 	pub async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let consumer_channels: Vec<Receiver<ChainHeadEvent>> = self.consumer_config.into();
+		let (message_tx, message_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		let mut futures = self
 			.endpoints
@@ -159,7 +163,7 @@ impl BlockTimeMonitor {
 					values,
 					update_channel,
 					self.api_service.clone(),
-					self.active_endpoints.clone(),
+					message_tx.clone(),
 				))
 			})
 			.collect::<Vec<_>>();
@@ -169,6 +173,7 @@ impl BlockTimeMonitor {
 			self.endpoints.clone(),
 			self.opts,
 			self.active_endpoints,
+			message_rx,
 		)));
 
 		Ok(futures)
@@ -179,21 +184,30 @@ impl BlockTimeMonitor {
 		values: Vec<Arc<Mutex<VecDeque<u64>>>>,
 		endpoints: Vec<String>,
 		opts: BlockTimeOptions,
-		active_endpoints: Arc<AtomicUsize>,
+		active_endpoints: usize,
+		message_rx: Receiver<BlockTimeMessage>,
 	) {
 		if let BlockTimeMode::Cli(opts) = opts.mode {
 			loop {
-				if active_endpoints.load(Ordering::Acquire) == 0 {
-					// No more active endpoints remaining, give up
-					info!("no more active endpoints are left, terminating UI loop");
-					break
+				select! {
+					message = message_rx.recv() => {
+						if let Ok(BlockTimeMessage::EndpointDisconected) = message {
+							let _ = active_endpoints.saturating_sub(1);
+						}
+					}
+					_ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {
+						if active_endpoints == 0 {
+							// No more active endpoints remaining, give up
+							info!("no more active endpoints are left, terminating UI loop");
+							break
+						}
+						let _ = stdout().queue(Clear(ClearType::All)).unwrap();
+						endpoints.iter().zip(values.iter()).enumerate().for_each(|(i, (uri, values))| {
+							Self::display_chart(uri, (i * (opts.chart_height + 3)) as u32, values.clone(), opts.clone());
+						});
+						let _ = stdout().flush();
+					}
 				}
-				let _ = stdout().queue(Clear(ClearType::All)).unwrap();
-				endpoints.iter().zip(values.iter()).enumerate().for_each(|(i, (uri, values))| {
-					Self::display_chart(uri, (i * (opts.chart_height + 3)) as u32, values.clone(), opts.clone());
-				});
-				let _ = stdout().flush();
-				tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 			}
 		}
 	}
@@ -247,7 +261,7 @@ impl BlockTimeMonitor {
 		// TODO: make this a struct.
 		consumer_config: Receiver<ChainHeadEvent>,
 		api_service: ApiService<H256>,
-		active_endpoints: Arc<AtomicUsize>,
+		mut message_tx: Sender<BlockTimeMessage>,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
 		let url = leak_static_str(url);
@@ -318,7 +332,8 @@ impl BlockTimeMonitor {
 				break
 			}
 		}
-		active_endpoints.fetch_sub(1, Ordering::SeqCst);
+
+		message_tx.send(BlockTimeMessage::EndpointDisconected).await.unwrap();
 	}
 }
 
