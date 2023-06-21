@@ -176,6 +176,7 @@ impl BlockTimeMonitor {
 	) {
 		if let BlockTimeMode::Cli(opts) = opts.mode {
 			let mut values: HashMap<String, VecDeque<u64>> = HashMap::new();
+			let mut update_interval = std::time::Duration::from_secs(0); // The first time to start at once
 
 			loop {
 				select! {
@@ -200,7 +201,7 @@ impl BlockTimeMonitor {
 							_ => {}
 						}
 					}
-					_ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {
+					_ = tokio::time::sleep(update_interval) => {
 						if active_endpoints == 0 {
 							// No more active endpoints remaining, give up
 							info!("no more active endpoints are left, terminating UI loop");
@@ -212,6 +213,7 @@ impl BlockTimeMonitor {
 							Self::display_chart(url, (i * (opts.chart_height + 3)) as u32, values.get(url), opts.clone());
 						});
 						let _ = stdout().flush();
+						update_interval = std::time::Duration::from_secs(3);
 					}
 				}
 			}
