@@ -9,10 +9,10 @@ repository.workspace = true
 publish = true
 
 [dependencies]
-async-channel = "1.8.0"
-futures = "0.3.28"
-rand = "0.8.5"
-thiserror = "1.0.31"
+async-channel = { workspace = true }
+futures = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.28.2", features = ["macros", "rt"] }
+tokio = { workspace = true }

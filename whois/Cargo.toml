@@ -8,12 +8,12 @@ repository.workspace = true
 publish = true
 
 [dependencies]
-clap = { version = "4.3.5", features = ["derive"] }
-color-eyre = "0.6.2"
-env_logger = "0.10.0"
-futures = "0.3.28"
-log = "0.4.19"
-polkadot-introspector-essentials = { path = "../essentials" }
-polkadot-introspector-priority-channel = { path = "../priority-channel" }
-thiserror = "1.0.39"
-tokio = { version = "1.28.2", features = ["macros", "rt-multi-thread", "signal"] }
+clap = { workspace = true }
+color-eyre = { workspace = true }
+env_logger = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+polkadot-introspector-essentials = { workspace = true }
+polkadot-introspector-priority-channel = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

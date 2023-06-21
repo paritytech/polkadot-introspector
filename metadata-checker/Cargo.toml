@@ -8,11 +8,11 @@ repository.workspace = true
 publish = true
 
 [dependencies]
-clap = { version = "4.3.5", features = ["derive"] }
-color-eyre = "0.6.2"
-crossterm = "0.26.1"
-env_logger = "0.10.0"
-log = "0.4.19"
-polkadot-introspector-essentials = { path = "../essentials" }
-subxt = { default-features = false, features = ["jsonrpsee-ws"], version = "0.29.0" }
-tokio = { version = "1.28.2", features = ["macros", "rt-multi-thread", "signal"] }
+clap = { workspace = true }
+color-eyre = { workspace = true }
+crossterm = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+polkadot-introspector-essentials = { workspace = true }
+subxt = { workspace = true }
+tokio = { workspace = true }
