@@ -168,7 +168,6 @@ impl BlockTimeMonitor {
 		Ok(futures)
 	}
 
-	// TODO: get rid of arc mutex and use channels.
 	async fn display_charts(
 		endpoints: Vec<String>,
 		opts: BlockTimeOptions,
