@@ -208,8 +208,8 @@ impl BlockTimeMonitor {
 						}
 						let _ = stdout().queue(Clear(ClearType::All)).unwrap();
 
-						endpoints.iter().enumerate().for_each(|(i, uri)| {
-							Self::display_chart(uri, (i * (opts.chart_height + 3)) as u32, values.get(uri), opts.clone());
+						endpoints.iter().enumerate().for_each(|(i, url)| {
+							Self::display_chart(url, (i * (opts.chart_height + 3)) as u32, values.get(url), opts.clone());
 						});
 						let _ = stdout().flush();
 					}
