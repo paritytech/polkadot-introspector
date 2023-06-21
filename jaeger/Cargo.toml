@@ -8,17 +8,17 @@ repository.workspace = true
 publish = true
 
 [dependencies]
-clap = { version = "4.3.5", features = ["derive"] }
-color-eyre = "0.6.2"
-env_logger = "0.10.0"
-futures = "0.3.28"
-log = "0.4.19"
-polkadot-introspector-essentials = { path = "../essentials" }
-reqwest = { version = "0.11.18" }
-serde = "1.0.164"
-serde_bytes = "0.11.9"
-serde_derive = "1.0.138"
-serde_json = "1.0.97"
-serde_urlencoded = "0.7.1"
-tokio = { version = "1.28.2", features = ["macros", "rt-multi-thread", "signal"] }
-typed-builder = "0.14.0"
+clap = { workspace = true }
+color-eyre = { workspace = true }
+env_logger = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+polkadot-introspector-essentials = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+serde_derive = { workspace = true }
+serde_json = { workspace = true }
+serde_urlencoded = { workspace = true }
+tokio = { workspace = true }
+typed-builder = { workspace = true }
