@@ -89,7 +89,7 @@ pub(crate) struct ParachainTracerOptions {
 	/// Defines subscription mode
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
-	/// Turns on historical mode to trace parachains between specific blocks instead of following chain updates
+	/// Run in historical mode to trace parachains between specific blocks instead of following live chain progress
 	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
 	is_historical: bool,
 	/// First block in historical mode, should be less then `--to` and the chain's tip
