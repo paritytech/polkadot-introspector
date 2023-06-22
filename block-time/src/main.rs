@@ -107,12 +107,6 @@ impl BlockTimeMonitor {
 		opts: BlockTimeOptions,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
 	) -> color_eyre::Result<Self> {
-		let endpoints = opts.nodes.clone();
-		let mut values = Vec::new();
-		for _ in 0..endpoints.len() {
-			values.push(Default::default());
-		}
-
 		// This starts the both the storage and subxt APIs.
 		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 }, opts.retry.clone());
 		let endpoints = opts.nodes.clone();
