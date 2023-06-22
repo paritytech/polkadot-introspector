@@ -27,7 +27,7 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
-use clap::Parser;
+use clap::{error::ErrorKind, CommandFactory, Parser};
 use colored::Colorize;
 use crossterm::style::Stylize;
 use futures::{future, stream::FuturesUnordered, StreamExt};
@@ -35,12 +35,14 @@ use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::RequestExecutor,
-	chain_head_subscription::{ChainHeadEvent, ChainHeadSubscription},
+	chain_head_subscription::ChainHeadSubscription,
+	chain_subscription::ChainSubscriptionEvent,
 	collector,
 	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent},
 	consumer::{EventConsumerInit, EventStream},
+	historical_subscription::HistoricalSubscription,
 	init,
-	types::H256,
+	types::{BlockNumber, H256},
 	utils::RetryOptions,
 };
 use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
@@ -87,6 +89,15 @@ pub(crate) struct ParachainTracerOptions {
 	/// Defines subscription mode
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
+	/// Run in historical mode to trace parachains between specific blocks instead of following live chain progress
+	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
+	is_historical: bool,
+	/// First block in historical mode, should be less then `--to` and the chain's tip
+	#[clap(name = "from", long)]
+	from_block_number: Option<BlockNumber>,
+	/// Last block in historical mode, should be greater then `--from` and less then the chain's tip
+	#[clap(name = "to", long)]
+	to_block_number: Option<BlockNumber>,
 	/// Mode of running - CLI/Prometheus. Default or no subcommand means `CLI` mode.
 	#[clap(subcommand)]
 	mode: Option<ParachainTracerMode>,
@@ -118,7 +129,7 @@ impl ParachainTracer {
 	pub(crate) async fn run(
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
-		consumer_config: EventConsumerInit<ChainHeadEvent>,
+		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -167,7 +178,7 @@ impl ParachainTracer {
 			}
 		}
 
-		let consumer_channels: Vec<Receiver<ChainHeadEvent>> = consumer_config.into();
+		let consumer_channels: Vec<Receiver<ChainSubscriptionEvent>> = consumer_config.into();
 		let collector_fut = collector
 			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
 			.await;
@@ -369,17 +380,35 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let mut core = ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone());
-	let consumer_init = core.create_consumer();
 	let (shutdown_tx, _) = broadcast::channel(1);
+	let shutdown_future = tokio::spawn(init::on_shutdown(shutdown_tx.clone()));
 
-	match ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await {
-		Ok(futures) => {
-			let shutdown_future = tokio::spawn(init::on_shutdown(shutdown_tx.clone()));
-			core.run(futures, shutdown_tx.clone(), shutdown_future).await?
-		},
-		Err(err) => error!("FATAL: cannot start parachain tracer: {}", err),
-	}
+	if opts.is_historical {
+		let from_block_number = opts.from_block_number.expect("`--from` must exist in historical mode");
+		let to_block_number = opts.to_block_number.expect("`--to` must exist in historical mode");
+		if from_block_number >= to_block_number {
+			let mut cmd = ParachainTracerOptions::command();
+			cmd // Throws `clap` error instead of just panicking
+				.error(ErrorKind::ArgumentConflict, "`--from` block number should be less then `--to`")
+				.exit();
+		}
+
+		println!("Historical mode: from {} to {}", from_block_number, to_block_number);
+		let mut core = HistoricalSubscription::new(
+			vec![opts.node.clone()],
+			from_block_number,
+			to_block_number,
+			opts.retry.clone(),
+		);
+		let consumer_init = core.create_consumer();
+		let futures = ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await?;
+		core.run(futures, shutdown_tx, shutdown_future).await?;
+	} else {
+		let mut core = ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone());
+		let consumer_init = core.create_consumer();
+		let futures = ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await?;
+		core.run(futures, shutdown_tx, shutdown_future).await?;
+	};
 
 	Ok(())
 }

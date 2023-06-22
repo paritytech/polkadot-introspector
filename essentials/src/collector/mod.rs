@@ -25,7 +25,7 @@ use crate::{
 	chain_events::{
 		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 	},
-	chain_head_subscription::ChainHeadEvent,
+	chain_subscription::ChainSubscriptionEvent,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{Timestamp, H256},
 	utils::RetryOptions,
@@ -229,7 +229,7 @@ impl Collector {
 	/// Process async channels in the endless loop
 	pub async fn run_with_consumer_channel(
 		mut self,
-		mut consumer_channel: Receiver<ChainHeadEvent>,
+		mut consumer_channel: Receiver<ChainSubscriptionEvent>,
 	) -> tokio::task::JoinHandle<()> {
 		tokio::spawn(async move {
 			loop {
@@ -269,12 +269,12 @@ impl Collector {
 	/// Collects chain events from new head including block events parsing
 	pub async fn collect_chain_events(
 		&mut self,
-		event: &ChainHeadEvent,
+		event: &ChainSubscriptionEvent,
 	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
 		let new_head_event = match event {
-			ChainHeadEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
-			ChainHeadEvent::NewFinalizedHead(hash) => ChainEvent::NewFinalizedHead(*hash),
-			ChainHeadEvent::Heartbeat => return Ok(vec![]),
+			ChainSubscriptionEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
+			ChainSubscriptionEvent::NewFinalizedBlock(hash) => ChainEvent::NewFinalizedHead(*hash),
+			ChainSubscriptionEvent::Heartbeat => return Ok(vec![]),
 		};
 		let mut chain_events = vec![new_head_event];
 
@@ -936,10 +936,10 @@ fn get_unix_time_unwrap() -> Duration {
 	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }
 
-pub fn new_head_hash(event: &ChainHeadEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
+pub fn new_head_hash(event: &ChainSubscriptionEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
 	match (event, subscribe_mode) {
-		(ChainHeadEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
-		(ChainHeadEvent::NewFinalizedHead(hash), CollectorSubscribeMode::Finalized) => Some(hash),
+		(ChainSubscriptionEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
+		(ChainSubscriptionEvent::NewFinalizedBlock(hash), CollectorSubscribeMode::Finalized) => Some(hash),
 		_ => None,
 	}
 }

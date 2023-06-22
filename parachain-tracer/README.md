@@ -37,7 +37,9 @@ It's important to note that the tool cannot further drill down into the details 
 
 Assuming you have cloned the repo, and built the binary, all you need for it to work is a relay chain RPC endpoint.
 
-Example: `polkadot-parachain-tracer --ws=wss://kusama-try-runtime-node.parity-chains.parity.io:443 --para-id=2107`
+Example: `polkadot-parachain-tracer --ws wss://rpc.polkadot.io:443 --para-id 2107 cli`
+
+It is possible to run the tool in historical mode to trace parachains between specific blocks instead of following live chain progress: `polkadot-parachain-tracer --ws wss://rpc.polkadot.io:443 --para-id 2107 --historical --from 16080000 --to 16080050 cli`
 
 ```
 USAGE:

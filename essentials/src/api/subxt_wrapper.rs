@@ -17,7 +17,7 @@
 
 use crate::{
 	metadata::{polkadot, polkadot_primitives},
-	types::{AccountId32, SessionKeys, SubxtCall, Timestamp, H256},
+	types::{AccountId32, BlockNumber, SessionKeys, SubxtCall, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
 use codec::Decode;
@@ -27,7 +27,10 @@ use std::{
 	fmt::Debug,
 };
 use subxt::{
-	rpc::{types::FollowEvent, Subscription},
+	rpc::{
+		types::{FollowEvent, NumberOrHex},
+		Subscription,
+	},
 	OnlineClient, PolkadotConfig,
 };
 use thiserror::Error;
@@ -40,6 +43,8 @@ pub enum RequestType {
 	GetHead(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get a full block.
 	GetBlock(Option<<PolkadotConfig as subxt::Config>::Hash>),
+	/// Get a block hash.
+	GetBlockHash(Option<BlockNumber>),
 	/// Get block events.
 	GetEvents(<PolkadotConfig as subxt::Config>::Hash),
 	/// Extract the `ParaInherentData` from a given block.
@@ -84,6 +89,9 @@ impl Debug for RequestType {
 			},
 			RequestType::GetBlock(h) => {
 				format!("get block: {:?}", h)
+			},
+			RequestType::GetBlockHash(h) => {
+				format!("get block hash: {:?}", h)
 			},
 			RequestType::GetEvents(h) => {
 				format!("get events: {:?}", h)
@@ -147,6 +155,8 @@ pub enum Response {
 	MaybeHead(Option<<PolkadotConfig as subxt::Config>::Header>),
 	/// A full block.
 	MaybeBlock(Option<subxt::rpc::types::ChainBlock<PolkadotConfig>>),
+	/// A block hash.
+	MaybeBlockHash(Option<H256>),
 	/// Block events
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
 	/// `ParaInherent` data.
@@ -227,6 +237,7 @@ impl RequestExecutor {
 				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(&api, hash).await,
 				RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
 				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
+				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(&api, maybe_block_number).await,
 				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
@@ -286,6 +297,14 @@ impl RequestExecutor {
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
 	) -> std::result::Result<Option<subxt::rpc::types::ChainBlock<PolkadotConfig>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetBlock, MaybeBlock, url, maybe_hash)
+	}
+
+	pub async fn get_block_hash(
+		&mut self,
+		url: &str,
+		maybe_block_number: Option<BlockNumber>,
+	) -> std::result::Result<Option<H256>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetBlockHash, MaybeBlockHash, url, maybe_block_number)
 	}
 
 	pub async fn get_events(
@@ -454,6 +473,12 @@ async fn subxt_get_block_ts(api: &OnlineClient<PolkadotConfig>, hash: H256) -> R
 
 async fn subxt_get_block(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
 	Ok(Response::MaybeBlock(api.rpc().block(maybe_hash).await?.map(|response| response.block)))
+}
+
+async fn subxt_get_block_hash(api: &OnlineClient<PolkadotConfig>, maybe_block_number: Option<BlockNumber>) -> Result {
+	let maybe_subxt_block_number: Option<subxt::rpc::types::BlockNumber> =
+		maybe_block_number.map(|v| NumberOrHex::Number(v.into()).into());
+	Ok(Response::MaybeBlockHash(api.rpc().block_hash(maybe_subxt_block_number).await?))
 }
 
 async fn subxt_get_events(api: &OnlineClient<PolkadotConfig>, hash: H256) -> Result {

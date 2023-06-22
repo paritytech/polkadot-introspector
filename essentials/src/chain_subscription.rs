@@ -15,18 +15,14 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-pub mod api;
-pub mod chain_events;
-pub mod chain_head_subscription;
-pub mod chain_subscription;
-pub mod collector;
-pub mod constants;
-pub mod consumer;
-pub mod historical_subscription;
-pub mod init;
-pub mod metadata;
-pub mod storage;
-pub mod telemetry_feed;
-pub mod telemetry_subscription;
-pub mod types;
-pub mod utils;
+use subxt::PolkadotConfig;
+
+#[derive(Debug)]
+pub enum ChainSubscriptionEvent {
+	/// New relay chain best head
+	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
+	/// New relay chain finalized head
+	NewFinalizedBlock(<PolkadotConfig as subxt::Config>::Hash),
+	/// Heartbeat event
+	Heartbeat,
+}
