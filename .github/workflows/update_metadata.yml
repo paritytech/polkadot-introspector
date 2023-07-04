@@ -1,0 +1,68 @@
+name: Check updates
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */1 * * *'
+
+env:
+  BRANCH_NAME: automated-update-metadata
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
+
+      - name: Try to checkout existing PR branch
+        id: checkout-pr
+        run: |
+          EXISTING_BRANCH=$(git branch -r --list "origin/$BRANCH_NAME" --sort=-refname | head -n 1)
+          if [ -z "$EXISTING_BRANCH" ]
+          then
+            switched="false"
+          else
+            git checkout --track $EXISTING_BRANCH
+            switched="true"
+          fi
+          echo "switched=$switched" >> $GITHUB_OUTPUT
+
+      - name: Build metadata-cli
+        run: |
+          cargo install subxt
+          subxt metadata --format bytes --url wss://rococo-rpc.polkadot.io:443 > essentials/assets/rococo_metadata.scale
+          subxt metadata --format bytes --url wss://kusama-rpc.polkadot.io:443 > essentials/assets/kusama_metadata.scale
+          subxt metadata --format bytes --url wss://rpc.polkadot.io:443 > essentials/assets/polkadot_metadata.scale
+
+      - name: Commit changes if PR exists
+        if: ${{ steps.checkout-pr.outputs.switched == 'true' }}
+        using: "composite"
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add .
+          git commit -m "Update metadata" || true
+          git push
+
+      - name: Create Pull Request if not exist
+        if: ${{ steps.checkout-pr.outputs.switched == 'false' }}
+        uses: peter-evans/create-pull-request@153407881ec5c347639a548ade7d8ad1d6740e38 # v5.0.2
+        with:
+          commit-message: add unsigned QR codes
+          branch: ${{ $BRANCH_NAME }}
+          delete-branch: true
+          base: master
+          title: '[Automated] Update metadata'
