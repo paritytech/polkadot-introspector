@@ -3,7 +3,7 @@ name: Check updates
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */1 * * *'
 
 env:
   BRANCH_NAME: automated-update-metadata
