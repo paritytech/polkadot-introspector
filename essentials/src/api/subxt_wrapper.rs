@@ -27,6 +27,8 @@ use std::{
 	fmt::Debug,
 };
 use subxt::{
+	dynamic::{At, Value},
+	ext::scale_value::ValueDef,
 	rpc::{
 		types::{FollowEvent, NumberOrHex},
 		Subscription,
@@ -180,7 +182,7 @@ pub enum Response {
 	/// HRMP content for a specific channel
 	HRMPContent(Vec<Vec<u8>>),
 	/// The current host configuration
-	HostConfiguration(polkadot::runtime_types::polkadot_runtime_parachains::configuration::HostConfiguration<u32>),
+	HostConfiguration(DynamicHostConfiguration),
 	/// Chain head subscription
 	ChainHeadSubscription((Subscription<FollowEvent<H256>>, String)),
 	/// Unpin hash from chain head subscription
@@ -421,10 +423,7 @@ impl RequestExecutor {
 	pub async fn get_host_configuration(
 		&mut self,
 		url: &str,
-	) -> std::result::Result<
-		polkadot::runtime_types::polkadot_runtime_parachains::configuration::HostConfiguration<u32>,
-		SubxtWrapperError,
-	> {
+	) -> std::result::Result<DynamicHostConfiguration, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetHostConfiguration, HostConfiguration, url, ())
 	}
 
@@ -645,9 +644,9 @@ async fn subxt_get_hrmp_content(
 }
 
 async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Result {
-	let addr = polkadot::storage().configuration().active_config();
-	let host_configuration = api.storage().at_latest().await?.fetch(&addr).await?.unwrap();
-	Ok(Response::HostConfiguration(host_configuration))
+	let addr = subxt::dynamic::storage_root("Configuration", "ActiveConfig");
+	let value = api.storage().at_latest().await?.fetch(&addr).await?.unwrap().to_value()?;
+	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
 }
 
 async fn subxt_get_chain_head_subscription(api: &OnlineClient<PolkadotConfig>) -> Result {
@@ -685,3 +684,39 @@ pub enum SubxtWrapperError {
 	DecodeExtrinsicError,
 }
 pub type Result = std::result::Result<Response, SubxtWrapperError>;
+
+pub struct DynamicHostConfiguration(Value<u32>);
+
+impl DynamicHostConfiguration {
+	pub fn new(value: Value<u32>) -> Self {
+		Self(value)
+	}
+
+	pub fn at(&self, field: &str) -> String {
+		match self.0.at(field) {
+			Some(value) if matches!(value, Value { value: ValueDef::Variant(_), .. }) => match value.at(0) {
+				Some(inner) => format!("{}", inner),
+				None => format!("{}", 0),
+			},
+			Some(value) => format!("{}", value),
+			None => format!("{}", 0),
+		}
+	}
+}
+
+impl std::fmt::Display for DynamicHostConfiguration {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"\t👀 Max validators: {} / {} per core
+\t👍 Needed approvals: {}
+\t🥔 No show slots: {}
+\t⏳ Delay tranches: {}",
+			self.at("max_validators"),
+			self.at("max_validators_per_core"),
+			self.at("needed_approvals"),
+			self.at("no_show_slots"),
+			self.at("n_delay_tranches"),
+		)
+	}
+}

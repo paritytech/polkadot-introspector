@@ -364,14 +364,7 @@ fn evict_stalled(
 async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> color_eyre::Result<()> {
 	let conf = executor.get_host_configuration(url).await?;
 	println!("Host configuration for {}:", url.to_owned().bold());
-	println!(
-		"\t👀 Max validators: {} / {} per core",
-		format!("{}", conf.max_validators.unwrap_or(0)).bold(),
-		format!("{}", conf.max_validators_per_core.unwrap_or(0)).bright_magenta(),
-	);
-	println!("\t👍 Needed approvals: {}", format!("{}", conf.needed_approvals).bold(),);
-	println!("\t🥔 No show slots: {}", format!("{}", conf.no_show_slots).bold(),);
-	println!("\t⏳ Delay tranches: {}", format!("{}", conf.n_delay_tranches).bold(),);
+	println!("{}", conf);
 	Ok(())
 }
 
