@@ -1,10 +1,9 @@
 name: Check updates
 
 on:
-  push:
   workflow_dispatch:
   schedule:
-    - cron: '0 */1 * * *'
+    - cron: '0 */12 * * *'
 
 env:
   BRANCH_NAME: automated-update-metadata
@@ -66,3 +65,4 @@ jobs:
           delete-branch: true
           base: master
           title: '[Automated] Update metadata'
+          body: New metadata uploaded
