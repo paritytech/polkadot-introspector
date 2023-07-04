@@ -21,7 +21,7 @@ jobs:
       - name: Release Build
         run: cargo build --release
       - name: 'Upload Artifact'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ env.PROJECT_NAME_UNDERSCORE }}
           path: target/release/${{ env.PROJECT_NAME_UNDERSCORE }}
