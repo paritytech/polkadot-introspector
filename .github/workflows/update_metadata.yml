@@ -10,7 +10,7 @@ env:
   BRANCH_NAME: automated-update-metadata
 
 jobs:
-  update:
+  update-metadata:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,9 +41,9 @@ jobs:
           fi
           echo "switched=$switched" >> $GITHUB_OUTPUT
 
-      - name: Build metadata-cli
+      - name: Download metadata
         run: |
-          cargo install subxt
+          cargo install subxt-cli
           subxt metadata --format bytes --url wss://rococo-rpc.polkadot.io:443 > essentials/assets/rococo_metadata.scale
           subxt metadata --format bytes --url wss://kusama-rpc.polkadot.io:443 > essentials/assets/kusama_metadata.scale
           subxt metadata --format bytes --url wss://rpc.polkadot.io:443 > essentials/assets/polkadot_metadata.scale
