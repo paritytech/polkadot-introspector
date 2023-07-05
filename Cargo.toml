@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.9"
+version = "0.2.10"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2021"
 readme = "README.md"

@@ -1716,7 +1716,7 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 
 [[package]]
 name = "polkadot-block-time"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-essentials"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "async-trait",
  "clap",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-priority-channel"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "async-channel",
  "futures",
@@ -1776,7 +1776,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-jaeger"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1796,7 +1796,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-kvdb"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "bincode",
  "clap",
@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-metadata-checker"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1838,7 +1838,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-parachain-tracer"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "async-trait",
  "clap",
@@ -1870,7 +1870,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-whois"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "clap",
  "color-eyre",
