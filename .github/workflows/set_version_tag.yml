@@ -14,20 +14,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get latest version
-        id: latest
-        run: |
-          echo "version=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
-
-      - name: Get current version
-        id: current
-        run: |
-          echo "version=v$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' Cargo.toml)" >> $GITHUB_OUTPUT
-
       - name: Push new version if exists
-        if: ${{ steps.latest.version != steps.current.version }}
         run: |
-          git config --global user.name 'GitHub Action'
-          git config --global user.email 'action@github.com'
-          git tag ${{ steps.current.version }}
-          git push origin ${{ steps.current.version }}
+          LATEST_TAG=$(git describe --tags --abbrev=0)
+          echo "Latest tag is ${LATEST_TAG}"
+
+          CURRENT_TAG=v$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' Cargo.toml)
+          echo "Current tag is ${CURRENT_TAG}"
+
+          if [ "$LATEST_TAG" = "$CURRENT_TAG" ]; then
+            echo "The version hasn't changed"
+          else
+            git config --global user.name 'GitHub Action'
+            git config --global user.email 'action@github.com'
+            git tag $CURRENT_TAG
+            git push origin $CURRENT_TAG
+            echo "The version has updated"
+          fi
