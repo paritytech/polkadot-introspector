@@ -1,0 +1,33 @@
+name: Set version tag
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  set-version-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        with:
+          fetch-depth: 0
+
+      - name: Get latest version
+        id: latest
+        run: |
+          echo "version=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
+
+      - name: Get current version
+        id: current
+        run: |
+          echo "version=v$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' Cargo.toml)" >> $GITHUB_OUTPUT
+
+      - name: Push new version if exists
+        if: ${{ steps.latest.version != steps.current.version }}
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git tag ${{ steps.current.version }}
+          git push origin ${{ steps.current.version }}
