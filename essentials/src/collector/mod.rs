@@ -19,13 +19,14 @@ mod ws;
 
 use crate::{
 	api::{
-		subxt_wrapper::{RequestExecutor, SubxtWrapperError},
+		subxt_wrapper::{InherentData, RequestExecutor, SubxtWrapperError},
 		ApiService,
 	},
 	chain_events::{
 		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 	},
 	chain_subscription::ChainSubscriptionEvent,
+	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{Timestamp, H256},
 	utils::RetryOptions,
@@ -112,6 +113,7 @@ pub type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct DisputeInfo {
 	pub initiated: <PolkadotConfig as subxt::Config>::Index,
+	pub initiators_idx: Vec<u32>,
 	pub dispute: SubxtDispute,
 	pub parachain_id: u32,
 	pub outcome: Option<SubxtDisputeResult>,
@@ -541,7 +543,17 @@ impl Collector {
 			self.state.current_session_index = cur_session;
 			self.broadcast_event(CollectorUpdateEvent::NewSession(cur_session)).await?;
 		}
+		self.write_parainherent_data(block_hash, block_number, ts).await?;
 
+		Ok(())
+	}
+
+	async fn write_parainherent_data(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
 		let inherent_data = self
 			.executor
 			.extract_parainherent_data(self.endpoint.as_str(), Some(block_hash))
@@ -767,6 +779,7 @@ impl Collector {
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed { disputed: relay_block_number, concluded: None });
+		let initiators_idx = self.extract_dispute_initiators(dispute_event).await?;
 		if let Some(to_websocket) = self.to_websocket.as_mut() {
 			to_websocket
 				.send(WebSocketUpdateEvent {
@@ -781,7 +794,8 @@ impl Collector {
 		// Fill and write dispute info structure
 		let dispute_info = DisputeInfo {
 			dispute: dispute_event.clone(),
-			initiated: self.state.current_relay_chain_block_number,
+			initiated: relay_block_number,
+			initiators_idx,
 			concluded: None,
 			parachain_id: candidate.parachain_id(),
 			outcome: None,
@@ -796,10 +810,7 @@ impl Collector {
 		self.storage_write_prefixed(
 			CollectorPrefixType::Dispute(para_id),
 			dispute_event.candidate_hash,
-			StorageEntry::new_onchain(
-				RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
-				dispute_info,
-			),
+			StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), dispute_info),
 		)
 		.await?;
 
@@ -807,11 +818,38 @@ impl Collector {
 		self.storage_replace_prefixed(
 			CollectorPrefixType::Candidate(para_id),
 			dispute_event.candidate_hash,
-			StorageEntry::new_onchain(RecordTime::with_ts(self.state.current_relay_chain_block_number, now), candidate),
+			StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), candidate),
 		)
 		.await;
 
 		Ok(())
+	}
+
+	async fn extract_dispute_initiators(&mut self, dispute_event: &SubxtDispute) -> color_eyre::Result<Vec<u32>> {
+		let entry = match self
+			.storage_read_prefixed(CollectorPrefixType::InherentData, dispute_event.relay_parent_block)
+			.await
+		{
+			Some(v) => v,
+			None => return Ok(vec![]),
+		};
+
+		let data: InherentData = entry.into_inner()?;
+		let statement_set = match data
+			.disputes
+			.iter()
+			.find(|&d| d.candidate_hash.0 == dispute_event.candidate_hash)
+		{
+			Some(v) => v,
+			None => return Ok(vec![]),
+		};
+
+		Ok(statement_set
+			.statements
+			.iter()
+			.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Invalid(_)))
+			.map(|(_, idx, _)| idx.0)
+			.collect())
 	}
 
 	async fn process_dispute_concluded(
