@@ -173,7 +173,7 @@ pub enum CollectorError {
 }
 
 pub struct Collector {
-	api_service: CollectorStorageApi,
+	api: CollectorStorageApi,
 	ws_listener: Option<WebSocketListener>,
 	to_websocket: Option<Sender<WebSocketUpdateEvent>>,
 	endpoint: String,
@@ -186,21 +186,21 @@ pub struct Collector {
 
 impl Collector {
 	pub fn new(endpoint: &str, opts: CollectorOptions, retry: RetryOptions) -> Self {
-		let api_service: CollectorStorageApi = ApiService::new_with_prefixed_storage(
+		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
 			RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) },
 			retry,
 		);
 		let ws_listener = if let Some(listen_addr) = opts.listen_addr {
 			let ws_listener_config = WebSocketListenerConfig::builder().listen_addr(listen_addr).build();
-			let ws_listener = WebSocketListener::new(ws_listener_config, api_service.clone());
+			let ws_listener = WebSocketListener::new(ws_listener_config, api.clone());
 
 			Some(ws_listener)
 		} else {
 			None
 		};
-		let executor = api_service.subxt();
+		let executor = api.subxt();
 		Self {
-			api_service,
+			api,
 			ws_listener,
 			to_websocket: None,
 			endpoint: endpoint.to_owned(),
@@ -326,7 +326,7 @@ impl Collector {
 
 	/// Returns API endpoint for storage and request executor
 	pub fn api(&self) -> CollectorStorageApi {
-		self.api_service.clone()
+		self.api.clone()
 	}
 
 	/// Returns Subxt request executor
@@ -438,17 +438,15 @@ impl Collector {
 		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
 
 		if self.state.last_finalized_block_number.is_some() {
-			self.api_service
-				.storage()
-				.storage_write_prefixed(
-					CollectorPrefixType::RelevantFinalizedBlockNumber,
-					block_hash,
-					StorageEntry::new_onchain(
-						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
-						self.state.last_finalized_block_number.unwrap(),
-					),
-				)
-				.await?;
+			self.storage_write_prefixed(
+				CollectorPrefixType::RelevantFinalizedBlockNumber,
+				block_hash,
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(block_number, Duration::from_secs(ts)),
+					self.state.last_finalized_block_number.unwrap(),
+				),
+			)
+			.await?;
 		}
 
 		match self.subscribe_mode {
@@ -503,20 +501,15 @@ impl Collector {
 			))?,
 		}
 
-		self.api_service
-			.storage()
-			.storage_write_prefixed(
-				CollectorPrefixType::RelayBlockHeader,
-				block_hash,
-				StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), header),
-			)
-			.await
-			.unwrap();
+		self.storage_write_prefixed(
+			CollectorPrefixType::RelayBlockHeader,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), header),
+		)
+		.await?;
 		let cur_session = self.executor.get_session_index(self.endpoint.as_str(), block_hash).await?;
 		let cur_session_hash = BlakeTwo256::hash(&cur_session.to_be_bytes()[..]);
 		let maybe_existing_session = self
-			.api_service
-			.storage()
 			.storage_read_prefixed(CollectorPrefixType::AccountKeys, cur_session_hash)
 			.await;
 		if maybe_existing_session.is_none() {
@@ -527,25 +520,18 @@ impl Collector {
 				.get_session_account_keys(self.endpoint.as_str(), cur_session)
 				.await?
 				.ok_or_else(|| eyre!("Missing account keys for session {}", cur_session))?;
-			self.api_service
-				.storage()
-				.storage_write_prefixed(
-					CollectorPrefixType::AccountKeys,
-					cur_session_hash,
-					StorageEntry::new_persistent(
-						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
-						accounts_keys,
-					),
-				)
-				.await?;
+			self.storage_write_prefixed(
+				CollectorPrefixType::AccountKeys,
+				cur_session_hash,
+				StorageEntry::new_persistent(RecordTime::with_ts(block_number, Duration::from_secs(ts)), accounts_keys),
+			)
+			.await?;
 			// Remove old session with the index `cur_session - 2` ignoring possible errors
 			if cur_session > 1 {
 				let prev_session = cur_session.saturating_sub(2);
 				let prev_session_hash = BlakeTwo256::hash(&prev_session.to_be_bytes()[..]);
 
 				let _ = self
-					.api_service
-					.storage()
 					.storage_delete_prefixed(CollectorPrefixType::AccountKeys, prev_session_hash)
 					.await;
 			}
@@ -562,17 +548,12 @@ impl Collector {
 			.await?;
 
 		if let Some(inherent_data) = inherent_data {
-			self.api_service
-				.storage()
-				.storage_write_prefixed(
-					CollectorPrefixType::InherentData,
-					block_hash,
-					StorageEntry::new_onchain(
-						RecordTime::with_ts(block_number, Duration::from_secs(ts)),
-						inherent_data,
-					),
-				)
-				.await?;
+			self.storage_write_prefixed(
+				CollectorPrefixType::InherentData,
+				block_hash,
+				StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), inherent_data),
+			)
+			.await?;
 		} else {
 			warn!("cannot get inherent data for block number {} ({})", block_number, block_hash);
 		}
@@ -584,11 +565,10 @@ impl Collector {
 		&mut self,
 		change_event: &SubxtCandidateEvent,
 	) -> color_eyre::Result<(), CollectorError> {
-		let storage = self.api_service.storage();
 		match change_event.event_type {
 			SubxtCandidateEventType::Backed => {
 				// Candidate should not exist in our storage
-				let maybe_existing = storage
+				let maybe_existing = self
 					.storage_read_prefixed(
 						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
@@ -610,18 +590,17 @@ impl Collector {
 						"stored candidate backed: {:?}, parachain: {}",
 						change_event.candidate_hash, change_event.parachain_id
 					);
-					storage
-						.storage_write_prefixed(
-							CollectorPrefixType::CandidatesParachains,
-							change_event.candidate_hash,
-							StorageEntry::new_onchain(
-								RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
-								change_event.parachain_id,
-							),
-						)
-						.await?;
+					self.storage_write_prefixed(
+						CollectorPrefixType::CandidatesParachains,
+						change_event.candidate_hash,
+						StorageEntry::new_onchain(
+							RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
+							change_event.parachain_id,
+						),
+					)
+					.await?;
 					// Find the relay parent
-					let maybe_relay_parent = storage
+					let maybe_relay_parent = self
 						.storage_read_prefixed(
 							CollectorPrefixType::RelayBlockHeader,
 							change_event.candidate_descriptor.relay_parent,
@@ -643,15 +622,12 @@ impl Collector {
 							candidate_first_seen: now,
 							candidate_disputed: None,
 						};
-						self.api_service
-							.storage()
-							.storage_write_prefixed(
-								CollectorPrefixType::Candidate(change_event.parachain_id),
-								change_event.candidate_hash,
-								StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), new_record),
-							)
-							.await
-							.unwrap();
+						self.storage_write_prefixed(
+							CollectorPrefixType::Candidate(change_event.parachain_id),
+							change_event.candidate_hash,
+							StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), new_record),
+						)
+						.await?;
 						self.state
 							.candidates_seen
 							.entry(change_event.parachain_id)
@@ -679,8 +655,6 @@ impl Collector {
 			},
 			SubxtCandidateEventType::Included => {
 				let maybe_known_candidate = self
-					.api_service
-					.storage()
 					.storage_read_prefixed(
 						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
@@ -709,14 +683,12 @@ impl Collector {
 						.entry(change_event.parachain_id)
 						.or_default()
 						.push(change_event.candidate_hash);
-					self.api_service
-						.storage()
-						.storage_replace_prefixed(
-							CollectorPrefixType::Candidate(change_event.parachain_id),
-							change_event.candidate_hash,
-							StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), known_candidate),
-						)
-						.await;
+					self.storage_replace_prefixed(
+						CollectorPrefixType::Candidate(change_event.parachain_id),
+						change_event.candidate_hash,
+						StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), known_candidate),
+					)
+					.await;
 				} else {
 					info!(
 						"unknown candidate {:?} has been included, parachain: {}",
@@ -726,8 +698,6 @@ impl Collector {
 			},
 			SubxtCandidateEventType::TimedOut => {
 				let maybe_known_candidate = self
-					.api_service
-					.storage()
 					.storage_read_prefixed(
 						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
@@ -756,14 +726,12 @@ impl Collector {
 						.entry(change_event.parachain_id)
 						.or_default()
 						.push(change_event.candidate_hash);
-					self.api_service
-						.storage()
-						.storage_replace_prefixed(
-							CollectorPrefixType::Candidate(change_event.parachain_id),
-							change_event.candidate_hash,
-							StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), known_candidate),
-						)
-						.await;
+					self.storage_replace_prefixed(
+						CollectorPrefixType::Candidate(change_event.parachain_id),
+						change_event.candidate_hash,
+						StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), known_candidate),
+					)
+					.await;
 				} else {
 					info!(
 						"unknown candidate {:?} has been timed out, parachain: {}",
@@ -777,14 +745,10 @@ impl Collector {
 
 	async fn find_candidate_by_hash(&self, candidate_hash: H256) -> Option<CandidateRecord> {
 		let para_id = self
-			.api_service
-			.storage()
 			.storage_read_prefixed(CollectorPrefixType::CandidatesParachains, candidate_hash)
 			.await?;
 		let para_id: u32 = para_id.into_inner().unwrap();
 		let candidate = self
-			.api_service
-			.storage()
 			.storage_read_prefixed(CollectorPrefixType::Candidate(para_id), candidate_hash)
 			.await?;
 		Some(candidate.into_inner().unwrap())
@@ -829,30 +793,23 @@ impl Collector {
 			.or_default()
 			.push(dispute_info.clone());
 
-		self.api_service
-			.storage()
-			.storage_write_prefixed(
-				CollectorPrefixType::Dispute(para_id),
-				dispute_event.candidate_hash,
-				StorageEntry::new_onchain(
-					RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
-					dispute_info,
-				),
-			)
-			.await?;
+		self.storage_write_prefixed(
+			CollectorPrefixType::Dispute(para_id),
+			dispute_event.candidate_hash,
+			StorageEntry::new_onchain(
+				RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
+				dispute_info,
+			),
+		)
+		.await?;
 
 		// Update candidate
-		self.api_service
-			.storage()
-			.storage_replace_prefixed(
-				CollectorPrefixType::Candidate(para_id),
-				dispute_event.candidate_hash,
-				StorageEntry::new_onchain(
-					RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
-					candidate,
-				),
-			)
-			.await;
+		self.storage_replace_prefixed(
+			CollectorPrefixType::Candidate(para_id),
+			dispute_event.candidate_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(self.state.current_relay_chain_block_number, now), candidate),
+		)
+		.await;
 
 		Ok(())
 	}
@@ -889,8 +846,6 @@ impl Collector {
 		}
 
 		let dispute_info_entry = self
-			.api_service
-			.storage()
 			.storage_read_prefixed(CollectorPrefixType::Dispute(para_id), dispute_event.candidate_hash)
 			.await;
 
@@ -905,14 +860,12 @@ impl Collector {
 				.or_default()
 				.push(dispute_info.clone());
 
-			self.api_service
-				.storage()
-				.storage_replace_prefixed(
-					CollectorPrefixType::Dispute(para_id),
-					dispute_event.candidate_hash,
-					StorageEntry::new_onchain(record_time, dispute_info),
-				)
-				.await;
+			self.storage_replace_prefixed(
+				CollectorPrefixType::Dispute(para_id),
+				dispute_event.candidate_hash,
+				StorageEntry::new_onchain(record_time, dispute_info),
+			)
+			.await;
 		} else {
 			warn!(
 				"dispute for candidate {} is concluded without being seen (parachain id = {})",
@@ -920,15 +873,29 @@ impl Collector {
 			);
 		}
 
-		self.api_service
-			.storage()
-			.storage_replace_prefixed(
-				CollectorPrefixType::Candidate(para_id),
-				dispute_event.candidate_hash,
-				StorageEntry::new_onchain(record_time, candidate),
-			)
-			.await;
+		self.storage_replace_prefixed(
+			CollectorPrefixType::Candidate(para_id),
+			dispute_event.candidate_hash,
+			StorageEntry::new_onchain(record_time, candidate),
+		)
+		.await;
 		Ok(())
+	}
+
+	async fn storage_read_prefixed(&self, p: CollectorPrefixType, k: H256) -> Option<StorageEntry> {
+		self.api.storage().storage_read_prefixed(p, k).await
+	}
+
+	async fn storage_write_prefixed(&self, p: CollectorPrefixType, k: H256, v: StorageEntry) -> color_eyre::Result<()> {
+		self.api.storage().storage_write_prefixed(p, k, v).await
+	}
+
+	async fn storage_replace_prefixed(&self, p: CollectorPrefixType, k: H256, v: StorageEntry) {
+		self.api.storage().storage_replace_prefixed(p, k, v).await
+	}
+
+	async fn storage_delete_prefixed(&self, p: CollectorPrefixType, k: H256) -> Option<StorageEntry> {
+		self.api.storage().storage_delete_prefixed(p, k).await
 	}
 }
 
