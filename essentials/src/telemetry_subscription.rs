@@ -81,6 +81,7 @@ impl TelemetrySubscription {
 	async fn run_per_consumer(
 		mut update_channel: Sender<TelemetryEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
+		maybe_chain_name: Option<String>,
 		shutdown_tx: BroadcastSender<()>,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
@@ -118,7 +119,7 @@ impl TelemetrySubscription {
 					}
 
 					if !subscribed {
-						match choose_chain(&chains).await {
+						match choose_chain(&chains, &maybe_chain_name).await {
 							Ok(hash) => {
 								if let Err(e) = stream.subscribe_to(&hash).await {
 									on_stream_error(e);
@@ -142,13 +143,19 @@ impl TelemetrySubscription {
 	pub async fn run(
 		self,
 		url: &str,
+		maybe_chain_name: &Option<String>,
 		shutdown_tx: BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		Ok(self
 			.consumers
 			.into_iter()
 			.map(|update_channel| {
-				tokio::spawn(Self::run_per_consumer(update_channel, url.to_string(), shutdown_tx.clone()))
+				tokio::spawn(Self::run_per_consumer(
+					update_channel,
+					url.to_string(),
+					maybe_chain_name.clone(),
+					shutdown_tx.clone(),
+				))
 			})
 			.collect::<Vec<_>>())
 	}
@@ -163,11 +170,16 @@ const EXIT_COMMAND: &str = "q";
 pub enum ChooseChainError {
 	#[error("No chains found")]
 	NoChains,
+	#[error("Chain {0} not found")]
+	NoChain(String),
 	#[error("Chain choice interupted by user")]
 	NoChoice,
 }
 
-async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<H256, ChooseChainError> {
+async fn choose_chain(
+	chains: &HashMap<H256, AddedChain>,
+	maybe_chain_name: &Option<String>,
+) -> color_eyre::Result<H256, ChooseChainError> {
 	let list: Vec<AddedChain> = chains
 		.iter()
 		.map(|(_, v)| v)
@@ -178,6 +190,14 @@ async fn choose_chain(chains: &HashMap<H256, AddedChain>) -> color_eyre::Result<
 	if list.is_empty() {
 		return Err(ChooseChainError::NoChains)
 	}
+
+	if let Some(chain_name) = maybe_chain_name {
+		return match list.iter().find(|chain| chain.name == *chain_name) {
+			Some(chain) => Ok(chain.genesis_hash),
+			None => Err(ChooseChainError::NoChain(chain_name.to_owned())),
+		}
+	}
+
 	if list.len() == 1 {
 		return Ok(list[0].genesis_hash)
 	}
