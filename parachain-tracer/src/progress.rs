@@ -245,6 +245,16 @@ impl Display for DisputesTracker {
 			},
 		}
 
+		if !self.initiators.is_empty() {
+			for (validator_idx, validator_address) in &self.initiators {
+				writeln!(
+					f,
+					"\t\t\t😠 Validator initiated dispute: {}",
+					format!("idx: {}, address: {}", validator_idx, validator_address).magenta(),
+				)?;
+			}
+		}
+
 		if !self.misbehaving_validators.is_empty() {
 			for (validator_idx, validator_address) in &self.misbehaving_validators {
 				writeln!(
