@@ -37,9 +37,9 @@ zombienet_run() {
 }
 
 zombienet_shutdown() {
-  pid = $(ps -ax | grep zombienet | grep -v grep | awk '{print $2}')
-  echo "killing pid ${pid}"
-  kill $pid
+  PID=$(ps -ax | grep zombienet | grep -v grep | awk '{print $2}')
+  echo "killing pid ${PID}"
+  kill $PID
   echo $?
 }
 
