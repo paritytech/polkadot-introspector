@@ -33,11 +33,21 @@ zombienet_run() {
     echo "zombienet binary not present, please run setup first"
   fi
 
-  PATH=.:$PATH ./$ZOMBIENET_BIN -p native spawn $1
+  mkdir ./network
+  PATH=.:$PATH ./$ZOMBIENET_BIN -p native -d ./network spawn $1 &
+  # 2 mins to to spawn the network
+  for i in $(seq 1 120); do
+    ls ./network/zombie.json 2>/dev/null
+    if [ $? = 0 ]; then
+      break;
+    fi
+  done
+
+  echo "Network launched 🚀🚀"
 }
 
 zombienet_shutdown() {
-  PID=$(ps -ax | grep zombienet | grep -v grep | awk '{print $2}')
+  PID=$(ps -ax | grep $ZOMBIENET_BIN | grep -v grep | awk '{print $1}')
   echo "killing pid ${PID}"
   kill $PID
   echo $?
