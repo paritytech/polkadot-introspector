@@ -113,7 +113,8 @@ pub type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct DisputeInfo {
 	pub initiated: <PolkadotConfig as subxt::Config>::Index,
-	pub initiators_idx: Vec<u32>,
+	pub initiator_indices: Vec<u32>,
+	pub session_index: u32,
 	pub dispute: SubxtDispute,
 	pub parachain_id: u32,
 	pub outcome: Option<SubxtDisputeResult>,
@@ -779,7 +780,7 @@ impl Collector {
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed { disputed: relay_block_number, concluded: None });
-		let initiators_idx = self.extract_dispute_initiators(dispute_event).await?;
+		let initiator_indices = self.extract_dispute_initiators(dispute_event).await?;
 		if let Some(to_websocket) = self.to_websocket.as_mut() {
 			to_websocket
 				.send(WebSocketUpdateEvent {
@@ -795,7 +796,8 @@ impl Collector {
 		let dispute_info = DisputeInfo {
 			dispute: dispute_event.clone(),
 			initiated: relay_block_number,
-			initiators_idx,
+			initiator_indices,
+			session_index: self.state.current_session_index,
 			concluded: None,
 			parachain_id: candidate.parachain_id(),
 			outcome: None,
