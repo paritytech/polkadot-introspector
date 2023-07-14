@@ -106,7 +106,7 @@ test:
     - time cargo test --all-targets --no-default-features --features=kusama --workspace
     - time cargo test --all-targets --no-default-features --features=polkadot --workspace
     - ./scripts/ci/zombienet/zombie.sh setup
-    - ZOMBIE_WS_PORT=9900 script/ci/zombienet/zombie.sh run ./small-network.toml &
+    - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./small-network.toml &
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=rococo --workspace
     - ./scripts/zombienet/zombie.sh shutdown
 
