@@ -37,7 +37,10 @@ zombienet_run() {
 }
 
 zombienet_shutdown() {
-  ps -aux | grep zombienet | grep -v grep | awk '{print $2}' | xargs kill
+  pid = $(ps -ax | grep zombienet | grep -v grep | awk '{print $2}')
+  echo "killing pid ${pid}"
+  kill $pid
+  echo $?
 }
 
 SUBCOMMAND=$1
