@@ -249,7 +249,7 @@ impl Display for DisputesTracker {
 			for (validator_idx, validator_address) in &self.initiators {
 				writeln!(
 					f,
-					"\t\t\t🚀 Validator initiated dispute: {}",
+					"\t\t\t😠 Validator initiated dispute: {}",
 					format!("idx: {}, address: {}", validator_idx, validator_address).magenta(),
 				)?;
 			}
