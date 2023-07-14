@@ -780,7 +780,7 @@ impl Collector {
 		let now = get_unix_time_unwrap();
 		let para_id = candidate.parachain_id();
 		candidate.candidate_disputed = Some(CandidateDisputed { disputed: relay_block_number, concluded: None });
-		let initiator_indices = self.extract_dispute_initiators(dispute_event).await?;
+		let (initiator_indices, session_index) = self.extract_dispute_initiators(dispute_event).await?;
 		if let Some(to_websocket) = self.to_websocket.as_mut() {
 			to_websocket
 				.send(WebSocketUpdateEvent {
@@ -797,7 +797,7 @@ impl Collector {
 			dispute: dispute_event.clone(),
 			initiated: relay_block_number,
 			initiator_indices,
-			session_index: self.state.current_session_index,
+			session_index,
 			concluded: None,
 			parachain_id: candidate.parachain_id(),
 			outcome: None,
@@ -827,13 +827,17 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn extract_dispute_initiators(&mut self, dispute_event: &SubxtDispute) -> color_eyre::Result<Vec<u32>> {
+	async fn extract_dispute_initiators(
+		&mut self,
+		dispute_event: &SubxtDispute,
+	) -> color_eyre::Result<(Vec<u32>, u32)> {
+		let default_value = (vec![], self.state.current_session_index);
 		let entry = match self
 			.storage_read_prefixed(CollectorPrefixType::InherentData, dispute_event.relay_parent_block)
 			.await
 		{
 			Some(v) => v,
-			None => return Ok(vec![]),
+			None => return Ok(default_value),
 		};
 
 		let data: InherentData = entry.into_inner()?;
@@ -843,15 +847,18 @@ impl Collector {
 			.find(|&d| d.candidate_hash.0 == dispute_event.candidate_hash)
 		{
 			Some(v) => v,
-			None => return Ok(vec![]),
+			None => return Ok(default_value),
 		};
 
-		Ok(statement_set
-			.statements
-			.iter()
-			.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Invalid(_)))
-			.map(|(_, idx, _)| idx.0)
-			.collect())
+		Ok((
+			statement_set
+				.statements
+				.iter()
+				.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Invalid(_)))
+				.map(|(_, idx, _)| idx.0)
+				.collect(),
+			statement_set.session,
+		))
 	}
 
 	async fn process_dispute_concluded(
