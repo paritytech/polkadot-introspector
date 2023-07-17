@@ -33,7 +33,7 @@ zombienet_run() {
     echo "zombienet binary not present, please run setup first"
   fi
 
-  mkdir ./network
+  mkdir -p ./network
   PATH=.:$PATH ./$ZOMBIENET_BIN -p native -d ./network spawn $1 &
   # 2 mins to to spawn the network
   for i in $(seq 1 120); do
