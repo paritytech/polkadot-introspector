@@ -39,6 +39,9 @@ struct TelemetryOptions {
 	/// Web-Socket URL of a telemetry backend
 	#[clap(long)]
 	pub feed: String,
+	/// Name of a chain to connect
+	#[clap(long)]
+	pub chain: Option<String>,
 	#[clap(flatten)]
 	pub verbose: init::VerbosityOptions,
 	#[clap(flatten)]
@@ -111,7 +114,7 @@ impl Telemetry {
 			_ => return Err(WhoisError::NoNextKeys),
 		};
 		let authority_key = get_authority_key(next_keys);
-		let mut futures = match self.subscription.run(&self.opts.feed, shutdown_tx).await {
+		let mut futures = match self.subscription.run(&self.opts.feed, &self.opts.chain, shutdown_tx).await {
 			Ok(v) => v,
 			Err(e) => return Err(WhoisError::TelemetryError(e)),
 		};
