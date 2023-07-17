@@ -41,7 +41,7 @@ zombienet_run() {
       break;
     fi
   done
-  # sleep 120
+  sleep 60
 
   echo "Network launched 🚀🚀"
 }
