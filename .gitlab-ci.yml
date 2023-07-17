@@ -97,7 +97,7 @@ check:
 
 #### stage:                       test
 
-test:
+test-rococo:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
@@ -106,13 +106,26 @@ test:
     - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-rococo.toml
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=rococo --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
+
+test-kusama:
+  stage:                           lint
+  <<:                              *docker-env
+  <<:                              *common-refs
+  script:
+    - ./scripts/ci/zombienet/zombie.sh setup
     - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-kusama.toml
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=kusama --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
+
+test-polkadot:
+  stage:                           lint
+  <<:                              *docker-env
+  <<:                              *common-refs
+  script:
+    - ./scripts/ci/zombienet/zombie.sh setup
     - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-polkadot.toml
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=polkadot --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
-
 
 check-rococo-metadata:
   stage:                           test
