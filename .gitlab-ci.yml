@@ -102,12 +102,11 @@ test:
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo test --all-targets --no-default-features --features=rococo --workspace
-    - time cargo test --all-targets --no-default-features --features=kusama --workspace
-    - time cargo test --all-targets --no-default-features --features=polkadot --workspace
     - ./scripts/ci/zombienet/zombie.sh setup
     - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network.toml &
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=rococo --workspace
+    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=kusama --workspace
+    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=polkadot --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
 
 
