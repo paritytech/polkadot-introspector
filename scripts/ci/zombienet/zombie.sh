@@ -33,7 +33,6 @@ zombienet_run() {
     echo "zombienet binary not present, please run setup first"
   fi
 
-  # mkdir -p ./network
   PATH=.:$PATH ./$ZOMBIENET_BIN -p native -d ./network spawn $1 &
   # 2 mins to to spawn the network
   for i in $(seq 1 120); do
@@ -51,6 +50,7 @@ zombienet_shutdown() {
   echo "killing pid ${PID}"
   kill $PID
   echo $?
+  rm -rf network/
 }
 
 SUBCOMMAND=$1
