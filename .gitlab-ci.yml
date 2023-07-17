@@ -97,35 +97,32 @@ check:
 
 #### stage:                       test
 
-test-rococo:
+.test-api:                         &test-api
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
+  variables:
+    NETWORK:                       ""
   script:
     - ./scripts/ci/zombienet/zombie.sh setup
-    - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-rococo.toml
-    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=rococo --workspace
+    - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-${NETWORK}.toml
+    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=${NETWORK} --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
+
+test-rococo:
+  <<:                              *test-api
+  variables:
+    NETWORK:                       "rococo"
 
 test-kusama:
-  stage:                           lint
-  <<:                              *docker-env
-  <<:                              *common-refs
-  script:
-    - ./scripts/ci/zombienet/zombie.sh setup
-    - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-kusama.toml
-    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=kusama --workspace
-    - ./scripts/ci/zombienet/zombie.sh shutdown
+  <<:                              *test-api
+  variables:
+    NETWORK:                       "kusama"
 
 test-polkadot:
-  stage:                           lint
-  <<:                              *docker-env
-  <<:                              *common-refs
-  script:
-    - ./scripts/ci/zombienet/zombie.sh setup
-    - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-polkadot.toml
-    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=polkadot --workspace
-    - ./scripts/ci/zombienet/zombie.sh shutdown
+  <<:                              *test-api
+  variables:
+    NETWORK:                       "polkadot"
 
 check-rococo-metadata:
   stage:                           test
