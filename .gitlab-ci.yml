@@ -104,6 +104,7 @@ test:
   script:
     - ./scripts/ci/zombienet/zombie.sh setup
     - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network.toml &
+    - curl -v 127.0.0.1:9900
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=rococo --workspace
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=kusama --workspace
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=polkadot --workspace
