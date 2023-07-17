@@ -78,12 +78,21 @@ mod tests {
 	use super::*;
 	use crate::{storage::StorageEntry, types::H256};
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
-	#[cfg(feature = "rococo")]
-	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
-	#[cfg(feature = "kusama")]
-	const RPC_NODE_URL: &str = "wss://kusama-rpc.polkadot.io:443";
-	#[cfg(feature = "polkadot")]
-	const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
+
+	fn rpc_node_url() -> &'static str {
+		#[cfg(feature = "rococo")]
+		const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
+		#[cfg(feature = "kusama")]
+		const RPC_NODE_URL: &str = "wss://kusama-rpc.polkadot.io:443";
+		#[cfg(feature = "polkadot")]
+		const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
+
+		if let Ok(url) = std::env::var("WS_URL") {
+			return Box::leak(url.into_boxed_str())
+		}
+
+		RPC_NODE_URL
+	}
 
 	#[tokio::test]
 	async fn basic_storage_test() {
@@ -104,9 +113,9 @@ mod tests {
 			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
-		let timestamp = subxt.get_block_timestamp(RPC_NODE_URL, head.hash()).await.unwrap();
-		let _block = subxt.get_block(RPC_NODE_URL, Some(head.hash())).await.unwrap().unwrap();
+		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
+		let timestamp = subxt.get_block_timestamp(rpc_node_url(), head.hash()).await.unwrap();
+		let _block = subxt.get_block(rpc_node_url(), Some(head.hash())).await.unwrap().unwrap();
 		assert!(timestamp > 0);
 	}
 
@@ -116,7 +125,7 @@ mod tests {
 		let mut subxt = api.subxt();
 
 		subxt
-			.extract_parainherent_data(RPC_NODE_URL, None)
+			.extract_parainherent_data(rpc_node_url(), None)
 			.await
 			.unwrap()
 			.expect("Inherent data must be present");
@@ -127,9 +136,9 @@ mod tests {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
+		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
 
-		assert!(!subxt.get_scheduled_paras(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
+		assert!(!subxt.get_scheduled_paras(rpc_node_url(), head.hash()).await.unwrap().is_empty())
 	}
 
 	#[tokio::test]
@@ -137,9 +146,9 @@ mod tests {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
+		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
 
-		assert!(!subxt.get_occupied_cores(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
+		assert!(!subxt.get_occupied_cores(rpc_node_url(), head.hash()).await.unwrap().is_empty())
 	}
 
 	#[tokio::test]
@@ -147,8 +156,8 @@ mod tests {
 		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, RetryOptions::default());
 		let mut subxt = api.subxt();
 
-		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
+		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
 
-		assert!(!subxt.get_backing_groups(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
+		assert!(!subxt.get_backing_groups(rpc_node_url(), head.hash()).await.unwrap().is_empty())
 	}
 }
