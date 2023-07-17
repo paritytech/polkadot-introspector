@@ -1,0 +1,17 @@
+[relaychain]
+default_command = "polkadot"
+chain = "kusama"
+
+  [[relaychain.nodes]]
+  name = "alice"
+  ws_port = {{ZOMBIE_WS_PORT}}
+
+  [[relaychain.nodes]]
+  name = "bob"
+
+[[parachains]]
+id = 100
+
+  [parachains.collator]
+  name = "collator01"
+  command = "polkadot-parachain"
