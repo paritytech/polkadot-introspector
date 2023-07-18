@@ -37,6 +37,7 @@ zombienet_run() {
   # 2 mins to to spawn the network
   for i in $(seq 1 120); do
     sleep 1
+    echo "Network is spawning..."
     ls ./network/zombie.json 2>/dev/null
     if [ $? = 0 ]; then
       echo "Network is ready after $i seconds"
