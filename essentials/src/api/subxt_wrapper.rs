@@ -17,6 +17,7 @@
 
 use super::dynamic::decode_dynamic_validator_groups;
 use crate::{
+	api::dynamic::decode_dynamic_availability_cores,
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, SessionKeys, SubxtCall, Timestamp, H256},
 	utils::{Retry, RetryOptions},
@@ -524,9 +525,10 @@ async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash
 }
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let addr = polkadot::storage().para_scheduler().availability_cores();
-	let occupied_cores = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
-	Ok(Response::OccupiedCores(occupied_cores))
+	let addr = subxt::dynamic::storage_root("ParaScheduler", "AvailabilityCores");
+	let value = api.storage().at(block_hash).fetch(&addr).await?.unwrap().to_value()?;
+
+	Ok(Response::OccupiedCores(decode_dynamic_availability_cores(&value)?))
 }
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
