@@ -15,6 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+mod dynamic;
 mod storage;
 pub mod subxt_wrapper;
 
@@ -148,7 +149,9 @@ mod tests {
 		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
+		let groups = subxt.get_backing_groups(RPC_NODE_URL, head.hash()).await.unwrap();
 
-		assert!(!subxt.get_backing_groups(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
+		assert!(!groups.is_empty());
+		assert_eq!(groups[0][0].0, 0); // First validator's index is 0
 	}
 }

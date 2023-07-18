@@ -15,6 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use super::dynamic::decode_dynamic_validator_groups;
 use crate::{
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, SessionKeys, SubxtCall, Timestamp, H256},
@@ -529,8 +530,10 @@ async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash
 }
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let addr = polkadot::storage().para_scheduler().validator_groups();
-	let groups = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
+	let addr = subxt::dynamic::storage_root("ParaScheduler", "ValidatorGroups");
+	let value = api.storage().at(block_hash).fetch(&addr).await?.unwrap().to_value()?;
+	let groups = decode_dynamic_validator_groups(&value)?;
+
 	Ok(Response::BackingGroups(groups))
 }
 
@@ -682,6 +685,8 @@ pub enum SubxtWrapperError {
 	ConnectionError,
 	#[error("decode extinisc error")]
 	DecodeExtrinsicError,
+	#[error("decode dynamic value error: expected `{0}`, got {1}")]
+	DecodeDynamicError(String, ValueDef<u32>),
 }
 pub type Result = std::result::Result<Response, SubxtWrapperError>;
 
