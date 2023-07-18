@@ -39,10 +39,10 @@ zombienet_run() {
     sleep 1
     ls ./network/zombie.json 2>/dev/null
     if [ $? = 0 ]; then
+      echo "Network is ready after $i seconds"
       break;
     fi
   done
-  # sleep 60
 
   echo "Network launched 🚀🚀"
 }
