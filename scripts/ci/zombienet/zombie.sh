@@ -44,7 +44,7 @@ zombienet_run() {
     fi
   done
 
-  echo "Network launched 🚀🚀"
+  echo "Network is launched 🚀🚀"
 }
 
 zombienet_shutdown() {

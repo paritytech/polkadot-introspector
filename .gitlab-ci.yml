@@ -105,6 +105,7 @@ check:
     NETWORK:                       ""
   script:
     - ./scripts/ci/zombienet/zombie.sh setup
+    - echo "Launching zombienet for ${NETWORK}"
     - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/small-network-${NETWORK}.toml
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=${NETWORK} --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
