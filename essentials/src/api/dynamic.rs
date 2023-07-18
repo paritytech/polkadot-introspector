@@ -1,20 +1,26 @@
 use super::subxt_wrapper::SubxtWrapperError::{self, DecodeDynamicError};
-use crate::metadata::polkadot_primitives;
+use crate::metadata::{
+	polkadot::runtime_types::{
+		polkadot_parachain::primitives::Id,
+		polkadot_runtime_parachains::scheduler::{AssignmentKind, CoreAssignment},
+	},
+	polkadot_primitives::{CoreIndex, CoreOccupied, GroupIndex, ValidatorIndex},
+};
 use subxt::{
 	dynamic::{At, Value},
-	ext::scale_value::{Composite, Primitive, ValueDef},
+	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
 };
 
 pub(crate) fn decode_dynamic_validator_groups(
 	raw_groups: &Value<u32>,
-) -> Result<Vec<Vec<polkadot_primitives::ValidatorIndex>>, SubxtWrapperError> {
+) -> Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
 	let decoded_groups = decode_vector(raw_groups)?;
 	let mut groups = vec![];
 	for raw_group in decoded_groups.iter() {
 		let decoded_group = decode_vector(raw_group)?;
 		let mut group = vec![];
 		for raw_index in decoded_group.iter() {
-			group.push(decode_validator_index_value(raw_index)?)
+			group.push(ValidatorIndex(decode_u128_value(raw_index)? as u32));
 		}
 		groups.push(group)
 	}
@@ -22,41 +28,65 @@ pub(crate) fn decode_dynamic_validator_groups(
 	Ok(groups)
 }
 
-fn decode_vector(value: &Value<u32>) -> Result<&Vec<Value<u32>>, SubxtWrapperError> {
-	match &value.value {
-		ValueDef::Composite(Composite::Unnamed(v)) => Ok(v),
-		other => return Err(DecodeDynamicError("vector".to_string(), other.clone())),
-	}
-}
-
-fn decode_option(value: &Value<u32>) -> Result<Option<&Value<u32>>, SubxtWrapperError> {
-	if matches!(value, Value { value: ValueDef::Variant(_), .. }) {
-		Ok(value.at(0))
-	} else {
-		Err(DecodeDynamicError("vector of validator indices".to_string(), value.value.clone()))
-	}
-}
-
-fn decode_validator_index_value(value: &Value<u32>) -> Result<polkadot_primitives::ValidatorIndex, SubxtWrapperError> {
-	match &decode_vector(value)?.first().expect("Expected a vector of one").value {
-		ValueDef::Primitive(Primitive::U128(index)) => Ok(polkadot_primitives::ValidatorIndex(*index as u32)),
-		other => Err(DecodeDynamicError("validator's index".to_string(), other.clone())),
-	}
-}
-
 pub(crate) fn decode_dynamic_availability_cores(
 	raw_cores: &Value<u32>,
-) -> Result<Vec<Option<polkadot_primitives::CoreOccupied>>, SubxtWrapperError> {
+) -> Result<Vec<Option<CoreOccupied>>, SubxtWrapperError> {
 	let decoded_cores = decode_vector(raw_cores)?;
 	let mut cores = vec![];
-	for row_core in decoded_cores.iter() {
-		cores.push(decode_core_occupied(row_core)?);
+	for raw_core in decoded_cores.iter() {
+		cores.push(decode_option(raw_core)?.map(|v| match decode_variant(v).unwrap().name.as_str() {
+			"Parachain" => CoreOccupied::Parachain,
+			_ => todo!("Add parathreads support"),
+		}));
 	}
 
 	Ok(cores)
 }
 
-// TODO: Add support for on demand parachains
-fn decode_core_occupied(value: &Value<u32>) -> Result<Option<polkadot_primitives::CoreOccupied>, SubxtWrapperError> {
-	Ok(decode_option(value)?.map(|_| polkadot_primitives::CoreOccupied::Parachain))
+pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<Vec<CoreAssignment>, SubxtWrapperError> {
+	let decoded_paras = decode_vector(raw_paras)?;
+	let mut paras = vec![];
+	for para in decoded_paras.iter() {
+		let core = CoreIndex(decode_u128_value(para.at("core").expect("Should be defined"))? as u32);
+		let para_id = Id(decode_u128_value(para.at("para_id").expect("Should be defined"))? as u32);
+		let kind = match decode_variant(para.at("kind").expect("Should be defined"))?.name.as_str() {
+			"Parachain" => AssignmentKind::Parachain,
+			_ => todo!("Add parathreads support"),
+		};
+		let group_idx = GroupIndex(decode_u128_value(para.at("group_idx").expect("Should be defined"))? as u32);
+		let assignment = CoreAssignment { core, para_id, kind, group_idx };
+
+		paras.push(assignment)
+	}
+
+	Ok(paras)
+}
+
+fn decode_variant(value: &Value<u32>) -> Result<&Variant<u32>, SubxtWrapperError> {
+	match &value.value {
+		ValueDef::Variant(variant) => Ok(variant),
+		other => Err(DecodeDynamicError("variant".to_string(), other.clone())),
+	}
+}
+
+fn decode_option(value: &Value<u32>) -> Result<Option<&Value<u32>>, SubxtWrapperError> {
+	match decode_variant(value)?.name.as_str() {
+		"Some" => Ok(value.at(0)),
+		"None" => Ok(None),
+		_ => Err(DecodeDynamicError("option".to_string(), value.value.clone())),
+	}
+}
+
+fn decode_vector(value: &Value<u32>) -> Result<&Vec<Value<u32>>, SubxtWrapperError> {
+	match &value.value {
+		ValueDef::Composite(Composite::Unnamed(v)) => Ok(v),
+		other => Err(DecodeDynamicError("vector".to_string(), other.clone())),
+	}
+}
+
+fn decode_u128_value(value: &Value<u32>) -> Result<u128, SubxtWrapperError> {
+	match &decode_vector(value)?.first().expect("a vector of one").value {
+		ValueDef::Primitive(Primitive::U128(v)) => Ok(*v),
+		other => Err(DecodeDynamicError("u128".to_string(), other.clone())),
+	}
 }

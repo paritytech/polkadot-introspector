@@ -77,7 +77,14 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{metadata::polkadot_primitives::CoreOccupied, storage::StorageEntry, types::H256};
+	use crate::{
+		metadata::{
+			polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment,
+			polkadot_primitives::CoreOccupied,
+		},
+		storage::StorageEntry,
+		types::H256,
+	};
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
 	#[cfg(feature = "rococo")]
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
@@ -129,8 +136,10 @@ mod tests {
 		let mut subxt = api.subxt();
 
 		let head = subxt.get_block_head(RPC_NODE_URL, None).await.unwrap().unwrap();
+		let paras = subxt.get_scheduled_paras(RPC_NODE_URL, head.hash()).await.unwrap();
 
-		assert!(!subxt.get_scheduled_paras(RPC_NODE_URL, head.hash()).await.unwrap().is_empty())
+		assert!(!paras.is_empty());
+		assert!(matches!(paras[0], CoreAssignment { .. }));
 	}
 
 	#[tokio::test]
