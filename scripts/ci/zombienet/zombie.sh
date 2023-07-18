@@ -36,12 +36,13 @@ zombienet_run() {
   PATH=.:$PATH ./$ZOMBIENET_BIN -p native -d ./network spawn $1 &
   # 2 mins to to spawn the network
   for i in $(seq 1 120); do
+    sleep 1
     ls ./network/zombie.json 2>/dev/null
     if [ $? = 0 ]; then
       break;
     fi
   done
-  sleep 60
+  # sleep 60
 
   echo "Network launched 🚀🚀"
 }
