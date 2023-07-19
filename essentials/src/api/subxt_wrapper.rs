@@ -520,7 +520,10 @@ fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeEx
 
 async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = subxt::dynamic::storage_root("ParaScheduler", "Scheduled");
-	let value = api.storage().at(block_hash).fetch(&addr).await?.unwrap().to_value()?;
+	let value = match api.storage().at(block_hash).fetch(&addr).await? {
+		Some(v) => v.to_value()?,
+		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
+	};
 	let paras = decode_dynamic_scheduled_paras(&value)?;
 
 	Ok(Response::ScheduledParas(paras))
@@ -528,7 +531,10 @@ async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = subxt::dynamic::storage_root("ParaScheduler", "AvailabilityCores");
-	let value = api.storage().at(block_hash).fetch(&addr).await?.unwrap().to_value()?;
+	let value = match api.storage().at(block_hash).fetch(&addr).await? {
+		Some(v) => v.to_value()?,
+		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
+	};
 	let cores = decode_dynamic_availability_cores(&value)?;
 
 	Ok(Response::OccupiedCores(cores))
@@ -536,7 +542,10 @@ async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let addr = subxt::dynamic::storage_root("ParaScheduler", "ValidatorGroups");
-	let value = api.storage().at(block_hash).fetch(&addr).await?.unwrap().to_value()?;
+	let value = match api.storage().at(block_hash).fetch(&addr).await? {
+		Some(v) => v.to_value()?,
+		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
+	};
 	let groups = decode_dynamic_validator_groups(&value)?;
 
 	Ok(Response::BackingGroups(groups))
@@ -653,7 +662,11 @@ async fn subxt_get_hrmp_content(
 
 async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Result {
 	let addr = subxt::dynamic::storage_root("Configuration", "ActiveConfig");
-	let value = api.storage().at_latest().await?.fetch(&addr).await?.unwrap().to_value()?;
+	let value = match api.storage().at_latest().await?.fetch(&addr).await? {
+		Some(v) => v.to_value()?,
+		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
+	};
+
 	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
 }
 
@@ -690,6 +703,8 @@ pub enum SubxtWrapperError {
 	ConnectionError,
 	#[error("decode extinisc error")]
 	DecodeExtrinsicError,
+	#[error("no response from dynamic api")]
+	NoResponseFromDynamicApi,
 	#[error("decode dynamic value error: expected `{0}`, got {1}")]
 	DecodeDynamicError(String, ValueDef<u32>),
 }
