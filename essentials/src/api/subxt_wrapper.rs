@@ -518,34 +518,37 @@ fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeEx
 	SubxtCall::decode(data).map_err(DecodeExtrinsicError::CodecError)
 }
 
+async fn fetch_dynamic_storage(
+	api: &OnlineClient<PolkadotConfig>,
+	block_hash: H256,
+	pallet_name: &str,
+	entry_name: &str,
+) -> std::result::Result<Value<u32>, SubxtWrapperError> {
+	api.storage()
+		.at(block_hash)
+		.fetch(&subxt::dynamic::storage_root(pallet_name, entry_name))
+		.await?
+		.map_or(Err(SubxtWrapperError::NoResponseFromDynamicApi(format!("{pallet_name}.{entry_name}"))), |v| {
+			v.to_value().map_err(|e| e.into())
+		})
+}
+
 async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let addr = subxt::dynamic::storage_root("ParaScheduler", "Scheduled");
-	let value = match api.storage().at(block_hash).fetch(&addr).await? {
-		Some(v) => v.to_value()?,
-		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
-	};
+	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "Scheduled").await?;
 	let paras = decode_dynamic_scheduled_paras(&value)?;
 
 	Ok(Response::ScheduledParas(paras))
 }
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let addr = subxt::dynamic::storage_root("ParaScheduler", "AvailabilityCores");
-	let value = match api.storage().at(block_hash).fetch(&addr).await? {
-		Some(v) => v.to_value()?,
-		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
-	};
+	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "AvailabilityCores").await?;
 	let cores = decode_dynamic_availability_cores(&value)?;
 
 	Ok(Response::OccupiedCores(cores))
 }
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let addr = subxt::dynamic::storage_root("ParaScheduler", "ValidatorGroups");
-	let value = match api.storage().at(block_hash).fetch(&addr).await? {
-		Some(v) => v.to_value()?,
-		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
-	};
+	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ValidatorGroups").await?;
 	let groups = decode_dynamic_validator_groups(&value)?;
 
 	Ok(Response::BackingGroups(groups))
@@ -661,11 +664,18 @@ async fn subxt_get_hrmp_content(
 }
 
 async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Result {
-	let addr = subxt::dynamic::storage_root("Configuration", "ActiveConfig");
-	let value = match api.storage().at_latest().await?.fetch(&addr).await? {
-		Some(v) => v.to_value()?,
-		None => return Err(SubxtWrapperError::NoResponseFromDynamicApi),
-	};
+	let pallet_name = "Configuration";
+	let entry_name = "ActiveConfig";
+	let addr = subxt::dynamic::storage_root(pallet_name, entry_name);
+	let value = api
+		.storage()
+		.at_latest()
+		.await?
+		.fetch(&addr)
+		.await?
+		.map_or(Err(SubxtWrapperError::NoResponseFromDynamicApi(format!("{pallet_name}.{entry_name}"))), |v| {
+			v.to_value().map_err(|e| e.into())
+		})?;
 
 	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
 }
@@ -703,8 +713,8 @@ pub enum SubxtWrapperError {
 	ConnectionError,
 	#[error("decode extinisc error")]
 	DecodeExtrinsicError,
-	#[error("no response from dynamic api")]
-	NoResponseFromDynamicApi,
+	#[error("no response from dynamic api: {0}")]
+	NoResponseFromDynamicApi(String),
 	#[error("decode dynamic value error: expected `{0}`, got {1}")]
 	DecodeDynamicError(String, ValueDef<u32>),
 }
