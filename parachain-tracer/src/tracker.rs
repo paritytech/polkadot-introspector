@@ -73,6 +73,8 @@ pub struct DisputesTracker {
 	pub voted_for: u32,
 	/// Number of validators voted that a candidate is invalid
 	pub voted_against: u32,
+	/// A vector of validators initiateds the dispute (index + identify)
+	pub initiators: Vec<(u32, String)>,
 	/// A vector of validators voted against supermajority (index + identify)
 	pub misbehaving_validators: Vec<(u32, String)>,
 	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
@@ -581,11 +583,24 @@ impl SubxtTracker {
 						.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
 						.collect()
 				};
+
+				let initiators_session_info = if session_index == stored_dispute.session_index {
+					session_info
+				} else {
+					self.get_session_keys(stored_dispute.session_index).await
+				};
+				let initiators: Vec<_> = stored_dispute
+					.initiator_indices
+					.iter()
+					.map(|idx| extract_validator_address(initiators_session_info.as_ref(), *idx))
+					.collect();
+
 				self.disputes.push(DisputesTracker {
 					candidate: dispute_info.candidate_hash.0,
 					voted_for,
 					voted_against,
 					outcome,
+					initiators,
 					misbehaving_validators,
 					resolve_time: Some(
 						stored_dispute

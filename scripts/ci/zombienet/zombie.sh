@@ -44,7 +44,9 @@ zombienet_run() {
     fi
   done
 
+
   echo "Network is launched 🚀🚀"
+
 }
 
 zombienet_shutdown() {
@@ -53,6 +55,7 @@ zombienet_shutdown() {
   kill $PID
   echo $?
   rm -rf network/
+
 }
 
 SUBCOMMAND=$1
