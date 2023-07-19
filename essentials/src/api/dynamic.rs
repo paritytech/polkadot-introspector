@@ -15,10 +15,10 @@ pub(crate) fn decode_dynamic_validator_groups(
 	raw_groups: &Value<u32>,
 ) -> Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
 	let decoded_groups = decode_vector(raw_groups)?;
-	let mut groups = vec![];
+	let mut groups = Vec::with_capacity(decoded_groups.len());
 	for raw_group in decoded_groups.iter() {
 		let decoded_group = decode_vector(raw_group)?;
-		let mut group = vec![];
+		let mut group = Vec::with_capacity(decoded_group.len());
 		for raw_index in decoded_group.iter() {
 			group.push(ValidatorIndex(decode_u128_value(raw_index)? as u32));
 		}
@@ -32,7 +32,7 @@ pub(crate) fn decode_dynamic_availability_cores(
 	raw_cores: &Value<u32>,
 ) -> Result<Vec<Option<CoreOccupied>>, SubxtWrapperError> {
 	let decoded_cores = decode_vector(raw_cores)?;
-	let mut cores = vec![];
+	let mut cores = Vec::with_capacity(decoded_cores.len());
 	for raw_core in decoded_cores.iter() {
 		cores.push(decode_option(raw_core)?.map(|v| match decode_variant(v).unwrap().name.as_str() {
 			"Parachain" => CoreOccupied::Parachain,
@@ -45,7 +45,7 @@ pub(crate) fn decode_dynamic_availability_cores(
 
 pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<Vec<CoreAssignment>, SubxtWrapperError> {
 	let decoded_paras = decode_vector(raw_paras)?;
-	let mut paras = vec![];
+	let mut paras = Vec::with_capacity(decoded_paras.len());
 	for para in decoded_paras.iter() {
 		let core = CoreIndex(decode_u128_value(para.at("core").expect("Should be defined"))? as u32);
 		let para_id = Id(decode_u128_value(para.at("para_id").expect("Should be defined"))? as u32);
