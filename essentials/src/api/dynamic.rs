@@ -63,9 +63,9 @@ pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<V
 }
 
 fn value_at<'a>(field: &'a str, value: &'a Value<u32>) -> Result<&'a Value<u32>, SubxtWrapperError> {
-	Ok(value
+	value
 		.at(field)
-		.ok_or(DecodeDynamicError(format!(".{field}"), value.value.clone()))?)
+		.ok_or(DecodeDynamicError(format!(".{field}"), value.value.clone()))
 }
 
 fn decode_variant(value: &Value<u32>) -> Result<&Variant<u32>, SubxtWrapperError> {
