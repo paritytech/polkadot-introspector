@@ -6,6 +6,7 @@ use crate::metadata::{
 	},
 	polkadot_primitives::{CoreIndex, CoreOccupied, GroupIndex, ValidatorIndex},
 };
+use log::error;
 use subxt::{
 	dynamic::{At, Value},
 	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
@@ -34,10 +35,18 @@ pub(crate) fn decode_dynamic_availability_cores(
 	let decoded_cores = decode_vector(raw_cores)?;
 	let mut cores = Vec::with_capacity(decoded_cores.len());
 	for raw_core in decoded_cores.iter() {
-		cores.push(decode_option(raw_core)?.map(|v| match decode_variant(v).unwrap().name.as_str() {
-			"Parachain" => CoreOccupied::Parachain,
-			_ => todo!("Add parathreads support"),
-		}));
+		let core = match decode_option(raw_core)?.map(|v| decode_variant(v)) {
+			Some(Ok(variant)) => match variant.name.as_str() {
+				"Parachain" => Some(CoreOccupied::Parachain),
+				name => todo!("Add support for {name}"),
+			},
+			Some(Err(e)) => {
+				error!("Can't decode a dynamic value: {:?}", e);
+				return Err(DecodeDynamicError("core".to_string(), raw_core.value.clone()))
+			},
+			None => None,
+		};
+		cores.push(core);
 	}
 
 	Ok(cores)
@@ -51,7 +60,7 @@ pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<V
 		let para_id = Id(decode_u128_value(value_at("para_id", para)?)? as u32);
 		let kind = match decode_variant(value_at("kind", para)?)?.name.as_str() {
 			"Parachain" => AssignmentKind::Parachain,
-			_ => todo!("Add parathreads support"),
+			name => todo!("Add support for {name}"),
 		};
 		let group_idx = GroupIndex(decode_u128_value(value_at("group_idx", para)?)? as u32);
 		let assignment = CoreAssignment { core, para_id, kind, group_idx };
