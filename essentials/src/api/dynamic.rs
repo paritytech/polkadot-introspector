@@ -35,7 +35,7 @@ pub(crate) fn decode_dynamic_availability_cores(
 	let decoded_cores = decode_vector(raw_cores)?;
 	let mut cores = Vec::with_capacity(decoded_cores.len());
 	for raw_core in decoded_cores.iter() {
-		let core = match decode_option(raw_core)?.map(|v| decode_variant(v)) {
+		let core = match decode_option(raw_core)?.map(decode_variant) {
 			Some(Ok(variant)) => match variant.name.as_str() {
 				"Parachain" => Some(CoreOccupied::Parachain),
 				name => todo!("Add support for {name}"),
