@@ -47,19 +47,25 @@ pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<V
 	let decoded_paras = decode_vector(raw_paras)?;
 	let mut paras = Vec::with_capacity(decoded_paras.len());
 	for para in decoded_paras.iter() {
-		let core = CoreIndex(decode_u128_value(para.at("core").expect("Should be defined"))? as u32);
-		let para_id = Id(decode_u128_value(para.at("para_id").expect("Should be defined"))? as u32);
-		let kind = match decode_variant(para.at("kind").expect("Should be defined"))?.name.as_str() {
+		let core = CoreIndex(decode_u128_value(value_at("core", para)?)? as u32);
+		let para_id = Id(decode_u128_value(value_at("para_id", para)?)? as u32);
+		let kind = match decode_variant(value_at("kind", para)?)?.name.as_str() {
 			"Parachain" => AssignmentKind::Parachain,
 			_ => todo!("Add parathreads support"),
 		};
-		let group_idx = GroupIndex(decode_u128_value(para.at("group_idx").expect("Should be defined"))? as u32);
+		let group_idx = GroupIndex(decode_u128_value(value_at("group_idx", para)?)? as u32);
 		let assignment = CoreAssignment { core, para_id, kind, group_idx };
 
 		paras.push(assignment)
 	}
 
 	Ok(paras)
+}
+
+fn value_at<'a>(field: &'a str, value: &'a Value<u32>) -> Result<&'a Value<u32>, SubxtWrapperError> {
+	Ok(value
+		.at(field)
+		.ok_or(DecodeDynamicError(format!(".{field}"), value.value.clone()))?)
 }
 
 fn decode_variant(value: &Value<u32>) -> Result<&Variant<u32>, SubxtWrapperError> {
@@ -85,8 +91,11 @@ fn decode_vector(value: &Value<u32>) -> Result<&Vec<Value<u32>>, SubxtWrapperErr
 }
 
 fn decode_u128_value(value: &Value<u32>) -> Result<u128, SubxtWrapperError> {
-	match &decode_vector(value)?.first().expect("a vector of one").value {
-		ValueDef::Primitive(Primitive::U128(v)) => Ok(*v),
-		other => Err(DecodeDynamicError("u128".to_string(), other.clone())),
+	match decode_vector(value)?[..] {
+		[ref first, ..] => match &first.value {
+			ValueDef::Primitive(Primitive::U128(v)) => Ok(*v),
+			other => Err(DecodeDynamicError("u128".to_string(), other.clone())),
+		},
+		_ => Err(DecodeDynamicError("vector of one element".to_string(), value.value.clone())),
 	}
 }
