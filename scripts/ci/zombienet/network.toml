@@ -4,7 +4,7 @@ chain = "rococo-local"
 
   [[relaychain.nodes]]
   name = "alice"
-  ws_port = 65000
+  ws_port = {{ZOMBIE_WS_PORT}}
 
   [[relaychain.node_groups]]
   name = "validator"
