@@ -98,7 +98,7 @@ check:
 #### stage:                       test
 
 test:
-  stage:                           lint
+  stage:                           test
   <<:                              *docker-env
   <<:                              *common-refs
   script:
