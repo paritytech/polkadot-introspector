@@ -17,14 +17,14 @@
 use clap::{Args, Parser, Subcommand};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
-	constants::MAX_MSG_QUEUE_SIZE,
+	consumer::{EventConsumerInit, EventStream},
 	init,
 	telemetry_feed::{AddedNode, TelemetryFeed},
 	telemetry_subscription::{TelemetryEvent, TelemetrySubscription},
 	types::{AccountId32, SessionKeys},
 	utils,
 };
-use polkadot_introspector_priority_channel::{channel as priority_channel, Receiver};
+use polkadot_introspector_priority_channel::Receiver;
 use std::str::FromStr;
 use tokio::sync::broadcast;
 
@@ -80,21 +80,18 @@ pub enum WhoisError {
 	TelemetryError(color_eyre::Report),
 }
 
-struct Telemetry {
+struct Whois {
 	opts: TelemetryOptions,
-	subscription: TelemetrySubscription,
-	update_channel: Receiver<TelemetryEvent>,
 }
 
-impl Telemetry {
+impl Whois {
 	fn new(opts: TelemetryOptions) -> color_eyre::Result<Self> {
-		let (update_tx, update_rx) = priority_channel(MAX_MSG_QUEUE_SIZE);
-		Ok(Self { opts, subscription: TelemetrySubscription::new(vec![update_tx]), update_channel: update_rx })
+		Ok(Self { opts })
 	}
 
 	async fn run(
 		self,
-		shutdown_tx: &broadcast::Sender<()>,
+		consumer_config: EventConsumerInit<TelemetryEvent>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
 		let mut executor = RequestExecutor::new(self.opts.retry.clone());
 		let validator = match self.opts.command {
@@ -114,15 +111,12 @@ impl Telemetry {
 			_ => return Err(WhoisError::NoNextKeys),
 		};
 		let authority_key = get_authority_key(next_keys);
-		let mut futures = match self
-			.subscription
-			.run(&self.opts.feed, &self.opts.chain, shutdown_tx.clone())
-			.await
-		{
-			Ok(v) => v,
-			Err(e) => return Err(WhoisError::TelemetryError(e)),
-		};
-		futures.push(tokio::spawn(Self::watch(self.update_channel, authority_key, validator.clone())));
+
+		let consumer_channels: Vec<Receiver<TelemetryEvent>> = consumer_config.into();
+		let futures = consumer_channels
+			.into_iter()
+			.map(|c: Receiver<TelemetryEvent>| tokio::spawn(Self::watch(c, authority_key.clone(), validator.clone())))
+			.collect();
 
 		Ok(futures)
 	}
@@ -175,8 +169,16 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = TelemetryOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
+	let whois = Whois::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-	let futures = Telemetry::new(opts)?.run(&shutdown_tx).await?;
+	let mut futures = vec![];
+
+	let mut sub = TelemetrySubscription::new(opts.ws.clone(), opts.chain.clone());
+	let consumer_init = sub.create_consumer();
+
+	futures.extend(whois.run(consumer_init).await?);
+	futures.extend(sub.run(&shutdown_tx).await?);
+
 	init::run(futures, &shutdown_tx).await?;
 
 	Ok(())
