@@ -26,7 +26,6 @@ use polkadot_introspector_essentials::{
 };
 use polkadot_introspector_priority_channel::Receiver;
 use std::str::FromStr;
-use tokio::sync::broadcast;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Simple telemetry feed")]
