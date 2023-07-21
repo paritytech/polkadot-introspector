@@ -94,7 +94,7 @@ impl Telemetry {
 
 	async fn run(
 		self,
-		shutdown_tx: broadcast::Sender<()>,
+		shutdown_tx: &broadcast::Sender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
 		let mut executor = RequestExecutor::new(self.opts.retry.clone());
 		let validator = match self.opts.command {
@@ -114,7 +114,11 @@ impl Telemetry {
 			_ => return Err(WhoisError::NoNextKeys),
 		};
 		let authority_key = get_authority_key(next_keys);
-		let mut futures = match self.subscription.run(&self.opts.feed, &self.opts.chain, shutdown_tx).await {
+		let mut futures = match self
+			.subscription
+			.run(&self.opts.feed, &self.opts.chain, shutdown_tx.clone())
+			.await
+		{
 			Ok(v) => v,
 			Err(e) => return Err(WhoisError::TelemetryError(e)),
 		};
@@ -172,9 +176,8 @@ async fn main() -> color_eyre::Result<()> {
 	init::init_cli(&opts.verbose)?;
 
 	let shutdown_tx = init::init_shutdown();
-	let futures =
-		init::init_futures_with_shutdown(Telemetry::new(opts)?.run(shutdown_tx.clone()).await?, shutdown_tx.clone());
-	init::run(futures).await?;
+	let futures = Telemetry::new(opts)?.run(&shutdown_tx).await?;
+	init::run(futures, &shutdown_tx).await?;
 
 	Ok(())
 }

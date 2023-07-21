@@ -21,7 +21,7 @@ use crossterm::{
 	terminal::{Clear, ClearType},
 	QueueableCommand,
 };
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
 	api::ApiService,
 	chain_head_subscription::ChainHeadSubscription,
@@ -41,7 +41,7 @@ use std::{
 	net::ToSocketAddrs,
 };
 use subxt::config::Header;
-use tokio::{select, sync::broadcast};
+use tokio::select;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Observe block times using an RPC node")]
@@ -97,16 +97,12 @@ struct BlockTimeMonitor {
 	opts: BlockTimeOptions,
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
-	consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
 	api_service: ApiService<H256>,
 	active_endpoints: usize,
 }
 
 impl BlockTimeMonitor {
-	pub fn new(
-		opts: BlockTimeOptions,
-		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
-	) -> color_eyre::Result<Self> {
+	pub fn new(opts: BlockTimeOptions) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 }, opts.retry.clone());
 		let endpoints = opts.nodes.clone();
@@ -121,28 +117,18 @@ impl BlockTimeMonitor {
 				socket_addr_str.to_socket_addrs()?.for_each(|addr| {
 					tokio::spawn(prometheus_endpoint::init_prometheus(addr, prometheus_registry.clone()));
 				});
-				Ok(BlockTimeMonitor {
-					opts,
-					block_time_metric,
-					endpoints,
-					consumer_config,
-					api_service,
-					active_endpoints,
-				})
+				Ok(BlockTimeMonitor { opts, block_time_metric, endpoints, api_service, active_endpoints })
 			},
-			BlockTimeMode::Cli(_) => Ok(BlockTimeMonitor {
-				opts,
-				block_time_metric: None,
-				endpoints,
-				consumer_config,
-				api_service,
-				active_endpoints,
-			}),
+			BlockTimeMode::Cli(_) =>
+				Ok(BlockTimeMonitor { opts, block_time_metric: None, endpoints, api_service, active_endpoints }),
 		}
 	}
 
-	pub async fn run(self) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let consumer_channels: Vec<Receiver<ChainSubscriptionEvent>> = self.consumer_config.into();
+	pub async fn run(
+		self,
+		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
+	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+		let consumer_channels: Vec<Receiver<ChainSubscriptionEvent>> = consumer_config.into();
 		let (message_tx, message_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		let mut futures = self
@@ -400,16 +386,18 @@ fn register_metric(registry: &Registry) -> HistogramVec {
 async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
-	let mut core = ChainHeadSubscription::new(opts.nodes.clone(), opts.retry.clone());
-	let block_time_consumer_init = core.create_consumer();
-	let (shutdown_tx, _) = broadcast::channel(1);
 
-	match BlockTimeMonitor::new(opts, block_time_consumer_init)?.run().await {
-		Ok(futures) =>
-			core.run(futures, shutdown_tx.clone(), tokio::spawn(init::on_shutdown(shutdown_tx.clone())))
-				.await?,
-		Err(err) => error!("FATAL: cannot start block time monitor: {}", err),
-	}
+	let monitor = BlockTimeMonitor::new(opts.clone())?;
+	let shutdown_tx = init::init_shutdown();
+	let mut futures = vec![];
+
+	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), opts.retry.clone());
+	let consumer_init = sub.create_consumer();
+
+	futures.extend(monitor.run(consumer_init).await?);
+	futures.extend(sub.run(&shutdown_tx).await?);
+
+	init::run(futures, &shutdown_tx).await?;
 
 	Ok(())
 }

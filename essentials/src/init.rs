@@ -31,20 +31,17 @@ pub fn init_shutdown() -> broadcast::Sender<()> {
 	shutdown_tx
 }
 
-pub fn init_futures_with_shutdown(
-	mut futures: Vec<tokio::task::JoinHandle<()>>,
-	shutdown_tx: broadcast::Sender<()>,
-) -> Vec<tokio::task::JoinHandle<()>> {
-	futures.push(tokio::spawn(on_shutdown(shutdown_tx)));
-	futures
-}
-
 pub async fn on_shutdown(shutdown_tx: broadcast::Sender<()>) {
 	signal::ctrl_c().await.unwrap();
 	let _ = shutdown_tx.send(());
 }
 
-pub async fn run(futures: Vec<tokio::task::JoinHandle<()>>) -> color_eyre::Result<()> {
+pub async fn run(
+	mut futures: Vec<tokio::task::JoinHandle<()>>,
+	shutdown_tx: &broadcast::Sender<()>,
+) -> color_eyre::Result<()> {
+	futures.push(tokio::spawn(on_shutdown(shutdown_tx.clone())));
 	future::try_join_all(futures).await?;
+
 	Ok(())
 }

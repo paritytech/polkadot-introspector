@@ -24,14 +24,11 @@ use tokio::sync::broadcast::Sender as BroadcastSender;
 pub trait EventStream {
 	type Event;
 
+	/// Create a consumer config
 	fn create_consumer(&mut self) -> EventConsumerInit<Self::Event>;
-	/// Run the main event loop.
-	async fn run(
-		self,
-		tasks: Vec<tokio::task::JoinHandle<()>>,
-		shutdown_tx: BroadcastSender<()>,
-		shutdown_future: tokio::task::JoinHandle<()>,
-	) -> color_eyre::Result<()>;
+
+	/// Prepare futures to join.
+	async fn run(self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>>;
 }
 
 #[derive(Debug)]
