@@ -48,7 +48,7 @@ use polkadot_introspector_essentials::{
 use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
-use tokio::sync::{broadcast, broadcast::Sender as BroadcastSender};
+use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::{ParachainBlockTracker, SubxtTracker};
 
 mod progress;
@@ -368,40 +368,45 @@ async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> 
 	Ok(())
 }
 
+fn historical_bounds(opts: &ParachainTracerOptions) -> color_eyre::Result<(u32, u32)> {
+	let from_block_number = opts.from_block_number.expect("`--from` must exist in historical mode");
+	let to_block_number = opts.to_block_number.expect("`--to` must exist in historical mode");
+	if from_block_number >= to_block_number {
+		let mut cmd = ParachainTracerOptions::command();
+		cmd // Throws `clap` error instead of just panicking
+			.error(ErrorKind::ArgumentConflict, "`--from` block number should be less then `--to`")
+			.exit();
+	}
+	println!("Historical mode: from {} to {}", from_block_number, to_block_number);
+
+	Ok((from_block_number, to_block_number))
+}
+
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let (shutdown_tx, _) = broadcast::channel(1);
-	let shutdown_future = tokio::spawn(init::on_shutdown(shutdown_tx.clone()));
+	let tracer = ParachainTracer::new(opts.clone())?;
+	let shutdown_tx = init::init_shutdown();
+	let mut futures = vec![];
 
 	if opts.is_historical {
-		let from_block_number = opts.from_block_number.expect("`--from` must exist in historical mode");
-		let to_block_number = opts.to_block_number.expect("`--to` must exist in historical mode");
-		if from_block_number >= to_block_number {
-			let mut cmd = ParachainTracerOptions::command();
-			cmd // Throws `clap` error instead of just panicking
-				.error(ErrorKind::ArgumentConflict, "`--from` block number should be less then `--to`")
-				.exit();
-		}
+		let (from, to) = historical_bounds(&opts)?;
+		let mut historical_sub = HistoricalSubscription::new(vec![opts.node.clone()], from, to, opts.retry.clone());
+		let consumer_init = historical_sub.create_consumer();
 
-		println!("Historical mode: from {} to {}", from_block_number, to_block_number);
-		let mut core = HistoricalSubscription::new(
-			vec![opts.node.clone()],
-			from_block_number,
-			to_block_number,
-			opts.retry.clone(),
-		);
-		let consumer_init = core.create_consumer();
-		let futures = ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await?;
-		core.run(futures, shutdown_tx, shutdown_future).await?;
+		futures.extend(tracer.run(&shutdown_tx, consumer_init).await?);
+		futures.extend(historical_sub.run(&shutdown_tx).await?);
 	} else {
-		let mut core = ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone());
-		let consumer_init = core.create_consumer();
-		let futures = ParachainTracer::new(opts)?.run(&shutdown_tx, consumer_init).await?;
-		core.run(futures, shutdown_tx, shutdown_future).await?;
+		let mut head_sub = ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone());
+		let consumer_init = head_sub.create_consumer();
+
+		futures.extend(tracer.run(&shutdown_tx, consumer_init).await?);
+		futures.extend(head_sub.run(&shutdown_tx).await?);
 	};
+
+	init::run(futures, &shutdown_tx).await?;
 
 	Ok(())
 }

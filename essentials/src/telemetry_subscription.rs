@@ -16,12 +16,18 @@
 //
 
 use super::telemetry_feed::TelemetryFeed;
-use crate::{telemetry_feed::AddedChain, types::H256};
+use crate::{
+	constants::MAX_MSG_QUEUE_SIZE,
+	consumer::{EventConsumerInit, EventStream},
+	telemetry_feed::AddedChain,
+	types::H256,
+};
+use async_trait::async_trait;
 use color_eyre::Report;
 use futures::{SinkExt, Stream, StreamExt};
 use itertools::Itertools;
 use log::{debug, info, warn};
-use polkadot_introspector_priority_channel::{SendError, Sender};
+use polkadot_introspector_priority_channel::{channel, SendError, Sender};
 use std::{
 	cmp::{min, Reverse},
 	collections::HashMap,
@@ -68,13 +74,44 @@ pub enum TelemetryEvent {
 }
 
 pub struct TelemetrySubscription {
+	// Telemetry we feed
+	url: String,
+	// Name of a desired chain
+	maybe_chain_name: Option<String>,
 	/// One sender per consumer per URL.
 	consumers: Vec<Sender<TelemetryEvent>>,
 }
 
+#[async_trait]
+impl EventStream for TelemetrySubscription {
+	type Event = TelemetryEvent;
+
+	fn create_consumer(&mut self) -> EventConsumerInit<Self::Event> {
+		let (update_tx, update_rx) = channel(MAX_MSG_QUEUE_SIZE);
+		self.consumers.push(update_tx);
+
+		EventConsumerInit::new(vec![update_rx])
+	}
+
+	async fn run(self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+		Ok(self
+			.consumers
+			.into_iter()
+			.map(|update_channel| {
+				tokio::spawn(Self::run_per_consumer(
+					update_channel,
+					self.url.clone(),
+					self.maybe_chain_name.clone(),
+					shutdown_tx.clone(),
+				))
+			})
+			.collect::<Vec<_>>())
+	}
+}
+
 impl TelemetrySubscription {
-	pub fn new(consumers: Vec<Sender<TelemetryEvent>>) -> Self {
-		Self { consumers }
+	pub fn new(url: String, maybe_chain_name: Option<String>) -> Self {
+		Self { url, maybe_chain_name, consumers: Vec::new() }
 	}
 
 	// Subscribes to a telemetry feed handling graceful shutdown.
@@ -138,26 +175,6 @@ impl TelemetrySubscription {
 				}
 			}
 		}
-	}
-
-	pub async fn run(
-		self,
-		url: &str,
-		maybe_chain_name: &Option<String>,
-		shutdown_tx: BroadcastSender<()>,
-	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		Ok(self
-			.consumers
-			.into_iter()
-			.map(|update_channel| {
-				tokio::spawn(Self::run_per_consumer(
-					update_channel,
-					url.to_string(),
-					maybe_chain_name.clone(),
-					shutdown_tx.clone(),
-				))
-			})
-			.collect::<Vec<_>>())
 	}
 }
 
