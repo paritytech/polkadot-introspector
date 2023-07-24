@@ -35,7 +35,7 @@ futures-util = "0.3.27"
 hex = "0.4.3"
 itertools = "0.10.5"
 log = "0.4.19"
-parity-db = "0.4.9"
+parity-db = "0.4.10"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/substrate", branch = "master" }
 rand = "0.8.5"
 rasciigraph = "0.2.0"
