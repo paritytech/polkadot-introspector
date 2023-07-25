@@ -60,7 +60,7 @@ jobs:
         if: ${{ steps.checkout-pr.outputs.switched == 'false' }}
         uses: peter-evans/create-pull-request@153407881ec5c347639a548ade7d8ad1d6740e38 # v5.0.2
         with:
-          commit-message: add unsigned QR codes
+          commit-message: Add new metadata
           branch: ${{ env.BRANCH_NAME }}
           delete-branch: true
           base: master
