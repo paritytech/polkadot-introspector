@@ -58,6 +58,8 @@ struct MetricsInner {
 	disputes_stats: DisputesMetrics,
 	/// Block time measurements for relay parent blocks
 	relay_block_times: HistogramVec,
+	/// Relative time measurements (in standard blocks) for relay parent blocks
+	relay_relative_block_times: HistogramVec,
 	/// Number of slow availability events.
 	slow_avail_count: IntCounterVec,
 	/// Number of low bitfield propagation events.
@@ -88,11 +90,16 @@ impl Metrics {
 	}
 
 	pub(crate) fn on_block(&self, time: f64, para_id: u32) {
+		const STANDARD_BLOCK_TIME: f64 = 6.0;
 		if let Some(metrics) = &self.0 {
 			metrics
 				.relay_block_times
 				.with_label_values(&[&para_id.to_string()[..]])
 				.observe(time);
+			metrics
+				.relay_relative_block_times
+				.with_label_values(&[&para_id.to_string()[..]])
+				.observe((time / STANDARD_BLOCK_TIME).round());
 		}
 	}
 
@@ -247,6 +254,14 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			HistogramVec::new(
 				HistogramOpts::new("pc_relay_block_time", "Relay chain block time measured in seconds")
 					.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		relay_relative_block_times: prometheus_endpoint::register(
+			HistogramVec::new(
+				HistogramOpts::new("pc_relay_relative_block_time", "Relay chain block time measured in standard blocks")
+					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
 			)?,
 			registry,
