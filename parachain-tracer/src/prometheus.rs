@@ -263,7 +263,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		relay_skipped_slots: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new("pc_relay_relative_block_time", "Relay chain block time measured in standard blocks") ,
+				Opts::new("pc_relay_skipped_slots", "Relay chain block time measured in standard blocks") ,
 				&["parachain_id"],
 			)?,
 			registry,
