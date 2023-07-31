@@ -17,6 +17,7 @@
 use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use clap::Parser;
 use color_eyre::Result;
+use polkadot_introspector_essentials::constants::STANDARD_BLOCK_TIME;
 use prometheus_endpoint::{
 	prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
@@ -58,6 +59,8 @@ struct MetricsInner {
 	disputes_stats: DisputesMetrics,
 	/// Block time measurements for relay parent blocks
 	relay_block_times: HistogramVec,
+	/// Relative time measurements (in standard blocks) for relay parent blocks
+	relay_skipped_slots: IntCounterVec,
 	/// Number of slow availability events.
 	slow_avail_count: IntCounterVec,
 	/// Number of low bitfield propagation events.
@@ -93,6 +96,13 @@ impl Metrics {
 				.relay_block_times
 				.with_label_values(&[&para_id.to_string()[..]])
 				.observe(time);
+			let skipped_slots = ((time / STANDARD_BLOCK_TIME).round() as u64).saturating_sub(1);
+			if skipped_slots > 0 {
+				metrics
+					.relay_skipped_slots
+					.with_label_values(&[&para_id.to_string()[..]])
+					.inc_by(skipped_slots);
+			}
 		}
 	}
 
@@ -247,6 +257,13 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			HistogramVec::new(
 				HistogramOpts::new("pc_relay_block_time", "Relay chain block time measured in seconds")
 					.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		relay_skipped_slots: prometheus_endpoint::register(
+			IntCounterVec::new(
+				Opts::new("pc_relay_skipped_slots", "Relay chain block time measured in standard blocks") ,
 				&["parachain_id"],
 			)?,
 			registry,
