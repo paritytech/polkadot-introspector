@@ -17,6 +17,7 @@
 use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use clap::Parser;
 use color_eyre::Result;
+use polkadot_introspector_essentials::constants::STANDARD_BLOCK_TIME;
 use prometheus_endpoint::{
 	prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
@@ -90,7 +91,6 @@ impl Metrics {
 	}
 
 	pub(crate) fn on_block(&self, time: f64, para_id: u32) {
-		const STANDARD_BLOCK_TIME: f64 = 6.0;
 		if let Some(metrics) = &self.0 {
 			metrics
 				.relay_block_times

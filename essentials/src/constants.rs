@@ -16,3 +16,4 @@
 //
 
 pub const MAX_MSG_QUEUE_SIZE: usize = 1024;
+pub const STANDARD_BLOCK_TIME: f64 = 6.0;
