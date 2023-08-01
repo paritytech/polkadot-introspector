@@ -19,10 +19,9 @@ use super::dynamic::decode_dynamic_validator_groups;
 use crate::{
 	api::dynamic::{decode_dynamic_availability_cores, decode_dynamic_scheduled_paras},
 	metadata::{polkadot, polkadot_primitives},
-	types::{AccountId32, BlockNumber, SessionKeys, SubxtCall, Timestamp, H256},
+	types::{AccountId32, BlockNumber, SessionKeys, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
-use codec::Decode;
 use log::error;
 use std::{
 	collections::{hash_map::HashMap, BTreeMap},
@@ -52,7 +51,7 @@ pub enum RequestType {
 	/// Get block events.
 	GetEvents(<PolkadotConfig as subxt::Config>::Hash),
 	/// Extract the `ParaInherentData` from a given block.
-	ExtractParaInherent(subxt::rpc::types::ChainBlock<PolkadotConfig>),
+	ExtractParaInherent(subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>),
 	/// Get the availability core scheduling information at a given block.
 	GetScheduledParas(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get occupied core information at a given block.
@@ -101,7 +100,7 @@ impl Debug for RequestType {
 				format!("get events: {:?}", h)
 			},
 			RequestType::ExtractParaInherent(block) => {
-				format!("get inherent for block number: {:?}", block.header.number)
+				format!("get inherent for block number: {:?}", block.number())
 			},
 			RequestType::GetScheduledParas(h) => {
 				format!("get scheduled paras: {:?}", h)
@@ -158,7 +157,7 @@ pub enum Response {
 	/// A block header.
 	MaybeHead(Option<<PolkadotConfig as subxt::Config>::Header>),
 	/// A full block.
-	MaybeBlock(Option<subxt::rpc::types::ChainBlock<PolkadotConfig>>),
+	Block(subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>),
 	/// A block hash.
 	MaybeBlockHash(Option<H256>),
 	/// Block events
@@ -243,7 +242,7 @@ impl RequestExecutor {
 				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
 				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(&api, maybe_block_number).await,
 				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
-				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block),
+				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block).await,
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
 				RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(&api, hash).await,
@@ -299,8 +298,8 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
-	) -> std::result::Result<Option<subxt::rpc::types::ChainBlock<PolkadotConfig>>, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetBlock, MaybeBlock, url, maybe_hash)
+	) -> std::result::Result<subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetBlock, Block, url, maybe_hash)
 	}
 
 	pub async fn get_block_hash(
@@ -325,12 +324,11 @@ impl RequestExecutor {
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
 	) -> std::result::Result<Option<InherentData>, SubxtWrapperError> {
 		match self.get_block(url, maybe_hash).await {
-			Ok(Some(block)) => match self.execute_request(RequestType::ExtractParaInherent(block), url).await {
+			Ok(block) => match self.execute_request(RequestType::ExtractParaInherent(block), url).await {
 				Ok(Response::ParaInherentData(data)) => Ok(Some(data)),
 				Err(e) => Err(e),
 				_ => panic!("Expected ParaInherentData, got something else."),
 			},
-			Ok(None) => Ok(None),
 			Err(e) => Err(e),
 		}
 	}
@@ -473,7 +471,11 @@ async fn subxt_get_block_ts(api: &OnlineClient<PolkadotConfig>, hash: H256) -> R
 }
 
 async fn subxt_get_block(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
-	Ok(Response::MaybeBlock(api.rpc().block(maybe_hash).await?.map(|response| response.block)))
+	let block = match maybe_hash {
+		Some(hash) => api.blocks().at(hash).await?,
+		None => api.blocks().at_latest().await?,
+	};
+	Ok(Response::Block(block))
 }
 
 async fn subxt_get_block_hash(api: &OnlineClient<PolkadotConfig>, maybe_block_number: Option<BlockNumber>) -> Result {
@@ -495,27 +497,6 @@ pub enum DecodeExtrinsicError {
 	Unsupported,
 	/// Failed to decode.
 	CodecError(codec::Error),
-}
-
-/// Decode a Polkadot emitted extrinsic from provided bytes.
-fn decode_extrinsic(data: &mut &[u8]) -> std::result::Result<SubxtCall, DecodeExtrinsicError> {
-	// Extrinsic are encoded in memory in the following way:
-	//   - Compact<u32>: Length of the extrinsic
-	//   - first byte: abbbbbbb (a = 0 for unsigned, 1 for signed, b = version)
-	//   - signature: emitted `ParaInherent` must be unsigned.
-	//   - extrinsic data
-	if data.is_empty() {
-		return Err(DecodeExtrinsicError::EarlyEof)
-	}
-
-	let is_signed = data[0] & 0b1000_0000 != 0;
-	let version = data[0] & 0b0111_1111;
-	*data = &data[1..];
-	if is_signed || version != 4 {
-		return Err(DecodeExtrinsicError::Unsupported)
-	}
-
-	SubxtCall::decode(data).map_err(DecodeExtrinsicError::CodecError)
 }
 
 async fn fetch_dynamic_storage(
@@ -690,16 +671,28 @@ async fn subxt_unpin_chain_head(api: &OnlineClient<PolkadotConfig>, sub_id: &str
 	Ok(Response::UnpinChainHead(api.rpc().chainhead_unstable_unpin(sub_id.to_string(), hash).await?))
 }
 
-fn subxt_extract_parainherent(block: &subxt::rpc::types::ChainBlock<PolkadotConfig>) -> Result {
-	// `ParaInherent` data is always at index #1.
-	let bytes = &block.extrinsics[1].0;
+async fn subxt_extract_parainherent(
+	block: &subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>,
+) -> Result {
+	let body = block.body().await?;
+	let ex = body
+		.extrinsics()
+		.iter()
+		.take(2)
+		.last()
+		.expect("`ParaInherent` data is always at index #1")
+		.expect("`ParaInherent` data must exist");
 
-	let data = match decode_extrinsic(&mut bytes.as_slice()).expect("Failed to decode `ParaInherent`") {
-		SubxtCall::ParaInherent(
+	let data = match ex
+		.as_root_extrinsic::<polkadot::Call>()
+		.expect("Failed to decode `ParaInherent`")
+	{
+		polkadot::Call::ParaInherent(
 			polkadot::runtime_types::polkadot_runtime_parachains::paras_inherent::pallet::Call::enter { data },
 		) => data,
 		_ => unimplemented!("Unhandled variant"),
 	};
+
 	Ok(Response::ParaInherentData(data))
 }
 
