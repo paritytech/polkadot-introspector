@@ -14,6 +14,9 @@ cargo run --features=kusama --bin polkadot-metadata-checker -- --ws=wss://rococo
 
 # For Polkadot Metadata
 cargo run --features=polkadot --bin polkadot-metadata-checker -- --ws=wss://rpc.polkadot.io:443
+
+# For Westend Metadata
+cargo run --features=westend --bin polkadot-metadata-checker -- --ws=wss://westend-rpc.polkadot.io:443
 ```
 
 See also: [Updating or supporting a new `Runtime`](../essentials/README.md#updating-or-supporting-a-new-runtime)

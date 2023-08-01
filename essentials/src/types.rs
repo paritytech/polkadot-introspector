@@ -24,6 +24,8 @@ use subxt_runtime_types::kusama_runtime as runtime;
 use subxt_runtime_types::polkadot_runtime as runtime;
 #[cfg(feature = "rococo")]
 use subxt_runtime_types::rococo_runtime as runtime;
+#[cfg(feature = "westend")]
+use subxt_runtime_types::westend_runtime as runtime;
 
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;

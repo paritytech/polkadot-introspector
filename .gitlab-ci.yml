@@ -83,6 +83,7 @@ clippy:
     - time cargo clippy --no-default-features --all-targets --features=rococo -- -D warnings
     - time cargo clippy --no-default-features --all-targets --features=kusama -- -D warnings
     - time cargo clippy --no-default-features --all-targets --features=polkadot -- -D warnings
+    - time cargo clippy --no-default-features --all-targets --features=westend -- -D warnings
   # Remove me when pipeline stabilizes
   allow_failure:                   true
 
@@ -94,6 +95,7 @@ check:
     - time cargo check --no-default-features --all-targets --features=rococo --workspace
     - time cargo check --no-default-features --all-targets --features=kusama --workspace
     - time cargo check --no-default-features --all-targets --features=polkadot --workspace
+    - time cargo check --no-default-features --all-targets --features=westend --workspace
 
 #### stage:                       test
 
@@ -107,6 +109,7 @@ test:
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=rococo --workspace
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=kusama --workspace
     - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=polkadot --workspace
+    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=westend --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
 
 
@@ -131,6 +134,13 @@ check-polkadot-metadata:
   script:
     - cargo run --features=polkadot --bin polkadot-metadata-checker -- --ws=wss://rpc.polkadot.io:443
 
+check-westend-metadata:
+  stage:                           test
+  <<:                              *docker-env
+  <<:                              *common-refs
+  script:
+    - cargo run --features=westend --bin polkadot-metadata-checker -- --ws=wss://westend-rpc.polkadot.io:443
+
 #### stage:                       build
 
 build:
@@ -143,12 +153,15 @@ build:
     - mkdir ./artifacts/rococo || echo "dir exists"
     - mkdir ./artifacts/kusama || echo "dir exists"
     - mkdir ./artifacts/polkadot || echo "dir exists"
+    - mkdir ./artifacts/westend || echo "dir exists"
     - time cargo build --release --no-default-features --features=rococo
     - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/rococo/
     - time cargo build --release --no-default-features --features=kusama
     - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/kusama/
     - time cargo build --release --no-default-features --features=polkadot
     - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/polkadot/
+    - time cargo build --release --no-default-features --features=westend
+    - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/westend/
 
 # test that image can be built
 build-docker:

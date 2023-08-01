@@ -87,6 +87,8 @@ mod tests {
 		const RPC_NODE_URL: &str = "wss://kusama-rpc.polkadot.io:443";
 		#[cfg(feature = "polkadot")]
 		const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
+		#[cfg(feature = "westend")]
+		const RPC_NODE_URL: &str = "wss://westend-rpc.polkadot.io:443";
 
 		if let Ok(url) = std::env::var("WS_URL") {
 			return Box::leak(url.into_boxed_str())

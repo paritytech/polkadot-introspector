@@ -17,6 +17,9 @@ subxt metadata --format bytes --url wss://kusama-rpc.polkadot.io:443 > assets/ku
 
 # Update metadata for Polkadot
 subxt metadata --format bytes --url wss://rpc.polkadot.io:443 > assets/polkadot_metadata.scale
+
+# Update metadata for Westend
+subxt metadata --format bytes --url wss://westend-rpc.polkadot.io:443 > assets/westend_metadata.scale
 ```
 
 After replacing metadata files in the assets' folder with new ones, we need to rebuild the tools.

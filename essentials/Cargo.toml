@@ -38,3 +38,4 @@ warp = { workspace = true }
 rococo = []
 kusama = []
 polkadot = []
+westend = []
