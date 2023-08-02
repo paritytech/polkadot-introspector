@@ -683,17 +683,12 @@ async fn subxt_extract_parainherent(
 		.expect("`ParaInherent` data is always at index #1")
 		.expect("`ParaInherent` data must exist");
 
-	let data = match ex
-		.as_root_extrinsic::<polkadot::Call>()
+	let enter = ex
+		.as_extrinsic::<polkadot::para_inherent::calls::types::Enter>()
 		.expect("Failed to decode `ParaInherent`")
-	{
-		polkadot::Call::ParaInherent(
-			polkadot::runtime_types::polkadot_runtime_parachains::paras_inherent::pallet::Call::enter { data },
-		) => data,
-		_ => unimplemented!("Unhandled variant"),
-	};
+		.expect("`ParaInherent` must exist");
 
-	Ok(Response::ParaInherentData(data))
+	Ok(Response::ParaInherentData(enter.data))
 }
 
 #[derive(Debug, Error)]
