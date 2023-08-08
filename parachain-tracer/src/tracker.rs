@@ -25,7 +25,7 @@ use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel},
 	chain_events::SubxtDisputeResult,
-	collector::{CollectorPrefixType, CollectorStorageApi, DisputeInfo},
+	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
@@ -59,7 +59,7 @@ pub trait ParachainBlockTracker {
 	async fn new_session(&mut self, new_session_index: u32);
 
 	/// Update current parachain progress.
-	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
+	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
 }
 
 /// An outcome for a dispute
@@ -248,7 +248,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		}
 	}
 
-	fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
+	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_none() {
 			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 			self.update = None;
@@ -294,7 +294,7 @@ impl ParachainBlockTracker for SubxtTracker {
 					metrics.on_backed(self.para_id);
 				},
 			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
-				self.progress_availability(metrics);
+				self.progress_availability(metrics).await;
 			},
 		}
 
@@ -696,7 +696,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn progress_availability(&mut self, metrics: &Metrics) {
+	async fn progress_availability(&mut self, metrics: &Metrics) {
 		let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
 		let relay_block_ts = self.current_relay_block_ts.expect("Checked by caller; qed");
 
@@ -717,10 +717,29 @@ impl SubxtTracker {
 						self.current_candidate.max_av_bits,
 					));
 				}
-				self.stats.on_included(relay_block_number, self.last_included_block);
+
+				// Extract stored candidate from the collector if any
+				let stored_candidate = self
+					.api
+					.storage()
+					.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), candidate_hash)
+					.await;
+				let mut backed_in = None;
+				if let Some(stored_candidate) = stored_candidate {
+					let stored_candidate: CandidateRecord =
+						stored_candidate.into_inner().expect("must be able to decode what we encode");
+					backed_in = Some(
+						stored_candidate
+							.candidate_inclusion
+							.backed
+							.saturating_sub(stored_candidate.candidate_inclusion.relay_parent_number),
+					);
+				}
+				self.stats.on_included(relay_block_number, self.last_included_block, backed_in);
 				metrics.on_included(
 					relay_block_number,
 					self.last_included_block,
+					backed_in,
 					self.get_candidate_time(),
 					self.para_id,
 				);

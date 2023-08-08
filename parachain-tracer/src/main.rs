@@ -330,7 +330,7 @@ async fn process_tracker_update(
 ) -> color_eyre::Result<()> {
 	match tracker.inject_block(relay_hash, relay_parent_number).await {
 		Ok(_) => {
-			if let Some(progress) = tracker.progress(metrics) {
+			if let Some(progress) = tracker.progress(metrics).await {
 				if is_cli {
 					println!("{}", progress);
 				}

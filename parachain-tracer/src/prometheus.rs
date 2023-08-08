@@ -69,6 +69,8 @@ struct MetricsInner {
 	bitfields: IntGaugeVec,
 	/// Average candidate inclusion time measured in relay chain blocks.
 	para_block_times: HistogramVec,
+	/// Average candidate backing time measured in relay chain blocks (will be 1 for non async-backing case)
+	para_backing_times: HistogramVec,
 	/// Average candidate inclusion time measured in seconds.
 	para_block_times_sec: HistogramVec,
 	/// Finality lag
@@ -159,10 +161,12 @@ impl Metrics {
 		}
 	}
 
+	/// Update metrics on candidate inclusion
 	pub(crate) fn on_included(
 		&self,
 		relay_parent_number: u32,
 		previous_included: Option<u32>,
+		backed_in: Option<u32>,
 		para_block_time_sec: Option<Duration>,
 		para_id: u32,
 	) {
@@ -181,6 +185,12 @@ impl Metrics {
 					.para_block_times_sec
 					.with_label_values(&[&para_str[..]])
 					.observe(time.as_secs_f64());
+			}
+			if let Some(backed_in) = backed_in {
+				metrics
+					.para_backing_times
+					.with_label_values(&[&para_str[..]])
+					.observe(backed_in as f64);
 			}
 		}
 	}
@@ -298,6 +308,14 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			HistogramVec::new(
 				HistogramOpts::new("pc_para_block_time_sec", "Parachain block time measured in seconds.")
 					.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		para_backing_times: prometheus_endpoint::register(
+			HistogramVec::new(
+				HistogramOpts::new("pc_para_backing_time", "Parachain backing time measured in relay chain blocks.")
+					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
 			)?,
 			registry,
