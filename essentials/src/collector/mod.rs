@@ -620,10 +620,12 @@ impl Collector {
 						)
 						.await;
 
-					if let Some(_relay_parent) = maybe_relay_parent {
+					if let Some(relay_parent) = maybe_relay_parent {
+						let relay_parent: SubstrateHeader<u32, BlakeTwo256> = relay_parent.into_inner()?;
 						let relay_block_number = self.state.current_relay_chain_block_number;
 						let candidate_inclusion = CandidateInclusionRecord {
 							relay_parent: change_event.candidate_descriptor.relay_parent,
+							relay_parent_number: relay_parent.number,
 							parachain_id: change_event.parachain_id,
 							backed: relay_block_number,
 							core_idx: None,

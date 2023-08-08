@@ -163,6 +163,8 @@ pub struct ParachainStats {
 	bitfields: AvgBucket<u32>,
 	/// Average included time in relay parent blocks
 	included_times: AvgBucket<u16>,
+	/// Average backing time in relay parent blocks
+	backed_times: AvgBucket<u16>,
 }
 
 impl ParachainStats {
@@ -186,12 +188,16 @@ impl ParachainStats {
 	}
 
 	/// Update included counter
-	pub fn on_included(&mut self, relay_parent_number: u32, previous_included: Option<u32>) {
+	pub fn on_included(&mut self, relay_parent_number: u32, previous_included: Option<u32>, backed_in: Option<u32>) {
 		self.included_count += 1;
 
 		if let Some(previous_block_number) = previous_included {
 			self.included_times
 				.update(relay_parent_number.saturating_sub(previous_block_number) as u16);
+		}
+
+		if let Some(backed_in) = backed_in {
+			self.backed_times.update(backed_in as u16);
 		}
 	}
 
@@ -254,9 +260,15 @@ impl Display for ParachainStats {
 		)?;
 		writeln!(
 			f,
-			"Average parachain block time: {} relay parent blocks ({} parachain blocks processed)",
+			"Average parachain block inclusion time: {} relay parent blocks ({} parachain blocks processed)",
 			format!("{:.2}", self.included_times.value()).bold(),
 			self.included_times.count()
+		)?;
+		writeln!(
+			f,
+			"Average parachain block backing time: {} relay parent blocks ({} parachain blocks processed)",
+			format!("{:.2}", self.backed_times.value()).bold(),
+			self.backed_times.count()
 		)?;
 		writeln!(
 			f,

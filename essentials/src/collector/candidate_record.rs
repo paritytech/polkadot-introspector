@@ -38,6 +38,8 @@ pub struct CandidateInclusionRecord<T: Encode + Decode + Clone> {
 	pub core_idx: Option<u32>,
 	/// Stated relay parent
 	pub relay_parent: T,
+	/// Stated relay parent number
+	pub relay_parent_number: u32,
 }
 
 /// Outcome of the dispute + timestamp
@@ -120,6 +122,14 @@ impl CandidateRecord {
 			(backed, Some(included)) => included.checked_sub(*backed),
 			_ => None,
 		}
+	}
+
+	/// Returns backing context time for a candidate
+	#[allow(dead_code)]
+	pub fn backing_time(&self) -> Option<u32> {
+		self.candidate_inclusion
+			.backed
+			.checked_sub(self.candidate_inclusion.relay_parent_number)
 	}
 
 	/// Returns dispute resolution time
