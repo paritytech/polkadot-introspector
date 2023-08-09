@@ -15,11 +15,11 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::dynamic::decode_dynamic_validator_groups;
+use super::dynamic::{decode_dynamic_claim_queue, decode_dynamic_validator_groups};
 use crate::{
 	api::dynamic::{decode_dynamic_availability_cores, decode_dynamic_scheduled_paras},
 	metadata::{polkadot, polkadot_primitives},
-	types::{AccountId32, BlockNumber, SessionKeys, Timestamp, H256},
+	types::{AccountId32, BlockNumber, ClaimQueue, SessionKeys, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
 use log::error;
@@ -54,6 +54,8 @@ pub enum RequestType {
 	ExtractParaInherent(subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>),
 	/// Get the availability core scheduling information at a given block.
 	GetScheduledParas(<PolkadotConfig as subxt::Config>::Hash),
+	/// TODO: Fill
+	GetClaimQueue(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get occupied core information at a given block.
 	GetOccupiedCores(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get baking groups at a given block.
@@ -104,6 +106,9 @@ impl Debug for RequestType {
 			},
 			RequestType::GetScheduledParas(h) => {
 				format!("get scheduled paras: {:?}", h)
+			},
+			RequestType::GetClaimQueue(h) => {
+				format!("get claim queue: {:?}", h)
 			},
 			RequestType::GetOccupiedCores(h) => {
 				format!("get occupied cores: {:?}", h)
@@ -166,6 +171,8 @@ pub enum Response {
 	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
 	ScheduledParas(Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>),
+	/// TODO: Fill
+	ClaimQueue(ClaimQueue),
 	/// List of the occupied availability cores.
 	OccupiedCores(Vec<Option<polkadot_primitives::CoreOccupied>>),
 	/// Backing validator groups.
@@ -244,6 +251,7 @@ impl RequestExecutor {
 				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block).await,
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
+				RequestType::GetClaimQueue(hash) => subxt_get_claim_queue(&api, hash).await,
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
 				RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(&api, hash).await,
 				RequestType::GetSessionIndex(hash) => subxt_get_session_index(&api, hash).await,
@@ -342,6 +350,14 @@ impl RequestExecutor {
 		SubxtWrapperError,
 	> {
 		wrap_subxt_call!(self, GetScheduledParas, ScheduledParas, url, block_hash)
+	}
+
+	pub async fn get_claim_queue(
+		&mut self,
+		url: &str,
+		block_hash: <PolkadotConfig as subxt::Config>::Hash,
+	) -> std::result::Result<ClaimQueue, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetClaimQueue, ClaimQueue, url, block_hash)
 	}
 
 	pub async fn get_occupied_cores(
@@ -519,6 +535,13 @@ async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash
 	let paras = decode_dynamic_scheduled_paras(&value)?;
 
 	Ok(Response::ScheduledParas(paras))
+}
+
+async fn subxt_get_claim_queue(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
+	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ClaimQueue").await?;
+	let queue = decode_dynamic_claim_queue(&value)?;
+
+	Ok(Response::ClaimQueue(queue))
 }
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {

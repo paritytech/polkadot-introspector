@@ -16,6 +16,7 @@
 //
 
 use crate::metadata::polkadot::runtime_types as subxt_runtime_types;
+use std::collections::{BTreeMap, VecDeque};
 use subxt::utils;
 
 #[cfg(feature = "kusama")]
@@ -31,3 +32,23 @@ pub type AccountId32 = utils::AccountId32;
 pub type Timestamp = u64;
 pub type SessionKeys = runtime::SessionKeys;
 pub type SubxtCall = runtime::RuntimeCall;
+
+pub type ClaimQueue = BTreeMap<u32, VecDeque<Option<ParasEntry>>>;
+
+// TODO: Take it from runtime types
+#[derive(Debug)]
+pub struct ParasEntry {
+	/// The `Assignment`
+	pub assignment: Assignment,
+	/// Number of times this has been retried.
+	pub retries: u32,
+	/// The block height where this entry becomes invalid.
+	pub ttl: BlockNumber,
+}
+
+// TODO: Take it from runtime types
+#[derive(Debug)]
+pub struct Assignment {
+	/// Assignment's ParaId
+	pub para_id: u32,
+}
