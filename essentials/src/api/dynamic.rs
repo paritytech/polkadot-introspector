@@ -80,9 +80,8 @@ pub(crate) fn decode_dynamic_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue,
 	let decoded_btree_map_inner = decoded_btree_map
 		.first()
 		.ok_or(SubxtWrapperError::DecodeDynamicError("ClaimQueue".to_string(), raw.value.clone()))?;
-	let decoded_values = decode_unnamed_composite(decoded_btree_map_inner)?;
 	let mut claim_queue: ClaimQueue = BTreeMap::new();
-	for value in decoded_values {
+	for value in decode_unnamed_composite(decoded_btree_map_inner)? {
 		let (raw_core, raw_para_entries) = match decode_unnamed_composite(value)?[..] {
 			[ref first, ref second, ..] => (first, second),
 			_ =>
