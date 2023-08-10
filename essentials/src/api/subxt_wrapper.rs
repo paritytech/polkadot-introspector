@@ -270,18 +270,21 @@ impl RequestExecutor {
 				RequestType::UnpinChainHead(ref sub_id, hash) => subxt_unpin_chain_head(&api, sub_id, hash).await,
 			};
 
-			match reply {
-				Ok(rep) => return Ok(rep),
-				Err(err) => match &err {
-					SubxtWrapperError::SubxtError(subxt::Error::Io(io_err)) => {
-						connection_pool.remove(url);
-						error!("[{}] Subxt IO error: {:?}", url, io_err);
-						if (retry.sleep().await).is_err() {
-							return Err(SubxtWrapperError::Timeout)
-						}
-					},
-					_ => return Err(err),
-				},
+			if let Err(e) = reply {
+				let need_to_retry = matches!(
+					e,
+					SubxtWrapperError::SubxtError(subxt::Error::Io(_)) | SubxtWrapperError::NoResponseFromDynamicApi(_)
+				);
+				if !need_to_retry {
+					return Err(e)
+				}
+				error!("[{}] Subxt error: {:?}", url, e);
+				connection_pool.remove(url);
+				if (retry.sleep().await).is_err() {
+					return Err(SubxtWrapperError::Timeout)
+				}
+			} else {
+				return reply
 			}
 		}
 	}
