@@ -5,9 +5,9 @@ use crate::{
 			polkadot_parachain::primitives::Id,
 			polkadot_runtime_parachains::scheduler::{AssignmentKind, CoreAssignment},
 		},
-		polkadot_primitives::{CoreIndex, CoreOccupied, GroupIndex, ValidatorIndex},
+		polkadot_primitives::{CoreIndex, GroupIndex, ValidatorIndex},
 	},
-	types::{Assignment, BlockNumber, ClaimQueue, ParasEntry},
+	types::{Assignment, BlockNumber, ClaimQueue, CoreOccupied, ParasEntry},
 };
 use log::error;
 use std::collections::{BTreeMap, VecDeque};
@@ -35,20 +35,27 @@ pub(crate) fn decode_dynamic_validator_groups(
 
 pub(crate) fn decode_dynamic_availability_cores(
 	raw_cores: &Value<u32>,
-) -> Result<Vec<Option<CoreOccupied>>, SubxtWrapperError> {
+) -> Result<Vec<CoreOccupied>, SubxtWrapperError> {
 	let decoded_cores = decode_unnamed_composite(raw_cores)?;
 	let mut cores = Vec::with_capacity(decoded_cores.len());
 	for raw_core in decoded_cores.iter() {
-		let core = match decode_option(raw_core)?.map(decode_variant) {
+		let core_variant = match decode_option(raw_core) {
+			Ok(v) => v,
+			// In v5 types it is not more an option
+			Err(_) => Some(raw_core),
+		};
+		let core = match core_variant.map(decode_variant) {
 			Some(Ok(variant)) => match variant.name.as_str() {
-				"Parachain" => Some(CoreOccupied::Parachain),
+				"Parachain" => CoreOccupied::Paras,
+				"Paras" => CoreOccupied::Paras,
+				"Free" => CoreOccupied::Free,
 				name => todo!("Add support for {name}"),
 			},
 			Some(Err(e)) => {
 				error!("Can't decode a dynamic value: {:?}", e);
 				return Err(DecodeDynamicError("core".to_string(), raw_core.value.clone()))
 			},
-			None => None,
+			None => CoreOccupied::Free,
 		};
 		cores.push(core);
 	}

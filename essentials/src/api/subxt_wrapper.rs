@@ -19,7 +19,7 @@ use super::dynamic::{decode_dynamic_claim_queue, decode_dynamic_validator_groups
 use crate::{
 	api::dynamic::{decode_dynamic_availability_cores, decode_dynamic_scheduled_paras},
 	metadata::{polkadot, polkadot_primitives},
-	types::{AccountId32, BlockNumber, ClaimQueue, SessionKeys, Timestamp, H256},
+	types::{AccountId32, BlockNumber, ClaimQueue, CoreOccupied, SessionKeys, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
 use log::error;
@@ -174,7 +174,7 @@ pub enum Response {
 	/// TODO: Fill
 	ClaimQueue(ClaimQueue),
 	/// List of the occupied availability cores.
-	OccupiedCores(Vec<Option<polkadot_primitives::CoreOccupied>>),
+	OccupiedCores(Vec<CoreOccupied>),
 	/// Backing validator groups.
 	BackingGroups(Vec<Vec<polkadot_primitives::ValidatorIndex>>),
 	/// Returns a session index
@@ -364,7 +364,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<Option<polkadot_primitives::CoreOccupied>>, SubxtWrapperError> {
+	) -> std::result::Result<Vec<CoreOccupied>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetOccupiedCores, OccupiedCores, url, block_hash)
 	}
 

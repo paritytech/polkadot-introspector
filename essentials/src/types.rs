@@ -35,7 +35,8 @@ pub type SubxtCall = runtime::RuntimeCall;
 
 pub type ClaimQueue = BTreeMap<u32, VecDeque<Option<ParasEntry>>>;
 
-// TODO: Take it from runtime types
+// TODO: Take it from runtime types v5
+/// Polkadot v5 ParasEntry type
 #[derive(Debug)]
 pub struct ParasEntry {
 	/// The `Assignment`
@@ -46,9 +47,20 @@ pub struct ParasEntry {
 	pub ttl: BlockNumber,
 }
 
-// TODO: Take it from runtime types
+// TODO: Take it from runtime types v5
+/// Polkadot v5 Assignment type
 #[derive(Debug)]
 pub struct Assignment {
 	/// Assignment's ParaId
 	pub para_id: u32,
+}
+
+// TODO: Take it from runtime types v5
+/// Temporary abstraction to cover core state until v5 types are released
+#[derive(Debug)]
+pub enum CoreOccupied {
+	/// The core is not occupied.
+	Free,
+	/// A paras.
+	Paras,
 }

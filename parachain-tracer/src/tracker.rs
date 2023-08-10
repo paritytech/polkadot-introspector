@@ -27,7 +27,7 @@ use polkadot_introspector_essentials::{
 	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
 	metadata::{polkadot, polkadot_primitives},
-	types::{AccountId32, BlockNumber, Timestamp, H256},
+	types::{AccountId32, BlockNumber, CoreOccupied, Timestamp, H256},
 };
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -410,7 +410,6 @@ impl SubxtTracker {
 		is_fork: bool,
 	) -> color_eyre::Result<()> {
 		let backed_candidates = data.backed_candidates;
-		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
 		let validator_groups = self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await?;
 		let bitfields = data
 			.bitfields
@@ -461,7 +460,7 @@ impl SubxtTracker {
 		self.update_core_assignment(block_hash).await?;
 
 		if let Some(assigned_core) = self.current_candidate.assigned_core {
-			self.update_core_occupation(assigned_core, occupied_cores);
+			self.update_core_occupation(assigned_core, block_hash).await?;
 		}
 
 		if !data.disputes.is_empty() {
@@ -575,8 +574,10 @@ impl SubxtTracker {
 		}
 		Ok(())
 	}
-	fn update_core_occupation(&mut self, core: u32, occupied_cores: Vec<Option<polkadot_primitives::CoreOccupied>>) {
-		self.current_candidate.core_occupied = occupied_cores[core as usize].is_some();
+	async fn update_core_occupation(&mut self, core: u32, block_hash: H256) -> color_eyre::Result<()> {
+		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
+		self.current_candidate.core_occupied = matches!(occupied_cores[core as usize], CoreOccupied::Paras);
+		Ok(())
 	}
 
 	async fn update_disputes(&mut self, disputes: &[polkadot_primitives::DisputeStatementSet]) {
