@@ -23,14 +23,22 @@ use super::{
 use codec::{Decode, Encode};
 use log::{debug, error, info, warn};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel},
+	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
-use std::{collections::BTreeMap, default::Default, fmt::Debug, time::Duration};
-use subxt::config::{substrate::BlakeTwo256, Hasher};
+use std::{
+	collections::{BTreeMap, HashMap},
+	default::Default,
+	fmt::Debug,
+	time::Duration,
+};
+use subxt::{
+	config::{substrate::BlakeTwo256, Hasher},
+	error::{Error, MetadataError},
+};
 
 /// An abstract definition of a parachain block tracker.
 #[async_trait::async_trait]
@@ -401,10 +409,6 @@ impl SubxtTracker {
 		data: InherentData,
 		is_fork: bool,
 	) -> color_eyre::Result<()> {
-		let core_assignments = self
-			.executor
-			.get_scheduled_paras(self.node_rpc_url.as_str(), block_hash)
-			.await?;
 		let backed_candidates = data.backed_candidates;
 		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
 		let validator_groups = self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await?;
@@ -454,7 +458,7 @@ impl SubxtTracker {
 
 		// Update backing information if any.
 		let candidate_backed = self.update_backing(backed_candidates, block_number);
-		self.update_core_assignment(core_assignments);
+		self.update_core_assignment(block_hash).await?;
 
 		if let Some(assigned_core) = self.current_candidate.assigned_core {
 			self.update_core_occupation(assigned_core, occupied_cores);
@@ -521,16 +525,55 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_core_assignment(
+	async fn get_core_assignments_via_scheduled_paras(
 		&mut self,
-		core_assignments: Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>,
-	) {
-		if let Some(index) = core_assignments
-			.iter()
-			.position(|assignment| assignment.para_id.0 == self.para_id)
-		{
-			self.current_candidate.assigned_core = Some(core_assignments[index].core.0);
+		block_hash: H256,
+	) -> color_eyre::Result<Option<HashMap<u32, Vec<u32>>>> {
+		let core_assignments = self.executor.get_scheduled_paras(self.node_rpc_url.as_str(), block_hash).await;
+
+		match core_assignments {
+			Ok(core_assignments) => Ok(Some(
+				core_assignments
+					.iter()
+					.map(|v| (v.core.0, vec![v.para_id.0]))
+					.collect::<HashMap<_, _>>(),
+			)),
+			// API call `ParaScheduler,Scheduled` not found, as it's deprecated.
+			// It's not an error, we should try to fetch `ParaScheduler,ClaimQueue` instead
+			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) => Ok(None),
+			Err(err) => Err(err.into()),
 		}
+	}
+
+	async fn get_core_assignments_via_claim_queue(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<HashMap<u32, Vec<u32>>> {
+		let assignments = self.executor.get_claim_queue(self.node_rpc_url.as_str(), block_hash).await?;
+		Ok(assignments
+			.iter()
+			.map(|(core, queue)| {
+				let ids = queue
+					.iter()
+					.filter_map(|v| v.as_ref().map(|v| v.assignment.para_id))
+					.collect::<Vec<_>>();
+				(*core, ids)
+			})
+			.map(|v| v)
+			.collect())
+	}
+
+	async fn update_core_assignment(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		// After we add On-demand Parachains, `ParaScheduler.Scheduled` API call is going to be removed,
+		// so we need to use `ParaScheduler.ClaimQueue` instead
+		let assignments = match self.get_core_assignments_via_scheduled_paras(block_hash).await? {
+			Some(v) => v,
+			None => self.get_core_assignments_via_claim_queue(block_hash).await?,
+		};
+		if let Some((core, _)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
+			self.current_candidate.assigned_core = Some(*core);
+		}
+		Ok(())
 	}
 	fn update_core_occupation(&mut self, core: u32, occupied_cores: Vec<Option<polkadot_primitives::CoreOccupied>>) {
 		self.current_candidate.core_occupied = occupied_cores[core as usize].is_some();
