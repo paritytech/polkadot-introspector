@@ -10,7 +10,7 @@ use crate::{
 	types::{Assignment, BlockNumber, ClaimQueue, ParasEntry},
 };
 use log::error;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use subxt::{
 	dynamic::{At, Value},
 	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
@@ -77,34 +77,44 @@ pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<V
 
 pub(crate) fn decode_dynamic_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, SubxtWrapperError> {
 	let decoded_btree_map = decode_unnamed_composite(raw)?;
-	let decoded_values = decode_unnamed_composite(decoded_btree_map.first().expect("Must contain values"))?;
+	let decoded_btree_map_inner = decoded_btree_map
+		.first()
+		.ok_or(SubxtWrapperError::DecodeDynamicError("ClaimQueue".to_string(), raw.value.clone()))?;
+	let decoded_values = decode_unnamed_composite(decoded_btree_map_inner)?;
 	let mut claim_queue: ClaimQueue = BTreeMap::new();
 	for value in decoded_values {
-		let decoded_tuple = decode_unnamed_composite(value)?;
-		let raw_core = decoded_tuple.first().expect("Must contain core");
-		let raw_para_entries = decoded_tuple.last().expect("Must contain para_entry");
+		let (raw_core, raw_para_entries) = match decode_unnamed_composite(value)?[..] {
+			[ref first, ref second, ..] => (first, second),
+			_ =>
+				return Err(SubxtWrapperError::DecodeDynamicError(
+					"core and paras_entries".to_string(),
+					value.value.clone(),
+				)),
+		};
 		let decoded_core = decode_composite_u128_value(raw_core)? as u32;
-		let decoded_para_entries = decode_unnamed_composite(raw_para_entries)?
-			.iter()
-			.map(|v| {
-				decode_option(v)
-					.expect("Must contain option")
-					.map(|v| decode_paras_entry(v).expect("Must contain ParasEntry"))
-			})
-			.collect();
-		let _ = claim_queue.insert(decoded_core, decoded_para_entries);
+		let mut paras_entries = VecDeque::new();
+		for composite in decode_unnamed_composite(raw_para_entries)? {
+			paras_entries.push_back(decode_paras_entry_option(composite)?)
+		}
+		let _ = claim_queue.insert(decoded_core, paras_entries);
 	}
 	Ok(claim_queue)
 }
 
+fn decode_paras_entry_option(raw: &Value<u32>) -> Result<Option<ParasEntry>, SubxtWrapperError> {
+	match decode_option(raw)? {
+		Some(v) => Ok(Some(decode_paras_entry(v)?)),
+		None => Ok(None),
+	}
+}
+
 fn decode_paras_entry(raw: &Value<u32>) -> Result<ParasEntry, SubxtWrapperError> {
-	Ok(ParasEntry {
-		assignment: Assignment {
-			para_id: decode_composite_u128_value(value_at("para_id", value_at("assignment", raw)?)?)? as u32,
-		},
-		retries: decode_u128_value(value_at("retries", raw)?)? as u32,
-		ttl: decode_u128_value(value_at("ttl", raw)?)? as BlockNumber,
-	})
+	let para_id = decode_composite_u128_value(value_at("para_id", value_at("assignment", raw)?)?)? as u32;
+	let assignment = Assignment { para_id };
+	let retries = decode_u128_value(value_at("retries", raw)?)? as u32;
+	let ttl = decode_u128_value(value_at("ttl", raw)?)? as BlockNumber;
+
+	Ok(ParasEntry { assignment, retries, ttl })
 }
 
 fn value_at<'a>(field: &'a str, value: &'a Value<u32>) -> Result<&'a Value<u32>, SubxtWrapperError> {
