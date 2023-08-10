@@ -55,6 +55,7 @@ pub enum RequestType {
 	/// Get the availability core scheduling information at a given block.
 	GetScheduledParas(<PolkadotConfig as subxt::Config>::Hash),
 	/// TODO: Fill
+	/// Get the claim queue scheduling information at a given block.
 	GetClaimQueue(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get occupied core information at a given block.
 	GetOccupiedCores(<PolkadotConfig as subxt::Config>::Hash),
@@ -171,7 +172,7 @@ pub enum Response {
 	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
 	ScheduledParas(Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>),
-	/// TODO: Fill
+	/// Claim queue for parachains.
 	ClaimQueue(ClaimQueue),
 	/// List of the occupied availability cores.
 	OccupiedCores(Vec<CoreOccupied>),

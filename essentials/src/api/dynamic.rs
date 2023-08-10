@@ -46,9 +46,9 @@ pub(crate) fn decode_dynamic_availability_cores(
 		};
 		let core = match core_variant.map(decode_variant) {
 			Some(Ok(variant)) => match variant.name.as_str() {
-				"Parachain" => CoreOccupied::Paras,
-				"Paras" => CoreOccupied::Paras,
-				"Free" => CoreOccupied::Free,
+				"Parachain" => CoreOccupied::Paras, // v4
+				"Paras" => CoreOccupied::Paras,     // v5
+				"Free" => CoreOccupied::Free,       // v5
 				name => todo!("Add support for {name}"),
 			},
 			Some(Err(e)) => {
