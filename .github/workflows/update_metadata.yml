@@ -44,8 +44,6 @@ jobs:
         run: |
           cargo install subxt-cli
           subxt metadata --format bytes --url wss://rococo-rpc.polkadot.io:443 > essentials/assets/rococo_metadata.scale
-          subxt metadata --format bytes --url wss://kusama-rpc.polkadot.io:443 > essentials/assets/kusama_metadata.scale
-          subxt metadata --format bytes --url wss://rpc.polkadot.io:443 > essentials/assets/polkadot_metadata.scale
 
       - name: Commit changes if PR exists
         if: ${{ steps.checkout-pr.outputs.switched == 'true' }}

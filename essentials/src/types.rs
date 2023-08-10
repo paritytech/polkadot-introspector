@@ -18,12 +18,6 @@
 use crate::metadata::polkadot::runtime_types as subxt_runtime_types;
 use std::collections::{BTreeMap, VecDeque};
 use subxt::utils;
-
-#[cfg(feature = "kusama")]
-use subxt_runtime_types::kusama_runtime as runtime;
-#[cfg(feature = "polkadot")]
-use subxt_runtime_types::polkadot_runtime as runtime;
-#[cfg(feature = "rococo")]
 use subxt_runtime_types::rococo_runtime as runtime;
 
 pub type BlockNumber = u32;

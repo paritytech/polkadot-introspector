@@ -15,6 +15,8 @@ The tools utilize data sources such as [subxt](https://github.com/paritytech/sub
 
 ## Building
 
+**TODO: the following information is outdated, needs to be edited.**
+
 It is mandatory to specify which `Runtime` the build will target. Currently, the tools can only build for a single runtime version by enabling one of the following features:
 
 - `rococo` - for Rococo and Versi test networks

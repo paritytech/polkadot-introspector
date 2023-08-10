@@ -72,28 +72,20 @@ fmt:
   <<:                              *common-refs
   script:
     - time cargo +nightly fmt --all -- --check
-  # Remove me when pipeline stabilizes
-  allow_failure:                   true
 
 clippy:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo clippy --no-default-features --all-targets --features=rococo -- -D warnings
-    - time cargo clippy --no-default-features --all-targets --features=kusama -- -D warnings
-    - time cargo clippy --no-default-features --all-targets --features=polkadot -- -D warnings
-  # Remove me when pipeline stabilizes
-  allow_failure:                   true
+    - time cargo clippy --all-targets -- -D warnings
 
 check:
   stage:                           lint
   <<:                              *docker-env
   <<:                              *common-refs
   script:
-    - time cargo check --no-default-features --all-targets --features=rococo --workspace
-    - time cargo check --no-default-features --all-targets --features=kusama --workspace
-    - time cargo check --no-default-features --all-targets --features=polkadot --workspace
+    - time cargo check --all-targets --workspace
 
 #### stage:                       test
 
@@ -104,32 +96,8 @@ test:
   script:
     - ./scripts/ci/zombienet/zombie.sh setup
     - ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/network.toml
-    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=rococo --workspace
-    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=kusama --workspace
-    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --no-default-features --features=polkadot --workspace
+    - WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --workspace
     - ./scripts/ci/zombienet/zombie.sh shutdown
-
-
-check-rococo-metadata:
-  stage:                           test
-  <<:                              *docker-env
-  <<:                              *common-refs
-  script:
-    - cargo run --features=rococo --bin polkadot-metadata-checker -- --ws=wss://rococo-rpc.polkadot.io:443
-
-check-kusama-metadata:
-  stage:                           test
-  <<:                              *docker-env
-  <<:                              *common-refs
-  script:
-    - cargo run --features=kusama --bin polkadot-metadata-checker -- --ws=wss://kusama-rpc.polkadot.io:443
-
-check-polkadot-metadata:
-  stage:                           test
-  <<:                              *docker-env
-  <<:                              *common-refs
-  script:
-    - cargo run --features=polkadot --bin polkadot-metadata-checker -- --ws=wss://rpc.polkadot.io:443
 
 #### stage:                       build
 
@@ -140,15 +108,8 @@ build:
   <<:                              *collect-artifacts
   script:
     - mkdir ./artifacts || echo "dir exists"
-    - mkdir ./artifacts/rococo || echo "dir exists"
-    - mkdir ./artifacts/kusama || echo "dir exists"
-    - mkdir ./artifacts/polkadot || echo "dir exists"
-    - time cargo build --release --no-default-features --features=rococo
-    - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/rococo/
-    - time cargo build --release --no-default-features --features=kusama
-    - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/kusama/
-    - time cargo build --release --no-default-features --features=polkadot
-    - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/polkadot/
+    - time cargo build --release
+    - cp target/release/{polkadot-block-time,polkadot-jaeger,polkadot-kvdb,polkadot-parachain-tracer,polkadot-whois} ./artifacts/
 
 # test that image can be built
 build-docker:
