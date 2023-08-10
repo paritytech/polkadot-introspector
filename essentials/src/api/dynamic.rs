@@ -91,7 +91,6 @@ pub(crate) fn decode_dynamic_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue,
 					.expect("Must contain option")
 					.map(|v| decode_paras_entry(v).expect("Must contain ParasEntry"))
 			})
-			.map(|v| v)
 			.collect();
 		let _ = claim_queue.insert(decoded_core, decoded_para_entries);
 	}
