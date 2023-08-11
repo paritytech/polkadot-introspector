@@ -527,27 +527,22 @@ impl SubxtTracker {
 	async fn get_core_assignments_via_scheduled_paras(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<Option<HashMap<u32, Vec<u32>>>> {
-		let core_assignments = self.executor.get_scheduled_paras(self.node_rpc_url.as_str(), block_hash).await;
+	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
+		let core_assignments = self
+			.executor
+			.get_scheduled_paras(self.node_rpc_url.as_str(), block_hash)
+			.await?;
 
-		match core_assignments {
-			Ok(core_assignments) => Ok(Some(
-				core_assignments
-					.iter()
-					.map(|v| (v.core.0, vec![v.para_id.0]))
-					.collect::<HashMap<_, _>>(),
-			)),
-			// API call `ParaScheduler,Scheduled` not found, as it's deprecated.
-			// It's not an error, we should try to fetch `ParaScheduler,ClaimQueue` instead
-			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) => Ok(None),
-			Err(err) => Err(err.into()),
-		}
+		Ok(core_assignments
+			.iter()
+			.map(|v| (v.core.0, vec![v.para_id.0]))
+			.collect::<HashMap<_, _>>())
 	}
 
 	async fn get_core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<HashMap<u32, Vec<u32>>> {
+	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
 		let assignments = self.executor.get_claim_queue(self.node_rpc_url.as_str(), block_hash).await?;
 		Ok(assignments
 			.iter()
@@ -562,17 +557,21 @@ impl SubxtTracker {
 	}
 
 	async fn update_core_assignment(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		// After we add On-demand Parachains, `ParaScheduler.Scheduled` API call is going to be removed,
-		// so we need to use `ParaScheduler.ClaimQueue` instead
-		let assignments = match self.get_core_assignments_via_scheduled_paras(block_hash).await? {
-			Some(v) => v,
-			None => self.get_core_assignments_via_claim_queue(block_hash).await?,
+		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
+		let assignments = match self.get_core_assignments_via_scheduled_paras(block_hash).await {
+			Ok(v) => v,
+			// The `ParaScheduler,Scheduled` API call not found,
+			// we should try to fetch `ParaScheduler,ClaimQueue` instead
+			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) =>
+				self.get_core_assignments_via_claim_queue(block_hash).await?,
+			Err(e) => return Err(e.into()),
 		};
 		if let Some((core, _)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(*core);
 		}
 		Ok(())
 	}
+
 	async fn update_core_occupation(&mut self, core: u32, block_hash: H256) -> color_eyre::Result<()> {
 		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
 		self.current_candidate.core_occupied = matches!(occupied_cores[core as usize], CoreOccupied::Paras);
