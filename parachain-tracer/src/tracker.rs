@@ -558,7 +558,6 @@ impl SubxtTracker {
 					.collect::<Vec<_>>();
 				(*core, ids)
 			})
-			.map(|v| v)
 			.collect())
 	}
 
