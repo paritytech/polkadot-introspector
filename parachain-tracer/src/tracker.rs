@@ -26,7 +26,7 @@ use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
-	metadata::{polkadot, polkadot_primitives},
+	metadata::polkadot_primitives,
 	types::{AccountId32, BlockNumber, CoreOccupied, Timestamp, H256},
 };
 use std::{
