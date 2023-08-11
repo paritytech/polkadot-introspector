@@ -16,9 +16,7 @@ use subxt::{
 	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
 };
 
-pub(crate) fn decode_dynamic_validator_groups(
-	raw_groups: &Value<u32>,
-) -> Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
+pub(crate) fn decode_validator_groups(raw_groups: &Value<u32>) -> Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
 	let decoded_groups = decode_unnamed_composite(raw_groups)?;
 	let mut groups = Vec::with_capacity(decoded_groups.len());
 	for raw_group in decoded_groups.iter() {
@@ -33,9 +31,7 @@ pub(crate) fn decode_dynamic_validator_groups(
 	Ok(groups)
 }
 
-pub(crate) fn decode_dynamic_availability_cores(
-	raw_cores: &Value<u32>,
-) -> Result<Vec<CoreOccupied>, SubxtWrapperError> {
+pub(crate) fn decode_availability_cores(raw_cores: &Value<u32>) -> Result<Vec<CoreOccupied>, SubxtWrapperError> {
 	let decoded_cores = decode_unnamed_composite(raw_cores)?;
 	let mut cores = Vec::with_capacity(decoded_cores.len());
 	for raw_core in decoded_cores.iter() {
@@ -63,7 +59,7 @@ pub(crate) fn decode_dynamic_availability_cores(
 	Ok(cores)
 }
 
-pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<Vec<CoreAssignment>, SubxtWrapperError> {
+pub(crate) fn decode_scheduled_paras(raw_paras: &Value<u32>) -> Result<Vec<CoreAssignment>, SubxtWrapperError> {
 	let decoded_paras = decode_unnamed_composite(raw_paras)?;
 	let mut paras = Vec::with_capacity(decoded_paras.len());
 	for para in decoded_paras.iter() {
@@ -82,7 +78,7 @@ pub(crate) fn decode_dynamic_scheduled_paras(raw_paras: &Value<u32>) -> Result<V
 	Ok(paras)
 }
 
-pub(crate) fn decode_dynamic_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, SubxtWrapperError> {
+pub(crate) fn decode_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, SubxtWrapperError> {
 	let decoded_btree_map = decode_unnamed_composite(raw)?;
 	let decoded_btree_map_inner = decoded_btree_map
 		.first()

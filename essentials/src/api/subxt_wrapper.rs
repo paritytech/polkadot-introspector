@@ -15,9 +15,9 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::dynamic::{decode_dynamic_claim_queue, decode_dynamic_validator_groups};
+use super::dynamic::{decode_claim_queue, decode_validator_groups};
 use crate::{
-	api::dynamic::{decode_dynamic_availability_cores, decode_dynamic_scheduled_paras},
+	api::dynamic::{decode_availability_cores, decode_scheduled_paras},
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, ClaimQueue, CoreOccupied, SessionKeys, Timestamp, H256},
 	utils::{Retry, RetryOptions},
@@ -536,28 +536,28 @@ async fn fetch_dynamic_storage(
 
 async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "Scheduled").await?;
-	let paras = decode_dynamic_scheduled_paras(&value)?;
+	let paras = decode_scheduled_paras(&value)?;
 
 	Ok(Response::ScheduledParas(paras))
 }
 
 async fn subxt_get_claim_queue(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ClaimQueue").await?;
-	let queue = decode_dynamic_claim_queue(&value)?;
+	let queue = decode_claim_queue(&value)?;
 
 	Ok(Response::ClaimQueue(queue))
 }
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "AvailabilityCores").await?;
-	let cores = decode_dynamic_availability_cores(&value)?;
+	let cores = decode_availability_cores(&value)?;
 
 	Ok(Response::OccupiedCores(cores))
 }
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ValidatorGroups").await?;
-	let groups = decode_dynamic_validator_groups(&value)?;
+	let groups = decode_validator_groups(&value)?;
 
 	Ok(Response::BackingGroups(groups))
 }
