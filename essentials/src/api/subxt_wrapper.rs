@@ -22,7 +22,7 @@ use crate::{
 	types::{AccountId32, BlockNumber, ClaimQueue, CoreOccupied, SessionKeys, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
-use log::error;
+use log::{error, warn};
 use std::{
 	collections::{hash_map::HashMap, BTreeMap},
 	fmt::Debug,
@@ -281,10 +281,9 @@ impl RequestExecutor {
 				if !need_to_retry {
 					return Err(e)
 				}
-				error!("[{}] Subxt error: {:?}", url, e);
+				warn!("[{}] Subxt error: {:?}", url, e);
 				connection_pool.remove(url);
 				if (retry.sleep().await).is_err() {
-					error!("Here we throwing errors {}", url);
 					return Err(SubxtWrapperError::Timeout)
 				}
 			} else {
