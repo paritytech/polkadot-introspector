@@ -274,7 +274,9 @@ impl RequestExecutor {
 			if let Err(e) = reply {
 				let need_to_retry = matches!(
 					e,
-					SubxtWrapperError::SubxtError(subxt::Error::Io(_)) | SubxtWrapperError::NoResponseFromDynamicApi(_)
+					SubxtWrapperError::SubxtError(subxt::Error::Io(_)) |
+						SubxtWrapperError::SubxtError(subxt::Error::Rpc(_)) |
+						SubxtWrapperError::NoResponseFromDynamicApi(_)
 				);
 				if !need_to_retry {
 					return Err(e)
@@ -282,6 +284,7 @@ impl RequestExecutor {
 				error!("[{}] Subxt error: {:?}", url, e);
 				connection_pool.remove(url);
 				if (retry.sleep().await).is_err() {
+					error!("Here we throwing errors {}", url);
 					return Err(SubxtWrapperError::Timeout)
 				}
 			} else {
