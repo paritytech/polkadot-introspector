@@ -33,10 +33,10 @@ use crate::{
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
-use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
 use futures_util::StreamExt;
 use log::{debug, error, info, warn};
+use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_priority_channel::{
 	channel as priority_channel, channel_with_capacities as priority_channel_with_capacities, Receiver, Sender,
 };
