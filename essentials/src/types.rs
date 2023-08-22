@@ -18,7 +18,7 @@
 use crate::metadata::polkadot::runtime_types as subxt_runtime_types;
 use std::collections::{BTreeMap, VecDeque};
 use subxt::utils;
-use subxt_runtime_types::rococo_runtime as runtime;
+use subxt_runtime_types::polkadot_runtime as runtime;
 
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;
