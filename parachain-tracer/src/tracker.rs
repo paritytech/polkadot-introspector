@@ -20,8 +20,8 @@ use super::{
 	prometheus::Metrics,
 	stats::ParachainStats,
 };
-use codec::{Decode, Encode};
 use log::{debug, error, info, warn};
+use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	chain_events::SubxtDisputeResult,

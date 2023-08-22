@@ -10,7 +10,7 @@ publish = true
 [dependencies]
 async-trait = { workspace = true }
 clap = { workspace = true }
-codec = { package = "parity-scale-codec", workspace = true }
+parity-scale-codec = { workspace = true }
 color-eyre = { workspace = true }
 colored = { workspace = true }
 crossterm = { workspace = true }

@@ -518,7 +518,7 @@ pub enum DecodeExtrinsicError {
 	/// Unsupported extrinsic.
 	Unsupported,
 	/// Failed to decode.
-	CodecError(codec::Error),
+	CodecError(parity_scale_codec::Error),
 }
 
 async fn fetch_dynamic_storage(

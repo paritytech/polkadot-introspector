@@ -22,8 +22,8 @@ use crate::metadata::{
 	},
 	polkadot_primitives::CandidateDescriptor,
 };
-use codec::{Decode, Encode};
 use color_eyre::{eyre::eyre, Result};
+use parity_scale_codec::{Decode, Encode};
 use serde::Serialize;
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},

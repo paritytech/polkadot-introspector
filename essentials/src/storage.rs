@@ -23,8 +23,8 @@
 //! goal here.
 #![allow(dead_code)]
 
-use codec::{Decode, Encode};
 use color_eyre::eyre::eyre;
+use parity_scale_codec::{Decode, Encode};
 use std::{
 	borrow::Borrow,
 	collections::{BTreeMap, HashMap, HashSet},
