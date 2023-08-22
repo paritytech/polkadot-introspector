@@ -5,9 +5,9 @@ use crate::{
 			polkadot_parachain::primitives::Id,
 			polkadot_runtime_parachains::scheduler::{AssignmentKind, CoreAssignment},
 		},
-		polkadot_primitives::{CoreIndex, CoreOccupied, GroupIndex, ValidatorIndex},
+		polkadot_primitives::{CoreIndex, GroupIndex, ValidatorIndex},
 	},
-	types::{Assignment, BlockNumber, ClaimQueue, ParasEntry},
+	types::{Assignment, BlockNumber, ClaimQueue, CoreOccupied, ParasEntry},
 };
 use log::error;
 use std::collections::{BTreeMap, VecDeque};
