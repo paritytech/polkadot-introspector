@@ -231,10 +231,11 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewSession(idx) => {
 							tracker.new_session(idx).await;
 						},
-						CollectorUpdateEvent::Termination => {
-							error!("collector is terminating");
-							// We can no longer follow the chain
-							std::process::exit(1);
+						CollectorUpdateEvent::Termination(code) => {
+							info!("collector is terminating");
+							if code != 0 {
+								std::process::exit(code)
+							};
 						},
 					},
 					Err(_) => {
@@ -299,10 +300,12 @@ impl ParachainTracer {
 								for to_tracker in trackers.values_mut() {
 									to_tracker.send(CollectorUpdateEvent::NewSession(idx)).await.unwrap();
 								},
-							CollectorUpdateEvent::Termination => {
+							CollectorUpdateEvent::Termination(code) => {
 								info!("Received termination event, {} trackers will be terminated, {} futures are pending",
 									trackers.len(), futures.len());
-								break;
+								if code != 0 {
+									std::process::exit(code)
+								};
 							},
 						},
 						None => {

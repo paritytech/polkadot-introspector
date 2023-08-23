@@ -161,8 +161,8 @@ pub enum CollectorUpdateEvent {
 	NewHead(NewHeadEvent),
 	/// Occurs on a new session
 	NewSession(u32),
-	/// Occurs when collector is disconnected and is about to terminate
-	Termination,
+	/// Occurs when collector is disconnected and is about to terminate, contains error code
+	Termination(i32),
 }
 
 #[derive(Debug, Error)]
@@ -244,7 +244,7 @@ impl Collector {
 									error!("collector service could not process event: {}", error);
 									match error {
 										CollectorError::ExecutorFatal(_) | CollectorError::SendFatal(_) => {
-											self.broadcast_event_priority(CollectorUpdateEvent::Termination)
+											self.broadcast_event_priority(CollectorUpdateEvent::Termination(1))
 												.await
 												.unwrap();
 											return
@@ -255,13 +255,17 @@ impl Collector {
 							},
 						Err(e) => {
 							error!("collector service could not process events: {}", e);
-							self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
+							self.broadcast_event_priority(CollectorUpdateEvent::Termination(1))
+								.await
+								.unwrap();
 							return
 						},
 					},
 					None => {
 						error!("no more events from the consumer channel");
-						self.broadcast_event_priority(CollectorUpdateEvent::Termination).await.unwrap();
+						self.broadcast_event_priority(CollectorUpdateEvent::Termination(0))
+							.await
+							.unwrap();
 						return
 					},
 				}
