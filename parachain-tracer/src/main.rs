@@ -232,8 +232,9 @@ impl ParachainTracer {
 							tracker.new_session(idx).await;
 						},
 						CollectorUpdateEvent::Termination => {
-							info!("collector is terminating");
-							break
+							error!("collector is terminating");
+							// We can no longer follow the chain
+							std::process::exit(1);
 						},
 					},
 					Err(_) => {
