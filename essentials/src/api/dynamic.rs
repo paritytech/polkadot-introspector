@@ -2,12 +2,11 @@ use super::subxt_wrapper::SubxtWrapperError::{self, DecodeDynamicError};
 use crate::{
 	metadata::{
 		polkadot::runtime_types::{
-			polkadot_parachain::primitives::Id,
-			polkadot_runtime_parachains::scheduler::{AssignmentKind, CoreAssignment},
+			polkadot_parachain::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind,
 		},
-		polkadot_primitives::{CoreIndex, GroupIndex, ValidatorIndex},
+		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},
-	types::{Assignment, BlockNumber, ClaimQueue, CoreOccupied, ParasEntry},
+	types::{Assignment, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, ParasEntry},
 };
 use log::error;
 use std::collections::{BTreeMap, VecDeque};
@@ -69,8 +68,7 @@ pub(crate) fn decode_scheduled_paras(raw_paras: &Value<u32>) -> Result<Vec<CoreA
 			"Parachain" => AssignmentKind::Parachain,
 			name => todo!("Add support for {name}"),
 		};
-		let group_idx = GroupIndex(decode_composite_u128_value(value_at("group_idx", para)?)? as u32);
-		let assignment = CoreAssignment { core, para_id, kind, group_idx };
+		let assignment = CoreAssignment { core, para_id, kind };
 
 		paras.push(assignment)
 	}
@@ -113,10 +111,10 @@ fn decode_paras_entry_option(raw: &Value<u32>) -> Result<Option<ParasEntry>, Sub
 fn decode_paras_entry(raw: &Value<u32>) -> Result<ParasEntry, SubxtWrapperError> {
 	let para_id = decode_composite_u128_value(value_at("para_id", value_at("assignment", raw)?)?)? as u32;
 	let assignment = Assignment { para_id };
-	let retries = decode_u128_value(value_at("retries", raw)?)? as u32;
+	let availability_timeouts = decode_u128_value(value_at("availability_timeouts", raw)?)? as u32;
 	let ttl = decode_u128_value(value_at("ttl", raw)?)? as BlockNumber;
 
-	Ok(ParasEntry { assignment, retries, ttl })
+	Ok(ParasEntry { assignment, availability_timeouts, ttl })
 }
 
 fn value_at<'a>(field: &'a str, value: &'a Value<u32>) -> Result<&'a Value<u32>, SubxtWrapperError> {

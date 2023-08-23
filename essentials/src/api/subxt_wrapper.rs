@@ -19,7 +19,7 @@ use super::dynamic::{decode_claim_queue, decode_validator_groups};
 use crate::{
 	api::dynamic::{decode_availability_cores, decode_scheduled_paras},
 	metadata::{polkadot, polkadot_primitives},
-	types::{AccountId32, BlockNumber, ClaimQueue, CoreOccupied, SessionKeys, Timestamp, H256},
+	types::{AccountId32, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, SessionKeys, Timestamp, H256},
 	utils::{Retry, RetryOptions},
 };
 use log::{error, warn};
@@ -171,7 +171,7 @@ pub enum Response {
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
-	ScheduledParas(Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>),
+	ScheduledParas(Vec<CoreAssignment>),
 	/// Claim queue for parachains.
 	ClaimQueue(ClaimQueue),
 	/// List of the occupied availability cores.
@@ -351,10 +351,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<
-		Vec<polkadot::runtime_types::polkadot_runtime_parachains::scheduler::CoreAssignment>,
-		SubxtWrapperError,
-	> {
+	) -> std::result::Result<Vec<CoreAssignment>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetScheduledParas, ScheduledParas, url, block_hash)
 	}
 

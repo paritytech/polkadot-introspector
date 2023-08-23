@@ -15,7 +15,13 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::polkadot::runtime_types as subxt_runtime_types;
+use crate::metadata::{
+	polkadot::{
+		runtime_types as subxt_runtime_types,
+		runtime_types::{polkadot_parachain::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind},
+	},
+	polkadot_primitives::CoreIndex,
+};
 use std::collections::{BTreeMap, VecDeque};
 use subxt::utils;
 
@@ -36,13 +42,24 @@ pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = BTreeMap<u32, VecDeque<Option<ParasEntry>>>;
 
 // TODO: Take it from runtime types v5
+/// How a free core is scheduled to be assigned.
+pub struct CoreAssignment {
+	/// The core that is assigned.
+	pub core: CoreIndex,
+	/// The unique ID of the para that is assigned to the core.
+	pub para_id: Id,
+	/// The kind of the assignment.
+	pub kind: AssignmentKind,
+}
+
+// TODO: Take it from runtime types v5
 /// Polkadot v5 ParasEntry type
 #[derive(Debug)]
 pub struct ParasEntry {
 	/// The `Assignment`
 	pub assignment: Assignment,
-	/// Number of times this has been retried.
-	pub retries: u32,
+	/// The number of times the entry has timed out in availability.
+	pub availability_timeouts: u32,
 	/// The block height where this entry becomes invalid.
 	pub ttl: BlockNumber,
 }
