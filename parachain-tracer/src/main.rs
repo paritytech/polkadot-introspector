@@ -236,6 +236,7 @@ impl ParachainTracer {
 							if code != 0 {
 								std::process::exit(code)
 							};
+							break
 						},
 					},
 					Err(_) => {
@@ -306,6 +307,7 @@ impl ParachainTracer {
 								if code != 0 {
 									std::process::exit(code)
 								};
+								break
 							},
 						},
 						None => {
