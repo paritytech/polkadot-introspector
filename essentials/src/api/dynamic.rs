@@ -101,7 +101,7 @@ pub(crate) fn decode_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, SubxtWr
 	Ok(claim_queue)
 }
 
-pub(crate) fn decode_on_demand_order_placed(raw: &Composite<u32>) -> Result<OnDemandOrder, SubxtWrapperError> {
+pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrder, SubxtWrapperError> {
 	match raw {
 		Composite::Named(v) => {
 			let raw_para_id = v

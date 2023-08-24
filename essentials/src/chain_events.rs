@@ -16,7 +16,7 @@
 //
 
 use crate::{
-	api::dynamic::decode_on_demand_order_placed,
+	api::dynamic::decode_on_demand_order,
 	metadata::{
 		polkadot::{
 			para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
@@ -149,7 +149,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 
 	// TODO: Use `is_specific_event` as soon as shows up in types
 	if event.pallet_name() == "OnDemandAssignmentProvider" && event.variant_name() == "OnDemandOrderPlaced" {
-		let decoded = decode_on_demand_order_placed(&event.field_values()?)?;
+		let decoded = decode_on_demand_order(&event.field_values()?)?;
 		return Ok(ChainEvent::OnDemandOrderPlaced(block_hash, decoded))
 	}
 
