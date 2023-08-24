@@ -75,6 +75,10 @@ struct MetricsInner {
 	para_block_times_sec: HistogramVec,
 	/// Parachain's on-demand orders
 	para_on_demand_orders: GaugeVec,
+	/// Latency between ordering a slot by a parachain and its last included candidate in relay blocks
+	para_on_demand_delay: GaugeVec,
+	/// Latency between ordering a slot by a parachain and its last included candidate in seconds
+	para_on_demand_delay_sec: GaugeVec,
 	/// Finality lag
 	finality_lag: Gauge,
 }
@@ -197,6 +201,7 @@ impl Metrics {
 		}
 	}
 
+	/// Update on-demand orders
 	pub(crate) fn on_on_demand_order(&self, order: &OnDemandOrder) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = order.para_id.to_string();
@@ -204,6 +209,28 @@ impl Metrics {
 				.para_on_demand_orders
 				.with_label_values(&[&para_str[..]])
 				.set(order.spot_price as f64);
+		}
+	}
+
+	/// Update on-demand latency in blocks
+	pub(crate) fn on_on_demand_delay(&self, delay_blocks: u32, para_id: u32) {
+		if let Some(metrics) = &self.0 {
+			let para_str: String = para_id.to_string();
+			metrics
+				.para_on_demand_delay
+				.with_label_values(&[&para_str[..]])
+				.set(delay_blocks as f64);
+		}
+	}
+
+	/// Update on-demand latency in seconds
+	pub(crate) fn on_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32) {
+		if let Some(metrics) = &self.0 {
+			let para_str: String = para_id.to_string();
+			metrics
+				.para_on_demand_delay_sec
+				.with_label_values(&[&para_str[..]])
+				.set(delay_sec.as_secs_f64());
 		}
 	}
 
@@ -335,6 +362,20 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		para_on_demand_orders: prometheus_endpoint::register(
 			GaugeVec::new(
 				Opts::new("pc_para_on_demand_orders", "Parachain's on demand orders"),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		para_on_demand_delay: prometheus_endpoint::register(
+			GaugeVec::new(
+				Opts::new("pc_para_on_demand_delay", "Latency between ordering a slot by a parachain and its last included candidate in relay blocks"),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		para_on_demand_delay_sec: prometheus_endpoint::register(
+			GaugeVec::new(
+				Opts::new("pc_para_on_demand_delay_sec", "Latency between ordering by a slot a parachain and its last included candidate in seconds"),
 				&["parachain_id"],
 			)?,
 			registry,
