@@ -38,7 +38,7 @@ use polkadot_introspector_essentials::{
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector,
-	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent},
+	collector::{Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent, TerminationReason},
 	consumer::{EventConsumerInit, EventStream},
 	historical_subscription::HistoricalSubscription,
 	init,
@@ -231,9 +231,15 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewSession(idx) => {
 							tracker.new_session(idx).await;
 						},
-						CollectorUpdateEvent::Termination => {
+						CollectorUpdateEvent::Termination(reason) => {
 							info!("collector is terminating");
-							break
+							match reason {
+								TerminationReason::Normal => break,
+								TerminationReason::Abnormal(code, info) => {
+									error!("Shutting down, {}", info);
+									std::process::exit(code)
+								},
+							}
 						},
 					},
 					Err(_) => {
@@ -298,10 +304,16 @@ impl ParachainTracer {
 								for to_tracker in trackers.values_mut() {
 									to_tracker.send(CollectorUpdateEvent::NewSession(idx)).await.unwrap();
 								},
-							CollectorUpdateEvent::Termination => {
+							CollectorUpdateEvent::Termination(reason) => {
 								info!("Received termination event, {} trackers will be terminated, {} futures are pending",
 									trackers.len(), futures.len());
-								break;
+								match reason {
+									TerminationReason::Normal => break,
+									TerminationReason::Abnormal(code, info) => {
+										error!("Shutting down, {}", info);
+										std::process::exit(code)
+									},
+								}
 							},
 						},
 						None => {
