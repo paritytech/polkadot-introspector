@@ -28,7 +28,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{Timestamp, H256},
+	types::{OnDemandOrder, Timestamp, H256},
 	utils::RetryOptions,
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
@@ -104,6 +104,8 @@ pub enum CollectorPrefixType {
 	InherentData,
 	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
 	Dispute(u32),
+	/// On-demand order information by parachain id
+	OnDemandOrder(u32),
 }
 
 /// A type that defines prefix + hash itself
@@ -304,6 +306,8 @@ impl Collector {
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
 				self.process_dispute_concluded(dispute_event, dispute_outcome).await,
+			ChainEvent::OnDemandOrderPlaced(block_hash, order) =>
+				self.process_on_demand_order_placed(block_hash, order).await,
 			_ => Ok(()),
 		}
 	}
@@ -928,6 +932,23 @@ impl Collector {
 			StorageEntry::new_onchain(record_time, candidate),
 		)
 		.await;
+		Ok(())
+	}
+
+	async fn process_on_demand_order_placed(
+		&self,
+		block_hash: &H256,
+		order: &OnDemandOrder,
+	) -> Result<(), CollectorError> {
+		self.storage_write_prefixed(
+			CollectorPrefixType::OnDemandOrder(order.para_id),
+			*block_hash,
+			StorageEntry::new_onchain(
+				RecordTime::with_ts(self.state.current_relay_chain_block_number, get_unix_time_unwrap()),
+				order,
+			),
+		)
+		.await?;
 		Ok(())
 	}
 

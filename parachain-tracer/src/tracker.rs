@@ -27,7 +27,7 @@ use polkadot_introspector_essentials::{
 	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
 	metadata::polkadot_primitives,
-	types::{AccountId32, BlockNumber, CoreOccupied, Timestamp, H256},
+	types::{AccountId32, BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -245,6 +245,16 @@ impl ParachainBlockTracker for SubxtTracker {
 				.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
+		}
+
+		if let Some(on_demand_order) = self
+			.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
+			.await
+		{
+			let on_demand_order: OnDemandOrder = on_demand_order.into_inner().unwrap();
+			self.on_on_demand_order(on_demand_order).await?;
 		}
 
 		Ok(&self.current_candidate)
@@ -496,6 +506,11 @@ impl SubxtTracker {
 			}
 		}
 
+		Ok(())
+	}
+
+	async fn on_on_demand_order(&self, order: OnDemandOrder) -> color_eyre::Result<()> {
+		println!("order {:?}", order);
 		Ok(())
 	}
 

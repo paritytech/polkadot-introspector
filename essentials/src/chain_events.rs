@@ -15,12 +15,16 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::{
-	polkadot::{
-		para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
-		paras_disputes::events::{DisputeConcluded, DisputeInitiated},
+use crate::{
+	api::dynamic::decode_on_demand_order_placed,
+	metadata::{
+		polkadot::{
+			para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
+			paras_disputes::events::{DisputeConcluded, DisputeInitiated},
+		},
+		polkadot_primitives::CandidateDescriptor,
 	},
-	polkadot_primitives::CandidateDescriptor,
+	types::OnDemandOrder,
 };
 use color_eyre::{eyre::eyre, Result};
 use parity_scale_codec::{Decode, Encode};
@@ -42,6 +46,8 @@ pub enum ChainEvent<T: subxt::Config> {
 	DisputeConcluded(SubxtDispute, SubxtDisputeResult),
 	/// Backing, inclusion, time out for a parachain candidate
 	CandidateChanged(Box<SubxtCandidateEvent>),
+	/// On-demand parachain placed its order
+	OnDemandOrderPlaced(<PolkadotConfig as subxt::Config>::Hash, OnDemandOrder),
 	/// Anything undecoded
 	RawEvent(<PolkadotConfig as subxt::Config>::Hash, subxt::events::EventDetails<T>),
 }
@@ -139,6 +145,12 @@ pub async fn decode_chain_event<T: subxt::Config>(
 			decoded.0.descriptor,
 			SubxtCandidateEventType::TimedOut,
 		))))
+	}
+
+	// TODO: Use `is_specific_event` as soon as shows up in types
+	if event.pallet_name() == "OnDemandAssignmentProvider" && event.variant_name() == "OnDemandOrderPlaced" {
+		let decoded = decode_on_demand_order_placed(&event.field_values()?)?;
+		return Ok(ChainEvent::OnDemandOrderPlaced(block_hash, decoded))
 	}
 
 	Ok(ChainEvent::RawEvent(block_hash, event))
