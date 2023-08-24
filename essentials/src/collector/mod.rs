@@ -161,8 +161,17 @@ pub enum CollectorUpdateEvent {
 	NewHead(NewHeadEvent),
 	/// Occurs on a new session
 	NewSession(u32),
-	/// Occurs when collector is disconnected and is about to terminate, contains error code
-	Termination(i32),
+	/// Occurs when collector is disconnected and is about to terminate
+	Termination(TerminationReason),
+}
+
+/// Represents the reason for a collector termination
+#[derive(Clone, Debug)]
+pub enum TerminationReason {
+	/// Indicates a normal termination
+	Normal,
+	/// Indicates an abnormal termination with error code and additional information
+	Abnormal(i32, String),
 }
 
 #[derive(Debug, Error)]
@@ -243,10 +252,26 @@ impl Collector {
 								if let Err(error) = self.process_chain_event(event).await {
 									error!("collector service could not process event: {}", error);
 									match error {
-										CollectorError::ExecutorFatal(_) | CollectorError::SendFatal(_) => {
-											self.broadcast_event_priority(CollectorUpdateEvent::Termination(1))
-												.await
-												.unwrap();
+										CollectorError::ExecutorFatal(e) => {
+											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
+												TerminationReason::Abnormal(
+													1,
+													format!("Collector's executor error: {}", e),
+												),
+											))
+											.await
+											.unwrap();
+											return
+										},
+										CollectorError::SendFatal(e) => {
+											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
+												TerminationReason::Abnormal(
+													1,
+													format!("Collector's chanel error: {}", e),
+												),
+											))
+											.await
+											.unwrap();
 											return
 										},
 										_ => continue,
@@ -255,15 +280,17 @@ impl Collector {
 							},
 						Err(e) => {
 							error!("collector service could not process events: {}", e);
-							self.broadcast_event_priority(CollectorUpdateEvent::Termination(1))
-								.await
-								.unwrap();
+							self.broadcast_event_priority(CollectorUpdateEvent::Termination(
+								TerminationReason::Abnormal(1, format!("Collector's service error: {}", e)),
+							))
+							.await
+							.unwrap();
 							return
 						},
 					},
 					None => {
 						error!("no more events from the consumer channel");
-						self.broadcast_event_priority(CollectorUpdateEvent::Termination(0))
+						self.broadcast_event_priority(CollectorUpdateEvent::Termination(TerminationReason::Normal))
 							.await
 							.unwrap();
 						return
