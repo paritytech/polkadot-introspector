@@ -17,9 +17,9 @@
 use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
 use clap::Parser;
 use color_eyre::Result;
-use polkadot_introspector_essentials::constants::STANDARD_BLOCK_TIME;
+use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
 use prometheus_endpoint::{
-	prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
+	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
 };
 use std::{net::ToSocketAddrs, time::Duration};
@@ -73,6 +73,8 @@ struct MetricsInner {
 	para_backing_times: HistogramVec,
 	/// Average candidate inclusion time measured in seconds.
 	para_block_times_sec: HistogramVec,
+	/// Parachain's on-demand orders
+	para_on_demand_orders: GaugeVec,
 	/// Finality lag
 	finality_lag: Gauge,
 }
@@ -192,6 +194,16 @@ impl Metrics {
 					.with_label_values(&[&para_str[..]])
 					.observe(backed_in as f64);
 			}
+		}
+	}
+
+	pub(crate) fn on_on_demand_order(&self, order: &OnDemandOrder) {
+		if let Some(metrics) = &self.0 {
+			let para_str: String = order.para_id.to_string();
+			metrics
+				.para_on_demand_orders
+				.with_label_values(&[&para_str[..]])
+				.set(order.spot_price as f64);
 		}
 	}
 
@@ -316,6 +328,13 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			HistogramVec::new(
 				HistogramOpts::new("pc_para_backing_time", "Parachain backing time measured in relay chain blocks.")
 					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		para_on_demand_orders: prometheus_endpoint::register(
+			GaugeVec::new(
+				Opts::new("pc_para_on_demand_orders", "Parachain's on demand orders"),
 				&["parachain_id"],
 			)?,
 			registry,

@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-mod dynamic;
+pub mod dynamic;
 mod storage;
 pub mod subxt_wrapper;
 

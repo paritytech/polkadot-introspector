@@ -6,7 +6,7 @@ use crate::{
 		},
 		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},
-	types::{Assignment, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, ParasEntry},
+	types::{Assignment, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, OnDemandOrder, ParasEntry},
 };
 use log::error;
 use std::collections::{BTreeMap, VecDeque};
@@ -99,6 +99,34 @@ pub(crate) fn decode_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, SubxtWr
 		let _ = claim_queue.insert(decoded_core, paras_entries);
 	}
 	Ok(claim_queue)
+}
+
+pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrder, SubxtWrapperError> {
+	match raw {
+		Composite::Named(v) => {
+			let raw_para_id = v
+				.iter()
+				.find_map(|(field, value)| if field == "para_id" { Some(value) } else { None })
+				.ok_or(SubxtWrapperError::DecodeDynamicError(
+					"named composite with field `para_id`".to_string(),
+					ValueDef::Composite(raw.clone()),
+				))?;
+			let raw_spot_price = v
+				.iter()
+				.find_map(|(field, value)| if field == "spot_price" { Some(value) } else { None })
+				.ok_or(SubxtWrapperError::DecodeDynamicError(
+					"named composite with field `spot_price`".to_string(),
+					ValueDef::Composite(raw.clone()),
+				))?;
+
+			Ok(OnDemandOrder {
+				para_id: decode_composite_u128_value(raw_para_id)? as u32,
+				spot_price: decode_u128_value(raw_spot_price)?,
+			})
+		},
+		_ =>
+			Err(SubxtWrapperError::DecodeDynamicError("named composite".to_string(), ValueDef::Composite(raw.clone()))),
+	}
 }
 
 fn decode_paras_entry_option(raw: &Value<u32>) -> Result<Option<ParasEntry>, SubxtWrapperError> {

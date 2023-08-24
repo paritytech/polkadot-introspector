@@ -22,6 +22,7 @@ use crate::metadata::{
 	},
 	polkadot_primitives::CoreIndex,
 };
+use parity_scale_codec::{Decode, Encode};
 use std::collections::{BTreeMap, VecDeque};
 use subxt::utils;
 
@@ -80,4 +81,12 @@ pub enum CoreOccupied {
 	Free,
 	/// A paras.
 	Paras,
+}
+
+// TODO: Take it from runtime types v5
+/// Temporary abstraction to cover `Event::OnDemandAssignmentProvider`
+#[derive(Debug, Decode, Encode)]
+pub struct OnDemandOrder {
+	pub para_id: u32,
+	pub spot_price: u128,
 }

@@ -27,7 +27,7 @@ use polkadot_introspector_essentials::{
 	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
 	metadata::polkadot_primitives,
-	types::{AccountId32, BlockNumber, CoreOccupied, Timestamp, H256},
+	types::{AccountId32, BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -154,6 +154,8 @@ pub struct SubxtTracker {
 	disputes: Vec<DisputesTracker>,
 	/// Current relay chain block timestamp.
 	current_relay_block_ts: Option<Timestamp>,
+	/// Current on-demand order
+	on_demand_order: Option<OnDemandOrder>,
 	/// Last observed finality lag
 	finality_lag: Option<u32>,
 	/// Last relay chain block timestamp.
@@ -246,6 +248,8 @@ impl ParachainBlockTracker for SubxtTracker {
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
+
+		self.set_on_demand_order(block_hash).await;
 
 		Ok(&self.current_candidate)
 	}
@@ -343,6 +347,10 @@ impl ParachainBlockTracker for SubxtTracker {
 			metrics.on_block(tm.as_secs_f64(), self.para_id);
 		}
 
+		if let Some(ref order) = self.on_demand_order {
+			metrics.on_on_demand_order(order);
+		}
+
 		if let Some(finality_lag) = self.finality_lag {
 			metrics.on_finality_lag(finality_lag);
 		}
@@ -374,6 +382,7 @@ impl SubxtTracker {
 			current_relay_block: None,
 			previous_relay_block: None,
 			current_relay_block_ts: None,
+			on_demand_order: None,
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_assignment: None,
@@ -390,6 +399,15 @@ impl SubxtTracker {
 	fn set_relay_block(&mut self, block_number: BlockNumber, block_hash: H256) {
 		self.previous_relay_block = self.current_relay_block;
 		self.current_relay_block = Some((block_number, block_hash));
+	}
+
+	async fn set_on_demand_order(&mut self, block_hash: H256) {
+		self.on_demand_order = self
+			.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
+			.await
+			.map(|v| v.into_inner::<OnDemandOrder>().unwrap());
 	}
 
 	async fn get_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
