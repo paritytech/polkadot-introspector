@@ -75,9 +75,9 @@ struct MetricsInner {
 	para_block_times_sec: HistogramVec,
 	/// Parachain's on-demand orders
 	para_on_demand_orders: GaugeVec,
-	/// Latency between ordering a slot by a parachain and its last included candidate in relay blocks
+	/// Latency between ordering a slot by a parachain and its last backed candidate in relay blocks
 	para_on_demand_delay: GaugeVec,
-	/// Latency between ordering a slot by a parachain and its last included candidate in seconds
+	/// Latency between ordering a slot by a parachain and its last backed candidate in seconds
 	para_on_demand_delay_sec: GaugeVec,
 	/// Finality lag
 	finality_lag: Gauge,
@@ -368,14 +368,14 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		para_on_demand_delay: prometheus_endpoint::register(
 			GaugeVec::new(
-				Opts::new("pc_para_on_demand_delay", "Latency between ordering a slot by a parachain and its last included candidate in relay blocks"),
+				Opts::new("pc_para_on_demand_delay", "Latency between ordering a slot by a parachain and its last backed candidate in relay blocks"),
 				&["parachain_id"],
 			)?,
 			registry,
 		)?,
 		para_on_demand_delay_sec: prometheus_endpoint::register(
 			GaugeVec::new(
-				Opts::new("pc_para_on_demand_delay_sec", "Latency between ordering by a slot a parachain and its last included candidate in seconds"),
+				Opts::new("pc_para_on_demand_delay_sec", "Latency between ordering by a slot a parachain and its last backed candidate in seconds"),
 				&["parachain_id"],
 			)?,
 			registry,
