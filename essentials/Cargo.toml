@@ -33,8 +33,3 @@ tokio-tungstenite = { workspace = true }
 typed-builder = { workspace = true }
 url = { workspace = true }
 warp = { workspace = true }
-
-[features]
-rococo = []
-kusama = []
-polkadot = []

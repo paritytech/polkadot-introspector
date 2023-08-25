@@ -54,7 +54,6 @@ pub enum RequestType {
 	ExtractParaInherent(subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>),
 	/// Get the availability core scheduling information at a given block.
 	GetScheduledParas(<PolkadotConfig as subxt::Config>::Hash),
-	/// TODO: Fill
 	/// Get the claim queue scheduling information at a given block.
 	GetClaimQueue(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get occupied core information at a given block.

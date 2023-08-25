@@ -15,21 +15,6 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-#[cfg(all(feature = "rococo", feature = "kusama", feature = "polkadot"))]
-compile_error!("`rococo`, `kusama`, and `polkadot` are mutually exclusive features");
-
-#[cfg(not(any(feature = "rococo", feature = "kusama", feature = "polkadot")))]
-compile_error!("Must build with either `rococo`, `kusama`, `polkadot` features");
-
-#[cfg(feature = "rococo")]
-#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
-pub mod polkadot {}
-
-#[cfg(feature = "kusama")]
-#[subxt::subxt(runtime_metadata_path = "assets/kusama_metadata.scale")]
-pub mod polkadot {}
-
-#[cfg(feature = "polkadot")]
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
 pub mod polkadot {}
 

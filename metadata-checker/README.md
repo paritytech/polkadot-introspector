@@ -2,6 +2,8 @@
 
 **For internal use only.**
 
+**TODO: the following information is outdated, needs to be edited.**
+
 The `Runtime` version deployed on a network might be newer and incompatible with the metadata
 bundled in the repository. To check whether the metadata is up-to-date, we run `polkadot-metadata-checker` on our CI/CD pipelines:
 

@@ -4,6 +4,8 @@ This repository contains essential components for the Polkadot Introspector tool
 
 ## Updating or supporting a new `Runtime`
 
+**TODO: the following information is outdated, needs to be edited.**
+
 The `Runtime` version deployed on a network might be newer and incompatible with the metadata bundled in the repository. To check whether the metadata is up-to-date, we run [polkadot-metadata-checker](../metadata-checker/README.md) on our CI/CD pipelines. In case it fails, to bring the new metadata, we use [subxt-cli](https://github.com/paritytech/subxt/#downloading-metadata-from-a-substrate-node).
 
 Here's an example of how to update the metadata:
