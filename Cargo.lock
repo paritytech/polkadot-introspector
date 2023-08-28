@@ -1828,20 +1828,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "polkadot-metadata-checker"
-version = "0.2.15"
-dependencies = [
- "clap",
- "color-eyre",
- "crossterm",
- "env_logger",
- "log",
- "polkadot-introspector-essentials",
- "subxt",
- "tokio",
-]
-
-[[package]]
 name = "polkadot-parachain-tracer"
 version = "0.2.15"
 dependencies = [

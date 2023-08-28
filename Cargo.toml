@@ -5,7 +5,6 @@ members = [
     "essentials",
     "jaeger",
     "kvdb",
-    "metadata-checker",
     "parachain-tracer",
     "priority-channel",
     "whois",
