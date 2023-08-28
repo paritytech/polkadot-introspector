@@ -312,10 +312,12 @@ impl ParachainBlockTracker for SubxtTracker {
 						metrics.on_on_demand_delay(
 							relay_block_number.saturating_sub(last_on_demand_order_block),
 							self.para_id,
-						)
+						);
+						self.last_on_demand_order_block = None;
 					}
 					if let Some(diff) = self.get_time_diff(self.current_relay_block_ts, self.last_on_demand_order_ts) {
-						metrics.on_on_demand_delay_sec(diff, self.para_id)
+						metrics.on_on_demand_delay_sec(diff, self.para_id);
+						self.last_on_demand_order_ts = None;
 					}
 				},
 			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
@@ -362,6 +364,7 @@ impl ParachainBlockTracker for SubxtTracker {
 
 		if let Some(ref order) = self.on_demand_order {
 			metrics.on_on_demand_order(order);
+			self.on_demand_order = None;
 		}
 
 		if let Some(finality_lag) = self.finality_lag {
