@@ -202,7 +202,7 @@ impl Metrics {
 	}
 
 	/// Update on-demand orders
-	pub(crate) fn on_on_demand_order(&self, order: &OnDemandOrder) {
+	pub(crate) fn handle_on_demand_order(&self, order: &OnDemandOrder) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = order.para_id.to_string();
 			metrics
@@ -224,7 +224,7 @@ impl Metrics {
 	}
 
 	/// Update on-demand latency in seconds
-	pub(crate) fn on_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32) {
+	pub(crate) fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
