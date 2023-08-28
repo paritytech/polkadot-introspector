@@ -213,7 +213,7 @@ impl Metrics {
 	}
 
 	/// Update on-demand latency in blocks
-	pub(crate) fn on_on_demand_delay(&self, delay_blocks: u32, para_id: u32) {
+	pub(crate) fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
