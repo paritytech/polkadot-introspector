@@ -15,18 +15,6 @@ The tools utilize data sources such as [subxt](https://github.com/paritytech/sub
 
 ## Building
 
-**TODO: the following information is outdated, needs to be edited.**
+We utilize the latest polkadot metadata to decode block data. It is possible that we might lack some types, which are already present in test networks but not yet in polkadot. In such instances, we implement our own provisional types, which should be removed once they are included in the polkadot metadata.
 
-It is mandatory to specify which `Runtime` the build will target. Currently, the tools can only build for a single runtime version by enabling one of the following features:
-
-- `rococo` - for Rococo and Versi test networks
-- `kusama` - for Kusama production networks
-- `polkadot` - for Polkadot production networks
-
-These features will select which metadata to use for decoding block data. To enable a specific feature, use the following command:
-
-```
-cargo build --release --no-default-features --features=polkadot
-```
-
-See also: [Updating or supporting a new `Runtime`](essentials/README.md#updating-or-supporting-a-new-runtime)
+See also: [Updating a `Runtime`](essentials/README.md#updating-a-runtime)
