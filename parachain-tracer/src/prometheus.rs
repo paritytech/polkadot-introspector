@@ -213,23 +213,23 @@ impl Metrics {
 	}
 
 	/// Update on-demand latency in blocks
-	pub(crate) fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32) {
+	pub(crate) fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
 				.para_on_demand_delay
-				.with_label_values(&[&para_str[..]])
+				.with_label_values(&[&para_str[..], until])
 				.set(delay_blocks as f64);
 		}
 	}
 
 	/// Update on-demand latency in seconds
-	pub(crate) fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32) {
+	pub(crate) fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
 				.para_on_demand_delay_sec
-				.with_label_values(&[&para_str[..]])
+				.with_label_values(&[&para_str[..], until])
 				.set(delay_sec.as_secs_f64());
 		}
 	}
@@ -369,7 +369,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		para_on_demand_delay: prometheus_endpoint::register(
 			GaugeVec::new(
 				Opts::new("pc_para_on_demand_delay", "Latency (in relay chain blocks) between when the parachain orders a core and when first candidate is backed on that core."),
-				&["parachain_id"],
+				&["parachain_id", "until"],
 			)?,
 			registry,
 		)?,
