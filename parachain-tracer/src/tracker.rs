@@ -160,9 +160,9 @@ pub struct SubxtTracker {
 	on_demand_order_block: Option<BlockNumber>,
 	/// Timestamp where the last on-demand order was placed
 	on_demand_order_ts: Option<Timestamp>,
-	/// Relay block where the on-demand parachain is scheduled
+	/// Relay block where the on-demand parachain was scheduled on a core
 	on_demand_scheduled_block: Option<BlockNumber>,
-	/// Timestamp where the on-demand parachain is scheduled
+	/// Timestamp where the on-demand parachain was scheduled on a core
 	on_demand_scheduled_ts: Option<Timestamp>,
 	/// Last observed finality lag
 	finality_lag: Option<u32>,
