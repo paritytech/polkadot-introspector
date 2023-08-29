@@ -160,10 +160,8 @@ pub struct SubxtTracker {
 	on_demand_order_block: Option<BlockNumber>,
 	/// Timestamp where the last on-demand order was placed
 	on_demand_order_ts: Option<Timestamp>,
-	/// Relay block where the on-demand parachain was scheduled on a core
-	on_demand_scheduled_block: Option<BlockNumber>,
-	/// Timestamp where the on-demand parachain was scheduled on a core
-	on_demand_scheduled_ts: Option<Timestamp>,
+	/// On-demand parachain was scheduled in current relay block
+	on_demand_scheduled: bool,
 	/// Last observed finality lag
 	finality_lag: Option<u32>,
 	/// Last relay chain block timestamp.
@@ -312,7 +310,13 @@ impl ParachainBlockTracker for SubxtTracker {
 					}
 					self.stats.on_backed();
 					metrics.on_backed(self.para_id);
-					self.handle_on_demand_delay_until_backed(metrics)
+
+					if self.handle_on_demand_delay("backed", metrics) {
+						self.on_demand_order_block = None;
+					}
+					if self.handle_on_demand_delay_sec("backed", metrics) {
+						self.on_demand_order_ts = None;
+					}
 				},
 			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
 				self.progress_availability(metrics).await;
@@ -360,8 +364,14 @@ impl ParachainBlockTracker for SubxtTracker {
 			metrics.on_finality_lag(finality_lag);
 		}
 
-		self.handle_on_demand_order(metrics);
-		self.handle_on_demand_delay_until_scheduled(metrics);
+		if self.handle_on_demand_order(metrics) {
+			self.on_demand_order = None;
+		}
+		if self.on_demand_scheduled {
+			let _sent = self.handle_on_demand_delay("scheduled", metrics);
+			let _sent = self.handle_on_demand_delay_sec("scheduled", metrics);
+			self.on_demand_scheduled = false;
+		}
 
 		self.update.clone()
 	}
@@ -391,10 +401,9 @@ impl SubxtTracker {
 			previous_relay_block: None,
 			current_relay_block_ts: None,
 			on_demand_order: None,
-			on_demand_scheduled_block: None,
-			on_demand_scheduled_ts: None,
 			on_demand_order_block: None,
 			on_demand_order_ts: None,
+			on_demand_scheduled: false,
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_assignment: None,
@@ -609,11 +618,7 @@ impl SubxtTracker {
 		};
 		if let Some((core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(*core);
-
-			if self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id {
-				self.on_demand_scheduled_block = self.current_relay_block.map(|(block, _)| block);
-				self.on_demand_scheduled_ts = self.current_relay_block_ts;
-			}
+			self.on_demand_scheduled = self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
 		Ok(())
 	}
@@ -866,36 +871,29 @@ impl SubxtTracker {
 		&self.stats
 	}
 
-	fn handle_on_demand_order(&mut self, metrics: &Metrics) {
+	fn handle_on_demand_order(&self, metrics: &Metrics) -> bool {
 		if let Some(ref order) = self.on_demand_order {
 			metrics.handle_on_demand_order(order);
-			self.on_demand_order = None;
+			return true
 		}
+		false
 	}
 
-	fn handle_on_demand_delay_until_scheduled(&mut self, metrics: &Metrics) {
-		if let (Some(on_demand_block), Some((relay_block, _))) =
-			(self.on_demand_scheduled_block, self.current_relay_block)
-		{
-			metrics.handle_on_demand_delay(relay_block.saturating_sub(on_demand_block), self.para_id, "scheduled");
-			self.on_demand_scheduled_block = None;
-		}
-		if let Some(diff) = self.get_time_diff(self.current_relay_block_ts, self.on_demand_scheduled_ts) {
-			metrics.handle_on_demand_delay_sec(diff, self.para_id, "scheduled");
-			self.on_demand_scheduled_ts = None;
-		}
-	}
-
-	fn handle_on_demand_delay_until_backed(&mut self, metrics: &Metrics) {
+	fn handle_on_demand_delay(&self, until: &str, metrics: &Metrics) -> bool {
 		if let (Some(on_demand_block), Some((relay_block, _))) = (self.on_demand_order_block, self.current_relay_block)
 		{
-			metrics.handle_on_demand_delay(relay_block.saturating_sub(on_demand_block), self.para_id, "backed");
-			self.on_demand_order_block = None;
+			metrics.handle_on_demand_delay(relay_block.saturating_sub(on_demand_block), self.para_id, until);
+			return true
 		}
+		false
+	}
+
+	fn handle_on_demand_delay_sec(&self, until: &str, metrics: &Metrics) -> bool {
 		if let Some(diff) = self.get_time_diff(self.current_relay_block_ts, self.on_demand_order_ts) {
-			metrics.handle_on_demand_delay_sec(diff, self.para_id, "backed");
-			self.on_demand_order_ts = None;
+			metrics.handle_on_demand_delay_sec(diff, self.para_id, until);
+			return true
 		}
+		false
 	}
 }
 
