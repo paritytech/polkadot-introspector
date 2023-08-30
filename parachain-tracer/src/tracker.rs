@@ -156,6 +156,12 @@ pub struct SubxtTracker {
 	current_relay_block_ts: Option<Timestamp>,
 	/// Current on-demand order
 	on_demand_order: Option<OnDemandOrder>,
+	/// Relay block where the last on-demand order was placed
+	on_demand_order_block: Option<BlockNumber>,
+	/// Timestamp where the last on-demand order was placed
+	on_demand_order_ts: Option<Timestamp>,
+	/// On-demand parachain was scheduled in current relay block
+	on_demand_scheduled: bool,
 	/// Last observed finality lag
 	finality_lag: Option<u32>,
 	/// Last relay chain block timestamp.
@@ -304,6 +310,13 @@ impl ParachainBlockTracker for SubxtTracker {
 					}
 					self.stats.on_backed();
 					metrics.on_backed(self.para_id);
+
+					if self.handle_on_demand_delay("backed", metrics) {
+						self.on_demand_order_block = None;
+					}
+					if self.handle_on_demand_delay_sec("backed", metrics) {
+						self.on_demand_order_ts = None;
+					}
 				},
 			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
 				self.progress_availability(metrics).await;
@@ -347,12 +360,17 @@ impl ParachainBlockTracker for SubxtTracker {
 			metrics.on_block(tm.as_secs_f64(), self.para_id);
 		}
 
-		if let Some(ref order) = self.on_demand_order {
-			metrics.on_on_demand_order(order);
-		}
-
 		if let Some(finality_lag) = self.finality_lag {
 			metrics.on_finality_lag(finality_lag);
+		}
+
+		if self.handle_on_demand_order(metrics) {
+			self.on_demand_order = None;
+		}
+		if self.on_demand_scheduled {
+			let _sent = self.handle_on_demand_delay("scheduled", metrics);
+			let _sent = self.handle_on_demand_delay_sec("scheduled", metrics);
+			self.on_demand_scheduled = false;
 		}
 
 		self.update.clone()
@@ -383,6 +401,9 @@ impl SubxtTracker {
 			previous_relay_block: None,
 			current_relay_block_ts: None,
 			on_demand_order: None,
+			on_demand_order_block: None,
+			on_demand_order_ts: None,
+			on_demand_scheduled: false,
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_assignment: None,
@@ -408,6 +429,17 @@ impl SubxtTracker {
 			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
 			.await
 			.map(|v| v.into_inner::<OnDemandOrder>().unwrap());
+
+		if self.on_demand_order.is_none() {
+			return
+		}
+
+		if let Some((block_number, _)) = self.current_relay_block {
+			self.on_demand_order_block = Some(block_number);
+		}
+		if let Some(ts) = self.current_relay_block_ts {
+			self.on_demand_order_ts = Some(ts);
+		}
 	}
 
 	async fn get_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
@@ -584,8 +616,9 @@ impl SubxtTracker {
 				self.get_core_assignments_via_claim_queue(block_hash).await?,
 			Err(e) => return Err(e.into()),
 		};
-		if let Some((core, _)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
+		if let Some((core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(*core);
+			self.on_demand_scheduled = self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
 		Ok(())
 	}
@@ -800,7 +833,7 @@ impl SubxtTracker {
 					relay_block_number,
 					self.last_included_block,
 					backed_in,
-					self.get_candidate_time(),
+					self.get_time_diff(self.current_relay_block_ts, self.last_included_at_ts),
 					self.para_id,
 				);
 				self.last_included_block = Some(relay_block_number);
@@ -825,13 +858,10 @@ impl SubxtTracker {
 		Duration::from_millis(cur_ts).saturating_sub(Duration::from_millis(base_ts))
 	}
 
-	/// Returns the time for the current candidate
-	pub fn get_candidate_time(&self) -> Option<Duration> {
-		let current = self.current_relay_block_ts;
-		let base = self.last_included_at_ts;
-		match (current, base) {
-			(Some(current), Some(base)) =>
-				Some(Duration::from_millis(current).saturating_sub(Duration::from_millis(base))),
+	/// Returns a time difference between optional timestamps
+	pub fn get_time_diff(&self, lhs: Option<u64>, rhs: Option<u64>) -> Option<Duration> {
+		match (lhs, rhs) {
+			(Some(lhs), Some(rhs)) => Some(Duration::from_millis(lhs).saturating_sub(Duration::from_millis(rhs))),
 			_ => None,
 		}
 	}
@@ -839,6 +869,31 @@ impl SubxtTracker {
 	/// Returns the stats
 	pub fn summary(&self) -> &ParachainStats {
 		&self.stats
+	}
+
+	fn handle_on_demand_order(&self, metrics: &Metrics) -> bool {
+		if let Some(ref order) = self.on_demand_order {
+			metrics.handle_on_demand_order(order);
+			return true
+		}
+		false
+	}
+
+	fn handle_on_demand_delay(&self, until: &str, metrics: &Metrics) -> bool {
+		if let (Some(on_demand_block), Some((relay_block, _))) = (self.on_demand_order_block, self.current_relay_block)
+		{
+			metrics.handle_on_demand_delay(relay_block.saturating_sub(on_demand_block), self.para_id, until);
+			return true
+		}
+		false
+	}
+
+	fn handle_on_demand_delay_sec(&self, until: &str, metrics: &Metrics) -> bool {
+		if let Some(diff) = self.get_time_diff(self.current_relay_block_ts, self.on_demand_order_ts) {
+			metrics.handle_on_demand_delay_sec(diff, self.para_id, until);
+			return true
+		}
+		false
 	}
 }
 
