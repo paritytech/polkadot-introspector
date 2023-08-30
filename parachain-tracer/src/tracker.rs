@@ -111,7 +111,7 @@ pub struct SubxtMessageQueuesTracker {
 
 impl SubxtMessageQueuesTracker {
 	/// Update the content of HRMP channels
-	pub fn update_hrmp_channels(
+	fn update_hrmp_channels(
 		&mut self,
 		inbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
 		outbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
@@ -122,7 +122,7 @@ impl SubxtMessageQueuesTracker {
 	}
 
 	/// Returns if there are HRMP messages in any direction
-	pub fn has_hrmp_messages(&self) -> bool {
+	fn has_hrmp_messages(&self) -> bool {
 		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
 			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
 	}
@@ -852,14 +852,14 @@ impl SubxtTracker {
 	}
 
 	/// Returns the time for the current block
-	pub fn get_ts(&self) -> Duration {
+	fn get_ts(&self) -> Duration {
 		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
 		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
 		Duration::from_millis(cur_ts).saturating_sub(Duration::from_millis(base_ts))
 	}
 
 	/// Returns a time difference between optional timestamps
-	pub fn get_time_diff(&self, lhs: Option<u64>, rhs: Option<u64>) -> Option<Duration> {
+	fn get_time_diff(&self, lhs: Option<u64>, rhs: Option<u64>) -> Option<Duration> {
 		match (lhs, rhs) {
 			(Some(lhs), Some(rhs)) => Some(Duration::from_millis(lhs).saturating_sub(Duration::from_millis(rhs))),
 			_ => None,
