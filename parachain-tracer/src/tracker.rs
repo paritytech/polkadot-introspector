@@ -19,6 +19,7 @@ use super::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
 	prometheus::Metrics,
 	stats::ParachainStats,
+	utils::{extract_validator_address, time_diff},
 };
 use log::{debug, error, info, warn};
 use parity_scale_codec::{Decode, Encode};
@@ -956,30 +957,5 @@ impl SubxtTracker {
 			(Some((current, _)), Some((previous, _))) => current == previous,
 			_ => false,
 		}
-	}
-}
-
-/// Returns a time difference between optional timestamps
-fn time_diff(lhs: Option<u64>, rhs: Option<u64>) -> Option<Duration> {
-	match (lhs, rhs) {
-		(Some(lhs), Some(rhs)) => Some(Duration::from_millis(lhs).saturating_sub(Duration::from_millis(rhs))),
-		_ => None,
-	}
-}
-
-// Examines session info (if any) and find the corresponding validator
-fn extract_validator_address(session_keys: Option<&Vec<AccountId32>>, validator_index: u32) -> (u32, String) {
-	if let Some(session_keys) = session_keys.as_ref() {
-		if validator_index < session_keys.len() as u32 {
-			let validator_identity = &session_keys[validator_index as usize];
-			(validator_index, validator_identity.to_string())
-		} else {
-			(
-				validator_index,
-				format!("??? (no such validator index {}: know {} validators)", validator_index, session_keys.len()),
-			)
-		}
-	} else {
-		(validator_index, "??? (no session keys)".to_string())
 	}
 }

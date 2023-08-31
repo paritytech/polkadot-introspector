@@ -55,6 +55,7 @@ mod progress;
 mod prometheus;
 mod stats;
 mod tracker;
+mod utils;
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
