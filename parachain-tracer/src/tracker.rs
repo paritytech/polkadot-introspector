@@ -62,7 +62,7 @@ pub trait ParachainBlockTracker {
 		&mut self,
 		block_hash: Self::RelayChainNewHead,
 		block_number: Self::RelayChainBlockNumber,
-	) -> color_eyre::Result<&Self::ParachainBlockInfo>;
+	) -> color_eyre::Result<()>;
 	/// Called when a new session is observed
 	async fn new_session(&mut self, new_session_index: u32);
 
@@ -228,36 +228,18 @@ impl ParachainBlockTracker for SubxtTracker {
 		&mut self,
 		block_hash: Self::RelayChainNewHead,
 		block_number: Self::RelayChainBlockNumber,
-	) -> color_eyre::Result<&Self::ParachainBlockInfo> {
-		let is_fork = block_number == self.current_relay_block.unwrap_or((0, H256::zero())).0;
-		let inherent_data = self
-			.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
-			.await;
-
-		if let Some(inherent_data) = inherent_data {
-			let inherent: InherentData = inherent_data.into_inner().unwrap();
-			self.set_relay_block(block_number, block_hash);
-			self.on_inherent_data(block_hash, block_number, inherent, is_fork).await?;
-
-			let inbound_hrmp_channels = self
-				.executor
-				.get_inbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-				.await?;
-			let outbound_hrmp_channels = self
-				.executor
-				.get_outbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-				.await?;
-			self.message_queues
-				.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
-		} else {
+	) -> color_eyre::Result<()> {
+		let maybe_inherent = self.get_inherent_data(block_hash).await;
+		if maybe_inherent.is_none() {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
 
+		self.set_relay_block(block_number, block_hash, maybe_inherent.is_some());
+		self.set_hrmp_channels(block_hash, maybe_inherent.is_some()).await?;
+		self.on_inherent_data(block_hash, block_number, maybe_inherent).await?;
 		self.set_on_demand_order(block_hash).await;
 
-		Ok(&self.current_candidate)
+		Ok(())
 	}
 
 	async fn new_session(&mut self, new_session_index: u32) {
@@ -417,9 +399,36 @@ impl SubxtTracker {
 		}
 	}
 
-	fn set_relay_block(&mut self, block_number: BlockNumber, block_hash: H256) {
-		self.previous_relay_block = self.current_relay_block;
-		self.current_relay_block = Some((block_number, block_hash));
+	async fn get_inherent_data(&self, block_hash: H256) -> Option<InherentData> {
+		self.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
+			.await
+			.map(|raw| raw.into_inner().unwrap())
+	}
+
+	async fn set_hrmp_channels(&mut self, block_hash: H256, has_inherent: bool) -> color_eyre::Result<()> {
+		if has_inherent {
+			let inbound_hrmp_channels = self
+				.executor
+				.get_inbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
+				.await?;
+			let outbound_hrmp_channels = self
+				.executor
+				.get_outbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
+				.await?;
+			self.message_queues
+				.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
+		}
+
+		Ok(())
+	}
+
+	fn set_relay_block(&mut self, block_number: BlockNumber, block_hash: H256, has_inherent: bool) {
+		if has_inherent {
+			self.previous_relay_block = self.current_relay_block;
+			self.current_relay_block = Some((block_number, block_hash));
+		}
 	}
 
 	async fn set_on_demand_order(&mut self, block_hash: H256) {
@@ -456,9 +465,14 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		block_number: BlockNumber,
-		data: InherentData,
-		is_fork: bool,
+		data: Option<InherentData>,
 	) -> color_eyre::Result<()> {
+		if data.is_none() {
+			return Ok(())
+		}
+
+		let data = data.expect("Checked above: qed");
+		let is_fork = block_number == self.current_relay_block.unwrap_or((0, H256::zero())).0;
 		let backed_candidates = data.backed_candidates;
 		let validator_groups = self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await?;
 		let bitfields = data
