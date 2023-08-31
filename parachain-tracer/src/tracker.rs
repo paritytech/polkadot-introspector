@@ -331,7 +331,7 @@ impl SubxtTracker {
 
 	/// Called to move to idle state after inclusion/timeout.
 	pub fn maybe_reset_state(&mut self) {
-		if self.current_candidate.state == ParachainBlockState::Included {
+		if matches!(self.current_candidate.state, ParachainBlockState::Included) {
 			self.current_candidate.state = ParachainBlockState::Idle;
 			self.current_candidate.candidate = None;
 			self.current_candidate.candidate_hash = None;
@@ -368,13 +368,14 @@ impl SubxtTracker {
 
 	fn process_disputes(&mut self, metrics: &Metrics) {
 		self.disputes.iter().for_each(|outcome| {
-			self.stats.on_disputed(outcome);
-			metrics.on_disputed(outcome, self.para_id);
 			if let Some(progress) = self.progress.as_mut() {
 				progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
 			}
+			self.stats.on_disputed(outcome);
+			metrics.on_disputed(outcome, self.para_id);
 		});
 	}
+
 	fn process_active_message_queues(&mut self) {
 		if !self.message_queues.has_hrmp_messages() {
 			return
@@ -402,55 +403,34 @@ impl SubxtTracker {
 		}
 	}
 
-	// TODO
-	fn handle_on_demand_order(&self, metrics: &Metrics) -> bool {
+	fn process_on_demand_order(&mut self, metrics: &Metrics) {
+		let is_backed = matches!(self.current_candidate.state, ParachainBlockState::Backed);
+
 		if let Some(ref order) = self.on_demand_order {
 			metrics.handle_on_demand_order(order);
-			return true
 		}
-		false
-	}
-
-	// TODO
-	fn handle_on_demand_delay(&self, until: &str, metrics: &Metrics) -> bool {
-		if let (Some(on_demand_block), Some((relay_block, _))) =
-			(self.on_demand_order_block_number, self.current_relay_block)
-		{
-			metrics.handle_on_demand_delay(relay_block.saturating_sub(on_demand_block), self.para_id, until);
-			return true
+		if let Some(delay) = self.on_demand_delay() {
+			if self.on_demand_scheduled {
+				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
+			}
+			if is_backed {
+				metrics.handle_on_demand_delay(delay, self.para_id, "backed");
+			}
 		}
-		false
-	}
-
-	// TODO
-	fn handle_on_demand_delay_sec(&self, until: &str, metrics: &Metrics) -> bool {
-		if let Some(diff) = time_diff(self.current_relay_block_ts, self.on_demand_order_ts) {
-			metrics.handle_on_demand_delay_sec(diff, self.para_id, until);
-			return true
-		}
-		false
-	}
-
-	fn process_on_demand_order(&mut self, metrics: &Metrics) {
-		if self.handle_on_demand_order(metrics) {
-			self.on_demand_order = None;
+		if let Some(delay_sec) = self.on_demand_delay_ts() {
+			if self.on_demand_scheduled {
+				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
+			}
+			if is_backed {
+				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
+			}
 		}
 
-		match self.current_candidate.state {
-			ParachainBlockState::Backed => {
-				if self.handle_on_demand_delay("backed", metrics) {
-					self.on_demand_order_block_number = None;
-				}
-				if self.handle_on_demand_delay_sec("backed", metrics) {
-					self.on_demand_order_ts = None;
-				}
-			},
-			_ => {},
-		}
-		if self.on_demand_scheduled {
-			let _sent = self.handle_on_demand_delay("scheduled", metrics);
-			let _sent = self.handle_on_demand_delay_sec("scheduled", metrics);
-			self.on_demand_scheduled = false;
+		self.on_demand_order = None;
+		self.on_demand_scheduled = false;
+		if is_backed {
+			self.on_demand_order_block_number = None;
+			self.on_demand_order_ts = None;
 		}
 	}
 
@@ -957,5 +937,17 @@ impl SubxtTracker {
 			(Some((current, _)), Some((previous, _))) => current == previous,
 			_ => false,
 		}
+	}
+
+	fn on_demand_delay(&self) -> Option<u32> {
+		if let (Some(on_demand), Some((relay, _))) = (self.on_demand_order_block_number, self.current_relay_block) {
+			Some(relay.saturating_sub(on_demand))
+		} else {
+			None
+		}
+	}
+
+	fn on_demand_delay_ts(&self) -> Option<Duration> {
+		time_diff(self.current_relay_block_ts, self.on_demand_order_ts)
 	}
 }
