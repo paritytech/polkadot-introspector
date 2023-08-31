@@ -65,7 +65,7 @@ pub trait ParachainBlockTracker {
 	) -> color_eyre::Result<()>;
 
 	/// Called when a new session is observed
-	async fn set_new_session(&mut self, session_index: u32);
+	async fn inject_session(&mut self, session_index: u32);
 
 	/// Update current parachain progress.
 	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
@@ -253,83 +253,35 @@ impl ParachainBlockTracker for SubxtTracker {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
 
-		self.set_relay_block(block_number, block_hash, maybe_inherent.is_some());
+		self.set_relay_block(block_hash, block_number, maybe_inherent.is_some());
 		self.set_hrmp_channels(block_hash, maybe_inherent.is_some()).await?;
-		self.on_inherent_data(block_hash, block_number, maybe_inherent).await?;
+		self.set_inherent_data(block_hash, block_number, maybe_inherent).await?;
 		self.set_on_demand_order(block_hash).await;
 
 		Ok(())
 	}
 
-	async fn set_new_session(&mut self, session_index: u32) {
+	async fn inject_session(&mut self, session_index: u32) {
 		if let Some(progress) = self.progress.as_mut() {
 			progress.events.push(ParachainConsensusEvent::NewSession(session_index));
 		}
 	}
 
 	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
-		if self.current_relay_block.is_none() {
+		if self.current_relay_block.is_some() {
+			self.set_initial_progress();
+
+			self.process_core_assignment();
+			self.process_core_occupied();
+			self.process_bitfield_propagation(metrics);
+			self.process_candidate_state(metrics).await;
+			self.process_disputes(metrics);
+			self.process_active_message_queues();
+			self.process_block_ts(metrics);
+			self.process_finality_lag(metrics);
+			self.process_on_demand_order(metrics);
+		} else {
 			self.skip_progress();
-			return self.progress.clone()
-		}
-
-		self.set_initial_progress();
-		self.process_core_assignment();
-		if let Some(progress) = self.progress.as_mut() {
-			progress.core_occupied = self.current_candidate.core_occupied;
-		}
-
-		self.process_bitfield_propagation(metrics);
-
-		match self.current_candidate.state {
-			ParachainBlockState::Idle =>
-				if let Some(progress) = self.progress.as_mut() {
-					progress.events.push(ParachainConsensusEvent::SkippedSlot);
-					self.stats.on_skipped_slot(progress);
-					metrics.on_skipped_slot(progress);
-				},
-			ParachainBlockState::Backed =>
-				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-					if let Some(progress) = self.progress.as_mut() {
-						progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
-					}
-					self.stats.on_backed();
-					metrics.on_backed(self.para_id);
-
-					if self.handle_on_demand_delay("backed", metrics) {
-						self.on_demand_order_block_number = None;
-					}
-					if self.handle_on_demand_delay_sec("backed", metrics) {
-						self.on_demand_order_ts = None;
-					}
-				},
-			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
-				self.progress_availability(metrics).await;
-			},
-		}
-
-		self.process_disputes(metrics);
-		self.process_active_message_queues();
-
-		let last_block_number = self.previous_relay_block.unwrap_or((u32::MAX, H256::zero())).0;
-		let (relay_block_number, _) = self.current_relay_block.expect("Just checked above; qed");
-		if relay_block_number > last_block_number {
-			let ts = self.get_ts();
-			self.stats.on_block(ts);
-			metrics.on_block(ts.as_secs_f64(), self.para_id);
-		}
-
-		if let Some(finality_lag) = self.finality_lag {
-			metrics.on_finality_lag(finality_lag);
-		}
-
-		if self.handle_on_demand_order(metrics) {
-			self.on_demand_order = None;
-		}
-		if self.on_demand_scheduled {
-			let _sent = self.handle_on_demand_delay("scheduled", metrics);
-			let _sent = self.handle_on_demand_delay_sec("scheduled", metrics);
-			self.on_demand_scheduled = false;
 		}
 
 		self.progress.clone()
@@ -390,7 +342,7 @@ impl SubxtTracker {
 					.unwrap_or(self.current_relay_block_ts.unwrap_or_default()),
 				block_number,
 				block_hash,
-				is_fork: self.is_fork(block_number),
+				is_fork: self.is_fork(),
 				finality_lag: self.finality_lag,
 				..Default::default()
 			});
@@ -419,6 +371,43 @@ impl SubxtTracker {
 		}
 	}
 
+	fn process_block_ts(&mut self, metrics: &Metrics) {
+		if !self.is_fork() {
+			let ts = self.get_ts();
+			self.stats.on_block(ts);
+			metrics.on_block(ts.as_secs_f64(), self.para_id);
+		}
+	}
+
+	fn process_finality_lag(&mut self, metrics: &Metrics) {
+		if let Some(finality_lag) = self.finality_lag {
+			metrics.on_finality_lag(finality_lag);
+		}
+	}
+
+	fn process_on_demand_order(&mut self, metrics: &Metrics) {
+		if self.handle_on_demand_order(metrics) {
+			self.on_demand_order = None;
+		}
+
+		match self.current_candidate.state {
+			ParachainBlockState::Backed => {
+				if self.handle_on_demand_delay("backed", metrics) {
+					self.on_demand_order_block_number = None;
+				}
+				if self.handle_on_demand_delay_sec("backed", metrics) {
+					self.on_demand_order_ts = None;
+				}
+			},
+			_ => {},
+		}
+		if self.on_demand_scheduled {
+			let _sent = self.handle_on_demand_delay("scheduled", metrics);
+			let _sent = self.handle_on_demand_delay_sec("scheduled", metrics);
+			self.on_demand_scheduled = false;
+		}
+	}
+
 	async fn set_hrmp_channels(&mut self, block_hash: H256, has_inherent: bool) -> color_eyre::Result<()> {
 		if has_inherent {
 			let inbound = self.fetch_inbound_hrmp_channels(block_hash).await?;
@@ -429,7 +418,7 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	fn set_relay_block(&mut self, block_number: BlockNumber, block_hash: H256, has_inherent: bool) {
+	fn set_relay_block(&mut self, block_hash: H256, block_number: BlockNumber, has_inherent: bool) {
 		if has_inherent {
 			self.previous_relay_block = self.current_relay_block;
 			self.current_relay_block = Some((block_number, block_hash));
@@ -454,7 +443,7 @@ impl SubxtTracker {
 	}
 
 	// Parse inherent data and update state.
-	async fn on_inherent_data(
+	async fn set_inherent_data(
 		&mut self,
 		block_hash: H256,
 		block_number: BlockNumber,
@@ -475,7 +464,7 @@ impl SubxtTracker {
 
 		self.current_candidate.bitfield_count = bitfields.len() as u32;
 
-		if !self.is_fork(block_number) {
+		if !self.is_fork() {
 			self.last_relay_block_ts = self.current_relay_block_ts;
 			self.relay_forks.clear();
 		}
@@ -770,6 +759,12 @@ impl SubxtTracker {
 		}
 	}
 
+	fn process_core_occupied(&mut self) {
+		if let Some(progress) = self.progress.as_mut() {
+			progress.core_occupied = self.current_candidate.core_occupied;
+		}
+	}
+
 	fn process_bitfield_propagation(&mut self, metrics: &Metrics) {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
 		if self.current_relay_block.is_none() {
@@ -794,7 +789,29 @@ impl SubxtTracker {
 		metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
 	}
 
-	async fn progress_availability(&mut self, metrics: &Metrics) {
+	async fn process_candidate_state(&mut self, metrics: &Metrics) {
+		match self.current_candidate.state {
+			ParachainBlockState::Idle =>
+				if let Some(progress) = self.progress.as_mut() {
+					progress.events.push(ParachainConsensusEvent::SkippedSlot);
+					self.stats.on_skipped_slot(progress);
+					metrics.on_skipped_slot(progress);
+				},
+			ParachainBlockState::Backed =>
+				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
+					if let Some(progress) = self.progress.as_mut() {
+						progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
+					}
+					self.stats.on_backed();
+					metrics.on_backed(self.para_id);
+				},
+			ParachainBlockState::PendingAvailability | ParachainBlockState::Included => {
+				self.process_availability(metrics).await;
+			},
+		}
+	}
+
+	async fn process_availability(&mut self, metrics: &Metrics) {
 		let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
 		let relay_block_ts = self.current_relay_block_ts.expect("Checked by caller; qed");
 
@@ -872,8 +889,11 @@ impl SubxtTracker {
 		}
 	}
 
-	fn is_fork(&self, block_number: u32) -> bool {
-		block_number == self.previous_relay_block.unwrap_or((0, H256::zero())).0
+	fn is_fork(&self) -> bool {
+		match (self.current_relay_block, self.previous_relay_block) {
+			(Some((current, _)), Some((previous, _))) => current == previous,
+			_ => false,
+		}
 	}
 
 	/// Returns the stats
