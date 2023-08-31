@@ -269,7 +269,7 @@ impl ParachainBlockTracker for SubxtTracker {
 
 	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_some() {
-			self.set_initial_progress();
+			self.init_progress();
 
 			self.process_core_assignment();
 			self.process_core_occupied();
@@ -332,7 +332,7 @@ impl SubxtTracker {
 		self.progress = None
 	}
 
-	fn set_initial_progress(&mut self) {
+	fn init_progress(&mut self) {
 		if let Some((block_number, block_hash)) = self.current_relay_block {
 			self.progress = Some(ParachainProgressUpdate {
 				para_id: self.para_id,
@@ -431,15 +431,6 @@ impl SubxtTracker {
 			self.on_demand_order_block_number = self.current_relay_block.map(|(num, _)| num);
 			self.on_demand_order_ts = self.current_relay_block_ts;
 		}
-	}
-
-	async fn get_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
-		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::AccountKeys, session_hash)
-			.await
-			.map(|session_entry| session_entry.into_inner().unwrap())
 	}
 
 	// Parse inherent data and update state.
@@ -640,7 +631,7 @@ impl SubxtTracker {
 				}
 
 				let session_index = dispute_info.session;
-				let session_info = self.get_session_keys(session_index).await;
+				let session_info = self.read_session_keys(session_index).await;
 				// TODO: we would like to distinguish different dispute phases at some point
 				let voted_for = dispute_info
 					.statements
@@ -675,7 +666,7 @@ impl SubxtTracker {
 				let initiators_session_info = if session_index == stored_dispute.session_index {
 					session_info
 				} else {
-					self.get_session_keys(stored_dispute.session_index).await
+					self.read_session_keys(stored_dispute.session_index).await
 				};
 				let initiators: Vec<_> = stored_dispute
 					.initiator_indices
@@ -947,12 +938,21 @@ impl SubxtTracker {
 			.await?)
 	}
 
+	async fn read_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
+		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
+		self.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::AccountKeys, session_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
 	async fn read_inherent_data(&self, block_hash: H256) -> Option<InherentData> {
 		self.api
 			.storage()
 			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
 			.await
-			.map(|raw| raw.into_inner().unwrap())
+			.map(|v| v.into_inner().unwrap())
 	}
 
 	async fn read_on_demand_order(&self, block_hash: H256) -> Option<OnDemandOrder> {
@@ -960,7 +960,7 @@ impl SubxtTracker {
 			.storage()
 			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
 			.await
-			.map(|v| v.into_inner::<OnDemandOrder>().unwrap())
+			.map(|v| v.into_inner().unwrap())
 	}
 }
 
