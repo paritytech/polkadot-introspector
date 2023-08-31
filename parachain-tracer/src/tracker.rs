@@ -127,6 +127,24 @@ impl SubxtMessageQueuesTracker {
 		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
 			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
 	}
+
+	/// Returns active inbound channels
+	fn active_inbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
+		self.inbound_hrmp_channels
+			.iter()
+			.filter(|(_, queue)| queue.total_size > 0)
+			.map(|(source_id, queue)| (*source_id, queue.clone()))
+			.collect::<Vec<_>>()
+	}
+
+	/// Returns active outbound channels
+	fn active_outbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
+		self.outbound_hrmp_channels
+			.iter()
+			.filter(|(_, queue)| queue.total_size > 0)
+			.map(|(dest_id, queue)| (*dest_id, queue.clone()))
+			.collect::<Vec<_>>()
+	}
 }
 
 /// A subxt based parachain candidate tracker.
@@ -175,7 +193,7 @@ pub struct SubxtTracker {
 	/// Parachain statistics. Used to print summary at the end of a run.
 	stats: ParachainStats,
 	/// Parachain progress update.
-	update: Option<ParachainProgressUpdate>,
+	progress: Option<ParachainProgressUpdate>,
 	/// Current forks recorded
 	relay_forks: Vec<ForkTracker>,
 }
@@ -244,50 +262,36 @@ impl ParachainBlockTracker for SubxtTracker {
 	}
 
 	async fn set_new_session(&mut self, session_index: u32) {
-		if let Some(update) = self.update.as_mut() {
-			update.events.push(ParachainConsensusEvent::NewSession(session_index));
+		if let Some(progress) = self.progress.as_mut() {
+			progress.events.push(ParachainConsensusEvent::NewSession(session_index));
 		}
 	}
 
 	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_none() {
-			self.update = None;
-			return None
+			self.skip_progress();
+			return self.progress.clone()
 		}
 
-		let (relay_block_number, relay_block_hash) = self.current_relay_block.expect("Just checked above; qed");
-
-		self.update = Some(ParachainProgressUpdate {
-			para_id: self.para_id,
-			timestamp: self.current_relay_block_ts.unwrap_or_default(),
-			prev_timestamp: self
-				.last_relay_block_ts
-				.unwrap_or_else(|| self.current_relay_block_ts.unwrap_or_default()),
-			block_number: relay_block_number,
-			block_hash: relay_block_hash,
-			is_fork: self.is_fork(relay_block_number),
-			finality_lag: self.finality_lag,
-			..Default::default()
-		});
-
-		self.progress_core_assignment();
-		if let Some(update) = self.update.as_mut() {
-			update.core_occupied = self.current_candidate.core_occupied;
+		self.set_initial_progress();
+		self.process_core_assignment();
+		if let Some(progress) = self.progress.as_mut() {
+			progress.core_occupied = self.current_candidate.core_occupied;
 		}
 
-		self.update_bitfield_propagation(metrics);
+		self.process_bitfield_propagation(metrics);
 
 		match self.current_candidate.state {
 			ParachainBlockState::Idle =>
-				if let Some(update) = self.update.as_mut() {
-					update.events.push(ParachainConsensusEvent::SkippedSlot);
-					self.stats.on_skipped_slot(update);
-					metrics.on_skipped_slot(update);
+				if let Some(progress) = self.progress.as_mut() {
+					progress.events.push(ParachainConsensusEvent::SkippedSlot);
+					self.stats.on_skipped_slot(progress);
+					metrics.on_skipped_slot(progress);
 				},
 			ParachainBlockState::Backed =>
 				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-					if let Some(update) = self.update.as_mut() {
-						update.events.push(ParachainConsensusEvent::Backed(candidate_hash));
+					if let Some(progress) = self.progress.as_mut() {
+						progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
 					}
 					self.stats.on_backed();
 					metrics.on_backed(self.para_id);
@@ -304,41 +308,15 @@ impl ParachainBlockTracker for SubxtTracker {
 			},
 		}
 
-		self.disputes.iter().for_each(|outcome| {
-			self.stats.on_disputed(outcome);
-			metrics.on_disputed(outcome, self.para_id);
-			if let Some(update) = self.update.as_mut() {
-				update.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
-			}
-		});
-
-		if self.message_queues.has_hrmp_messages() {
-			let inbound_channels_active = self
-				.message_queues
-				.inbound_hrmp_channels
-				.iter()
-				.filter(|(_, queue)| queue.total_size > 0)
-				.map(|(source_id, queue)| (*source_id, queue.clone()))
-				.collect::<Vec<_>>();
-			let outbound_channels_active = self
-				.message_queues
-				.outbound_hrmp_channels
-				.iter()
-				.filter(|(_, queue)| queue.total_size > 0)
-				.map(|(dest_id, queue)| (*dest_id, queue.clone()))
-				.collect::<Vec<_>>();
-			if let Some(update) = self.update.as_mut() {
-				update
-					.events
-					.push(ParachainConsensusEvent::MessageQueues(inbound_channels_active, outbound_channels_active))
-			}
-		}
+		self.process_disputes(metrics);
+		self.process_active_message_queues();
 
 		let last_block_number = self.previous_relay_block.unwrap_or((u32::MAX, H256::zero())).0;
+		let (relay_block_number, _) = self.current_relay_block.expect("Just checked above; qed");
 		if relay_block_number > last_block_number {
-			let tm = self.get_ts();
-			self.stats.on_block(tm);
-			metrics.on_block(tm.as_secs_f64(), self.para_id);
+			let ts = self.get_ts();
+			self.stats.on_block(ts);
+			metrics.on_block(ts.as_secs_f64(), self.para_id);
 		}
 
 		if let Some(finality_lag) = self.finality_lag {
@@ -354,7 +332,7 @@ impl ParachainBlockTracker for SubxtTracker {
 			self.on_demand_scheduled = false;
 		}
 
-		self.update.clone()
+		self.progress.clone()
 	}
 }
 
@@ -393,8 +371,51 @@ impl SubxtTracker {
 			last_included_block_number: None,
 			last_included_at_ts: None,
 			message_queues: Default::default(),
-			update: None,
+			progress: None,
 			relay_forks: vec![],
+		}
+	}
+
+	fn skip_progress(&mut self) {
+		self.progress = None
+	}
+
+	fn set_initial_progress(&mut self) {
+		if let Some((block_number, block_hash)) = self.current_relay_block {
+			self.progress = Some(ParachainProgressUpdate {
+				para_id: self.para_id,
+				timestamp: self.current_relay_block_ts.unwrap_or_default(),
+				prev_timestamp: self
+					.last_relay_block_ts
+					.unwrap_or(self.current_relay_block_ts.unwrap_or_default()),
+				block_number,
+				block_hash,
+				is_fork: self.is_fork(block_number),
+				finality_lag: self.finality_lag,
+				..Default::default()
+			});
+		}
+	}
+
+	fn process_disputes(&mut self, metrics: &Metrics) {
+		self.disputes.iter().for_each(|outcome| {
+			self.stats.on_disputed(outcome);
+			metrics.on_disputed(outcome, self.para_id);
+			if let Some(progress) = self.progress.as_mut() {
+				progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
+			}
+		});
+	}
+	fn process_active_message_queues(&mut self) {
+		if !self.message_queues.has_hrmp_messages() {
+			return
+		}
+
+		if let Some(progress) = self.progress.as_mut() {
+			progress.events.push(ParachainConsensusEvent::MessageQueues(
+				self.message_queues.active_inbound_channels(),
+				self.message_queues.active_outbound_channels(),
+			))
 		}
 	}
 
@@ -737,41 +758,40 @@ impl SubxtTracker {
 			self.current_candidate.candidate_hash = None;
 		}
 		self.disputes.clear();
-		self.update = None;
+		self.progress = None;
 	}
 
 	// TODO: fix this, it is broken, nobody sets this.
-	fn progress_core_assignment(&mut self) {
+	fn process_core_assignment(&mut self) {
 		if let Some(assigned_core) = self.last_assignment {
-			if let Some(update) = self.update.as_mut() {
-				update.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core));
+			if let Some(progress) = self.progress.as_mut() {
+				progress.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core));
 			}
 		}
 	}
 
-	fn update_bitfield_propagation(&mut self, metrics: &Metrics) {
+	fn process_bitfield_propagation(&mut self, metrics: &Metrics) {
 		// This makes sense to show if we have a relay chain block and pipeline not idle.
-		if let Some((_, _)) = self.current_relay_block {
-			// If `max_av_bits` is not set do not check for bitfield propagation.
-			// Usually this happens at startup, when we miss a core assignment and we do not update
-			// availability before calling this `fn`.
-			if self.current_candidate.max_av_bits > 0 &&
-				self.current_candidate.state != ParachainBlockState::Idle &&
-				self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2
-			{
-				if let Some(update) = self.update.as_mut() {
-					update.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
-						self.current_candidate.bitfield_count,
-						self.current_candidate.max_av_bits,
-					))
-				}
-				self.stats.on_bitfields(self.current_candidate.bitfield_count, true);
-				metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
-			} else {
-				self.stats.on_bitfields(self.current_candidate.bitfield_count, false);
-				metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
+		if self.current_relay_block.is_none() {
+			return
+		}
+
+		// If `max_av_bits` is not set do not check for bitfield propagation.
+		// Usually this happens at startup, when we miss a core assignment and we do not update
+		// availability before calling this `fn`.
+		let is_low = self.current_candidate.max_av_bits > 0 &&
+			self.current_candidate.state != ParachainBlockState::Idle &&
+			self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2;
+		if let Some(progress) = self.progress.as_mut() {
+			if is_low {
+				progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
+					self.current_candidate.bitfield_count,
+					self.current_candidate.max_av_bits,
+				))
 			}
 		}
+		self.stats.on_bitfields(self.current_candidate.bitfield_count, is_low);
+		metrics.on_bitfields(self.current_candidate.bitfield_count, true, self.para_id);
 	}
 
 	async fn progress_availability(&mut self, metrics: &Metrics) {
@@ -779,17 +799,17 @@ impl SubxtTracker {
 		let relay_block_ts = self.current_relay_block_ts.expect("Checked by caller; qed");
 
 		// Update bitfields health.
-		if let Some(update) = self.update.as_mut() {
-			update.bitfield_health.max_bitfield_count = self.current_candidate.max_av_bits;
-			update.bitfield_health.available_count = self.current_candidate.current_av_bits;
-			update.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
+		if let Some(progress) = self.progress.as_mut() {
+			progress.bitfield_health.max_bitfield_count = self.current_candidate.max_av_bits;
+			progress.bitfield_health.available_count = self.current_candidate.current_av_bits;
+			progress.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
 		}
 
 		// TODO: Availability timeout.
 		if self.current_candidate.current_av_bits > (self.current_candidate.max_av_bits / 3) * 2 {
 			if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-				if let Some(update) = self.update.as_mut() {
-					update.events.push(ParachainConsensusEvent::Included(
+				if let Some(progress) = self.progress.as_mut() {
+					progress.events.push(ParachainConsensusEvent::Included(
 						candidate_hash,
 						self.current_candidate.current_av_bits,
 						self.current_candidate.max_av_bits,
@@ -826,8 +846,8 @@ impl SubxtTracker {
 				self.last_included_at_ts = Some(relay_block_ts);
 			}
 		} else if self.current_candidate.core_occupied && self.last_backed_at_block_number != Some(relay_block_number) {
-			if let Some(update) = self.update.as_mut() {
-				update.events.push(ParachainConsensusEvent::SlowAvailability(
+			if let Some(progress) = self.progress.as_mut() {
+				progress.events.push(ParachainConsensusEvent::SlowAvailability(
 					self.current_candidate.current_av_bits,
 					self.current_candidate.max_av_bits,
 				));
