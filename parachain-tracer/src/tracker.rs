@@ -141,7 +141,7 @@ pub struct SubxtTracker {
 	/// The last availability core index the parachain has been assigned to.
 	last_assignment: Option<u32>,
 	/// The relay chain block number at which the last candidate was backed at.
-	last_backed_at: Option<BlockNumber>,
+	last_backed_at_block_number: Option<BlockNumber>,
 	/// The relay chain timestamp at which the last candidate was included at.
 	last_included_at_ts: Option<Timestamp>,
 	/// Information about current block we track.
@@ -157,7 +157,7 @@ pub struct SubxtTracker {
 	/// Current on-demand order
 	on_demand_order: Option<OnDemandOrder>,
 	/// Relay block where the last on-demand order was placed
-	on_demand_order_block: Option<BlockNumber>,
+	on_demand_order_block_number: Option<BlockNumber>,
 	/// Timestamp where the last on-demand order was placed
 	on_demand_order_ts: Option<Timestamp>,
 	/// On-demand parachain was scheduled in current relay block
@@ -167,7 +167,7 @@ pub struct SubxtTracker {
 	/// Last relay chain block timestamp.
 	last_relay_block_ts: Option<Timestamp>,
 	/// Last included candidate in relay parent number
-	last_included_block: Option<BlockNumber>,
+	last_included_block_number: Option<BlockNumber>,
 	/// Messages queues status
 	message_queues: SubxtMessageQueuesTracker,
 
@@ -229,7 +229,7 @@ impl ParachainBlockTracker for SubxtTracker {
 		block_hash: Self::RelayChainNewHead,
 		block_number: Self::RelayChainBlockNumber,
 	) -> color_eyre::Result<()> {
-		let maybe_inherent = self.get_inherent_data(block_hash).await;
+		let maybe_inherent = self.read_inherent_data(block_hash).await;
 		if maybe_inherent.is_none() {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
@@ -294,7 +294,7 @@ impl ParachainBlockTracker for SubxtTracker {
 					metrics.on_backed(self.para_id);
 
 					if self.handle_on_demand_delay("backed", metrics) {
-						self.on_demand_order_block = None;
+						self.on_demand_order_block_number = None;
 					}
 					if self.handle_on_demand_delay_sec("backed", metrics) {
 						self.on_demand_order_ts = None;
@@ -383,15 +383,15 @@ impl SubxtTracker {
 			previous_relay_block: None,
 			current_relay_block_ts: None,
 			on_demand_order: None,
-			on_demand_order_block: None,
+			on_demand_order_block_number: None,
 			on_demand_order_ts: None,
 			on_demand_scheduled: false,
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_assignment: None,
-			last_backed_at: None,
+			last_backed_at_block_number: None,
 			last_relay_block_ts: None,
-			last_included_block: None,
+			last_included_block_number: None,
 			last_included_at_ts: None,
 			message_queues: Default::default(),
 			update: None,
@@ -399,26 +399,11 @@ impl SubxtTracker {
 		}
 	}
 
-	async fn get_inherent_data(&self, block_hash: H256) -> Option<InherentData> {
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
-			.await
-			.map(|raw| raw.into_inner().unwrap())
-	}
-
 	async fn set_hrmp_channels(&mut self, block_hash: H256, has_inherent: bool) -> color_eyre::Result<()> {
 		if has_inherent {
-			let inbound_hrmp_channels = self
-				.executor
-				.get_inbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-				.await?;
-			let outbound_hrmp_channels = self
-				.executor
-				.get_outbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-				.await?;
-			self.message_queues
-				.update_hrmp_channels(inbound_hrmp_channels, outbound_hrmp_channels);
+			let inbound = self.fetch_inbound_hrmp_channels(block_hash).await?;
+			let outbound = self.fetch_outbound_hrmp_channels(block_hash).await?;
+			self.message_queues.update_hrmp_channels(inbound, outbound);
 		}
 
 		Ok(())
@@ -432,22 +417,10 @@ impl SubxtTracker {
 	}
 
 	async fn set_on_demand_order(&mut self, block_hash: H256) {
-		self.on_demand_order = self
-			.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
-			.await
-			.map(|v| v.into_inner::<OnDemandOrder>().unwrap());
-
-		if self.on_demand_order.is_none() {
-			return
-		}
-
-		if let Some((block_number, _)) = self.current_relay_block {
-			self.on_demand_order_block = Some(block_number);
-		}
-		if let Some(ts) = self.current_relay_block_ts {
-			self.on_demand_order_ts = Some(ts);
+		self.on_demand_order = self.read_on_demand_order(block_hash).await;
+		if self.on_demand_order.is_some() {
+			self.on_demand_order_block_number = self.current_relay_block.map(|(num, _)| num);
+			self.on_demand_order_ts = self.current_relay_block_ts;
 		}
 	}
 
@@ -580,7 +553,7 @@ impl SubxtTracker {
 			self.current_candidate.candidate_hash =
 				Some(BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash)));
 			self.current_candidate.candidate = Some(backed_candidate);
-			self.last_backed_at = Some(block_number);
+			self.last_backed_at_block_number = Some(block_number);
 
 			true
 		} else {
@@ -842,18 +815,19 @@ impl SubxtTracker {
 							.saturating_sub(stored_candidate.candidate_inclusion.relay_parent_number),
 					);
 				}
-				self.stats.on_included(relay_block_number, self.last_included_block, backed_in);
+				self.stats
+					.on_included(relay_block_number, self.last_included_block_number, backed_in);
 				metrics.on_included(
 					relay_block_number,
-					self.last_included_block,
+					self.last_included_block_number,
 					backed_in,
 					self.get_time_diff(self.current_relay_block_ts, self.last_included_at_ts),
 					self.para_id,
 				);
-				self.last_included_block = Some(relay_block_number);
+				self.last_included_block_number = Some(relay_block_number);
 				self.last_included_at_ts = Some(relay_block_ts);
 			}
-		} else if self.current_candidate.core_occupied && self.last_backed_at != Some(relay_block_number) {
+		} else if self.current_candidate.core_occupied && self.last_backed_at_block_number != Some(relay_block_number) {
 			if let Some(update) = self.update.as_mut() {
 				update.events.push(ParachainConsensusEvent::SlowAvailability(
 					self.current_candidate.current_av_bits,
@@ -894,7 +868,8 @@ impl SubxtTracker {
 	}
 
 	fn handle_on_demand_delay(&self, until: &str, metrics: &Metrics) -> bool {
-		if let (Some(on_demand_block), Some((relay_block, _))) = (self.on_demand_order_block, self.current_relay_block)
+		if let (Some(on_demand_block), Some((relay_block, _))) =
+			(self.on_demand_order_block_number, self.current_relay_block)
 		{
 			metrics.handle_on_demand_delay(relay_block.saturating_sub(on_demand_block), self.para_id, until);
 			return true
@@ -908,6 +883,42 @@ impl SubxtTracker {
 			return true
 		}
 		false
+	}
+
+	async fn fetch_inbound_hrmp_channels(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>> {
+		Ok(self
+			.executor
+			.get_inbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
+			.await?)
+	}
+
+	async fn fetch_outbound_hrmp_channels(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>> {
+		Ok(self
+			.executor
+			.get_outbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
+			.await?)
+	}
+
+	async fn read_inherent_data(&self, block_hash: H256) -> Option<InherentData> {
+		self.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
+			.await
+			.map(|raw| raw.into_inner().unwrap())
+	}
+
+	async fn read_on_demand_order(&self, block_hash: H256) -> Option<OnDemandOrder> {
+		self.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
+			.await
+			.map(|v| v.into_inner::<OnDemandOrder>().unwrap())
 	}
 }
 
