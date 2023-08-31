@@ -63,8 +63,9 @@ pub trait ParachainBlockTracker {
 		block_hash: Self::RelayChainNewHead,
 		block_number: Self::RelayChainBlockNumber,
 	) -> color_eyre::Result<()>;
+
 	/// Called when a new session is observed
-	async fn new_session(&mut self, new_session_index: u32);
+	async fn set_new_session(&mut self, session_index: u32);
 
 	/// Update current parachain progress.
 	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
@@ -242,9 +243,9 @@ impl ParachainBlockTracker for SubxtTracker {
 		Ok(())
 	}
 
-	async fn new_session(&mut self, new_session_index: u32) {
+	async fn set_new_session(&mut self, session_index: u32) {
 		if let Some(update) = self.update.as_mut() {
-			update.events.push(ParachainConsensusEvent::NewSession(new_session_index));
+			update.events.push(ParachainConsensusEvent::NewSession(session_index));
 		}
 	}
 

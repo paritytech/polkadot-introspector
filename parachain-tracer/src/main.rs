@@ -229,7 +229,7 @@ impl ParachainTracer {
 								};
 							},
 						CollectorUpdateEvent::NewSession(idx) => {
-							tracker.new_session(idx).await;
+							tracker.set_new_session(idx).await;
 						},
 						CollectorUpdateEvent::Termination(reason) => {
 							info!("collector is terminating");
