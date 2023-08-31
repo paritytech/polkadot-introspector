@@ -251,13 +251,11 @@ impl ParachainBlockTracker for SubxtTracker {
 
 	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if self.current_relay_block.is_none() {
-			// return writeln!(f, "{}", "No relay block processed".to_string().bold().red(),)
 			self.update = None;
 			return None
 		}
 
 		let (relay_block_number, relay_block_hash) = self.current_relay_block.expect("Just checked above; qed");
-		let is_fork = relay_block_number == self.previous_relay_block.unwrap_or((0, H256::zero())).0;
 
 		self.update = Some(ParachainProgressUpdate {
 			para_id: self.para_id,
@@ -267,7 +265,7 @@ impl ParachainBlockTracker for SubxtTracker {
 				.unwrap_or_else(|| self.current_relay_block_ts.unwrap_or_default()),
 			block_number: relay_block_number,
 			block_hash: relay_block_hash,
-			is_fork,
+			is_fork: self.is_fork(relay_block_number),
 			finality_lag: self.finality_lag,
 			..Default::default()
 		});
@@ -446,7 +444,6 @@ impl SubxtTracker {
 		}
 
 		let data = data.expect("Checked above: qed");
-		let is_fork = block_number == self.current_relay_block.unwrap_or((0, H256::zero())).0;
 		let backed_candidates = data.backed_candidates;
 		let validator_groups = self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await?;
 		let bitfields = data
@@ -457,7 +454,7 @@ impl SubxtTracker {
 
 		self.current_candidate.bitfield_count = bitfields.len() as u32;
 
-		if !is_fork {
+		if !self.is_fork(block_number) {
 			self.last_relay_block_ts = self.current_relay_block_ts;
 			self.relay_forks.clear();
 		}
@@ -853,6 +850,10 @@ impl SubxtTracker {
 			(Some(lhs), Some(rhs)) => Some(Duration::from_millis(lhs).saturating_sub(Duration::from_millis(rhs))),
 			_ => None,
 		}
+	}
+
+	fn is_fork(&self, block_number: u32) -> bool {
+		block_number == self.previous_relay_block.unwrap_or((0, H256::zero())).0
 	}
 
 	/// Returns the stats
