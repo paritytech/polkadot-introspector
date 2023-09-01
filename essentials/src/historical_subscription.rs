@@ -15,6 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use tokio::sync::broadcast::error::TryRecvError;
+
 use crate::{
 	api::subxt_wrapper::RequestExecutor,
 	chain_subscription::ChainSubscriptionEvent,
@@ -98,7 +100,7 @@ impl HistoricalSubscription {
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut executor = RequestExecutor::new(retry);
-		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
+		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
 		let last_block_number = match executor.get_block(&url, None).await {
@@ -115,20 +117,7 @@ impl HistoricalSubscription {
 		}
 
 		for block_number in from_block_number..=to_block_number {
-			tokio::select! {
-				_ = shutdown_rx.recv() => {
-					info!("Received interrupt signal shutting down subscription");
-					return;
-				}
-				_ = heartbeat_periodic.tick() => {
-					debug!("sent heartbeat to subscribers");
-					let res = update_channel.send(ChainSubscriptionEvent::Heartbeat).await;
-					if let Err(e) = res {
-						info!("Event consumer has terminated: {:?}, shutting down", e);
-						return;
-					}
-				}
-			}
+			debug!("Subscription advacing to block #{}/#{}", block_number, to_block_number);
 
 			let message = executor.get_block_hash(&url, Some(block_number)).await;
 			let block_hash = match message {
@@ -144,9 +133,40 @@ impl HistoricalSubscription {
 			};
 
 			info!("[{}] Block imported ({:?})", url, block_hash);
+			if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewBestHead(block_hash)).await {
+				info!("Event consumer has terminated: {:?}, shutting down", e);
+				return
+			}
 			if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedBlock(block_hash)).await {
 				info!("Event consumer has terminated: {:?}, shutting down", e);
 				return
+			}
+
+			match shutdown_rx.try_recv() {
+				Err(TryRecvError::Closed) | Ok(_) => {
+					info!("Received interrupt signal shutting down subscription");
+					return
+				},
+				_ => {},
+			}
+		}
+
+		loop {
+			// We wait here for termination.
+			tokio::select! {
+				_ = shutdown_rx.recv() => {
+					info!("Received interrupt signal shutting down subscription");
+					return;
+				}
+				_ = heartbeat_periodic.tick() => {
+					debug!("sent heartbeat to subscribers");
+					let res = update_channel.send(ChainSubscriptionEvent::Heartbeat).await;
+					if let Err(e) = res {
+						info!("Event consumer has terminated: {:?}, shutting down", e);
+						return;
+					}
+					heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
+				}
 			}
 		}
 	}
