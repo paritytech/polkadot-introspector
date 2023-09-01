@@ -471,31 +471,69 @@ impl SubxtTracker {
 		}
 
 		let data = data.expect("Checked above: qed");
-
-		// bitfield_count
 		let bitfields = data
 			.bitfields
 			.into_iter()
 			.map(|b| b.payload)
 			.collect::<Vec<polkadot_primitives::AvailabilityBitfield>>();
-		self.current_candidate.bitfield_count = bitfields.len() as u32;
+
+		self.set_bitfield_count(bitfields.len() as u32);
 
 		// clear forks
 		if !self.is_fork() {
-			self.last_relay_block_ts = self.current_relay_block_ts;
-			self.relay_forks.clear();
+			self.clear_forks();
 		}
+		self.update_fork_tracker(block_hash, block_number);
+		self.set_current_relay_block_ts(block_hash).await?;
+		self.set_finality_lag().await;
+
+		// Update backing information if any.
+		let candidate_just_backed = self.set_backing(data.backed_candidates, block_number);
+		self.set_core_assignment(block_hash).await?;
+		self.set_core_occupation(block_hash).await?;
+		self.set_disputes(&data.disputes[..]).await;
+
+		// If a candidate was backed in this relay block, we don't need to process availability now.
+		if candidate_just_backed {
+			self.set_backed_candidate();
+			return Ok(())
+		}
+
+		// If no candidate is being backed reset the state to `Idle`.
+		if self.no_backed_candidate() {
+			self.set_idle_state();
+			return Ok(())
+		}
+
+		self.set_availability(block_hash, bitfields).await?;
+
+		Ok(())
+	}
+
+	fn set_bitfield_count(&mut self, count: u32) {
+		self.current_candidate.bitfield_count = count;
+	}
+
+	fn clear_forks(&mut self) {
+		self.last_relay_block_ts = self.current_relay_block_ts;
+		self.relay_forks.clear();
+	}
+
+	fn update_fork_tracker(&mut self, block_hash: H256, block_number: BlockNumber) {
 		self.relay_forks.push(ForkTracker {
 			relay_hash: block_hash,
 			relay_number: block_number,
 			included_candidate: None,
 			backed_candidate: None,
 		});
+	}
 
-		// current_relay_block_ts
+	async fn set_current_relay_block_ts(&mut self, block_hash: H256) -> color_eyre::Result<(), SubxtWrapperError> {
 		self.current_relay_block_ts = Some(self.fetch_block_timestamp(block_hash).await?);
+		Ok(())
+	}
 
-		// finality_lag
+	async fn set_finality_lag(&mut self) {
 		if let Some((relay_block_number, relay_block_hash)) = self.current_relay_block {
 			let maybe_relevant_finalized_block_number =
 				self.read_relevant_finalized_block_number(relay_block_hash).await;
@@ -504,50 +542,6 @@ impl SubxtTracker {
 				None => None,
 			};
 		}
-
-		// Update backing information if any.
-		let candidate_just_backed = self.set_backing(data.backed_candidates, block_number);
-		self.set_core_assignment(block_hash).await?;
-
-		if let Some(assigned_core) = self.current_candidate.assigned_core {
-			self.set_core_occupation(assigned_core, block_hash).await?;
-		}
-
-		if !data.disputes.is_empty() {
-			self.set_disputes(&data.disputes[..]).await;
-		}
-
-		// If a candidate was backed in this relay block, we don't need to process availability now.
-		if candidate_just_backed {
-			if let Some(current_fork) = self.relay_forks.last_mut() {
-				current_fork.backed_candidate = Some(
-					self.current_candidate
-						.candidate_hash
-						.expect("checked in candidate_backed, qed."),
-				);
-			}
-			return Ok(())
-		}
-
-		if self.current_candidate.candidate.is_none() &&
-			self.relay_forks
-				.iter()
-				.all(|fork| fork.backed_candidate.is_none() && fork.included_candidate.is_none())
-		{
-			// If no candidate is being backed reset the state to `Idle`.
-			self.current_candidate.state = ParachainBlockState::Idle;
-			return Ok(())
-		}
-
-		let validator_groups = self.fetch_backing_groups(block_hash).await?;
-		if self.current_candidate.state == ParachainBlockState::Backed {
-			// We only process availability if our parachain is assigned to an availability core.
-			if let Some(assigned_core) = self.current_candidate.assigned_core {
-				self.set_availability(assigned_core, bitfields, validator_groups);
-			}
-		}
-
-		Ok(())
 	}
 
 	fn set_backing(
@@ -592,9 +586,11 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	async fn set_core_occupation(&mut self, core: u32, block_hash: H256) -> color_eyre::Result<()> {
-		let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
-		self.current_candidate.core_occupied = matches!(occupied_cores[core as usize], CoreOccupied::Paras);
+	async fn set_core_occupation(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		if let Some(core) = self.current_candidate.assigned_core {
+			let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
+			self.current_candidate.core_occupied = matches!(occupied_cores[core as usize], CoreOccupied::Paras);
+		}
 		Ok(())
 	}
 
@@ -678,39 +674,60 @@ impl SubxtTracker {
 		}
 	}
 
-	fn set_availability(
-		&mut self,
-		core: u32,
-		bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
-		validator_groups: Vec<Vec<polkadot_primitives::ValidatorIndex>>,
-	) {
-		let avail_bits: u32 = bitfields
-			.iter()
-			.map(|bitfield| {
-				let bit = bitfield
-					.0
-					.as_bits()
-					.get(core as usize)
-					.expect("core index must be in the bitfield");
-				bit as u32
-			})
-			.sum();
-
-		let all_bits = validator_groups
-			.into_iter()
-			.flatten()
-			.collect::<Vec<polkadot_primitives::ValidatorIndex>>();
-
-		self.current_candidate.max_av_bits = all_bits.len() as u32;
-		self.current_candidate.current_av_bits = avail_bits;
-		self.current_candidate.state = ParachainBlockState::PendingAvailability;
-
-		// Check availability and update state accordingly.
-		if avail_bits > (all_bits.len() as u32 / 3) * 2 {
-			self.current_candidate.state = ParachainBlockState::Included;
-			self.relay_forks.last_mut().expect("must have relay fork").included_candidate =
-				Some(self.current_candidate.candidate_hash.expect("must have candidate"));
+	fn set_backed_candidate(&mut self) {
+		if let Some(current_fork) = self.relay_forks.last_mut() {
+			current_fork.backed_candidate = Some(
+				self.current_candidate
+					.candidate_hash
+					.expect("checked in candidate_backed, qed."),
+			);
 		}
+	}
+
+	fn set_idle_state(&mut self) {
+		self.current_candidate.state = ParachainBlockState::Idle;
+	}
+
+	async fn set_availability(
+		&mut self,
+		block_hash: H256,
+		bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
+	) -> color_eyre::Result<()> {
+		if self.current_candidate.state == ParachainBlockState::Backed {
+			// We only process availability if our parachain is assigned to an availability core.
+			if let Some(core) = self.current_candidate.assigned_core {
+				let validator_groups = self.fetch_backing_groups(block_hash).await?;
+				let avail_bits: u32 = bitfields
+					.iter()
+					.map(|bitfield| {
+						let bit = bitfield
+							.0
+							.as_bits()
+							.get(core as usize)
+							.expect("core index must be in the bitfield");
+						bit as u32
+					})
+					.sum();
+
+				let all_bits = validator_groups
+					.into_iter()
+					.flatten()
+					.collect::<Vec<polkadot_primitives::ValidatorIndex>>();
+
+				self.current_candidate.max_av_bits = all_bits.len() as u32;
+				self.current_candidate.current_av_bits = avail_bits;
+				self.current_candidate.state = ParachainBlockState::PendingAvailability;
+
+				// Check availability and update state accordingly.
+				if avail_bits > (all_bits.len() as u32 / 3) * 2 {
+					self.current_candidate.state = ParachainBlockState::Included;
+					self.relay_forks.last_mut().expect("must have relay fork").included_candidate =
+						Some(self.current_candidate.candidate_hash.expect("must have candidate"));
+				}
+			}
+		}
+
+		Ok(())
 	}
 
 	// TODO: fix this, it is broken, nobody sets this.
@@ -955,5 +972,12 @@ impl SubxtTracker {
 
 	fn on_demand_delay_ts(&self) -> Option<Duration> {
 		time_diff(self.current_relay_block_ts, self.on_demand_order_ts)
+	}
+
+	fn no_backed_candidate(&self) -> bool {
+		self.current_candidate.candidate.is_none() &&
+			self.relay_forks
+				.iter()
+				.all(|fork| fork.backed_candidate.is_none() && fork.included_candidate.is_none())
 	}
 }
