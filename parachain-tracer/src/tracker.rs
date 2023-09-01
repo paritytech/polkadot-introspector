@@ -15,13 +15,16 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 //! This module tracks parachain blocks.
-use crate::utils::{backed_candidate, extract_inherent_fields};
+use crate::utils::{
+	backed_candidate, extract_inherent_fields, extract_misbehaving_validators, extract_validator_addresses,
+	extract_votes,
+};
 
 use super::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
 	prometheus::Metrics,
 	stats::ParachainStats,
-	utils::{extract_validator_address, time_diff},
+	utils::time_diff,
 };
 use log::{debug, error, info};
 use parity_scale_codec::{Decode, Encode};
@@ -548,76 +551,35 @@ impl SubxtTracker {
 	async fn set_disputes(&mut self, disputes: &[polkadot_primitives::DisputeStatementSet]) {
 		self.disputes = Vec::with_capacity(disputes.len());
 		for dispute_info in disputes {
-			let stored_dispute = self
-				.api
-				.storage()
-				.storage_read_prefixed(CollectorPrefixType::Dispute(self.para_id), dispute_info.candidate_hash.0)
-				.await;
-			if let Some(stored_dispute) = stored_dispute.map(|entry| -> DisputeInfo { entry.into_inner().unwrap() }) {
-				if stored_dispute.outcome.is_none() {
-					info!("dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
-						dispute_info.candidate_hash.0);
-					continue
+			if let Some(DisputeInfo { outcome, session_index, initiated, initiator_indices, concluded, .. }) =
+				self.read_dispute(dispute_info.candidate_hash.0).await
+			{
+				if let Some(outcome) = outcome {
+					let session_info = self.read_session_keys(dispute_info.session).await;
+					// TODO: we would like to distinguish different dispute phases at some point
+					let (voted_for, voted_against) = extract_votes(&dispute_info);
+					let misbehaving_validators = extract_misbehaving_validators(
+						session_info.as_ref(),
+						dispute_info,
+						outcome == SubxtDisputeResult::Valid,
+					);
+					let initiators_session_info = self.read_session_keys(session_index).await;
+					let initiators = extract_validator_addresses(initiators_session_info.as_ref(), initiator_indices);
+					self.disputes.push(DisputesTracker {
+						candidate: dispute_info.candidate_hash.0,
+						voted_for,
+						voted_against,
+						outcome,
+						initiators,
+						misbehaving_validators,
+						resolve_time: Some(concluded.expect("dispute must be concluded").saturating_sub(initiated)),
+					});
+				} else {
+					info!(
+						"dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
+						dispute_info.candidate_hash.0
+					);
 				}
-
-				let session_index = dispute_info.session;
-				let session_info = self.read_session_keys(session_index).await;
-				// TODO: we would like to distinguish different dispute phases at some point
-				let voted_for = dispute_info
-					.statements
-					.iter()
-					.filter(|(statement, _, _)| matches!(statement, polkadot_primitives::DisputeStatement::Valid(_)))
-					.count() as u32;
-				let voted_against = dispute_info.statements.len() as u32 - voted_for;
-
-				// This is a tracked outcome
-				let outcome = stored_dispute.outcome.expect("checked above; qed");
-
-				let misbehaving_validators = if outcome == SubxtDisputeResult::Valid {
-					dispute_info
-						.statements
-						.iter()
-						.filter(|(statement, _, _)| {
-							!matches!(statement, polkadot_primitives::DisputeStatement::Valid(_))
-						})
-						.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
-						.collect()
-				} else {
-					dispute_info
-						.statements
-						.iter()
-						.filter(|(statement, _, _)| {
-							matches!(statement, polkadot_primitives::DisputeStatement::Valid(_))
-						})
-						.map(|(_, idx, _)| extract_validator_address(session_info.as_ref(), idx.0))
-						.collect()
-				};
-
-				let initiators_session_info = if session_index == stored_dispute.session_index {
-					session_info
-				} else {
-					self.read_session_keys(stored_dispute.session_index).await
-				};
-				let initiators: Vec<_> = stored_dispute
-					.initiator_indices
-					.iter()
-					.map(|idx| extract_validator_address(initiators_session_info.as_ref(), *idx))
-					.collect();
-
-				self.disputes.push(DisputesTracker {
-					candidate: dispute_info.candidate_hash.0,
-					voted_for,
-					voted_against,
-					outcome,
-					initiators,
-					misbehaving_validators,
-					resolve_time: Some(
-						stored_dispute
-							.concluded
-							.expect("dispute must be concluded")
-							.saturating_sub(stored_dispute.initiated),
-					),
-				});
 			}
 		}
 	}
@@ -885,6 +847,14 @@ impl SubxtTracker {
 		self.api
 			.storage()
 			.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	async fn read_dispute(&self, block_hash: H256) -> Option<DisputeInfo> {
+		self.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::Dispute(self.para_id), block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}

@@ -16,7 +16,7 @@
 
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::InherentData,
-	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatementSet},
+	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatement, DisputeStatementSet},
 	types::{AccountId32, H256},
 };
 use std::time::Duration;
@@ -49,6 +49,16 @@ pub(crate) fn extract_validator_address(
 	}
 }
 
+pub(crate) fn extract_validator_addresses(
+	session_keys: Option<&Vec<AccountId32>>,
+	indices: Vec<u32>,
+) -> Vec<(u32, String)> {
+	indices
+		.iter()
+		.map(|idx| extract_validator_address(session_keys, *idx))
+		.collect()
+}
+
 pub(crate) fn extract_inherent_fields(
 	data: InherentData,
 ) -> (Vec<AvailabilityBitfield>, Vec<BackedCandidate<H256>>, Vec<DisputeStatementSet>) {
@@ -68,4 +78,33 @@ pub(crate) fn backed_candidate(
 	backed_candidates
 		.into_iter()
 		.find(|candidate| candidate.candidate.descriptor.para_id.0 == para_id)
+}
+
+pub(crate) fn extract_misbehaving_validators(
+	session_keys: Option<&Vec<AccountId32>>,
+	info: &DisputeStatementSet,
+	against_valid: bool,
+) -> Vec<(u32, String)> {
+	info.statements
+		.iter()
+		.filter(|(statement, _, _)| {
+			if against_valid {
+				!matches!(statement, DisputeStatement::Valid(_))
+			} else {
+				matches!(statement, DisputeStatement::Valid(_))
+			}
+		})
+		.map(|(_, idx, _)| extract_validator_address(session_keys, idx.0))
+		.collect()
+}
+
+pub(crate) fn extract_votes(info: &DisputeStatementSet) -> (u32, u32) {
+	let voted_for = info
+		.statements
+		.iter()
+		.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+		.count() as u32;
+	let voted_against = info.statements.len() as u32 - voted_for;
+
+	(voted_for, voted_against)
 }
