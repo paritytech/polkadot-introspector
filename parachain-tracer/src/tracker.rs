@@ -517,13 +517,11 @@ impl SubxtTracker {
 	}
 
 	async fn set_finality_lag(&mut self) {
-		if let Some((relay_block_number, relay_block_hash)) = self.current_relay_block {
-			let maybe_relevant_finalized_block_number =
-				self.read_relevant_finalized_block_number(relay_block_hash).await;
-			self.finality_lag = match maybe_relevant_finalized_block_number {
-				Some(num) => Some(relay_block_number - num),
-				None => None,
-			};
+		if let Some((block_number, block_hash)) = self.current_relay_block {
+			self.finality_lag = self
+				.read_relevant_finalized_block_number(block_hash)
+				.await
+				.map(|num| block_number - num);
 		}
 	}
 
