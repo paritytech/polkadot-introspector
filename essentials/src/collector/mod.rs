@@ -517,7 +517,7 @@ impl Collector {
 		block_number: u32,
 	) -> color_eyre::Result<(), CollectorError> {
 		info!(
-			"imported new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
+			"importing new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
 			block_hash,
 			block_number,
 			self.state.current_relay_chain_block_number,
@@ -580,6 +580,14 @@ impl Collector {
 			self.broadcast_event(CollectorUpdateEvent::NewSession(cur_session)).await?;
 		}
 		self.write_parainherent_data(block_hash, block_number, ts).await?;
+
+		debug!(
+			"Success! new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
+			block_hash,
+			block_number,
+			self.state.current_relay_chain_block_number,
+			self.state.current_relay_chain_block_hashes
+		);
 
 		Ok(())
 	}
