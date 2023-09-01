@@ -14,7 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use polkadot_introspector_essentials::types::AccountId32;
+use polkadot_introspector_essentials::{
+	api::subxt_wrapper::InherentData,
+	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatementSet},
+	types::{AccountId32, H256},
+};
 use std::time::Duration;
 
 /// Returns a time difference between optional timestamps
@@ -43,4 +47,24 @@ pub(crate) fn extract_validator_address(
 	} else {
 		(validator_index, "??? (no session keys)".to_string())
 	}
+}
+
+pub(crate) fn extract_inherent_fields(
+	data: Option<InherentData>,
+) -> Option<(Vec<AvailabilityBitfield>, Vec<BackedCandidate<H256>>, Vec<DisputeStatementSet>)> {
+	data.map(|d| {
+		let bitfields = d
+			.bitfields
+			.into_iter()
+			.map(|b| b.payload)
+			.collect::<Vec<AvailabilityBitfield>>();
+
+		(bitfields, d.backed_candidates, d.disputes)
+	})
+}
+
+pub(crate) fn backed_candidate(backed_candidates: Vec<BackedCandidate<H256>>, para_id: u32) {
+	backed_candidates
+		.into_iter()
+		.find(|candidate| candidate.candidate.descriptor.para_id.0 == para_id);
 }

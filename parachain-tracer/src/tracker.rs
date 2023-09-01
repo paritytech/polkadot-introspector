@@ -15,6 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 //! This module tracks parachain blocks.
+use crate::utils::extract_inherent_fields;
+
 use super::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
 	prometheus::Metrics,
@@ -209,6 +211,8 @@ pub struct ParachainBlockInfo {
 	candidate_hash: Option<H256>,
 	/// The current state.
 	state: ParachainBlockState,
+	/// Backed on current block.
+	just_backed: bool,
 	/// The number of signed bitfields.
 	bitfield_count: u32,
 	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
@@ -219,6 +223,17 @@ pub struct ParachainBlockInfo {
 	assigned_core: Option<u32>,
 	/// Core occupation status.
 	core_occupied: bool,
+}
+
+impl ParachainBlockInfo {
+	fn maybe_reset(&mut self) {
+		if matches!(self.state, ParachainBlockState::Included) {
+			self.state = ParachainBlockState::Idle;
+			self.candidate = None;
+			self.candidate_hash = None;
+		}
+		self.just_backed = false;
+	}
 }
 
 /// The state of parachain block.
@@ -331,11 +346,7 @@ impl SubxtTracker {
 
 	/// Called to move to idle state after inclusion/timeout.
 	pub fn maybe_reset_state(&mut self) {
-		if matches!(self.current_candidate.state, ParachainBlockState::Included) {
-			self.current_candidate.state = ParachainBlockState::Idle;
-			self.current_candidate.candidate = None;
-			self.current_candidate.candidate_hash = None;
-		}
+		self.current_candidate.maybe_reset();
 		self.disputes.clear();
 		self.progress = None;
 	}
@@ -466,46 +477,35 @@ impl SubxtTracker {
 		block_number: BlockNumber,
 		data: Option<InherentData>,
 	) -> color_eyre::Result<()> {
-		if data.is_none() {
-			return Ok(())
+		if let Some((bitfields, backed_candidates, disputes)) = extract_inherent_fields(data) {
+			self.set_bitfield_count(bitfields.len() as u32);
+
+			if !self.is_fork() {
+				self.clear_forks();
+			}
+			self.update_fork_tracker(block_hash, block_number);
+			self.set_current_relay_block_ts(block_hash).await?;
+			self.set_finality_lag().await;
+
+			let candidate_just_backed = self.set_backing(backed_candidates, block_number);
+			self.set_core_assignment(block_hash).await?;
+			self.set_core_occupation(block_hash).await?;
+			self.set_disputes(&disputes[..]).await;
+
+			// If a candidate was backed in this relay block, we don't need to process availability now.
+			if candidate_just_backed {
+				self.set_backed_candidate();
+				return Ok(())
+			}
+
+			// If no candidate is being backed reset the state to `Idle`.
+			if self.no_backed_candidate() {
+				self.set_idle_state();
+				return Ok(())
+			}
+
+			self.set_availability(block_hash, bitfields).await?;
 		}
-
-		let data = data.expect("Checked above: qed");
-		let bitfields = data
-			.bitfields
-			.into_iter()
-			.map(|b| b.payload)
-			.collect::<Vec<polkadot_primitives::AvailabilityBitfield>>();
-
-		self.set_bitfield_count(bitfields.len() as u32);
-
-		// clear forks
-		if !self.is_fork() {
-			self.clear_forks();
-		}
-		self.update_fork_tracker(block_hash, block_number);
-		self.set_current_relay_block_ts(block_hash).await?;
-		self.set_finality_lag().await;
-
-		// Update backing information if any.
-		let candidate_just_backed = self.set_backing(data.backed_candidates, block_number);
-		self.set_core_assignment(block_hash).await?;
-		self.set_core_occupation(block_hash).await?;
-		self.set_disputes(&data.disputes[..]).await;
-
-		// If a candidate was backed in this relay block, we don't need to process availability now.
-		if candidate_just_backed {
-			self.set_backed_candidate();
-			return Ok(())
-		}
-
-		// If no candidate is being backed reset the state to `Idle`.
-		if self.no_backed_candidate() {
-			self.set_idle_state();
-			return Ok(())
-		}
-
-		self.set_availability(block_hash, bitfields).await?;
 
 		Ok(())
 	}
