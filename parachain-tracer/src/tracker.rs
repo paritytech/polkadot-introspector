@@ -268,16 +268,14 @@ impl ParachainBlockTracker for SubxtTracker {
 			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
 
 			self.set_relay_block(block_hash, block_number).await?;
-			self.set_hrmp_channels(block_hash).await?;
-			self.set_on_demand_order(block_hash).await;
-
-			self.update_forks(block_hash, block_number);
-			self.set_finality_lag().await;
+			self.set_forks(block_hash, block_number);
 
 			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
 			self.set_core_assignment(block_hash).await?; // updates current_candidate
-			self.set_core_occupation(block_hash).await?; // updates current_candidate
 			self.set_disputes(&disputes[..]).await;
+
+			self.set_hrmp_channels(block_hash).await?;
+			self.set_on_demand_order(block_hash).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
 			if self.has_backed_candidate() && !self.candidate_just_backed() {
@@ -491,7 +489,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn update_forks(&mut self, block_hash: H256, block_number: BlockNumber) {
+	fn set_forks(&mut self, block_hash: H256, block_number: BlockNumber) {
 		if !self.is_fork() {
 			self.relay_forks.clear();
 		}
@@ -501,15 +499,6 @@ impl SubxtTracker {
 			included_candidate: None,
 			backed_candidate: None,
 		});
-	}
-
-	async fn set_finality_lag(&mut self) {
-		if let Some((block_number, block_hash)) = self.current_relay_block {
-			self.finality_lag = self
-				.read_relevant_finalized_block_number(block_hash)
-				.await
-				.map(|num| block_number - num);
-		}
 	}
 
 	fn set_current_candidate(
@@ -547,17 +536,11 @@ impl SubxtTracker {
 				self.fetch_core_assignments_via_claim_queue(block_hash).await?,
 			Err(e) => return Err(e.into()),
 		};
-		if let Some((core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
-			self.current_candidate.assigned_core = Some(*core);
+		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
+			self.current_candidate.assigned_core = Some(core);
+			self.current_candidate.core_occupied =
+				matches!(self.fetch_occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
 			self.on_demand_scheduled = self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
-		}
-		Ok(())
-	}
-
-	async fn set_core_occupation(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		if let Some(core) = self.current_candidate.assigned_core {
-			let occupied_cores = self.fetch_occupied_cores(block_hash).await?;
-			self.current_candidate.core_occupied = matches!(occupied_cores[core as usize], CoreOccupied::Paras);
 		}
 		Ok(())
 	}
@@ -635,9 +618,6 @@ impl SubxtTracker {
 							.saturating_sub(stored_dispute.initiated),
 					),
 				});
-			} else {
-				// Not relevant dispute
-				continue
 			}
 		}
 	}
