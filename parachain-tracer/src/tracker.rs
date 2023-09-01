@@ -21,13 +21,13 @@ use super::{
 	stats::ParachainStats,
 	utils::{extract_validator_address, time_diff},
 };
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	chain_events::SubxtDisputeResult,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
-	metadata::polkadot_primitives,
+	metadata::polkadot_primitives::{self, ValidatorIndex},
 	types::{AccountId32, BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
 use std::{
@@ -471,21 +471,20 @@ impl SubxtTracker {
 		}
 
 		let data = data.expect("Checked above: qed");
-		let backed_candidates = data.backed_candidates;
-		let validator_groups = self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await?;
+
+		// bitfield_count
 		let bitfields = data
 			.bitfields
 			.into_iter()
 			.map(|b| b.payload)
 			.collect::<Vec<polkadot_primitives::AvailabilityBitfield>>();
-
 		self.current_candidate.bitfield_count = bitfields.len() as u32;
 
+		// clear forks
 		if !self.is_fork() {
 			self.last_relay_block_ts = self.current_relay_block_ts;
 			self.relay_forks.clear();
 		}
-
 		self.relay_forks.push(ForkTracker {
 			relay_hash: block_hash,
 			relay_number: block_number,
@@ -493,32 +492,21 @@ impl SubxtTracker {
 			backed_candidate: None,
 		});
 
-		self.current_relay_block_ts = Some(
-			self.executor
-				.get_block_timestamp(self.node_rpc_url.as_str(), block_hash)
-				.await?,
-		);
+		// current_relay_block_ts
+		self.current_relay_block_ts = Some(self.fetch_block_timestamp(block_hash).await?);
 
+		// finality_lag
 		if let Some((relay_block_number, relay_block_hash)) = self.current_relay_block {
-			let maybe_relevant_finalized_block_number = self
-				.api
-				.storage()
-				.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, relay_block_hash)
-				.await;
+			let maybe_relevant_finalized_block_number =
+				self.read_relevant_finalized_block_number(relay_block_hash).await;
 			self.finality_lag = match maybe_relevant_finalized_block_number {
-				Some(entry) => match entry.into_inner::<u32>() {
-					Ok(relevant_finalized_block_number) => Some(relay_block_number - relevant_finalized_block_number),
-					Err(e) => {
-						warn!("Cannot decode the value of finality_lag: {:?}", e);
-						None
-					},
-				},
+				Some(num) => Some(relay_block_number - num),
 				None => None,
 			};
 		}
 
 		// Update backing information if any.
-		let candidate_backed = self.set_backing(backed_candidates, block_number);
+		let candidate_just_backed = self.set_backing(data.backed_candidates, block_number);
 		self.set_core_assignment(block_hash).await?;
 
 		if let Some(assigned_core) = self.current_candidate.assigned_core {
@@ -530,7 +518,7 @@ impl SubxtTracker {
 		}
 
 		// If a candidate was backed in this relay block, we don't need to process availability now.
-		if candidate_backed {
+		if candidate_just_backed {
 			if let Some(current_fork) = self.relay_forks.last_mut() {
 				current_fork.backed_candidate = Some(
 					self.current_candidate
@@ -551,6 +539,7 @@ impl SubxtTracker {
 			return Ok(())
 		}
 
+		let validator_groups = self.fetch_backing_groups(block_hash).await?;
 		if self.current_candidate.state == ParachainBlockState::Backed {
 			// We only process availability if our parachain is assigned to an availability core.
 			if let Some(assigned_core) = self.current_candidate.assigned_core {
@@ -851,21 +840,19 @@ impl SubxtTracker {
 	async fn fetch_inbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>> {
-		Ok(self
-			.executor
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+		self.executor
 			.get_inbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-			.await?)
+			.await
 	}
 
 	async fn fetch_outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>> {
-		Ok(self
-			.executor
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+		self.executor
 			.get_outbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-			.await?)
+			.await
 	}
 
 	async fn fetch_core_assignments_via_scheduled_paras(
@@ -900,6 +887,17 @@ impl SubxtTracker {
 			.collect())
 	}
 
+	async fn fetch_backing_groups(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
+		self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await
+	}
+
+	async fn fetch_block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
+		self.executor.get_block_timestamp(self.node_rpc_url.as_str(), block_hash).await
+	}
+
 	async fn read_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
 		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
 		self.api
@@ -921,6 +919,14 @@ impl SubxtTracker {
 		self.api
 			.storage()
 			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	async fn read_relevant_finalized_block_number(&self, block_hash: H256) -> Option<u32> {
+		self.api
+			.storage()
+			.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
