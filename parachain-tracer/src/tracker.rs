@@ -488,7 +488,7 @@ impl SubxtTracker {
 			self.set_disputes(&disputes[..]).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
-			if !self.candidate_just_backed() && !self.no_backed_candidate() {
+			if self.has_backed_candidate() && !self.candidate_just_backed() {
 				self.set_availability(block_hash, bitfields).await?;
 			}
 		}
@@ -547,7 +547,7 @@ impl SubxtTracker {
 			if let Some(current_fork) = self.relay_forks.last_mut() {
 				current_fork.backed_candidate = Some(candidate_hash);
 			}
-		} else if self.no_backed_candidate() {
+		} else if !self.has_backed_candidate() {
 			self.current_candidate.state = ParachainBlockState::Idle;
 		}
 	}
@@ -950,11 +950,11 @@ impl SubxtTracker {
 		time_diff(self.current_relay_block_ts, self.on_demand_order_ts)
 	}
 
-	fn no_backed_candidate(&self) -> bool {
-		self.current_candidate.candidate.is_none() &&
+	fn has_backed_candidate(&self) -> bool {
+		self.current_candidate.candidate.is_some() ||
 			self.relay_forks
 				.iter()
-				.all(|fork| fork.backed_candidate.is_none() && fork.included_candidate.is_none())
+				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
 	}
 
 	fn candidate_just_backed(&self) -> bool {
