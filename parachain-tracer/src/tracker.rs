@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 //! This module tracks parachain blocks.
-use crate::utils::extract_inherent_fields;
+use crate::utils::{backed_candidate, extract_inherent_fields};
 
 use super::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
@@ -487,13 +487,13 @@ impl SubxtTracker {
 			self.set_current_relay_block_ts(block_hash).await?;
 			self.set_finality_lag().await;
 
-			let candidate_just_backed = self.set_backing(backed_candidates, block_number);
+			self.set_backing(backed_candidates, block_number);
 			self.set_core_assignment(block_hash).await?;
 			self.set_core_occupation(block_hash).await?;
 			self.set_disputes(&disputes[..]).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
-			if candidate_just_backed {
+			if self.candidate_just_backed() {
 				self.set_backed_candidate();
 				return Ok(())
 			}
@@ -546,26 +546,18 @@ impl SubxtTracker {
 
 	fn set_backing(
 		&mut self,
-		mut backed_candidates: Vec<polkadot_primitives::BackedCandidate<H256>>,
+		backed_candidates: Vec<polkadot_primitives::BackedCandidate<H256>>,
 		block_number: BlockNumber,
-	) -> bool {
-		let candidate_index = backed_candidates
-			.iter()
-			.position(|candidate| candidate.candidate.descriptor.para_id.0 == self.para_id);
-
+	) {
 		// Update the curent state if a candiate was backed for this para.
-		if let Some(index) = candidate_index {
+		if let Some(candidate) = backed_candidate(backed_candidates, self.para_id) {
 			self.current_candidate.state = ParachainBlockState::Backed;
-			let backed_candidate = backed_candidates.remove(index);
-			let commitments_hash = BlakeTwo256::hash_of(&backed_candidate.candidate.commitments);
+			self.current_candidate.just_backed = true;
+			let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
 			self.current_candidate.candidate_hash =
-				Some(BlakeTwo256::hash_of(&(&backed_candidate.candidate.descriptor, commitments_hash)));
-			self.current_candidate.candidate = Some(backed_candidate);
+				Some(BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash)));
+			self.current_candidate.candidate = Some(candidate);
 			self.last_backed_at_block_number = Some(block_number);
-
-			true
-		} else {
-			false
 		}
 	}
 
@@ -979,5 +971,9 @@ impl SubxtTracker {
 			self.relay_forks
 				.iter()
 				.all(|fork| fork.backed_candidate.is_none() && fork.included_candidate.is_none())
+	}
+
+	fn candidate_just_backed(&self) -> bool {
+		self.current_candidate.just_backed
 	}
 }

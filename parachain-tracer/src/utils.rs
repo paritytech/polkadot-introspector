@@ -63,8 +63,11 @@ pub(crate) fn extract_inherent_fields(
 	})
 }
 
-pub(crate) fn backed_candidate(backed_candidates: Vec<BackedCandidate<H256>>, para_id: u32) {
+pub(crate) fn backed_candidate(
+	backed_candidates: Vec<BackedCandidate<H256>>,
+	para_id: u32,
+) -> Option<BackedCandidate<H256>> {
 	backed_candidates
 		.into_iter()
-		.find(|candidate| candidate.candidate.descriptor.para_id.0 == para_id);
+		.find(|candidate| candidate.candidate.descriptor.para_id.0 == para_id)
 }
