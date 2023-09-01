@@ -50,17 +50,15 @@ pub(crate) fn extract_validator_address(
 }
 
 pub(crate) fn extract_inherent_fields(
-	data: Option<InherentData>,
-) -> Option<(Vec<AvailabilityBitfield>, Vec<BackedCandidate<H256>>, Vec<DisputeStatementSet>)> {
-	data.map(|d| {
-		let bitfields = d
-			.bitfields
-			.into_iter()
-			.map(|b| b.payload)
-			.collect::<Vec<AvailabilityBitfield>>();
+	data: InherentData,
+) -> (Vec<AvailabilityBitfield>, Vec<BackedCandidate<H256>>, Vec<DisputeStatementSet>) {
+	let bitfields = data
+		.bitfields
+		.into_iter()
+		.map(|b| b.payload)
+		.collect::<Vec<AvailabilityBitfield>>();
 
-		(bitfields, d.backed_candidates, d.disputes)
-	})
+	(bitfields, data.backed_candidates, data.disputes)
 }
 
 pub(crate) fn backed_candidate(

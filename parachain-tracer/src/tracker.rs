@@ -264,15 +264,28 @@ impl ParachainBlockTracker for SubxtTracker {
 		block_hash: Self::RelayChainNewHead,
 		block_number: Self::RelayChainBlockNumber,
 	) -> color_eyre::Result<()> {
-		let maybe_inherent = self.read_inherent_data(block_hash).await;
-		if maybe_inherent.is_none() {
+		if let Some(inherent) = self.read_inherent_data(block_hash).await {
+			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
+
+			self.set_relay_block(block_hash, block_number).await?;
+			self.set_hrmp_channels(block_hash).await?;
+			self.set_on_demand_order(block_hash).await;
+
+			self.update_forks(block_hash, block_number);
+			self.set_finality_lag().await;
+
+			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
+			self.set_core_assignment(block_hash).await?; // updates current_candidate
+			self.set_core_occupation(block_hash).await?; // updates current_candidate
+			self.set_disputes(&disputes[..]).await;
+
+			// If a candidate was backed in this relay block, we don't need to process availability now.
+			if self.has_backed_candidate() && !self.candidate_just_backed() {
+				self.set_availability(block_hash, bitfields).await?;
+			}
+		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
-
-		self.set_relay_block(block_hash, block_number, maybe_inherent.is_some());
-		self.set_hrmp_channels(block_hash, maybe_inherent.is_some()).await?;
-		self.set_inherent_data(block_hash, block_number, maybe_inherent).await?;
-		self.set_on_demand_order(block_hash).await;
 
 		Ok(())
 	}
@@ -445,21 +458,29 @@ impl SubxtTracker {
 		}
 	}
 
-	async fn set_hrmp_channels(&mut self, block_hash: H256, has_inherent: bool) -> color_eyre::Result<()> {
-		if has_inherent {
-			let inbound = self.fetch_inbound_hrmp_channels(block_hash).await?;
-			let outbound = self.fetch_outbound_hrmp_channels(block_hash).await?;
-			self.message_queues.update_hrmp_channels(inbound, outbound);
-		}
+	async fn set_hrmp_channels(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+		let inbound = self.fetch_inbound_hrmp_channels(block_hash).await?;
+		let outbound = self.fetch_outbound_hrmp_channels(block_hash).await?;
+		self.message_queues.update_hrmp_channels(inbound, outbound);
 
 		Ok(())
 	}
 
-	fn set_relay_block(&mut self, block_hash: H256, block_number: BlockNumber, has_inherent: bool) {
-		if has_inherent {
-			self.previous_relay_block = self.current_relay_block;
-			self.current_relay_block = Some((block_number, block_hash));
+	async fn set_relay_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
+		self.previous_relay_block = self.current_relay_block;
+		self.current_relay_block = Some((block_number, block_hash));
+
+		self.current_relay_block_ts = Some(self.fetch_block_timestamp(block_hash).await?);
+		if !self.is_fork() {
+			self.last_relay_block_ts = self.current_relay_block_ts;
 		}
+
+		self.finality_lag = self
+			.read_relevant_finalized_block_number(block_hash)
+			.await
+			.map(|num| block_number - num);
+
+		Ok(())
 	}
 
 	async fn set_on_demand_order(&mut self, block_hash: H256) {
@@ -468,32 +489,6 @@ impl SubxtTracker {
 			self.on_demand_order_block_number = self.current_relay_block.map(|(num, _)| num);
 			self.on_demand_order_ts = self.current_relay_block_ts;
 		}
-	}
-
-	// Parse inherent data and update state.
-	async fn set_inherent_data(
-		&mut self,
-		block_hash: H256,
-		block_number: BlockNumber,
-		data: Option<InherentData>,
-	) -> color_eyre::Result<()> {
-		if let Some((bitfields, backed_candidates, disputes)) = extract_inherent_fields(data) {
-			self.update_forks(block_hash, block_number);
-			self.set_relay_block_ts(block_hash).await?;
-			self.set_finality_lag().await;
-
-			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
-			self.set_core_assignment(block_hash).await?; // updates current_candidate
-			self.set_core_occupation(block_hash).await?; // updates current_candidate
-			self.set_disputes(&disputes[..]).await;
-
-			// If a candidate was backed in this relay block, we don't need to process availability now.
-			if self.has_backed_candidate() && !self.candidate_just_backed() {
-				self.set_availability(block_hash, bitfields).await?;
-			}
-		}
-
-		Ok(())
 	}
 
 	fn update_forks(&mut self, block_hash: H256, block_number: BlockNumber) {
@@ -506,14 +501,6 @@ impl SubxtTracker {
 			included_candidate: None,
 			backed_candidate: None,
 		});
-	}
-
-	async fn set_relay_block_ts(&mut self, block_hash: H256) -> color_eyre::Result<(), SubxtWrapperError> {
-		if !self.is_fork() {
-			self.last_relay_block_ts = self.current_relay_block_ts;
-		}
-		self.current_relay_block_ts = Some(self.fetch_block_timestamp(block_hash).await?);
-		Ok(())
 	}
 
 	async fn set_finality_lag(&mut self) {
