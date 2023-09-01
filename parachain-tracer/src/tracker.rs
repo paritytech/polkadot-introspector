@@ -478,48 +478,28 @@ impl SubxtTracker {
 		data: Option<InherentData>,
 	) -> color_eyre::Result<()> {
 		if let Some((bitfields, backed_candidates, disputes)) = extract_inherent_fields(data) {
-			self.set_bitfield_count(bitfields.len() as u32);
-
-			if !self.is_fork() {
-				self.clear_forks();
-			}
-			self.update_fork_tracker(block_hash, block_number);
-			self.set_current_relay_block_ts(block_hash).await?;
+			self.update_forks(block_hash, block_number);
+			self.set_relay_block_ts(block_hash).await?;
 			self.set_finality_lag().await;
 
-			self.set_backing(backed_candidates, block_number);
-			self.set_core_assignment(block_hash).await?;
-			self.set_core_occupation(block_hash).await?;
+			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
+			self.set_core_assignment(block_hash).await?; // updates current_candidate
+			self.set_core_occupation(block_hash).await?; // updates current_candidate
 			self.set_disputes(&disputes[..]).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
-			if self.candidate_just_backed() {
-				self.set_backed_candidate();
-				return Ok(())
+			if !self.candidate_just_backed() && !self.no_backed_candidate() {
+				self.set_availability(block_hash, bitfields).await?;
 			}
-
-			// If no candidate is being backed reset the state to `Idle`.
-			if self.no_backed_candidate() {
-				self.set_idle_state();
-				return Ok(())
-			}
-
-			self.set_availability(block_hash, bitfields).await?;
 		}
 
 		Ok(())
 	}
 
-	fn set_bitfield_count(&mut self, count: u32) {
-		self.current_candidate.bitfield_count = count;
-	}
-
-	fn clear_forks(&mut self) {
-		self.last_relay_block_ts = self.current_relay_block_ts;
-		self.relay_forks.clear();
-	}
-
-	fn update_fork_tracker(&mut self, block_hash: H256, block_number: BlockNumber) {
+	fn update_forks(&mut self, block_hash: H256, block_number: BlockNumber) {
+		if !self.is_fork() {
+			self.relay_forks.clear();
+		}
 		self.relay_forks.push(ForkTracker {
 			relay_hash: block_hash,
 			relay_number: block_number,
@@ -528,7 +508,10 @@ impl SubxtTracker {
 		});
 	}
 
-	async fn set_current_relay_block_ts(&mut self, block_hash: H256) -> color_eyre::Result<(), SubxtWrapperError> {
+	async fn set_relay_block_ts(&mut self, block_hash: H256) -> color_eyre::Result<(), SubxtWrapperError> {
+		if !self.is_fork() {
+			self.last_relay_block_ts = self.current_relay_block_ts;
+		}
 		self.current_relay_block_ts = Some(self.fetch_block_timestamp(block_hash).await?);
 		Ok(())
 	}
@@ -544,20 +527,28 @@ impl SubxtTracker {
 		}
 	}
 
-	fn set_backing(
+	fn set_current_candidate(
 		&mut self,
 		backed_candidates: Vec<polkadot_primitives::BackedCandidate<H256>>,
+		bitfields_count: usize,
 		block_number: BlockNumber,
 	) {
+		self.current_candidate.bitfield_count = bitfields_count as u32;
 		// Update the curent state if a candiate was backed for this para.
 		if let Some(candidate) = backed_candidate(backed_candidates, self.para_id) {
 			self.current_candidate.state = ParachainBlockState::Backed;
 			self.current_candidate.just_backed = true;
 			let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
-			self.current_candidate.candidate_hash =
-				Some(BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash)));
+			let candidate_hash = BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash));
+			self.current_candidate.candidate_hash = Some(candidate_hash);
 			self.current_candidate.candidate = Some(candidate);
 			self.last_backed_at_block_number = Some(block_number);
+
+			if let Some(current_fork) = self.relay_forks.last_mut() {
+				current_fork.backed_candidate = Some(candidate_hash);
+			}
+		} else if self.no_backed_candidate() {
+			self.current_candidate.state = ParachainBlockState::Idle;
 		}
 	}
 
@@ -580,7 +571,7 @@ impl SubxtTracker {
 
 	async fn set_core_occupation(&mut self, block_hash: H256) -> color_eyre::Result<()> {
 		if let Some(core) = self.current_candidate.assigned_core {
-			let occupied_cores = self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await?;
+			let occupied_cores = self.fetch_occupied_cores(block_hash).await?;
 			self.current_candidate.core_occupied = matches!(occupied_cores[core as usize], CoreOccupied::Paras);
 		}
 		Ok(())
@@ -664,20 +655,6 @@ impl SubxtTracker {
 				continue
 			}
 		}
-	}
-
-	fn set_backed_candidate(&mut self) {
-		if let Some(current_fork) = self.relay_forks.last_mut() {
-			current_fork.backed_candidate = Some(
-				self.current_candidate
-					.candidate_hash
-					.expect("checked in candidate_backed, qed."),
-			);
-		}
-	}
-
-	fn set_idle_state(&mut self) {
-		self.current_candidate.state = ParachainBlockState::Idle;
 	}
 
 	async fn set_availability(
@@ -905,6 +882,13 @@ impl SubxtTracker {
 
 	async fn fetch_block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
 		self.executor.get_block_timestamp(self.node_rpc_url.as_str(), block_hash).await
+	}
+
+	async fn fetch_occupied_cores(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
+		self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await
 	}
 
 	async fn read_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
