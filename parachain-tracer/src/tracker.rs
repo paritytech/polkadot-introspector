@@ -16,8 +16,8 @@
 
 //! This module tracks parachain blocks.
 use crate::utils::{
-	backed_candidate, extract_inherent_fields, extract_misbehaving_validators, extract_validator_addresses,
-	extract_votes,
+	backed_candidate, extract_availability_bits_count, extract_inherent_fields, extract_misbehaving_validators,
+	extract_validator_addresses, extract_votes,
 };
 
 use super::{
@@ -219,9 +219,9 @@ pub struct ParachainBlockInfo {
 	/// The number of signed bitfields.
 	bitfield_count: u32,
 	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
-	max_av_bits: u32,
+	max_availability_bits: u32,
 	/// The current number of observed availability bits set to 1.
-	current_av_bits: u32,
+	current_availability_bits: u32,
 	/// Parachain availability core assignment information.
 	assigned_core: Option<u32>,
 	/// Core occupation status.
@@ -592,33 +592,19 @@ impl SubxtTracker {
 		if self.current_candidate.state == ParachainBlockState::Backed {
 			// We only process availability if our parachain is assigned to an availability core.
 			if let Some(core) = self.current_candidate.assigned_core {
-				let validator_groups = self.fetch_backing_groups(block_hash).await?;
-				let avail_bits: u32 = bitfields
-					.iter()
-					.map(|bitfield| {
-						let bit = bitfield
-							.0
-							.as_bits()
-							.get(core as usize)
-							.expect("core index must be in the bitfield");
-						bit as u32
-					})
-					.sum();
+				let availability_bits = extract_availability_bits_count(bitfields, core);
+				let all_bits = self.validators_indices(block_hash).await?.len() as u32;
 
-				let all_bits = validator_groups
-					.into_iter()
-					.flatten()
-					.collect::<Vec<polkadot_primitives::ValidatorIndex>>();
-
-				self.current_candidate.max_av_bits = all_bits.len() as u32;
-				self.current_candidate.current_av_bits = avail_bits;
-				self.current_candidate.state = ParachainBlockState::PendingAvailability;
+				self.current_candidate.max_availability_bits = all_bits;
+				self.current_candidate.current_availability_bits = availability_bits;
 
 				// Check availability and update state accordingly.
-				if avail_bits > (all_bits.len() as u32 / 3) * 2 {
+				if availability_bits > (all_bits / 3) * 2 {
 					self.current_candidate.state = ParachainBlockState::Included;
 					self.relay_forks.last_mut().expect("must have relay fork").included_candidate =
 						Some(self.current_candidate.candidate_hash.expect("must have candidate"));
+				} else {
+					self.current_candidate.state = ParachainBlockState::PendingAvailability;
 				}
 			}
 		}
@@ -650,14 +636,14 @@ impl SubxtTracker {
 		// If `max_av_bits` is not set do not check for bitfield propagation.
 		// Usually this happens at startup, when we miss a core assignment and we do not update
 		// availability before calling this `fn`.
-		let is_low = self.current_candidate.max_av_bits > 0 &&
+		let is_low = self.current_candidate.max_availability_bits > 0 &&
 			self.current_candidate.state != ParachainBlockState::Idle &&
-			self.current_candidate.bitfield_count <= (self.current_candidate.max_av_bits / 3) * 2;
+			self.current_candidate.bitfield_count <= (self.current_candidate.max_availability_bits / 3) * 2;
 		if let Some(progress) = self.progress.as_mut() {
 			if is_low {
 				progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
 					self.current_candidate.bitfield_count,
-					self.current_candidate.max_av_bits,
+					self.current_candidate.max_availability_bits,
 				))
 			}
 		}
@@ -693,19 +679,19 @@ impl SubxtTracker {
 
 		// Update bitfields health.
 		if let Some(progress) = self.progress.as_mut() {
-			progress.bitfield_health.max_bitfield_count = self.current_candidate.max_av_bits;
-			progress.bitfield_health.available_count = self.current_candidate.current_av_bits;
+			progress.bitfield_health.max_bitfield_count = self.current_candidate.max_availability_bits;
+			progress.bitfield_health.available_count = self.current_candidate.current_availability_bits;
 			progress.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
 		}
 
 		// TODO: Availability timeout.
-		if self.current_candidate.current_av_bits > (self.current_candidate.max_av_bits / 3) * 2 {
+		if self.current_candidate.current_availability_bits > (self.current_candidate.max_availability_bits / 3) * 2 {
 			if let Some(candidate_hash) = self.current_candidate.candidate_hash {
 				if let Some(progress) = self.progress.as_mut() {
 					progress.events.push(ParachainConsensusEvent::Included(
 						candidate_hash,
-						self.current_candidate.current_av_bits,
-						self.current_candidate.max_av_bits,
+						self.current_candidate.current_availability_bits,
+						self.current_candidate.max_availability_bits,
 					));
 				}
 
@@ -741,8 +727,8 @@ impl SubxtTracker {
 		} else if self.current_candidate.core_occupied && self.last_backed_at_block_number != Some(relay_block_number) {
 			if let Some(progress) = self.progress.as_mut() {
 				progress.events.push(ParachainConsensusEvent::SlowAvailability(
-					self.current_candidate.current_av_bits,
-					self.current_candidate.max_av_bits,
+					self.current_candidate.current_availability_bits,
+					self.current_candidate.max_availability_bits,
 				));
 			}
 			self.stats.on_slow_availability();
@@ -894,5 +880,12 @@ impl SubxtTracker {
 
 	fn candidate_just_backed(&self) -> bool {
 		self.current_candidate.just_backed
+	}
+
+	async fn validators_indices(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<Vec<polkadot_primitives::ValidatorIndex>> {
+		Ok(self.fetch_backing_groups(block_hash).await?.into_iter().flatten().collect())
 	}
 }
