@@ -46,37 +46,6 @@ use subxt::{
 	error::{Error, MetadataError},
 };
 
-/// An abstract definition of a parachain block tracker.
-#[async_trait::async_trait]
-pub trait ParachainBlockTracker {
-	/// The relay chain block hash
-	type RelayChainNewHead;
-	/// The relay chain block type.
-	type RelayChainBlockNumber;
-	/// The parachain inherent data.
-	type ParaInherentData;
-	/// The state obtained from processing a block.
-	type ParachainBlockInfo;
-	/// A structure to describe the parachain progress made after processing last relay chain block.
-	type ParachainProgressUpdate;
-	/// A structure to describe dispute outcome
-	type DisputeOutcome;
-
-	/// Injects a new relay chain block into the tracker.
-	/// Blocks must be injected in order.
-	async fn inject_block(
-		&mut self,
-		block_hash: Self::RelayChainNewHead,
-		block_number: Self::RelayChainBlockNumber,
-	) -> color_eyre::Result<()>;
-
-	/// Called when a new session is observed
-	async fn inject_session(&mut self, session_index: u32);
-
-	/// Update current parachain progress.
-	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
-}
-
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
 	/// Parachain ID to track.
@@ -130,83 +99,6 @@ pub struct SubxtTracker {
 	relay_forks: Vec<ForkTracker>,
 }
 
-#[async_trait::async_trait]
-impl ParachainBlockTracker for SubxtTracker {
-	type RelayChainNewHead = H256;
-	type RelayChainBlockNumber = BlockNumber;
-	type ParaInherentData = InherentData;
-	type ParachainBlockInfo = ParachainBlockInfo;
-	type ParachainProgressUpdate = ParachainProgressUpdate;
-	type DisputeOutcome = SubxtDisputeResult;
-
-	async fn inject_block(
-		&mut self,
-		block_hash: Self::RelayChainNewHead,
-		block_number: Self::RelayChainBlockNumber,
-	) -> color_eyre::Result<()> {
-		if let Some(inherent) = self.read_inherent_data(block_hash).await {
-			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
-
-			self.set_relay_block(block_hash, block_number).await?;
-			self.set_forks(block_hash, block_number);
-
-			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
-			self.set_core_assignment(block_hash).await?;
-			self.set_disputes(&disputes[..]).await;
-
-			self.set_hrmp_channels(block_hash).await?;
-			self.set_on_demand_order(block_hash).await;
-
-			// If a candidate was backed in this relay block, we don't need to process availability now.
-			if self.has_backed_candidate() && !self.current_candidate.is_just_backed() {
-				self.set_availability(block_hash, bitfields).await?;
-			}
-		} else {
-			error!("Failed to get inherent data for {:?}", block_hash);
-		}
-
-		Ok(())
-	}
-
-	async fn inject_session(&mut self, session_index: u32) {
-		if let Some(progress) = self.progress.as_mut() {
-			progress.events.push(ParachainConsensusEvent::NewSession(session_index));
-		}
-	}
-
-	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
-		if self.current_relay_block.is_some() {
-			self.init_progress();
-
-			// self.set_relay_block(block_hash, block_number).await?;
-			// self.set_forks(block_hash, block_number);
-
-			// self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
-			// self.set_core_assignment(block_hash).await?;
-			// self.set_disputes(&disputes[..]).await;
-
-			// self.set_hrmp_channels(block_hash).await?;
-			// self.set_on_demand_order(block_hash).await;
-
-			// self.set_availability(block_hash, bitfields).await?;
-
-			self.process_core_assignment();
-			self.process_core_occupied();
-			self.process_bitfield_propagation(metrics);
-			self.process_candidate_state(metrics).await;
-			self.process_disputes(metrics);
-			self.process_active_message_queues();
-			self.process_block_ts(metrics);
-			self.process_finality_lag(metrics);
-			self.process_on_demand_order(metrics);
-		} else {
-			self.skip_progress();
-		}
-
-		self.progress.clone()
-	}
-}
-
 impl SubxtTracker {
 	/// Constructor.
 	///
@@ -248,6 +140,59 @@ impl SubxtTracker {
 		}
 	}
 
+	/// Injects a new relay chain block into the tracker.
+	/// Blocks must be injected in order.
+	pub async fn inject_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
+		if let Some(inherent) = self.read_inherent_data(block_hash).await {
+			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
+
+			self.set_relay_block(block_hash, block_number).await?;
+			self.set_forks(block_hash, block_number);
+
+			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
+			self.set_core_assignment(block_hash).await?;
+			self.set_disputes(&disputes[..]).await;
+
+			self.set_hrmp_channels(block_hash).await?;
+			self.set_on_demand_order(block_hash).await;
+
+			// If a candidate was backed in this relay block, we don't need to process availability now.
+			if self.has_backed_candidate() && !self.current_candidate.is_just_backed() {
+				self.set_availability(block_hash, bitfields).await?;
+			}
+		} else {
+			error!("Failed to get inherent data for {:?}", block_hash);
+		}
+
+		Ok(())
+	}
+
+	/// Called when a new session is observed
+	pub async fn inject_session(&mut self, session_index: u32) {
+		if let Some(progress) = self.progress.as_mut() {
+			progress.events.push(ParachainConsensusEvent::NewSession(session_index));
+		}
+	}
+
+	/// Update current parachain progress.
+	pub async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
+		if self.current_relay_block.is_some() {
+			self.init_progress();
+
+			self.process_core_assignment();
+			self.process_core_occupied();
+			self.process_bitfield_propagation(metrics);
+			self.process_candidate_state(metrics).await;
+			self.process_disputes(metrics);
+			self.process_active_message_queues();
+			self.process_block_ts(metrics);
+			self.process_finality_lag(metrics);
+			self.process_on_demand_order(metrics);
+		}
+
+		self.progress.clone()
+	}
+
 	/// Called to move to idle state after inclusion/timeout.
 	pub fn maybe_reset_state(&mut self) {
 		if self.current_candidate.is_backed() {
@@ -264,10 +209,6 @@ impl SubxtTracker {
 	/// Returns the stats
 	pub fn summary(&self) -> &ParachainStats {
 		&self.stats
-	}
-
-	fn skip_progress(&mut self) {
-		self.progress = None
 	}
 
 	fn init_progress(&mut self) {

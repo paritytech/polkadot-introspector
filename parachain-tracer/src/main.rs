@@ -49,7 +49,7 @@ use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, 
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
-use tracker::{ParachainBlockTracker, SubxtTracker};
+use tracker::SubxtTracker;
 
 mod disputes_tracker;
 mod fork_tracker;
