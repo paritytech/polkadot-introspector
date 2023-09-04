@@ -376,18 +376,15 @@ impl SubxtTracker {
 
 	fn init_progress(&mut self) {
 		if let Some((block_number, block_hash)) = self.current_relay_block {
-			self.progress = Some(ParachainProgressUpdate {
-				para_id: self.para_id,
-				timestamp: self.current_relay_block_ts.unwrap_or_default(),
-				prev_timestamp: self
-					.last_relay_block_ts
-					.unwrap_or(self.current_relay_block_ts.unwrap_or_default()),
+			self.progress = Some(ParachainProgressUpdate::new(
+				self.para_id,
+				self.current_relay_block_ts,
+				self.last_relay_block_ts,
 				block_number,
 				block_hash,
-				is_fork: self.is_fork(),
-				finality_lag: self.finality_lag,
-				..Default::default()
-			});
+				self.is_fork(),
+				self.finality_lag,
+			));
 		}
 	}
 
