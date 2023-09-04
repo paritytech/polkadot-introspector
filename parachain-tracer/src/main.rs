@@ -51,6 +51,7 @@ use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::{ParachainBlockTracker, SubxtTracker};
 
+mod parachain_block_info;
 mod progress;
 mod prometheus;
 mod stats;

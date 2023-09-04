@@ -112,13 +112,6 @@ pub(crate) fn extract_votes(info: &DisputeStatementSet) -> (u32, u32) {
 pub(crate) fn extract_availability_bits_count(bitfields: Vec<AvailabilityBitfield>, core: u32) -> u32 {
 	bitfields
 		.iter()
-		.map(|bitfield| {
-			let bit = bitfield
-				.0
-				.as_bits()
-				.get(core as usize)
-				.expect("core index must be in the bitfield");
-			bit as u32
-		})
+		.map(|v| v.0.as_bits().get(core as usize).expect("core index must be in the bitfield") as u32)
 		.sum()
 }
