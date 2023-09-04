@@ -16,7 +16,7 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
-use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
+use super::{disputes_tracker::DisputesTracker, progress::ParachainProgressUpdate};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use polkadot_introspector_essentials::types::H256;

@@ -16,7 +16,7 @@
 
 //! This module defines structures used for tool progress tracking
 
-use super::tracker::DisputesTracker;
+use crate::disputes_tracker::DisputesTracker;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use polkadot_introspector_essentials::{

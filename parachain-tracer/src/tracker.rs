@@ -16,21 +16,19 @@
 
 //! This module tracks parachain blocks.
 use crate::{
+	disputes_tracker::DisputesTracker,
+	fork_tracker::ForkTracker,
+	message_queus_tracker::MessageQueuesTracker,
 	parachain_block_info::ParachainBlockInfo,
-	utils::{
-		backed_candidate, extract_availability_bits_count, extract_inherent_fields, extract_misbehaving_validators,
-		extract_validator_addresses, extract_votes,
-	},
-};
-
-use super::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
 	prometheus::Metrics,
 	stats::ParachainStats,
-	utils::time_diff,
+	utils::{
+		backed_candidate, extract_availability_bits_count, extract_inherent_fields, extract_misbehaving_validators,
+		extract_validator_addresses, extract_votes, time_diff,
+	},
 };
-use log::{debug, error, info};
-use parity_scale_codec::{Decode, Encode};
+use log::{error, info};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	chain_events::SubxtDisputeResult,
@@ -41,7 +39,6 @@ use polkadot_introspector_essentials::{
 use std::{
 	collections::{BTreeMap, HashMap},
 	default::Default,
-	fmt::Debug,
 	time::Duration,
 };
 use subxt::{
@@ -78,82 +75,6 @@ pub trait ParachainBlockTracker {
 
 	/// Update current parachain progress.
 	async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate>;
-}
-
-/// An outcome for a dispute
-#[derive(Encode, Decode, Debug, Clone)]
-pub struct DisputesTracker {
-	/// Disputed candidate
-	pub candidate: H256,
-	/// The real outcome
-	pub outcome: SubxtDisputeResult,
-	/// Number of validators voted that a candidate is valid
-	pub voted_for: u32,
-	/// Number of validators voted that a candidate is invalid
-	pub voted_against: u32,
-	/// A vector of validators initiateds the dispute (index + identify)
-	pub initiators: Vec<(u32, String)>,
-	/// A vector of validators voted against supermajority (index + identify)
-	pub misbehaving_validators: Vec<(u32, String)>,
-	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
-	pub resolve_time: Option<u32>,
-}
-
-/// Used to track forks of the relay chain
-#[derive(Debug, Clone)]
-struct ForkTracker {
-	#[allow(dead_code)]
-	relay_hash: H256,
-	#[allow(dead_code)]
-	relay_number: u32,
-	backed_candidate: Option<H256>,
-	included_candidate: Option<H256>,
-}
-
-#[derive(Default)]
-/// A structure that tracks messages (UMP, HRMP, DMP etc)
-pub struct SubxtMessageQueuesTracker {
-	/// Known inbound HRMP channels, indexed by source parachain id
-	pub inbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
-	/// Known outbound HRMP channels, indexed by source parachain id
-	pub outbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
-}
-
-impl SubxtMessageQueuesTracker {
-	/// Update the content of HRMP channels
-	fn update_hrmp_channels(
-		&mut self,
-		inbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
-		outbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
-	) {
-		debug!("hrmp channels configured: {:?} in, {:?} out", &inbound_channels, &outbound_channels);
-		self.inbound_hrmp_channels = inbound_channels;
-		self.outbound_hrmp_channels = outbound_channels;
-	}
-
-	/// Returns if there are HRMP messages in any direction
-	fn has_hrmp_messages(&self) -> bool {
-		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
-			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
-	}
-
-	/// Returns active inbound channels
-	fn active_inbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
-		self.inbound_hrmp_channels
-			.iter()
-			.filter(|(_, queue)| queue.total_size > 0)
-			.map(|(source_id, queue)| (*source_id, queue.clone()))
-			.collect::<Vec<_>>()
-	}
-
-	/// Returns active outbound channels
-	fn active_outbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
-		self.outbound_hrmp_channels
-			.iter()
-			.filter(|(_, queue)| queue.total_size > 0)
-			.map(|(dest_id, queue)| (*dest_id, queue.clone()))
-			.collect::<Vec<_>>()
-	}
 }
 
 /// A subxt based parachain candidate tracker.
@@ -199,7 +120,7 @@ pub struct SubxtTracker {
 	/// Last included candidate in relay parent number
 	last_included_at_block_number: Option<BlockNumber>,
 	/// Messages queues status
-	message_queues: SubxtMessageQueuesTracker,
+	message_queues: MessageQueuesTracker,
 
 	/// Parachain statistics. Used to print summary at the end of a run.
 	stats: ParachainStats,
