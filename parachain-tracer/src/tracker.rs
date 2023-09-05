@@ -200,7 +200,7 @@ impl SubxtTracker {
 	async fn set_hrmp_channels(&mut self, block_hash: H256) -> color_eyre::Result<()> {
 		let inbound = self.rpc.inbound_hrmp_channels(block_hash).await?;
 		let outbound = self.rpc.outbound_hrmp_channels(block_hash).await?;
-		self.message_queues.update_hrmp_channels(inbound, outbound);
+		self.message_queues.set_hrmp_channels(inbound, outbound);
 
 		Ok(())
 	}

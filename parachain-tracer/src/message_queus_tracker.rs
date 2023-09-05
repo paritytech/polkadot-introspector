@@ -22,14 +22,14 @@ use std::collections::BTreeMap;
 /// A structure that tracks messages (UMP, HRMP, DMP etc)
 pub struct MessageQueuesTracker {
 	/// Known inbound HRMP channels, indexed by source parachain id
-	pub(crate) inbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
+	pub inbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
 	/// Known outbound HRMP channels, indexed by source parachain id
-	pub(crate) outbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
+	pub outbound_hrmp_channels: BTreeMap<u32, SubxtHrmpChannel>,
 }
 
 impl MessageQueuesTracker {
 	/// Update the content of HRMP channels
-	pub(crate) fn update_hrmp_channels(
+	pub fn set_hrmp_channels(
 		&mut self,
 		inbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
 		outbound_channels: BTreeMap<u32, SubxtHrmpChannel>,
@@ -40,13 +40,13 @@ impl MessageQueuesTracker {
 	}
 
 	/// Returns if there are HRMP messages in any direction
-	pub(crate) fn has_hrmp_messages(&self) -> bool {
+	pub fn has_hrmp_messages(&self) -> bool {
 		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
 			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
 	}
 
 	/// Returns active inbound channels
-	pub(crate) fn active_inbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
+	pub fn active_inbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
 		self.inbound_hrmp_channels
 			.iter()
 			.filter(|(_, queue)| queue.total_size > 0)
@@ -55,11 +55,60 @@ impl MessageQueuesTracker {
 	}
 
 	/// Returns active outbound channels
-	pub(crate) fn active_outbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
+	pub fn active_outbound_channels(&self) -> Vec<(u32, SubxtHrmpChannel)> {
 		self.outbound_hrmp_channels
 			.iter()
 			.filter(|(_, queue)| queue.total_size > 0)
 			.map(|(dest_id, queue)| (*dest_id, queue.clone()))
 			.collect::<Vec<_>>()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn create_channels() -> BTreeMap<u32, SubxtHrmpChannel> {
+		let mut channels = BTreeMap::new();
+		channels.insert(100, SubxtHrmpChannel { total_size: 1, ..Default::default() });
+		channels.insert(200, SubxtHrmpChannel { total_size: 0, ..Default::default() });
+
+		channels
+	}
+
+	#[test]
+	fn test_set_hrmp_channels() {
+		let mut tracker = MessageQueuesTracker::default();
+		assert!(!tracker.has_hrmp_messages());
+
+		// if inbound has size
+		tracker.set_hrmp_channels(create_channels(), Default::default());
+		assert!(tracker.has_hrmp_messages());
+
+		// if outbound has size
+		tracker.set_hrmp_channels(Default::default(), create_channels());
+		assert!(tracker.has_hrmp_messages());
+	}
+
+	#[test]
+	fn test_active_inbound_channels() {
+		let mut tracker = MessageQueuesTracker::default();
+		assert!(tracker.active_inbound_channels().is_empty());
+
+		let channels = create_channels();
+		assert!(channels.len() > 1);
+		tracker.set_hrmp_channels(channels, Default::default());
+		assert_eq!(tracker.active_inbound_channels().iter().map(|v| v.0).collect::<Vec<u32>>(), vec![100])
+	}
+
+	#[test]
+	fn test_active_outbound_channels() {
+		let mut tracker = MessageQueuesTracker::default();
+		assert!(tracker.active_outbound_channels().is_empty());
+
+		let channels = create_channels();
+		assert!(channels.len() > 1);
+		tracker.set_hrmp_channels(Default::default(), channels);
+		assert_eq!(tracker.active_outbound_channels().iter().map(|v| v.0).collect::<Vec<u32>>(), vec![100])
 	}
 }
