@@ -23,6 +23,8 @@ use crate::{
 	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
 	prometheus::Metrics,
 	stats::ParachainStats,
+	tracker_rpc::TrackerRpc,
+	tracker_storage::TrackerStorage,
 	utils::{
 		backed_candidate, extract_availability_bits_count, extract_inherent_fields, extract_misbehaving_validators,
 		extract_validator_addresses, extract_votes, time_diff,
@@ -30,17 +32,13 @@ use crate::{
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{InherentData, RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
+	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
 	chain_events::SubxtDisputeResult,
-	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
-	metadata::polkadot_primitives::{self, ValidatorIndex},
-	types::{AccountId32, BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
+	collector::{CollectorStorageApi, DisputeInfo},
+	metadata::polkadot_primitives,
+	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
-use std::{
-	collections::{BTreeMap, HashMap},
-	default::Default,
-	time::Duration,
-};
+use std::{default::Default, time::Duration};
 use subxt::{
 	config::{substrate::BlakeTwo256, Hasher},
 	error::{Error, MetadataError},
@@ -50,12 +48,12 @@ use subxt::{
 pub struct SubxtTracker {
 	/// Parachain ID to track.
 	para_id: u32,
-	/// RPC node endpoint.
-	node_rpc_url: String,
 	/// A subxt API wrapper.
-	executor: RequestExecutor,
+	rpc: TrackerRpc,
 	/// API to access collector's storage
-	api: CollectorStorageApi,
+	storage: TrackerStorage,
+	/// Observed new session
+	new_session: Option<u32>,
 	/// The relay chain block number at which the last candidate was backed at.
 	last_backed_at_block_number: Option<BlockNumber>,
 	/// The relay chain timestamp at which the previous candidate was included at.
@@ -90,35 +88,18 @@ pub struct SubxtTracker {
 	last_included_at_block_number: Option<BlockNumber>,
 	/// Messages queues status
 	message_queues: MessageQueuesTracker,
-
-	/// Parachain statistics. Used to print summary at the end of a run.
-	stats: ParachainStats,
-	/// Parachain progress update.
-	progress: Option<ParachainProgressUpdate>,
 	/// Current forks recorded
 	relay_forks: Vec<ForkTracker>,
 }
 
 impl SubxtTracker {
-	/// Constructor.
-	///
-	/// # Arguments
-	///
-	/// * `last_skipped_slot_blocks` - The number of last blocks with missing slots to display in cli stats
-	pub fn new(
-		para_id: u32,
-		node_rpc_url: &str,
-		executor: RequestExecutor,
-		api: CollectorStorageApi,
-		last_skipped_slot_blocks: usize,
-	) -> Self {
+	pub fn new(para_id: u32, node_rpc_url: &str, executor: RequestExecutor, api: CollectorStorageApi) -> Self {
 		Self {
 			para_id,
-			node_rpc_url: node_rpc_url.to_owned(),
-			executor,
-			api,
-			stats: ParachainStats::new(para_id, last_skipped_slot_blocks),
+			rpc: TrackerRpc::new(para_id, node_rpc_url, executor),
+			storage: TrackerStorage::new(para_id, api),
 			current_candidate: Default::default(),
+			new_session: None,
 			current_relay_block: None,
 			previous_relay_block: None,
 			current_relay_block_ts: None,
@@ -135,15 +116,33 @@ impl SubxtTracker {
 			previous_included_at_block_number: None,
 			previous_included_at_ts: None,
 			message_queues: Default::default(),
-			progress: None,
 			relay_forks: vec![],
 		}
 	}
 
+	pub async fn process_new_head(
+		&mut self,
+		block_hash: H256,
+		block_number: BlockNumber,
+		stats: &mut ParachainStats,
+		metrics: &Metrics,
+	) -> color_eyre::Result<Option<ParachainProgressUpdate>> {
+		self.inject_block(block_hash, block_number).await?;
+		let progress = self.progress(stats, metrics).await;
+		self.maybe_reset_state();
+
+		Ok(progress)
+	}
+
+	/// Called when a new session is observed
+	pub async fn process_new_session(&mut self, session_index: u32) {
+		self.new_session = Some(session_index)
+	}
+
 	/// Injects a new relay chain block into the tracker.
 	/// Blocks must be injected in order.
-	pub async fn inject_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
-		if let Some(inherent) = self.read_inherent_data(block_hash).await {
+	async fn inject_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
+		if let Some(inherent) = self.storage.inherent_data(block_hash).await {
 			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
 
 			self.set_relay_block(block_hash, block_number).await?;
@@ -167,124 +166,55 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	/// Called when a new session is observed
-	pub async fn inject_session(&mut self, session_index: u32) {
-		if let Some(progress) = self.progress.as_mut() {
-			progress.events.push(ParachainConsensusEvent::NewSession(session_index));
-		}
-	}
-
 	/// Update current parachain progress.
-	pub async fn progress(&mut self, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
-		if self.current_relay_block.is_some() {
-			self.init_progress();
+	async fn progress(&self, stats: &mut ParachainStats, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
+		if let Some((block_number, block_hash)) = self.current_relay_block {
+			let timestamp = self.current_relay_block_ts.unwrap_or_default();
+			let prev_timestamp = self.last_relay_block_ts.unwrap_or(timestamp);
+			let mut progress = ParachainProgressUpdate {
+				timestamp,
+				prev_timestamp,
+				block_number,
+				block_hash,
+				para_id: self.para_id,
+				is_fork: self.is_fork(),
+				finality_lag: self.finality_lag,
+				core_occupied: self.current_candidate.core_occupied,
+				..Default::default()
+			};
 
-			self.process_core_assignment();
-			self.process_core_occupied();
-			self.process_bitfield_propagation(metrics);
-			self.process_candidate_state(metrics).await;
-			self.process_disputes(metrics);
-			self.process_active_message_queues();
-			self.process_block_ts(metrics);
-			self.process_finality_lag(metrics);
-			self.process_on_demand_order(metrics);
+			self.notify_new_session(&mut progress);
+			self.notify_core_assignment(&mut progress);
+			self.notify_bitfield_propagation(&mut progress, stats, metrics);
+			self.notify_candidate_state(&mut progress, stats, metrics).await;
+			self.notify_disputes(&mut progress, stats, metrics);
+			self.notify_active_message_queues(&mut progress);
+			self.notify_current_ts(stats, metrics);
+			self.notify_finality_lag(metrics);
+			self.notify_on_demand_order(metrics);
+
+			Some(progress)
+		} else {
+			None
 		}
-
-		self.progress.clone()
 	}
 
 	/// Called to move to idle state after inclusion/timeout.
-	pub fn maybe_reset_state(&mut self) {
+	fn maybe_reset_state(&mut self) {
 		if self.current_candidate.is_backed() {
 			self.on_demand_order_block_number = None;
 			self.on_demand_order_ts = None;
 		}
+		self.new_session = None;
 		self.on_demand_order = None;
 		self.on_demand_scheduled = false;
 		self.disputes.clear();
-		self.progress = None;
 		self.current_candidate.maybe_reset();
 	}
 
-	/// Returns the stats
-	pub fn summary(&self) -> &ParachainStats {
-		&self.stats
-	}
-
-	fn init_progress(&mut self) {
-		if let Some((block_number, block_hash)) = self.current_relay_block {
-			self.progress = Some(ParachainProgressUpdate::new(
-				self.para_id,
-				self.current_relay_block_ts,
-				self.last_relay_block_ts,
-				block_number,
-				block_hash,
-				self.is_fork(),
-				self.finality_lag,
-			));
-		}
-	}
-
-	fn process_disputes(&mut self, metrics: &Metrics) {
-		self.disputes.iter().for_each(|outcome| {
-			if let Some(progress) = self.progress.as_mut() {
-				progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
-			}
-			self.stats.on_disputed(outcome);
-			metrics.on_disputed(outcome, self.para_id);
-		});
-	}
-
-	fn process_active_message_queues(&mut self) {
-		if self.message_queues.has_hrmp_messages() {
-			if let Some(progress) = self.progress.as_mut() {
-				progress.events.push(ParachainConsensusEvent::MessageQueues(
-					self.message_queues.active_inbound_channels(),
-					self.message_queues.active_outbound_channels(),
-				))
-			}
-		}
-	}
-
-	fn process_block_ts(&mut self, metrics: &Metrics) {
-		if !self.is_fork() {
-			let ts = self.current_ts();
-			self.stats.on_block(ts);
-			metrics.on_block(ts.as_secs_f64(), self.para_id);
-		}
-	}
-
-	fn process_finality_lag(&mut self, metrics: &Metrics) {
-		if let Some(finality_lag) = self.finality_lag {
-			metrics.on_finality_lag(finality_lag);
-		}
-	}
-
-	fn process_on_demand_order(&mut self, metrics: &Metrics) {
-		if let Some(ref order) = self.on_demand_order {
-			metrics.handle_on_demand_order(order);
-		}
-		if let Some(delay) = self.on_demand_delay() {
-			if self.on_demand_scheduled {
-				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
-			}
-			if self.current_candidate.is_backed() {
-				metrics.handle_on_demand_delay(delay, self.para_id, "backed");
-			}
-		}
-		if let Some(delay_sec) = self.on_demand_delay_ts() {
-			if self.on_demand_scheduled {
-				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
-			}
-			if self.current_candidate.is_backed() {
-				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
-			}
-		}
-	}
-
 	async fn set_hrmp_channels(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		let inbound = self.fetch_inbound_hrmp_channels(block_hash).await?;
-		let outbound = self.fetch_outbound_hrmp_channels(block_hash).await?;
+		let inbound = self.rpc.inbound_hrmp_channels(block_hash).await?;
+		let outbound = self.rpc.outbound_hrmp_channels(block_hash).await?;
 		self.message_queues.update_hrmp_channels(inbound, outbound);
 
 		Ok(())
@@ -294,13 +224,14 @@ impl SubxtTracker {
 		self.previous_relay_block = self.current_relay_block;
 		self.current_relay_block = Some((block_number, block_hash));
 
-		self.current_relay_block_ts = Some(self.fetch_block_timestamp(block_hash).await?);
+		self.current_relay_block_ts = Some(self.rpc.block_timestamp(block_hash).await?);
 		if !self.is_fork() {
 			self.last_relay_block_ts = self.current_relay_block_ts;
 		}
 
 		self.finality_lag = self
-			.read_relevant_finalized_block_number(block_hash)
+			.storage
+			.relevant_finalized_block_number(block_hash)
 			.await
 			.map(|num| block_number - num);
 
@@ -308,7 +239,7 @@ impl SubxtTracker {
 	}
 
 	async fn set_on_demand_order(&mut self, block_hash: H256) {
-		self.on_demand_order = self.read_on_demand_order(block_hash).await;
+		self.on_demand_order = self.storage.on_demand_order(block_hash).await;
 		if self.on_demand_order.is_some() {
 			self.on_demand_order_block_number = self.current_relay_block.map(|(num, _)| num);
 			self.on_demand_order_ts = self.current_relay_block_ts;
@@ -353,18 +284,18 @@ impl SubxtTracker {
 
 	async fn set_core_assignment(&mut self, block_hash: H256) -> color_eyre::Result<()> {
 		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
-		let assignments = match self.fetch_core_assignments_via_scheduled_paras(block_hash).await {
+		let assignments = match self.rpc.core_assignments_via_scheduled_paras(block_hash).await {
 			Ok(v) => v,
 			// The `ParaScheduler,Scheduled` API call not found,
 			// we should try to fetch `ParaScheduler,ClaimQueue` instead
 			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) =>
-				self.fetch_core_assignments_via_claim_queue(block_hash).await?,
+				self.rpc.core_assignments_via_claim_queue(block_hash).await?,
 			Err(e) => return Err(e.into()),
 		};
 		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(core);
 			self.current_candidate.core_occupied =
-				matches!(self.fetch_occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
+				matches!(self.rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
 			self.on_demand_scheduled = self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
 		Ok(())
@@ -374,10 +305,10 @@ impl SubxtTracker {
 		self.disputes = Vec::with_capacity(disputes.len());
 		for dispute_info in disputes {
 			if let Some(DisputeInfo { outcome, session_index, initiated, initiator_indices, concluded, .. }) =
-				self.read_dispute(dispute_info.candidate_hash.0).await
+				self.storage.dispute(dispute_info.candidate_hash.0).await
 			{
 				if let Some(outcome) = outcome {
-					let session_info = self.read_session_keys(dispute_info.session).await;
+					let session_info = self.storage.session_keys(dispute_info.session).await;
 					// TODO: we would like to distinguish different dispute phases at some point
 					let (voted_for, voted_against) = extract_votes(&dispute_info);
 					let misbehaving_validators = extract_misbehaving_validators(
@@ -385,7 +316,7 @@ impl SubxtTracker {
 						dispute_info,
 						outcome == SubxtDisputeResult::Valid,
 					);
-					let initiators_session_info = self.read_session_keys(session_index).await;
+					let initiators_session_info = self.storage.session_keys(session_index).await;
 					let initiators = extract_validator_addresses(initiators_session_info.as_ref(), initiator_indices);
 					self.disputes.push(DisputesTracker {
 						candidate: dispute_info.candidate_hash.0,
@@ -434,86 +365,127 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	fn process_core_assignment(&mut self) {
+	fn notify_disputes(&self, progress: &mut ParachainProgressUpdate, stats: &mut ParachainStats, metrics: &Metrics) {
+		self.disputes.iter().for_each(|outcome| {
+			progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
+			stats.on_disputed(outcome);
+			metrics.on_disputed(outcome, self.para_id);
+		});
+	}
+
+	fn notify_active_message_queues(&self, progress: &mut ParachainProgressUpdate) {
+		if self.message_queues.has_hrmp_messages() {
+			progress.events.push(ParachainConsensusEvent::MessageQueues(
+				self.message_queues.active_inbound_channels(),
+				self.message_queues.active_outbound_channels(),
+			))
+		}
+	}
+
+	fn notify_current_ts(&self, stats: &mut ParachainStats, metrics: &Metrics) {
+		if !self.is_fork() {
+			let ts = self.current_ts();
+			stats.on_block(ts);
+			metrics.on_block(ts.as_secs_f64(), self.para_id);
+		}
+	}
+
+	fn notify_finality_lag(&self, metrics: &Metrics) {
+		if let Some(finality_lag) = self.finality_lag {
+			metrics.on_finality_lag(finality_lag);
+		}
+	}
+
+	fn notify_on_demand_order(&self, metrics: &Metrics) {
+		if let Some(ref order) = self.on_demand_order {
+			metrics.handle_on_demand_order(order);
+		}
+		if let Some(delay) = self.on_demand_delay() {
+			if self.on_demand_scheduled {
+				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
+			}
+			if self.current_candidate.is_backed() {
+				metrics.handle_on_demand_delay(delay, self.para_id, "backed");
+			}
+		}
+		if let Some(delay_sec) = self.on_demand_delay_ts() {
+			if self.on_demand_scheduled {
+				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
+			}
+			if self.current_candidate.is_backed() {
+				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
+			}
+		}
+	}
+
+	fn notify_new_session(&self, progress: &mut ParachainProgressUpdate) {
+		if let Some(session_index) = self.new_session {
+			progress.events.push(ParachainConsensusEvent::NewSession(session_index));
+		}
+	}
+
+	fn notify_core_assignment(&self, progress: &mut ParachainProgressUpdate) {
 		if let Some(assigned_core) = self.current_candidate.assigned_core {
-			if let Some(progress) = self.progress.as_mut() {
-				progress.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core));
-			}
+			progress.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core));
 		}
 	}
 
-	fn process_core_occupied(&mut self) {
-		if let Some(progress) = self.progress.as_mut() {
-			progress.core_occupied = self.current_candidate.core_occupied;
-		}
-	}
-
-	fn process_bitfield_propagation(&mut self, metrics: &Metrics) {
-		// This makes sense to show if we have a relay chain block and pipeline not idle.
-		if self.current_relay_block.is_some() {
-			// If `max_availability_bits` is not set do not check for bitfield propagation.
-			// Usually this happens at startup, when we miss a core assignment and we do not update
-			// availability before calling this function.
-			if self.current_candidate.is_bitfield_propagation_low() {
-				if let Some(progress) = self.progress.as_mut() {
-					progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
-						self.current_candidate.bitfield_count,
-						self.current_candidate.max_availability_bits,
-					))
-				}
-			}
-			self.stats.on_bitfields(
+	fn notify_bitfield_propagation(
+		&self,
+		progress: &mut ParachainProgressUpdate,
+		stats: &mut ParachainStats,
+		metrics: &Metrics,
+	) {
+		if self.current_candidate.is_bitfield_propagation_low() {
+			progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
 				self.current_candidate.bitfield_count,
-				self.current_candidate.is_bitfield_propagation_low(),
-			);
-			metrics.on_bitfields(
-				self.current_candidate.bitfield_count,
-				self.current_candidate.is_bitfield_propagation_low(),
-				self.para_id,
-			);
+				self.current_candidate.max_availability_bits,
+			))
 		}
+		stats.on_bitfields(self.current_candidate.bitfield_count, self.current_candidate.is_bitfield_propagation_low());
+		metrics.on_bitfields(
+			self.current_candidate.bitfield_count,
+			self.current_candidate.is_bitfield_propagation_low(),
+			self.para_id,
+		);
 	}
 
-	async fn process_candidate_state(&mut self, metrics: &Metrics) {
+	async fn notify_candidate_state(
+		&self,
+		progress: &mut ParachainProgressUpdate,
+		stats: &mut ParachainStats,
+		metrics: &Metrics,
+	) {
 		if self.current_candidate.is_idle() {
-			if let Some(progress) = self.progress.as_mut() {
-				progress.events.push(ParachainConsensusEvent::SkippedSlot);
-				self.stats.on_skipped_slot(progress);
-				metrics.on_skipped_slot(progress);
-			}
+			progress.events.push(ParachainConsensusEvent::SkippedSlot);
+			stats.on_skipped_slot(&progress);
+			metrics.on_skipped_slot(&progress);
 		}
 
 		if self.current_candidate.is_backed() {
 			if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-				if let Some(progress) = self.progress.as_mut() {
-					progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
-				}
-				self.stats.on_backed();
+				progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
+				stats.on_backed();
 				metrics.on_backed(self.para_id);
 			}
 		}
 
 		if self.current_candidate.is_pending() || self.current_candidate.is_included() {
-			if let Some(progress) = self.progress.as_mut() {
-				progress.bitfield_health.max_bitfield_count = self.current_candidate.max_availability_bits;
-				progress.bitfield_health.available_count = self.current_candidate.current_availability_bits;
-				progress.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
-			}
+			progress.bitfield_health.max_bitfield_count = self.current_candidate.max_availability_bits;
+			progress.bitfield_health.available_count = self.current_candidate.current_availability_bits;
+			progress.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
 
 			if self.current_candidate.is_data_available() {
 				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-					if let Some(progress) = self.progress.as_mut() {
-						progress.events.push(ParachainConsensusEvent::Included(
-							candidate_hash,
-							self.current_candidate.current_availability_bits,
-							self.current_candidate.max_availability_bits,
-						));
-					}
+					progress.events.push(ParachainConsensusEvent::Included(
+						candidate_hash,
+						self.current_candidate.current_availability_bits,
+						self.current_candidate.max_availability_bits,
+					));
 
 					let backed_in = self.candidate_backed_in(candidate_hash).await;
 					let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
-					self.stats
-						.on_included(relay_block_number, self.previous_included_at_block_number, backed_in);
+					stats.on_included(relay_block_number, self.previous_included_at_block_number, backed_in);
 					metrics.on_included(
 						relay_block_number,
 						self.previous_included_at_block_number,
@@ -523,136 +495,16 @@ impl SubxtTracker {
 					);
 				}
 			} else if self.is_slow_availability() {
-				if let Some(progress) = self.progress.as_mut() {
-					progress.events.push(ParachainConsensusEvent::SlowAvailability(
-						self.current_candidate.current_availability_bits,
-						self.current_candidate.max_availability_bits,
-					));
-				}
-				self.stats.on_slow_availability();
+				progress.events.push(ParachainConsensusEvent::SlowAvailability(
+					self.current_candidate.current_availability_bits,
+					self.current_candidate.max_availability_bits,
+				));
+				stats.on_slow_availability();
 				metrics.on_slow_availability(self.para_id);
 			}
 		}
 	}
 
-	async fn fetch_inbound_hrmp_channels(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
-		self.executor
-			.get_inbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-			.await
-	}
-
-	async fn fetch_outbound_hrmp_channels(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
-		self.executor
-			.get_outbound_hrmp_channels(self.node_rpc_url.as_str(), block_hash, self.para_id)
-			.await
-	}
-
-	async fn fetch_core_assignments_via_scheduled_paras(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
-		let core_assignments = self
-			.executor
-			.get_scheduled_paras(self.node_rpc_url.as_str(), block_hash)
-			.await?;
-
-		Ok(core_assignments
-			.iter()
-			.map(|v| (v.core.0, vec![v.para_id.0]))
-			.collect::<HashMap<_, _>>())
-	}
-
-	async fn fetch_core_assignments_via_claim_queue(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
-		let assignments = self.executor.get_claim_queue(self.node_rpc_url.as_str(), block_hash).await?;
-		Ok(assignments
-			.iter()
-			.map(|(core, queue)| {
-				let ids = queue
-					.iter()
-					.filter_map(|v| v.as_ref().map(|v| v.assignment.para_id))
-					.collect::<Vec<_>>();
-				(*core, ids)
-			})
-			.collect())
-	}
-
-	async fn fetch_backing_groups(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
-		self.executor.get_backing_groups(self.node_rpc_url.as_str(), block_hash).await
-	}
-
-	async fn fetch_block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
-		self.executor.get_block_timestamp(self.node_rpc_url.as_str(), block_hash).await
-	}
-
-	async fn fetch_occupied_cores(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
-		self.executor.get_occupied_cores(self.node_rpc_url.as_str(), block_hash).await
-	}
-
-	async fn read_session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
-		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::AccountKeys, session_hash)
-			.await
-			.map(|v| v.into_inner().unwrap())
-	}
-
-	async fn read_inherent_data(&self, block_hash: H256) -> Option<InherentData> {
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
-			.await
-			.map(|v| v.into_inner().unwrap())
-	}
-
-	async fn read_on_demand_order(&self, block_hash: H256) -> Option<OnDemandOrder> {
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
-			.await
-			.map(|v| v.into_inner().unwrap())
-	}
-
-	async fn read_relevant_finalized_block_number(&self, block_hash: H256) -> Option<u32> {
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, block_hash)
-			.await
-			.map(|v| v.into_inner().unwrap())
-	}
-
-	async fn read_dispute(&self, block_hash: H256) -> Option<DisputeInfo> {
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::Dispute(self.para_id), block_hash)
-			.await
-			.map(|v| v.into_inner().unwrap())
-	}
-
-	async fn read_candidate(&self, candidate_hash: H256) -> Option<CandidateRecord> {
-		self.api
-			.storage()
-			.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), candidate_hash)
-			.await
-			.map(|v| v.into_inner().unwrap())
-	}
-
-	/// Returns the time for the current block
 	fn current_ts(&self) -> Duration {
 		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
 		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
@@ -694,11 +546,11 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<Vec<polkadot_primitives::ValidatorIndex>> {
-		Ok(self.fetch_backing_groups(block_hash).await?.into_iter().flatten().collect())
+		Ok(self.rpc.backing_groups(block_hash).await?.into_iter().flatten().collect())
 	}
 
 	async fn candidate_backed_in(&self, candidate_hash: H256) -> Option<u32> {
-		self.read_candidate(candidate_hash).await.map(|v| {
+		self.storage.candidate(candidate_hash).await.map(|v| {
 			v.candidate_inclusion
 				.backed
 				.saturating_sub(v.candidate_inclusion.relay_parent_number)

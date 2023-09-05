@@ -88,31 +88,6 @@ pub struct ParachainProgressUpdate {
 	pub finality_lag: Option<u32>,
 }
 
-impl ParachainProgressUpdate {
-	pub fn new(
-		para_id: u32,
-		timestamp: Option<Timestamp>,
-		prev_timestamp: Option<Timestamp>,
-		block_number: BlockNumber,
-		block_hash: H256,
-		is_fork: bool,
-		finality_lag: Option<u32>,
-	) -> Self {
-		let timestamp = timestamp.unwrap_or_default();
-		let prev_timestamp = prev_timestamp.unwrap_or(timestamp);
-		Self {
-			para_id,
-			timestamp,
-			prev_timestamp,
-			block_number,
-			block_hash,
-			is_fork,
-			finality_lag,
-			..Default::default()
-		}
-	}
-}
-
 /// Format the current block inherent timestamp.
 fn format_ts(duration: Duration, current_block_ts: Timestamp) -> String {
 	let dt = time::OffsetDateTime::from_unix_timestamp_nanos(current_block_ts as i128 * 1_000_000).unwrap();
