@@ -54,20 +54,12 @@ pub struct SubxtTracker {
 	storage: TrackerStorage,
 	/// Observed new session
 	new_session: Option<u32>,
-	/// The relay chain block number at which the last candidate was backed at.
-	last_backed_at_block_number: Option<BlockNumber>,
-	/// The relay chain timestamp at which the previous candidate was included at.
-	previous_included_at_ts: Option<Timestamp>,
-	/// The relay chain timestamp at which the last candidate was included at.
-	last_included_at_ts: Option<Timestamp>,
 	/// Information about current block we track.
 	current_candidate: ParachainBlockInfo,
 	/// Current relay chain block.
 	current_relay_block: Option<(BlockNumber, H256)>,
 	/// Previous relay chain block
 	previous_relay_block: Option<(BlockNumber, H256)>,
-	/// Disputes information if any disputes are there.
-	disputes: Vec<DisputesTracker>,
 	/// Current relay chain block timestamp.
 	current_relay_block_ts: Option<Timestamp>,
 	/// Current on-demand order
@@ -77,15 +69,23 @@ pub struct SubxtTracker {
 	/// Timestamp where the last on-demand order was placed
 	on_demand_order_ts: Option<Timestamp>,
 	/// On-demand parachain was scheduled in current relay block
-	on_demand_scheduled: bool,
+	is_on_demand_scheduled: bool,
 	/// Last observed finality lag
 	finality_lag: Option<u32>,
 	/// Last relay chain block timestamp.
 	last_relay_block_ts: Option<Timestamp>,
-	/// Previous included candidate in relay parent number
-	previous_included_at_block_number: Option<BlockNumber>,
 	/// Last included candidate in relay parent number
 	last_included_at_block_number: Option<BlockNumber>,
+	/// The relay chain timestamp at which the last candidate was included at.
+	last_included_at_ts: Option<Timestamp>,
+	/// Previous included candidate in relay parent number
+	previous_included_at_block_number: Option<BlockNumber>,
+	/// The relay chain timestamp at which the previous candidate was included at.
+	previous_included_at_ts: Option<Timestamp>,
+	/// The relay chain block number at which the last candidate was backed at.
+	last_backed_at_block_number: Option<BlockNumber>,
+	/// Disputes information if any disputes are there.
+	disputes: Vec<DisputesTracker>,
 	/// Messages queues status
 	message_queues: MessageQueuesTracker,
 	/// Current forks recorded
@@ -106,7 +106,7 @@ impl SubxtTracker {
 			on_demand_order: None,
 			on_demand_order_block_number: None,
 			on_demand_order_ts: None,
-			on_demand_scheduled: false,
+			is_on_demand_scheduled: false,
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_backed_at_block_number: None,
@@ -207,7 +207,7 @@ impl SubxtTracker {
 		}
 		self.new_session = None;
 		self.on_demand_order = None;
-		self.on_demand_scheduled = false;
+		self.is_on_demand_scheduled = false;
 		self.disputes.clear();
 		self.current_candidate.maybe_reset();
 	}
@@ -296,7 +296,7 @@ impl SubxtTracker {
 			self.current_candidate.assigned_core = Some(core);
 			self.current_candidate.core_occupied =
 				matches!(self.rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
-			self.on_demand_scheduled = self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
+			self.is_on_demand_scheduled = self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
 		Ok(())
 	}
@@ -401,7 +401,7 @@ impl SubxtTracker {
 			metrics.handle_on_demand_order(order);
 		}
 		if let Some(delay) = self.on_demand_delay() {
-			if self.on_demand_scheduled {
+			if self.is_on_demand_scheduled {
 				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
 			}
 			if self.current_candidate.is_backed() {
@@ -409,7 +409,7 @@ impl SubxtTracker {
 			}
 		}
 		if let Some(delay_sec) = self.on_demand_delay_ts() {
-			if self.on_demand_scheduled {
+			if self.is_on_demand_scheduled {
 				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
 			}
 			if self.current_candidate.is_backed() {
