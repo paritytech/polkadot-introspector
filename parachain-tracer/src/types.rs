@@ -14,20 +14,31 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::utils::{extract_misbehaving_validators, extract_validator_addresses, extract_votes, format_ts};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::SubxtHrmpChannel,
 	chain_events::SubxtDisputeResult,
-	types::{BlockNumber, Timestamp, H256},
+	metadata::polkadot_primitives::DisputeStatementSet,
+	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
 use std::{
 	fmt::{self, Display, Formatter, Write},
 	time::Duration,
 };
 
-use crate::utils::format_ts;
+/// Used to track forks of the relay chain
+#[derive(Debug, Clone)]
+pub struct ForkTracker {
+	#[allow(dead_code)]
+	pub(crate) relay_hash: H256,
+	#[allow(dead_code)]
+	pub(crate) relay_number: u32,
+	pub(crate) backed_candidate: Option<H256>,
+	pub(crate) included_candidate: Option<H256>,
+}
 
 /// An outcome for a dispute
 #[derive(Encode, Decode, Debug, Clone)]
@@ -48,20 +59,41 @@ pub struct DisputesTracker {
 	pub resolve_time: Option<u32>,
 }
 
+impl DisputesTracker {
+	pub fn new(
+		dispute_info: &DisputeStatementSet,
+		outcome: SubxtDisputeResult,
+		initiated: u32,
+		initiator_indices: Vec<u32>,
+		concluded: Option<u32>,
+		session_info: Option<&Vec<AccountId32>>,
+		initiators_session_info: Option<&Vec<AccountId32>>,
+	) -> Self {
+		let candidate = dispute_info.candidate_hash.0;
+		let (voted_for, voted_against) = extract_votes(dispute_info);
+		let initiators = extract_validator_addresses(initiators_session_info, initiator_indices);
+		let misbehaving_validators =
+			extract_misbehaving_validators(session_info, dispute_info, outcome == SubxtDisputeResult::Valid);
+		let resolve_time = Some(concluded.expect("dispute must be concluded").saturating_sub(initiated));
+
+		Self { outcome, candidate, voted_for, voted_against, initiators, misbehaving_validators, resolve_time }
+	}
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Block {
+	pub hash: H256,
 	pub num: BlockNumber,
 	pub ts: Timestamp,
-	pub hash: H256,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BlockWithoutTs {
+pub struct BlockWithoutHash {
 	pub num: BlockNumber,
 	pub ts: Timestamp,
 }
 
-impl From<Block> for BlockWithoutTs {
+impl From<Block> for BlockWithoutHash {
 	fn from(block: Block) -> Self {
 		let Block { num, ts, .. } = block;
 		Self { num, ts }

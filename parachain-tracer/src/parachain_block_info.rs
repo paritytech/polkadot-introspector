@@ -16,87 +16,83 @@
 
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{metadata::polkadot_primitives::BackedCandidate, types::H256};
+use subxt::config::{substrate::BlakeTwo256, Hasher};
 
 /// The parachain block tracking information.
 /// This is used for displaying CLI updates and also goes to Storage.
 #[derive(Encode, Decode, Debug, Default)]
 pub struct ParachainBlockInfo {
 	/// The candidate information as observed during backing
-	pub(crate) candidate: Option<BackedCandidate<H256>>,
+	pub candidate: Option<BackedCandidate<H256>>,
 	/// Candidate hash
-	pub(crate) candidate_hash: Option<H256>,
+	pub candidate_hash: Option<H256>,
 	/// The current state.
 	state: ParachainBlockState,
-	/// Backed on current block.
-	just_backed: bool,
 	/// The number of signed bitfields.
-	pub(crate) bitfield_count: u32,
+	pub bitfield_count: u32,
 	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
-	pub(crate) max_availability_bits: u32,
+	pub max_availability_bits: u32,
 	/// The current number of observed availability bits set to 1.
-	pub(crate) current_availability_bits: u32,
+	pub current_availability_bits: u32,
 	/// Parachain availability core assignment information.
-	pub(crate) assigned_core: Option<u32>,
+	pub assigned_core: Option<u32>,
 	/// Core occupation status.
-	pub(crate) core_occupied: bool,
+	pub core_occupied: bool,
 }
 
 impl ParachainBlockInfo {
-	pub(crate) fn maybe_reset(&mut self) {
+	pub fn maybe_reset(&mut self) {
 		if self.is_included() {
 			self.state = ParachainBlockState::Idle;
 			self.candidate = None;
 			self.candidate_hash = None;
 		}
-		self.just_backed = false;
 	}
 
-	pub(crate) fn set_idle(&mut self) {
+	pub fn set_idle(&mut self) {
 		self.state = ParachainBlockState::Idle
 	}
 
-	pub(crate) fn set_backed(&mut self) {
+	pub fn set_backed(&mut self) {
 		self.state = ParachainBlockState::Backed
 	}
 
-	pub(crate) fn set_just_backed(&mut self) {
-		self.just_backed = true;
-		self.set_backed();
-	}
-
-	pub(crate) fn set_pending(&mut self) {
+	pub fn set_pending(&mut self) {
 		self.state = ParachainBlockState::PendingAvailability
 	}
 
-	pub(crate) fn set_included(&mut self) {
+	pub fn set_included(&mut self) {
 		self.state = ParachainBlockState::Included
 	}
 
-	pub(crate) fn is_idle(&self) -> bool {
+	pub fn set_candidate(&mut self, candidate: BackedCandidate<H256>) {
+		let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
+		let candidate_hash = BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash));
+		self.candidate_hash = Some(candidate_hash);
+		self.candidate = Some(candidate);
+	}
+
+	pub fn is_idle(&self) -> bool {
 		self.state == ParachainBlockState::Idle
 	}
 
-	pub(crate) fn is_backed(&self) -> bool {
+	pub fn is_backed(&self) -> bool {
 		self.state == ParachainBlockState::Backed
 	}
 
-	pub(super) fn is_just_backed(&self) -> bool {
-		self.just_backed
-	}
-
-	pub(crate) fn is_pending(&self) -> bool {
+	pub fn is_pending(&self) -> bool {
 		self.state == ParachainBlockState::PendingAvailability
 	}
 
-	pub(crate) fn is_included(&self) -> bool {
+	pub fn is_included(&self) -> bool {
 		self.state == ParachainBlockState::Included
 	}
 
-	pub(crate) fn is_data_available(&self) -> bool {
+	pub fn is_data_available(&self) -> bool {
 		self.current_availability_bits > (self.max_availability_bits / 3) * 2
 	}
 
-	pub(crate) fn is_bitfield_propagation_low(&self) -> bool {
+	pub fn is_bitfield_propagation_low(&self) -> bool {
 		self.max_availability_bits > 0 && !self.is_idle() && self.bitfield_count <= (self.max_availability_bits / 3) * 2
 	}
 }

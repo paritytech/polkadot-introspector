@@ -16,75 +16,67 @@
 
 //! This module tracks parachain blocks.
 use crate::{
-	fork_tracker::ForkTracker,
 	message_queus_tracker::MessageQueuesTracker,
 	parachain_block_info::ParachainBlockInfo,
 	prometheus::Metrics,
 	stats::ParachainStats,
 	tracker_rpc::TrackerRpc,
 	tracker_storage::TrackerStorage,
-	types::{Block, BlockWithoutTs, DisputesTracker, ParachainConsensusEvent, ParachainProgressUpdate},
-	utils::{
-		backed_candidate, extract_availability_bits_count, extract_inherent_fields, extract_misbehaving_validators,
-		extract_validator_addresses, extract_votes, time_diff,
-	},
+	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
+	utils::{backed_candidate, extract_availability_bits_count, extract_inherent_fields, time_diff},
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
-	chain_events::SubxtDisputeResult,
 	collector::{CollectorStorageApi, DisputeInfo},
 	metadata::polkadot_primitives,
 	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
 use std::{default::Default, time::Duration};
-use subxt::{
-	config::{substrate::BlakeTwo256, Hasher},
-	error::{Error, MetadataError},
-};
+use subxt::error::{Error, MetadataError};
 
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
-	/// Prachain ID to track.
+	/// Parachain ID to track.
 	para_id: u32,
 	/// A subxt API wrapper.
 	rpc: TrackerRpc,
 	/// API to access collector's storage
 	storage: TrackerStorage,
 
-	/// Observed new session
+	/// A new session index.
 	new_session: Option<u32>,
-	/// Information about current block we track.
+	/// Information about current parachain block we track.
 	current_candidate: ParachainBlockInfo,
 	/// Current relay chain block.
 	current_relay_block: Option<Block>,
-	/// Previous relay chain block
+	/// Previous relay chain block.
 	previous_relay_block: Option<Block>,
 
-	/// Last relay chain block timestamp.
+	/// A timestamp of a last relay chain block which is not a fork.
 	last_non_fork_relay_block_ts: Option<Timestamp>,
-	/// The relay chain block number at which the last candidate was backed at.
-	last_backed_at_num: Option<BlockNumber>,
-	/// Last included candidate in relay parent number
-	last_included_at: Option<BlockWithoutTs>,
-	/// Previous included candidate in relay parent number
-	previous_included_at: Option<BlockWithoutTs>,
+	/// The relay chain block number at which the last candidate was backed.
+	last_backed_at_block_number: Option<BlockNumber>,
+	/// The relay chain block at which last candidate was included.
+	last_included_at: Option<BlockWithoutHash>,
+	/// The relay chain block at which previous candidate was included.
+	previous_included_at: Option<BlockWithoutHash>,
 
-	/// Last observed finality lag
+	/// Last observed finality lag.
 	finality_lag: Option<u32>,
 
-	/// Current on-demand order
+	/// Current on-demand order.
 	on_demand_order: Option<OnDemandOrder>,
-	/// Relay block where the last on-demand order was placed
-	on_demand_order_at: Option<BlockWithoutTs>,
-	/// On-demand parachain was scheduled in current relay block
+	/// Yhe relay chain block at which last on-demand order was placed.
+	on_demand_order_at: Option<BlockWithoutHash>,
+	/// On-demand parachain was scheduled in current relay block.
 	is_on_demand_scheduled_in_current_block: bool,
 
-	/// Disputes information if any disputes are there.
+	/// Disputes information.
 	disputes: Vec<DisputesTracker>,
-	/// Messages queues status
+	/// Messages queues
 	message_queues: MessageQueuesTracker,
-	/// Current forks recorded
+	/// Current forks
 	relay_forks: Vec<ForkTracker>,
 }
 
@@ -103,7 +95,7 @@ impl SubxtTracker {
 			is_on_demand_scheduled_in_current_block: false,
 			finality_lag: None,
 			disputes: Vec::new(),
-			last_backed_at_num: None,
+			last_backed_at_block_number: None,
 			last_non_fork_relay_block_ts: None,
 			last_included_at: None,
 			previous_included_at: None,
@@ -112,6 +104,10 @@ impl SubxtTracker {
 		}
 	}
 
+	/// Proccesses relay chain block:
+	/// 	- injects block information to tracker's state,
+	/// 	- notifies about changes using progress, stats and metrics,
+	/// 	- resets state.
 	pub async fn process_new_head(
 		&mut self,
 		block_hash: H256,
@@ -126,13 +122,12 @@ impl SubxtTracker {
 		Ok(progress)
 	}
 
-	/// Called when a new session is observed
+	/// Saves new session to tracker's state
 	pub async fn process_new_session(&mut self, session_index: u32) {
 		self.new_session = Some(session_index)
 	}
 
-	/// Injects a new relay chain block into the tracker.
-	/// Blocks must be injected in order.
+	/// Injects a new relay chain block into the tracker. Blocks must be injected in order.
 	async fn inject_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
 		if let Some(inherent) = self.storage.inherent_data(block_hash).await {
 			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
@@ -148,7 +143,7 @@ impl SubxtTracker {
 			self.set_on_demand_order(block_hash).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
-			if self.has_backed_candidate() && !self.current_candidate.is_just_backed() {
+			if self.has_backed_candidate() && !self.is_just_backed() {
 				self.set_availability(block_hash, bitfields).await?;
 			}
 		} else {
@@ -158,7 +153,7 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	/// Update current parachain progress.
+	/// Creates a parachain progress.
 	async fn progress(&self, stats: &mut ParachainStats, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
 		if let Some(block) = self.current_relay_block {
 			let prev_timestamp = self.last_non_fork_relay_block_ts.unwrap_or(block.ts);
@@ -180,7 +175,7 @@ impl SubxtTracker {
 			self.notify_candidate_state(&mut progress, stats, metrics).await;
 			self.notify_disputes(&mut progress, stats, metrics);
 			self.notify_active_message_queues(&mut progress);
-			self.notify_current_ts(stats, metrics);
+			self.notify_current_block_time(stats, metrics);
 			self.notify_finality_lag(metrics);
 			self.notify_on_demand_order(metrics);
 
@@ -190,7 +185,7 @@ impl SubxtTracker {
 		}
 	}
 
-	/// Called to move to idle state after inclusion/timeout.
+	/// Resets state
 	fn maybe_reset_state(&mut self) {
 		if self.current_candidate.is_backed() {
 			self.on_demand_order_at = None;
@@ -254,17 +249,13 @@ impl SubxtTracker {
 		block_number: BlockNumber,
 	) {
 		self.current_candidate.bitfield_count = bitfields_count as u32;
-		// Update the curent state if a candiate was backed for this para.
 		if let Some(candidate) = backed_candidate(backed_candidates, self.para_id) {
-			self.current_candidate.set_just_backed();
-			let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
-			let candidate_hash = BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash));
-			self.current_candidate.candidate_hash = Some(candidate_hash);
-			self.current_candidate.candidate = Some(candidate);
-			self.last_backed_at_num = Some(block_number);
+			self.current_candidate.set_backed();
+			self.current_candidate.set_candidate(candidate);
+			self.last_backed_at_block_number = Some(block_number);
 
 			if let Some(current_fork) = self.relay_forks.last_mut() {
-				current_fork.backed_candidate = Some(candidate_hash);
+				current_fork.backed_candidate = self.current_candidate.candidate_hash;
 			}
 		} else if !self.has_backed_candidate() {
 			self.current_candidate.set_idle();
@@ -274,13 +265,11 @@ impl SubxtTracker {
 	async fn set_core_assignment(&mut self, block_hash: H256) -> color_eyre::Result<()> {
 		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
 		let assignments = match self.rpc.core_assignments_via_scheduled_paras(block_hash).await {
-			Ok(v) => v,
-			// The `ParaScheduler,Scheduled` API call not found,
-			// we should try to fetch `ParaScheduler,ClaimQueue` instead
+			// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
 			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) =>
-				self.rpc.core_assignments_via_claim_queue(block_hash).await?,
-			Err(e) => return Err(e.into()),
-		};
+				self.rpc.core_assignments_via_claim_queue(block_hash).await,
+			v => v,
+		}?;
 		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(core);
 			self.current_candidate.core_occupied =
@@ -298,25 +287,15 @@ impl SubxtTracker {
 				self.storage.dispute(dispute_info.candidate_hash.0).await
 			{
 				if let Some(outcome) = outcome {
-					let session_info = self.storage.session_keys(dispute_info.session).await;
-					// TODO: we would like to distinguish different dispute phases at some point
-					let (voted_for, voted_against) = extract_votes(&dispute_info);
-					let misbehaving_validators = extract_misbehaving_validators(
-						session_info.as_ref(),
+					self.disputes.push(DisputesTracker::new(
 						dispute_info,
-						outcome == SubxtDisputeResult::Valid,
-					);
-					let initiators_session_info = self.storage.session_keys(session_index).await;
-					let initiators = extract_validator_addresses(initiators_session_info.as_ref(), initiator_indices);
-					self.disputes.push(DisputesTracker {
-						candidate: dispute_info.candidate_hash.0,
-						voted_for,
-						voted_against,
 						outcome,
-						initiators,
-						misbehaving_validators,
-						resolve_time: Some(concluded.expect("dispute must be concluded").saturating_sub(initiated)),
-					});
+						initiated,
+						initiator_indices,
+						concluded,
+						self.storage.session_keys(dispute_info.session).await.as_ref(),
+						self.storage.session_keys(session_index).await.as_ref(),
+					));
 				} else {
 					info!(
 						"dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
@@ -370,7 +349,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn notify_current_ts(&self, stats: &mut ParachainStats, metrics: &Metrics) {
+	fn notify_current_block_time(&self, stats: &mut ParachainStats, metrics: &Metrics) {
 		if !self.is_fork() {
 			let ts = self.current_block_time();
 			stats.on_block(ts);
@@ -396,7 +375,7 @@ impl SubxtTracker {
 				metrics.handle_on_demand_delay(delay, self.para_id, "backed");
 			}
 		}
-		if let Some(delay_sec) = self.on_demand_delay_ts() {
+		if let Some(delay_sec) = self.on_demand_delay_sec() {
 			if self.is_on_demand_scheduled_in_current_block {
 				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
 			}
@@ -514,7 +493,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn on_demand_delay_ts(&self) -> Option<Duration> {
+	fn on_demand_delay_sec(&self) -> Option<Duration> {
 		time_diff(self.current_relay_block.map(|v| v.ts), self.on_demand_order_at.map(|v| v.ts))
 	}
 
@@ -525,8 +504,14 @@ impl SubxtTracker {
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
 	}
 
+	fn is_just_backed(&self) -> bool {
+		self.last_backed_at_block_number.is_some() &&
+			self.last_backed_at_block_number == self.current_relay_block.map(|v| v.num)
+	}
+
 	fn is_slow_availability(&self) -> bool {
-		self.current_candidate.core_occupied && self.last_backed_at_num != self.current_relay_block.map(|v| v.num)
+		self.current_candidate.core_occupied &&
+			self.last_backed_at_block_number != self.current_relay_block.map(|v| v.num)
 	}
 
 	async fn validators_indices(
