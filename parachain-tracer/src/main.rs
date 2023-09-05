@@ -52,16 +52,15 @@ use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
 
-mod disputes_tracker;
 mod fork_tracker;
 mod message_queus_tracker;
 mod parachain_block_info;
-mod progress;
 mod prometheus;
 mod stats;
 mod tracker;
 mod tracker_rpc;
 mod tracker_storage;
+mod types;
 mod utils;
 
 #[derive(Clone, Debug, Parser, Default)]

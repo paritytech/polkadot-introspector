@@ -1,4 +1,4 @@
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -14,11 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-//! This module defines structures used for tool progress tracking
-
-use crate::disputes_tracker::DisputesTracker;
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::SubxtHrmpChannel,
 	chain_events::SubxtDisputeResult,
@@ -28,6 +26,47 @@ use std::{
 	fmt::{self, Display, Formatter, Write},
 	time::Duration,
 };
+
+use crate::utils::format_ts;
+
+/// An outcome for a dispute
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct DisputesTracker {
+	/// Disputed candidate
+	pub candidate: H256,
+	/// The real outcome
+	pub outcome: SubxtDisputeResult,
+	/// Number of validators voted that a candidate is valid
+	pub voted_for: u32,
+	/// Number of validators voted that a candidate is invalid
+	pub voted_against: u32,
+	/// A vector of validators initiateds the dispute (index + identify)
+	pub initiators: Vec<(u32, String)>,
+	/// A vector of validators voted against supermajority (index + identify)
+	pub misbehaving_validators: Vec<(u32, String)>,
+	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
+	pub resolve_time: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Block {
+	pub num: BlockNumber,
+	pub ts: Timestamp,
+	pub hash: H256,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BlockWithoutTs {
+	pub num: BlockNumber,
+	pub ts: Timestamp,
+}
+
+impl From<Block> for BlockWithoutTs {
+	fn from(block: Block) -> Self {
+		let Block { num, ts, .. } = block;
+		Self { num, ts }
+	}
+}
 
 #[derive(Clone, Default)]
 pub struct BitfieldsHealth {
@@ -86,17 +125,6 @@ pub struct ParachainProgressUpdate {
 	pub is_fork: bool,
 	/// Finality lag (best block number - last finalized block number)
 	pub finality_lag: Option<u32>,
-}
-
-/// Format the current block inherent timestamp.
-fn format_ts(duration: Duration, current_block_ts: Timestamp) -> String {
-	let dt = time::OffsetDateTime::from_unix_timestamp_nanos(current_block_ts as i128 * 1_000_000).unwrap();
-	format!(
-		"{} +{}",
-		dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
-			.expect("Invalid datetime format"),
-		format_args!("{}ms", duration.as_millis())
-	)
 }
 
 impl Display for ParachainProgressUpdate {

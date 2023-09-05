@@ -16,15 +16,14 @@
 
 //! This module tracks parachain blocks.
 use crate::{
-	disputes_tracker::DisputesTracker,
 	fork_tracker::ForkTracker,
 	message_queus_tracker::MessageQueuesTracker,
 	parachain_block_info::ParachainBlockInfo,
-	progress::{ParachainConsensusEvent, ParachainProgressUpdate},
 	prometheus::Metrics,
 	stats::ParachainStats,
 	tracker_rpc::TrackerRpc,
 	tracker_storage::TrackerStorage,
+	types::{Block, BlockWithoutTs, DisputesTracker, ParachainConsensusEvent, ParachainProgressUpdate},
 	utils::{
 		backed_candidate, extract_availability_bits_count, extract_inherent_fields, extract_misbehaving_validators,
 		extract_validator_addresses, extract_votes, time_diff,
@@ -46,44 +45,41 @@ use subxt::{
 
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
-	/// Parachain ID to track.
+	/// Prachain ID to track.
 	para_id: u32,
 	/// A subxt API wrapper.
 	rpc: TrackerRpc,
 	/// API to access collector's storage
 	storage: TrackerStorage,
+
 	/// Observed new session
 	new_session: Option<u32>,
 	/// Information about current block we track.
 	current_candidate: ParachainBlockInfo,
 	/// Current relay chain block.
-	current_relay_block: Option<(BlockNumber, H256)>,
+	current_relay_block: Option<Block>,
 	/// Previous relay chain block
-	previous_relay_block: Option<(BlockNumber, H256)>,
-	/// Current relay chain block timestamp.
-	current_relay_block_ts: Option<Timestamp>,
+	previous_relay_block: Option<Block>,
+
+	/// Last relay chain block timestamp.
+	last_non_fork_relay_block_ts: Option<Timestamp>,
+	/// The relay chain block number at which the last candidate was backed at.
+	last_backed_at_num: Option<BlockNumber>,
+	/// Last included candidate in relay parent number
+	last_included_at: Option<BlockWithoutTs>,
+	/// Previous included candidate in relay parent number
+	previous_included_at: Option<BlockWithoutTs>,
+
+	/// Last observed finality lag
+	finality_lag: Option<u32>,
+
 	/// Current on-demand order
 	on_demand_order: Option<OnDemandOrder>,
 	/// Relay block where the last on-demand order was placed
-	on_demand_order_block_number: Option<BlockNumber>,
-	/// Timestamp where the last on-demand order was placed
-	on_demand_order_ts: Option<Timestamp>,
+	on_demand_order_at: Option<BlockWithoutTs>,
 	/// On-demand parachain was scheduled in current relay block
-	is_on_demand_scheduled: bool,
-	/// Last observed finality lag
-	finality_lag: Option<u32>,
-	/// Last relay chain block timestamp.
-	last_relay_block_ts: Option<Timestamp>,
-	/// Last included candidate in relay parent number
-	last_included_at_block_number: Option<BlockNumber>,
-	/// The relay chain timestamp at which the last candidate was included at.
-	last_included_at_ts: Option<Timestamp>,
-	/// Previous included candidate in relay parent number
-	previous_included_at_block_number: Option<BlockNumber>,
-	/// The relay chain timestamp at which the previous candidate was included at.
-	previous_included_at_ts: Option<Timestamp>,
-	/// The relay chain block number at which the last candidate was backed at.
-	last_backed_at_block_number: Option<BlockNumber>,
+	is_on_demand_scheduled_in_current_block: bool,
+
 	/// Disputes information if any disputes are there.
 	disputes: Vec<DisputesTracker>,
 	/// Messages queues status
@@ -102,19 +98,15 @@ impl SubxtTracker {
 			new_session: None,
 			current_relay_block: None,
 			previous_relay_block: None,
-			current_relay_block_ts: None,
 			on_demand_order: None,
-			on_demand_order_block_number: None,
-			on_demand_order_ts: None,
-			is_on_demand_scheduled: false,
+			on_demand_order_at: None,
+			is_on_demand_scheduled_in_current_block: false,
 			finality_lag: None,
 			disputes: Vec::new(),
-			last_backed_at_block_number: None,
-			last_relay_block_ts: None,
-			last_included_at_block_number: None,
-			last_included_at_ts: None,
-			previous_included_at_block_number: None,
-			previous_included_at_ts: None,
+			last_backed_at_num: None,
+			last_non_fork_relay_block_ts: None,
+			last_included_at: None,
+			previous_included_at: None,
 			message_queues: Default::default(),
 			relay_forks: vec![],
 		}
@@ -168,14 +160,13 @@ impl SubxtTracker {
 
 	/// Update current parachain progress.
 	async fn progress(&self, stats: &mut ParachainStats, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
-		if let Some((block_number, block_hash)) = self.current_relay_block {
-			let timestamp = self.current_relay_block_ts.unwrap_or_default();
-			let prev_timestamp = self.last_relay_block_ts.unwrap_or(timestamp);
+		if let Some(block) = self.current_relay_block {
+			let prev_timestamp = self.last_non_fork_relay_block_ts.unwrap_or(block.ts);
 			let mut progress = ParachainProgressUpdate {
-				timestamp,
+				timestamp: block.ts,
 				prev_timestamp,
-				block_number,
-				block_hash,
+				block_number: block.num,
+				block_hash: block.hash,
 				para_id: self.para_id,
 				is_fork: self.is_fork(),
 				finality_lag: self.finality_lag,
@@ -202,12 +193,11 @@ impl SubxtTracker {
 	/// Called to move to idle state after inclusion/timeout.
 	fn maybe_reset_state(&mut self) {
 		if self.current_candidate.is_backed() {
-			self.on_demand_order_block_number = None;
-			self.on_demand_order_ts = None;
+			self.on_demand_order_at = None;
 		}
 		self.new_session = None;
 		self.on_demand_order = None;
-		self.is_on_demand_scheduled = false;
+		self.is_on_demand_scheduled_in_current_block = false;
 		self.disputes.clear();
 		self.current_candidate.maybe_reset();
 	}
@@ -221,12 +211,12 @@ impl SubxtTracker {
 	}
 
 	async fn set_relay_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
+		let ts = self.rpc.block_timestamp(block_hash).await?;
 		self.previous_relay_block = self.current_relay_block;
-		self.current_relay_block = Some((block_number, block_hash));
+		self.current_relay_block = Some(Block { num: block_number, ts, hash: block_hash });
 
-		self.current_relay_block_ts = Some(self.rpc.block_timestamp(block_hash).await?);
 		if !self.is_fork() {
-			self.last_relay_block_ts = self.current_relay_block_ts;
+			self.last_non_fork_relay_block_ts = Some(ts);
 		}
 
 		self.finality_lag = self
@@ -241,8 +231,7 @@ impl SubxtTracker {
 	async fn set_on_demand_order(&mut self, block_hash: H256) {
 		self.on_demand_order = self.storage.on_demand_order(block_hash).await;
 		if self.on_demand_order.is_some() {
-			self.on_demand_order_block_number = self.current_relay_block.map(|(num, _)| num);
-			self.on_demand_order_ts = self.current_relay_block_ts;
+			self.on_demand_order_at = self.current_relay_block.map(|v| v.into());
 		}
 	}
 
@@ -272,7 +261,7 @@ impl SubxtTracker {
 			let candidate_hash = BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash));
 			self.current_candidate.candidate_hash = Some(candidate_hash);
 			self.current_candidate.candidate = Some(candidate);
-			self.last_backed_at_block_number = Some(block_number);
+			self.last_backed_at_num = Some(block_number);
 
 			if let Some(current_fork) = self.relay_forks.last_mut() {
 				current_fork.backed_candidate = Some(candidate_hash);
@@ -296,7 +285,8 @@ impl SubxtTracker {
 			self.current_candidate.assigned_core = Some(core);
 			self.current_candidate.core_occupied =
 				matches!(self.rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
-			self.is_on_demand_scheduled = self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
+			self.is_on_demand_scheduled_in_current_block =
+				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
 		Ok(())
 	}
@@ -352,10 +342,8 @@ impl SubxtTracker {
 					self.current_candidate.set_included();
 					self.relay_forks.last_mut().expect("must have relay fork").included_candidate =
 						self.current_candidate.candidate_hash;
-					self.previous_included_at_block_number = self.last_included_at_block_number;
-					self.previous_included_at_ts = self.last_included_at_ts;
-					self.last_included_at_block_number = self.current_relay_block.map(|v| v.0);
-					self.last_included_at_ts = self.current_relay_block_ts;
+					self.previous_included_at = self.last_included_at;
+					self.last_included_at = self.current_relay_block.map(|v| v.into());
 				} else {
 					self.current_candidate.set_pending();
 				}
@@ -384,7 +372,7 @@ impl SubxtTracker {
 
 	fn notify_current_ts(&self, stats: &mut ParachainStats, metrics: &Metrics) {
 		if !self.is_fork() {
-			let ts = self.current_ts();
+			let ts = self.current_block_time();
 			stats.on_block(ts);
 			metrics.on_block(ts.as_secs_f64(), self.para_id);
 		}
@@ -401,7 +389,7 @@ impl SubxtTracker {
 			metrics.handle_on_demand_order(order);
 		}
 		if let Some(delay) = self.on_demand_delay() {
-			if self.is_on_demand_scheduled {
+			if self.is_on_demand_scheduled_in_current_block {
 				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
 			}
 			if self.current_candidate.is_backed() {
@@ -409,7 +397,7 @@ impl SubxtTracker {
 			}
 		}
 		if let Some(delay_sec) = self.on_demand_delay_ts() {
-			if self.is_on_demand_scheduled {
+			if self.is_on_demand_scheduled_in_current_block {
 				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
 			}
 			if self.current_candidate.is_backed() {
@@ -484,13 +472,13 @@ impl SubxtTracker {
 					));
 
 					let backed_in = self.candidate_backed_in(candidate_hash).await;
-					let (relay_block_number, _) = self.current_relay_block.expect("Checked by caller; qed");
-					stats.on_included(relay_block_number, self.previous_included_at_block_number, backed_in);
+					let relay_block = self.current_relay_block.expect("Checked by caller; qed");
+					stats.on_included(relay_block.num, self.previous_included_at.map(|v| v.num), backed_in);
 					metrics.on_included(
-						relay_block_number,
-						self.previous_included_at_block_number,
+						relay_block.num,
+						self.previous_included_at.map(|v| v.num),
 						backed_in,
-						time_diff(self.current_relay_block_ts, self.previous_included_at_ts),
+						time_diff(Some(relay_block.ts), self.previous_included_at.map(|v| v.ts)),
 						self.para_id,
 					);
 				}
@@ -505,29 +493,29 @@ impl SubxtTracker {
 		}
 	}
 
-	fn current_ts(&self) -> Duration {
-		let cur_ts = self.current_relay_block_ts.unwrap_or_default();
-		let base_ts = self.last_relay_block_ts.unwrap_or(cur_ts);
+	fn current_block_time(&self) -> Duration {
+		let cur_ts = self.current_relay_block.map(|v| v.ts).unwrap_or_default();
+		let base_ts = self.last_non_fork_relay_block_ts.unwrap_or(cur_ts);
 		Duration::from_millis(cur_ts).saturating_sub(Duration::from_millis(base_ts))
 	}
 
 	fn is_fork(&self) -> bool {
 		match (self.current_relay_block, self.previous_relay_block) {
-			(Some((current, _)), Some((previous, _))) => current == previous,
+			(Some(a), Some(b)) => a.num == b.num,
 			_ => false,
 		}
 	}
 
 	fn on_demand_delay(&self) -> Option<u32> {
-		if let (Some(on_demand), Some((relay, _))) = (self.on_demand_order_block_number, self.current_relay_block) {
-			Some(relay.saturating_sub(on_demand))
+		if let (Some(on_demand), Some(relay)) = (self.on_demand_order_at, self.current_relay_block) {
+			Some(relay.num.saturating_sub(on_demand.num))
 		} else {
 			None
 		}
 	}
 
 	fn on_demand_delay_ts(&self) -> Option<Duration> {
-		time_diff(self.current_relay_block_ts, self.on_demand_order_ts)
+		time_diff(self.current_relay_block.map(|v| v.ts), self.on_demand_order_at.map(|v| v.ts))
 	}
 
 	fn has_backed_candidate(&self) -> bool {
@@ -538,8 +526,7 @@ impl SubxtTracker {
 	}
 
 	fn is_slow_availability(&self) -> bool {
-		self.current_candidate.core_occupied &&
-			self.last_backed_at_block_number != self.current_relay_block.map(|v| v.0)
+		self.current_candidate.core_occupied && self.last_backed_at_num != self.current_relay_block.map(|v| v.num)
 	}
 
 	async fn validators_indices(

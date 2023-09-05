@@ -17,7 +17,7 @@
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::InherentData,
 	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatement, DisputeStatementSet},
-	types::{AccountId32, H256},
+	types::{AccountId32, Timestamp, H256},
 };
 use std::time::Duration;
 
@@ -114,4 +114,15 @@ pub(crate) fn extract_availability_bits_count(bitfields: Vec<AvailabilityBitfiel
 		.iter()
 		.map(|v| v.0.as_bits().get(core as usize).expect("core index must be in the bitfield") as u32)
 		.sum()
+}
+
+/// Format the current block inherent timestamp.
+pub(crate) fn format_ts(duration: Duration, current_block_ts: Timestamp) -> String {
+	let dt = time::OffsetDateTime::from_unix_timestamp_nanos(current_block_ts as i128 * 1_000_000).unwrap();
+	format!(
+		"{} +{}",
+		dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
+			.expect("Invalid datetime format"),
+		format_args!("{}ms", duration.as_millis())
+	)
 }

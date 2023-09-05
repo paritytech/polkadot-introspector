@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{disputes_tracker::DisputesTracker, progress::ParachainProgressUpdate};
+use crate::types::{DisputesTracker, ParachainProgressUpdate};
 use clap::Parser;
 use color_eyre::Result;
 use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
