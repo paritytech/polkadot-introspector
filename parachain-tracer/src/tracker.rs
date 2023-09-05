@@ -425,8 +425,8 @@ impl SubxtTracker {
 	) {
 		if self.current_candidate.is_idle() {
 			progress.events.push(ParachainConsensusEvent::SkippedSlot);
-			stats.on_skipped_slot(&progress);
-			metrics.on_skipped_slot(&progress);
+			stats.on_skipped_slot(progress);
+			metrics.on_skipped_slot(progress);
 		}
 
 		if self.current_candidate.is_backed() {
