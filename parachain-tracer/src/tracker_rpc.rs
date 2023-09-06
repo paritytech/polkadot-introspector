@@ -100,3 +100,100 @@ impl TrackerRpc {
 		self.executor.get_occupied_cores(self.node.as_str(), block_hash).await
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use polkadot_introspector_essentials::{api::ApiService, storage::RecordsStorageConfig};
+	use subxt::error::{Error, MetadataError};
+
+	fn rpc_node_url() -> &'static str {
+		const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
+
+		if let Ok(url) = std::env::var("WS_URL") {
+			return Box::leak(url.into_boxed_str())
+		}
+
+		RPC_NODE_URL
+	}
+
+	async fn setup_client() -> (TrackerRpc, H256) {
+		let api: ApiService<H256> =
+			ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default());
+		let rpc = TrackerRpc::new(100, rpc_node_url(), api.subxt());
+		let block_hash = api.subxt().get_block(rpc_node_url(), None).await.unwrap().header().parent_hash;
+
+		(rpc, block_hash)
+	}
+
+	#[tokio::test]
+	async fn test_fetches_inbound_hrmp_channels() {
+		let (mut rpc, block_hash) = setup_client().await;
+
+		let response = rpc.inbound_hrmp_channels(block_hash).await;
+
+		assert!(response.is_ok());
+	}
+
+	#[tokio::test]
+	async fn test_fetches_outbound_hrmp_channels() {
+		let (mut rpc, block_hash) = setup_client().await;
+
+		let response = rpc.outbound_hrmp_channels(block_hash).await;
+
+		assert!(response.is_ok());
+	}
+
+	#[tokio::test]
+	async fn test_fetches_core_assignments_via_scheduled_paras() {
+		let (mut rpc, block_hash) = setup_client().await;
+
+		let response = rpc.core_assignments_via_scheduled_paras(block_hash).await;
+
+		match response {
+			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(reason)))) =>
+				assert_eq!(reason, "Scheduled"),
+			_ => assert!(!response.unwrap().is_empty()),
+		};
+	}
+
+	#[tokio::test]
+	async fn test_fetches_core_assignments_via_claim_queue() {
+		let (mut rpc, block_hash) = setup_client().await;
+
+		let response = rpc.core_assignments_via_claim_queue(block_hash).await;
+
+		match response {
+			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(reason)))) =>
+				assert_eq!(reason, "ClaimQueue"),
+			_ => assert!(!response.unwrap().is_empty()),
+		};
+	}
+
+	#[tokio::test]
+	async fn test_fetches_backing_groups() {
+		let (mut rpc, block_hash) = setup_client().await;
+
+		let response = rpc.backing_groups(block_hash).await;
+
+		assert!(!response.unwrap().is_empty());
+	}
+
+	#[tokio::test]
+	async fn test_fetches_block_timestamp() {
+		let (mut rpc, block_hash) = setup_client().await;
+
+		let response = rpc.block_timestamp(block_hash).await;
+
+		assert!(response.unwrap() > 0);
+	}
+
+	#[tokio::test]
+	async fn test_fetches_occupied_cores() {
+		let (mut rpc, block_hash) = setup_client().await;
+
+		let response = rpc.occupied_cores(block_hash).await;
+
+		assert!(!response.unwrap().is_empty());
+	}
+}
