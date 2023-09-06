@@ -31,11 +31,11 @@ pub struct TrackerRpc {
 }
 
 impl TrackerRpc {
-	pub(crate) fn new(para_id: u32, node: &str, executor: RequestExecutor) -> Self {
+	pub fn new(para_id: u32, node: &str, executor: RequestExecutor) -> Self {
 		Self { para_id, node: node.to_string(), executor }
 	}
 
-	pub(crate) async fn inbound_hrmp_channels(
+	pub async fn inbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
@@ -44,7 +44,7 @@ impl TrackerRpc {
 			.await
 	}
 
-	pub(crate) async fn outbound_hrmp_channels(
+	pub async fn outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
@@ -53,7 +53,7 @@ impl TrackerRpc {
 			.await
 	}
 
-	pub(crate) async fn core_assignments_via_scheduled_paras(
+	pub async fn core_assignments_via_scheduled_paras(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
@@ -65,7 +65,7 @@ impl TrackerRpc {
 			.collect::<HashMap<_, _>>())
 	}
 
-	pub(crate) async fn core_assignments_via_claim_queue(
+	pub async fn core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
@@ -82,18 +82,18 @@ impl TrackerRpc {
 			.collect())
 	}
 
-	pub(crate) async fn backing_groups(
+	pub async fn backing_groups(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
 		self.executor.get_backing_groups(self.node.as_str(), block_hash).await
 	}
 
-	pub(crate) async fn block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
+	pub async fn block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
 		self.executor.get_block_timestamp(self.node.as_str(), block_hash).await
 	}
 
-	pub(crate) async fn occupied_cores(
+	pub async fn occupied_cores(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
