@@ -62,6 +62,9 @@ mod tracker_storage;
 mod types;
 mod utils;
 
+#[cfg(test)]
+mod test_utils;
+
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub(crate) enum ParachainTracerMode {

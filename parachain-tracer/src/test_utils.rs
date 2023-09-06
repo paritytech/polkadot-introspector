@@ -1,0 +1,117 @@
+// Copyright 2023 Parity Technologies (UK) Ltd.
+// This file is part of polkadot-introspector.
+//
+// polkadot-introspector is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// polkadot-introspector is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+#![cfg(test)]
+
+use polkadot_introspector_essentials::{
+	metadata::{
+		polkadot::runtime_types::{
+			bounded_collections::bounded_vec::BoundedVec,
+			polkadot_core_primitives::CandidateHash,
+			polkadot_parachain::primitives::{HeadData, Id, ValidationCodeHash},
+			sp_core::sr25519::{Public, Signature},
+			sp_runtime::{
+				generic::{digest::Digest, header::Header},
+				traits::BlakeTwo256,
+			},
+		},
+		polkadot_primitives::{
+			collator_app, signed::UncheckedSigned, validator_app, AvailabilityBitfield, BackedCandidate,
+			CandidateCommitments, CandidateDescriptor, CommittedCandidateReceipt, DisputeStatement,
+			DisputeStatementSet, InherentData, InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
+		},
+	},
+	types::H256,
+};
+use subxt::utils::bits::DecodedBits;
+
+pub fn create_backed_candidate(para_id: u32) -> BackedCandidate<H256> {
+	BackedCandidate {
+		candidate: CommittedCandidateReceipt {
+			descriptor: CandidateDescriptor {
+				para_id: Id(para_id),
+				relay_parent: H256::random(),
+				collator: collator_app::Public(Public([0; 32])),
+				persisted_validation_data_hash: Default::default(),
+				pov_hash: Default::default(),
+				erasure_root: Default::default(),
+				signature: create_collator_signature(),
+				para_head: Default::default(),
+				validation_code_hash: ValidationCodeHash(Default::default()),
+			},
+			commitments: CandidateCommitments {
+				upward_messages: BoundedVec(Default::default()),
+				horizontal_messages: BoundedVec(Default::default()),
+				new_validation_code: Default::default(),
+				head_data: HeadData(Default::default()),
+				processed_downward_messages: Default::default(),
+				hrmp_watermark: Default::default(),
+			},
+		},
+		validity_votes: Default::default(),
+		validator_indices: DecodedBits::from_iter([true]),
+	}
+}
+
+pub fn create_dispute_statement_set() -> DisputeStatementSet {
+	DisputeStatementSet {
+		candidate_hash: CandidateHash(H256::random()),
+		session: 0,
+		statements: vec![
+			(
+				DisputeStatement::Valid(ValidDisputeStatementKind::Explicit),
+				ValidatorIndex(1),
+				create_validator_signature(),
+			),
+			(
+				DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
+				ValidatorIndex(2),
+				create_validator_signature(),
+			),
+			(
+				DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
+				ValidatorIndex(3),
+				create_validator_signature(),
+			),
+		],
+	}
+}
+
+pub fn create_inherent_date(para_id: u32) -> InherentData<Header<u32, BlakeTwo256>> {
+	InherentData {
+		bitfields: vec![UncheckedSigned {
+			payload: AvailabilityBitfield(DecodedBits::from_iter([true])),
+			validator_index: ValidatorIndex(1),
+			signature: create_validator_signature(),
+			__subxt_unused_type_params: Default::default(),
+		}],
+		backed_candidates: vec![create_backed_candidate(para_id)],
+		disputes: vec![create_dispute_statement_set()],
+		parent_header: Header {
+			parent_hash: H256::random(),
+			number: Default::default(),
+			state_root: Default::default(),
+			extrinsics_root: Default::default(),
+			digest: Digest { logs: Default::default() },
+			__subxt_unused_type_params: Default::default(),
+		},
+	}
+}
+
+fn create_collator_signature() -> collator_app::Signature {
+	collator_app::Signature(Signature([0; 64]))
+}
+
+fn create_validator_signature() -> validator_app::Signature {
+	validator_app::Signature(Signature([0; 64]))
+}
