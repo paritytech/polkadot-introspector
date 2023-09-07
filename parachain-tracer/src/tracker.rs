@@ -19,7 +19,7 @@ use crate::{
 	message_queus_tracker::MessageQueuesTracker,
 	parachain_block_info::ParachainBlockInfo,
 	prometheus::PrometheusMetrics,
-	stats::ParachainStats,
+	stats::Stats,
 	tracker_rpc::TrackerRpc,
 	tracker_storage::TrackerStorage,
 	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
@@ -109,7 +109,7 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		block_number: BlockNumber,
-		stats: &mut ParachainStats,
+		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 		rpc: &mut impl TrackerRpc,
 	) -> color_eyre::Result<Option<ParachainProgressUpdate>> {
@@ -159,7 +159,7 @@ impl SubxtTracker {
 	/// Creates a parachain progress.
 	async fn progress(
 		&self,
-		stats: &mut ParachainStats,
+		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) -> Option<ParachainProgressUpdate> {
 		if let Some(block) = self.current_relay_block {
@@ -349,7 +349,7 @@ impl SubxtTracker {
 	fn notify_disputes(
 		&self,
 		progress: &mut ParachainProgressUpdate,
-		stats: &mut ParachainStats,
+		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
 		self.disputes.iter().for_each(|outcome| {
@@ -368,7 +368,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn notify_current_block_time(&self, stats: &mut ParachainStats, metrics: &impl PrometheusMetrics) {
+	fn notify_current_block_time(&self, stats: &mut impl Stats, metrics: &impl PrometheusMetrics) {
 		if !self.is_fork() {
 			let ts = self.current_block_time();
 			stats.on_block(ts);
@@ -419,19 +419,20 @@ impl SubxtTracker {
 	fn notify_bitfield_propagation(
 		&self,
 		progress: &mut ParachainProgressUpdate,
-		stats: &mut ParachainStats,
+		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
-		if self.current_candidate.is_bitfield_propagation_low() {
+		if self.current_candidate.is_bitfield_propagation_slow() {
 			progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
 				self.current_candidate.bitfield_count,
 				self.current_candidate.max_availability_bits,
 			))
 		}
-		stats.on_bitfields(self.current_candidate.bitfield_count, self.current_candidate.is_bitfield_propagation_low());
+		stats
+			.on_bitfields(self.current_candidate.bitfield_count, self.current_candidate.is_bitfield_propagation_slow());
 		metrics.on_bitfields(
 			self.current_candidate.bitfield_count,
-			self.current_candidate.is_bitfield_propagation_low(),
+			self.current_candidate.is_bitfield_propagation_slow(),
 			self.para_id,
 		);
 	}
@@ -439,7 +440,7 @@ impl SubxtTracker {
 	async fn notify_candidate_state(
 		&self,
 		progress: &mut ParachainProgressUpdate,
-		stats: &mut ParachainStats,
+		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
 		if self.current_candidate.is_idle() {
@@ -673,7 +674,7 @@ mod test_inject_block {
 		let current = tracker.current_relay_block.unwrap();
 		assert!(tracker.previous_relay_block.is_none());
 		assert_eq!(current.hash, first_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(42));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1694095332000));
 		assert!(tracker.finality_lag.is_none());
 
 		// Inject a fork and relevant finalized block number
@@ -697,21 +698,22 @@ mod test_inject_block {
 
 #[cfg(test)]
 mod test_progress {
-	use std::collections::HashMap;
-
 	use super::*;
 	use crate::{
-		prometheus::Metrics,
+		prometheus::{Metrics, MockPrometheusMetrics},
+		stats::{MockStats, ParachainStats},
 		test_utils::{create_inherent_data, create_storage_api, storage_write},
 		tracker_rpc::MockTrackerRpc,
 	};
+	use mockall::predicate::eq;
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
+	use std::collections::HashMap;
 
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
 		let api = create_storage_api();
 		let tracker = SubxtTracker::new(100, api.clone());
-		let mut stats = ParachainStats::default();
+		let mut stats = MockStats::default();
 		let metrics = Metrics::default();
 
 		let progress = tracker.progress(&mut stats, &metrics).await;
@@ -727,7 +729,6 @@ mod test_progress {
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
 		mock_rpc
 			.expect_core_assignments_via_scheduled_paras()
 			.returning(|_| Ok(Default::default()));
@@ -737,6 +738,7 @@ mod test_progress {
 		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
 			.await
 			.unwrap();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
 		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
 
@@ -758,23 +760,26 @@ mod test_progress {
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
 		mock_rpc
 			.expect_core_assignments_via_scheduled_paras()
 			.returning(|_| Ok(Default::default()));
 		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
 		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
+		// No new session
 		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
 			.await
 			.unwrap();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
 		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
+
 		assert!(!progress
 			.events
 			.iter()
 			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
 
+		// With new session
 		tracker.process_new_session(12);
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
 
@@ -792,17 +797,17 @@ mod test_progress {
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
-		mock_rpc
-			.expect_core_assignments_via_scheduled_paras()
-			.returning(|_| Ok(HashMap::from([(0, vec![100])])));
-		mock_rpc.expect_occupied_cores().returning(|_| Ok(vec![CoreOccupied::Paras]));
 		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
 		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
 		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
 			.await
 			.unwrap();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
+		mock_rpc
+			.expect_core_assignments_via_scheduled_paras()
+			.returning(|_| Ok(HashMap::from([(0, vec![100])])));
+		mock_rpc.expect_occupied_cores().returning(|_| Ok(vec![CoreOccupied::Paras]));
 		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
 
@@ -812,7 +817,61 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::CoreAssigned(0))));
 	}
 
-	// 	TODO: notify_bitfield_propagation
+	#[tokio::test]
+	async fn test_includes_slow_propogation() {
+		let hash = H256::random();
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut mock_stats = MockStats::default();
+		mock_stats.expect_on_backed().returning(|| ());
+		mock_stats.expect_on_block().returning(|_| ());
+		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_on_backed().returning(|_| ());
+		mock_metrics.expect_on_block().returning(|_, _| ());
+		let mut mock_rpc = MockTrackerRpc::new();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
+		mock_rpc
+			.expect_core_assignments_via_scheduled_paras()
+			.returning(|_| Ok(Default::default()));
+		mock_rpc.expect_occupied_cores().returning(|_| Ok(Default::default()));
+		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
+		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
+		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
+			.await
+			.unwrap();
+		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+
+		// Bitfields propogation isn't slow
+		tracker.current_candidate.bitfield_count = 120;
+		mock_stats.expect_on_bitfields().with(eq(120), eq(false)).returning(|_, _| ());
+		mock_metrics
+			.expect_on_bitfields()
+			.with(eq(120), eq(false), eq(100))
+			.returning(|_, _, _| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert!(!progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
+
+		// Bitfields propogation is slow
+		tracker.current_candidate.set_backed();
+		tracker.current_candidate.max_availability_bits = 200;
+		tracker.current_candidate.bitfield_count = 120;
+		mock_stats.expect_on_bitfields().with(eq(120), eq(true)).returning(|_, _| ());
+		mock_metrics
+			.expect_on_bitfields()
+			.with(eq(120), eq(true), eq(100))
+			.returning(|_, _, _| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
+	}
+
 	// 	TODO: notify_candidate_state
 	// 	TODO: notify_disputes
 	// 	TODO: notify_active_message_queues

@@ -99,7 +99,7 @@ impl ParachainBlockInfo {
 		self.current_availability_bits > (self.max_availability_bits / 3) * 2
 	}
 
-	pub fn is_bitfield_propagation_low(&self) -> bool {
+	pub fn is_bitfield_propagation_slow(&self) -> bool {
 		self.max_availability_bits > 0 && !self.is_idle() && self.bitfield_count <= (self.max_availability_bits / 3) * 2
 	}
 }
@@ -207,15 +207,15 @@ mod tests {
 	#[test]
 	fn test_is_bitfield_propagation_low() {
 		let mut info = create_info();
-		assert!(!info.is_bitfield_propagation_low());
+		assert!(!info.is_bitfield_propagation_slow());
 
 		info.max_availability_bits = 200;
-		assert!(!info.is_bitfield_propagation_low());
+		assert!(!info.is_bitfield_propagation_slow());
 
 		info.bitfield_count = 100;
-		assert!(!info.is_bitfield_propagation_low());
+		assert!(!info.is_bitfield_propagation_slow());
 
 		info.set_backed();
-		assert!(info.is_bitfield_propagation_low());
+		assert!(info.is_bitfield_propagation_slow());
 	}
 }
