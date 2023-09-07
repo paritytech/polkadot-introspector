@@ -101,32 +101,13 @@ impl SubxtTracker {
 		}
 	}
 
-	/// Proccesses relay chain block:
-	/// 	- injects block information to tracker's state,
-	/// 	- notifies about changes using progress, stats and metrics,
-	/// 	- resets state.
-	pub async fn process_new_head(
-		&mut self,
-		block_hash: H256,
-		block_number: BlockNumber,
-		stats: &mut impl Stats,
-		metrics: &impl PrometheusMetrics,
-		rpc: &mut impl TrackerRpc,
-	) -> color_eyre::Result<Option<ParachainProgressUpdate>> {
-		self.inject_block(block_hash, block_number, rpc).await?;
-		let progress = self.progress(stats, metrics).await;
-		self.maybe_reset_state();
-
-		Ok(progress)
-	}
-
 	/// Saves new session to tracker's state
-	pub fn process_new_session(&mut self, session_index: u32) {
+	pub fn inject_new_session(&mut self, session_index: u32) {
 		self.new_session = Some(session_index)
 	}
 
 	/// Injects a new relay chain block into the tracker. Blocks must be injected in order.
-	async fn inject_block(
+	pub async fn inject_block(
 		&mut self,
 		block_hash: H256,
 		block_number: BlockNumber,
@@ -157,7 +138,7 @@ impl SubxtTracker {
 	}
 
 	/// Creates a parachain progress.
-	async fn progress(
+	pub async fn progress(
 		&self,
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
@@ -193,7 +174,7 @@ impl SubxtTracker {
 	}
 
 	/// Resets state
-	fn maybe_reset_state(&mut self) {
+	pub fn maybe_reset_state(&mut self) {
 		if self.current_candidate.is_backed() {
 			self.on_demand_order_at = None;
 		}
@@ -552,7 +533,7 @@ impl SubxtTracker {
 }
 
 #[cfg(test)]
-mod test_process_new_session {
+mod test_inject_new_session {
 	use super::*;
 	use crate::test_utils::create_storage_api;
 
@@ -561,7 +542,7 @@ mod test_process_new_session {
 		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		assert!(tracker.new_session.is_none());
 
-		tracker.process_new_session(42);
+		tracker.inject_new_session(42);
 
 		assert_eq!(tracker.new_session, Some(42));
 	}
@@ -749,7 +730,7 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
 
 		// With new session
-		tracker.process_new_session(12);
+		tracker.inject_new_session(12);
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
 
 		assert!(progress

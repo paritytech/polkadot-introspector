@@ -219,26 +219,20 @@ impl ParachainTracer {
 					Ok(update_event) => match update_event {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
-								match tracker
-									.process_new_head(
-										*relay_fork,
-										new_head.relay_parent_number,
-										&mut stats,
-										&metrics,
-										&mut rpc,
-									)
-									.await
-								{
-									Ok(Some(progress)) if is_cli => println!("{}", progress),
-									Err(e) => {
-										error!("error occurred when processing block {}: {:?}", relay_fork, e);
-										std::process::exit(1);
-									},
-									_ => continue,
+								let parent_number = new_head.relay_parent_number;
+								if let Err(e) = tracker.inject_block(*relay_fork, parent_number, &mut rpc).await {
+									error!("error occurred when processing block {}: {:?}", relay_fork, e);
+									std::process::exit(1);
 								}
+								if let Some(progress) = tracker.progress(&mut stats, &metrics).await {
+									if is_cli {
+										println!("{}", progress)
+									}
+								}
+								tracker.maybe_reset_state();
 							},
 						CollectorUpdateEvent::NewSession(idx) => {
-							tracker.process_new_session(idx);
+							tracker.inject_new_session(idx);
 						},
 						CollectorUpdateEvent::Termination(reason) => {
 							info!("collector is terminating");
