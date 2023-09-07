@@ -879,7 +879,58 @@ mod test_progress {
 		let _progress = tracker.progress(&mut stats, &mock_metrics).await.unwrap();
 	}
 
-	// 	TODO: notify_candidate_state
 	// 	TODO: notify_disputes
+	// self.disputes.iter().for_each(|outcome| {
+	// 	progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
+	// 	stats.on_disputed(outcome);
+	// 	metrics.on_disputed(outcome, self.para_id);
+	// });
+
+	#[tokio::test]
+	async fn test_includes_disputes() {
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut mock_stats = MockStats::default();
+		mock_stats.expect_on_bitfields().returning(|_, _| ());
+		mock_stats.expect_on_skipped_slot().returning(|_| ());
+		mock_stats.expect_on_block().returning(|_| ());
+		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
+		mock_metrics.expect_on_skipped_slot().returning(|_| ());
+		mock_metrics.expect_on_block().returning(|_, _| ());
+
+		// Without disputes
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		tracker.disputes = vec![];
+		mock_stats.expect_on_disputed().times(0).returning(|_| ());
+		mock_metrics.expect_on_disputed().times(0).returning(|_, _| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert!(!progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_))));
+
+		// With disputes
+		let dispute = DisputesTracker { candidate: H256::random(), ..Default::default() };
+		tracker.disputes = vec![dispute.clone()];
+		mock_stats
+			.expect_on_disputed()
+			.withf(move |d| d.candidate == dispute.candidate)
+			.once()
+			.returning(|_| ());
+		mock_metrics
+			.expect_on_disputed()
+			.withf(move |d, &id| d.candidate == dispute.candidate && id == 100)
+			.once()
+			.returning(|_, _| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_))));
+	}
+
+	// 	TODO: notify_candidate_state
 	// 	TODO: notify_on_demand_order
 }
