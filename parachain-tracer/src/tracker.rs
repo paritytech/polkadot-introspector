@@ -845,9 +845,40 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _))));
 	}
 
+	#[tokio::test]
+	async fn test_includes_current_block_time() {
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut mock_stats = MockStats::default();
+		mock_stats.expect_on_bitfields().returning(|_, _| ());
+		mock_stats.expect_on_skipped_slot().returning(|_| ());
+		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
+		mock_metrics.expect_on_skipped_slot().returning(|_| ());
+
+		// On a block
+		tracker.previous_relay_block = Some(Block { num: 41, ts: 1694095326000, hash: H256::random() });
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		tracker.last_non_fork_relay_block_ts = Some(1694095326000);
+		mock_stats
+			.expect_on_block()
+			.with(eq(Duration::from_millis(6000)))
+			.once()
+			.returning(|_| ());
+		mock_metrics
+			.expect_on_block()
+			.with(eq(6.0), eq(100))
+			.once()
+			.returning(|_, _| ());
+		let _progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		// On a fork
+		tracker.previous_relay_block = tracker.current_relay_block;
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		let _progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+	}
+
 	// 	TODO: notify_candidate_state
 	// 	TODO: notify_disputes
-	// 	TODO: notify_current_block_time
 	// 	TODO: notify_finality_lag
 	// 	TODO: notify_on_demand_order
 }
