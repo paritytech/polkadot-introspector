@@ -67,14 +67,7 @@ impl MessageQueuesTracker {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	fn create_channels() -> BTreeMap<u32, SubxtHrmpChannel> {
-		let mut channels = BTreeMap::new();
-		channels.insert(100, SubxtHrmpChannel { total_size: 1, ..Default::default() });
-		channels.insert(200, SubxtHrmpChannel { total_size: 0, ..Default::default() });
-
-		channels
-	}
+	use crate::test_utils::create_hrmp_channels;
 
 	#[test]
 	fn test_set_hrmp_channels() {
@@ -82,11 +75,11 @@ mod tests {
 		assert!(!tracker.has_hrmp_messages());
 
 		// if inbound has size
-		tracker.set_hrmp_channels(create_channels(), Default::default());
+		tracker.set_hrmp_channels(create_hrmp_channels(), Default::default());
 		assert!(tracker.has_hrmp_messages());
 
 		// if outbound has size
-		tracker.set_hrmp_channels(Default::default(), create_channels());
+		tracker.set_hrmp_channels(Default::default(), create_hrmp_channels());
 		assert!(tracker.has_hrmp_messages());
 	}
 
@@ -95,7 +88,7 @@ mod tests {
 		let mut tracker = MessageQueuesTracker::default();
 		assert!(tracker.active_inbound_channels().is_empty());
 
-		let channels = create_channels();
+		let channels = create_hrmp_channels();
 		assert!(channels.len() > 1);
 		tracker.set_hrmp_channels(channels, Default::default());
 		assert_eq!(tracker.active_inbound_channels().iter().map(|v| v.0).collect::<Vec<u32>>(), vec![100])
@@ -106,7 +99,7 @@ mod tests {
 		let mut tracker = MessageQueuesTracker::default();
 		assert!(tracker.active_outbound_channels().is_empty());
 
-		let channels = create_channels();
+		let channels = create_hrmp_channels();
 		assert!(channels.len() > 1);
 		tracker.set_hrmp_channels(Default::default(), channels);
 		assert_eq!(tracker.active_outbound_channels().iter().map(|v| v.0).collect::<Vec<u32>>(), vec![100])

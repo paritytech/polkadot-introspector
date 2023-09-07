@@ -698,11 +698,9 @@ mod test_progress {
 	use crate::{
 		prometheus::{Metrics, MockPrometheusMetrics},
 		stats::{MockStats, ParachainStats},
-		test_utils::{create_inherent_data, create_storage_api, storage_write},
-		tracker_rpc::MockTrackerRpc,
+		test_utils::{create_hrmp_channels, create_storage_api},
 	};
 	use mockall::predicate::eq;
-	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
@@ -820,9 +818,35 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
 	}
 
+	#[tokio::test]
+	async fn test_includes_message_queues() {
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut stats = ParachainStats::default();
+		let metrics = Metrics::default();
+
+		// No active channels
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
+
+		assert!(!progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _))));
+
+		// With active channels
+		tracker
+			.message_queues
+			.set_hrmp_channels(create_hrmp_channels(), Default::default());
+		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
+
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _))));
+	}
+
 	// 	TODO: notify_candidate_state
 	// 	TODO: notify_disputes
-	// 	TODO: notify_active_message_queues
 	// 	TODO: notify_current_block_time
 	// 	TODO: notify_finality_lag
 	// 	TODO: notify_on_demand_order

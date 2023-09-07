@@ -15,7 +15,7 @@
 
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
-	api::ApiService,
+	api::{subxt_wrapper::SubxtHrmpChannel, ApiService},
 	collector::{CollectorPrefixType, CollectorStorageApi},
 	metadata::{
 		polkadot::runtime_types::{
@@ -37,7 +37,7 @@ use polkadot_introspector_essentials::{
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::H256,
 };
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 use subxt::utils::bits::DecodedBits;
 
 pub fn rpc_node_url() -> &'static str {
@@ -125,6 +125,14 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32, BlakeTwo25
 
 pub fn create_storage_api() -> CollectorStorageApi {
 	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default())
+}
+
+pub fn create_hrmp_channels() -> BTreeMap<u32, SubxtHrmpChannel> {
+	let mut channels = BTreeMap::new();
+	channels.insert(100, SubxtHrmpChannel { total_size: 1, ..Default::default() });
+	channels.insert(200, SubxtHrmpChannel { total_size: 0, ..Default::default() });
+
+	channels
 }
 
 pub async fn storage_write<T: Encode>(
