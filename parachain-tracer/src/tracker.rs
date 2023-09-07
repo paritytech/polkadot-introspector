@@ -558,8 +558,7 @@ mod test_process_new_session {
 
 	#[tokio::test]
 	async fn test_sets_new_session() {
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api);
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		assert!(tracker.new_session.is_none());
 
 		tracker.process_new_session(42);
@@ -575,8 +574,7 @@ mod test_maybe_reset_state {
 
 	#[tokio::test]
 	async fn test_resets_state_if_not_backed() {
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api);
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		tracker.current_candidate.set_idle();
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
@@ -595,8 +593,7 @@ mod test_maybe_reset_state {
 
 	#[tokio::test]
 	async fn test_resets_state_if_backed() {
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api);
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		tracker.current_candidate.set_backed();
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
@@ -628,8 +625,7 @@ mod test_inject_block {
 	#[tokio::test]
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
 		let hash = H256::random();
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api);
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		let mut mock_rpc = MockTrackerRpc::new();
 
 		tracker.inject_block(hash, 0, &mut mock_rpc).await.unwrap();
@@ -707,12 +703,10 @@ mod test_progress {
 	};
 	use mockall::predicate::eq;
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
-	use std::collections::HashMap;
 
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
-		let api = create_storage_api();
-		let tracker = SubxtTracker::new(100, api.clone());
+		let tracker = SubxtTracker::new(100, create_storage_api());
 		let mut stats = MockStats::default();
 		let metrics = Metrics::default();
 
@@ -724,22 +718,11 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_returns_progress_on_current_block() {
 		let hash = H256::random();
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
-		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc
-			.expect_core_assignments_via_scheduled_paras()
-			.returning(|_| Ok(Default::default()));
-		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
-		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
-		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
-			.await
-			.unwrap();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
-		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash });
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
 
 		assert_eq!(progress.timestamp, 1694095332000);
@@ -754,24 +737,12 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_new_session_if_exist() {
-		let hash = H256::random();
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
-		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc
-			.expect_core_assignments_via_scheduled_paras()
-			.returning(|_| Ok(Default::default()));
-		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
-		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
 		// No new session
-		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
-			.await
-			.unwrap();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
-		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
 
 		assert!(!progress
@@ -791,24 +762,13 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_core_assignment() {
-		let hash = H256::random();
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
-		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
-		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
-		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
-			.await
-			.unwrap();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
-		mock_rpc
-			.expect_core_assignments_via_scheduled_paras()
-			.returning(|_| Ok(HashMap::from([(0, vec![100])])));
-		mock_rpc.expect_occupied_cores().returning(|_| Ok(vec![CoreOccupied::Paras]));
-		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		tracker.current_candidate.assigned_core = Some(0);
+		tracker.current_candidate.core_occupied = true;
 		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
 
 		assert!(progress
@@ -819,29 +779,18 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_slow_propogation() {
-		let hash = H256::random();
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
 		mock_stats.expect_on_block().returning(|_| ());
+		mock_stats.expect_on_skipped_slot().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_backed().returning(|_| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
-		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
-		mock_rpc
-			.expect_core_assignments_via_scheduled_paras()
-			.returning(|_| Ok(Default::default()));
-		mock_rpc.expect_occupied_cores().returning(|_| Ok(Default::default()));
-		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
-		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
-		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
-			.await
-			.unwrap();
-		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 
 		// Bitfields propogation isn't slow
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		tracker.current_candidate.bitfield_count = 120;
 		mock_stats.expect_on_bitfields().with(eq(120), eq(false)).returning(|_, _| ());
 		mock_metrics
@@ -858,7 +807,6 @@ mod test_progress {
 		// Bitfields propogation is slow
 		tracker.current_candidate.set_backed();
 		tracker.current_candidate.max_availability_bits = 200;
-		tracker.current_candidate.bitfield_count = 120;
 		mock_stats.expect_on_bitfields().with(eq(120), eq(true)).returning(|_, _| ());
 		mock_metrics
 			.expect_on_bitfields()
