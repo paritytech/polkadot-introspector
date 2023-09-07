@@ -140,11 +140,11 @@ pub(crate) fn extract_inherent_fields(
 #[cfg(test)]
 mod test_extract_inherent_fields {
 	use super::*;
-	use crate::test_utils::create_inherent_date;
+	use crate::test_utils::create_inherent_data;
 
 	#[test]
 	fn test_returns_fields() {
-		let (bitfields, backed_candidates, disputes) = extract_inherent_fields(create_inherent_date(100));
+		let (bitfields, backed_candidates, disputes) = extract_inherent_fields(create_inherent_data(100));
 
 		println!("{:?}", matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
 

@@ -21,7 +21,33 @@ use polkadot_introspector_essentials::{
 };
 use std::collections::{BTreeMap, HashMap};
 
-pub struct TrackerRpc {
+#[async_trait::async_trait]
+pub trait TrackerRpc {
+	async fn inbound_hrmp_channels(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError>;
+	async fn outbound_hrmp_channels(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError>;
+	async fn core_assignments_via_scheduled_paras(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError>;
+	async fn core_assignments_via_claim_queue(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError>;
+	async fn backing_groups(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError>;
+	async fn block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError>;
+	async fn occupied_cores(&mut self, block_hash: H256) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError>;
+}
+
+pub struct ParachainTrackerRpc {
 	/// Parachain ID to track.
 	para_id: u32,
 	/// RPC node endpoint.
@@ -30,12 +56,15 @@ pub struct TrackerRpc {
 	executor: RequestExecutor,
 }
 
-impl TrackerRpc {
+impl ParachainTrackerRpc {
 	pub fn new(para_id: u32, node: &str, executor: RequestExecutor) -> Self {
 		Self { para_id, node: node.to_string(), executor }
 	}
+}
 
-	pub async fn inbound_hrmp_channels(
+#[async_trait::async_trait]
+impl TrackerRpc for ParachainTrackerRpc {
+	async fn inbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
@@ -44,7 +73,7 @@ impl TrackerRpc {
 			.await
 	}
 
-	pub async fn outbound_hrmp_channels(
+	async fn outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
@@ -53,7 +82,7 @@ impl TrackerRpc {
 			.await
 	}
 
-	pub async fn core_assignments_via_scheduled_paras(
+	async fn core_assignments_via_scheduled_paras(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
@@ -65,7 +94,7 @@ impl TrackerRpc {
 			.collect::<HashMap<_, _>>())
 	}
 
-	pub async fn core_assignments_via_claim_queue(
+	async fn core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
@@ -82,21 +111,18 @@ impl TrackerRpc {
 			.collect())
 	}
 
-	pub async fn backing_groups(
+	async fn backing_groups(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
 		self.executor.get_backing_groups(self.node.as_str(), block_hash).await
 	}
 
-	pub async fn block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
+	async fn block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
 		self.executor.get_block_timestamp(self.node.as_str(), block_hash).await
 	}
 
-	pub async fn occupied_cores(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
+	async fn occupied_cores(&mut self, block_hash: H256) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
 		self.executor.get_occupied_cores(self.node.as_str(), block_hash).await
 	}
 }
@@ -117,10 +143,10 @@ mod tests {
 		RPC_NODE_URL
 	}
 
-	async fn setup_client() -> (TrackerRpc, H256) {
+	async fn setup_client() -> (ParachainTrackerRpc, H256) {
 		let api: ApiService<H256> =
 			ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default());
-		let rpc = TrackerRpc::new(100, rpc_node_url(), api.subxt());
+		let rpc = ParachainTrackerRpc::new(100, rpc_node_url(), api.subxt());
 		let block_hash = api.subxt().get_block(rpc_node_url(), None).await.unwrap().header().parent_hash;
 
 		(rpc, block_hash)

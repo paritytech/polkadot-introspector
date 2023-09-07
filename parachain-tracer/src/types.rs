@@ -41,7 +41,7 @@ pub struct ForkTracker {
 }
 
 /// An outcome for a dispute
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone, Default)]
 pub struct DisputesTracker {
 	/// Disputed candidate
 	pub candidate: H256,
@@ -87,7 +87,7 @@ pub struct Block {
 	pub ts: Timestamp,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct BlockWithoutHash {
 	pub num: BlockNumber,
 	pub ts: Timestamp,

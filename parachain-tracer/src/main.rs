@@ -51,6 +51,7 @@ use stats::ParachainStats;
 use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
+use tracker_rpc::ParachainTrackerRpc;
 
 mod message_queus_tracker;
 mod parachain_block_info;
@@ -205,9 +206,8 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		// The subxt API request executor.
-		let executor = api_service.subxt();
-		let mut tracker = SubxtTracker::new(para_id, self.node.as_str(), executor, api_service);
+		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.subxt());
+		let mut tracker = SubxtTracker::new(para_id, api_service);
 
 		let metrics = self.metrics.clone();
 		let mut stats = ParachainStats::new(para_id, self.opts.last_skipped_slot_blocks);
@@ -220,7 +220,13 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
 								match tracker
-									.process_new_head(*relay_fork, new_head.relay_parent_number, &mut stats, &metrics)
+									.process_new_head(
+										*relay_fork,
+										new_head.relay_parent_number,
+										&mut stats,
+										&metrics,
+										&mut rpc,
+									)
 									.await
 								{
 									Ok(Some(progress)) if is_cli => println!("{}", progress),
@@ -232,7 +238,7 @@ impl ParachainTracer {
 								}
 							},
 						CollectorUpdateEvent::NewSession(idx) => {
-							tracker.process_new_session(idx).await;
+							tracker.process_new_session(idx);
 						},
 						CollectorUpdateEvent::Termination(reason) => {
 							info!("collector is terminating");

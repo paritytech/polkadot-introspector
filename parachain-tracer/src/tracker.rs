@@ -27,7 +27,7 @@ use crate::{
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
+	api::subxt_wrapper::SubxtWrapperError,
 	collector::{CollectorStorageApi, DisputeInfo},
 	metadata::polkadot_primitives,
 	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
@@ -39,8 +39,6 @@ use subxt::error::{Error, MetadataError};
 pub struct SubxtTracker {
 	/// Parachain ID to track.
 	para_id: u32,
-	/// A subxt API wrapper.
-	rpc: TrackerRpc,
 	/// API to access collector's storage
 	storage: TrackerStorage,
 
@@ -81,10 +79,9 @@ pub struct SubxtTracker {
 }
 
 impl SubxtTracker {
-	pub fn new(para_id: u32, node_rpc_url: &str, executor: RequestExecutor, api: CollectorStorageApi) -> Self {
+	pub fn new(para_id: u32, api: CollectorStorageApi) -> Self {
 		Self {
 			para_id,
-			rpc: TrackerRpc::new(para_id, node_rpc_url, executor),
 			storage: TrackerStorage::new(para_id, api),
 			current_candidate: Default::default(),
 			new_session: None,
@@ -114,8 +111,9 @@ impl SubxtTracker {
 		block_number: BlockNumber,
 		stats: &mut ParachainStats,
 		metrics: &Metrics,
+		rpc: &mut impl TrackerRpc,
 	) -> color_eyre::Result<Option<ParachainProgressUpdate>> {
-		self.inject_block(block_hash, block_number).await?;
+		self.inject_block(block_hash, block_number, rpc).await?;
 		let progress = self.progress(stats, metrics).await;
 		self.maybe_reset_state();
 
@@ -123,28 +121,33 @@ impl SubxtTracker {
 	}
 
 	/// Saves new session to tracker's state
-	pub async fn process_new_session(&mut self, session_index: u32) {
+	pub fn process_new_session(&mut self, session_index: u32) {
 		self.new_session = Some(session_index)
 	}
 
 	/// Injects a new relay chain block into the tracker. Blocks must be injected in order.
-	async fn inject_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
+	async fn inject_block(
+		&mut self,
+		block_hash: H256,
+		block_number: BlockNumber,
+		rpc: &mut impl TrackerRpc,
+	) -> color_eyre::Result<()> {
 		if let Some(inherent) = self.storage.inherent_data(block_hash).await {
 			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
 
-			self.set_relay_block(block_hash, block_number).await?;
+			self.set_relay_block(block_hash, block_number, rpc).await?;
 			self.set_forks(block_hash, block_number);
 
 			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
-			self.set_core_assignment(block_hash).await?;
+			self.set_core_assignment(block_hash, rpc).await?;
 			self.set_disputes(&disputes[..]).await;
 
-			self.set_hrmp_channels(block_hash).await?;
+			self.set_hrmp_channels(block_hash, rpc).await?;
 			self.set_on_demand_order(block_hash).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
 			if self.has_backed_candidate() && !self.is_just_backed() {
-				self.set_availability(block_hash, bitfields).await?;
+				self.set_availability(block_hash, bitfields, rpc).await?;
 			}
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
@@ -197,16 +200,21 @@ impl SubxtTracker {
 		self.current_candidate.maybe_reset();
 	}
 
-	async fn set_hrmp_channels(&mut self, block_hash: H256) -> color_eyre::Result<()> {
-		let inbound = self.rpc.inbound_hrmp_channels(block_hash).await?;
-		let outbound = self.rpc.outbound_hrmp_channels(block_hash).await?;
+	async fn set_hrmp_channels(&mut self, block_hash: H256, rpc: &mut impl TrackerRpc) -> color_eyre::Result<()> {
+		let inbound = rpc.inbound_hrmp_channels(block_hash).await?;
+		let outbound = rpc.outbound_hrmp_channels(block_hash).await?;
 		self.message_queues.set_hrmp_channels(inbound, outbound);
 
 		Ok(())
 	}
 
-	async fn set_relay_block(&mut self, block_hash: H256, block_number: BlockNumber) -> color_eyre::Result<()> {
-		let ts = self.rpc.block_timestamp(block_hash).await?;
+	async fn set_relay_block(
+		&mut self,
+		block_hash: H256,
+		block_number: BlockNumber,
+		rpc: &mut impl TrackerRpc,
+	) -> color_eyre::Result<()> {
+		let ts = rpc.block_timestamp(block_hash).await?;
 		self.previous_relay_block = self.current_relay_block;
 		self.current_relay_block = Some(Block { num: block_number, ts, hash: block_hash });
 
@@ -262,18 +270,18 @@ impl SubxtTracker {
 		}
 	}
 
-	async fn set_core_assignment(&mut self, block_hash: H256) -> color_eyre::Result<()> {
+	async fn set_core_assignment(&mut self, block_hash: H256, rpc: &mut impl TrackerRpc) -> color_eyre::Result<()> {
 		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
-		let assignments = match self.rpc.core_assignments_via_scheduled_paras(block_hash).await {
+		let assignments = match rpc.core_assignments_via_scheduled_paras(block_hash).await {
 			// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
 			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) =>
-				self.rpc.core_assignments_via_claim_queue(block_hash).await,
+				rpc.core_assignments_via_claim_queue(block_hash).await,
 			v => v,
 		}?;
 		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(core);
 			self.current_candidate.core_occupied =
-				matches!(self.rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
+				matches!(rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
 			self.is_on_demand_scheduled_in_current_block =
 				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
@@ -310,12 +318,14 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
+		rpc: &mut impl TrackerRpc,
 	) -> color_eyre::Result<()> {
 		if self.current_candidate.is_backed() {
 			// We only process availability if our parachain is assigned to an availability core.
 			if let Some(core) = self.current_candidate.assigned_core {
 				self.current_candidate.current_availability_bits = extract_availability_bits_count(bitfields, core);
-				self.current_candidate.max_availability_bits = self.validators_indices(block_hash).await?.len() as u32;
+				self.current_candidate.max_availability_bits =
+					self.validators_indices(block_hash, rpc).await?.len() as u32;
 
 				if self.current_candidate.is_data_available() {
 					self.current_candidate.set_included();
@@ -517,8 +527,9 @@ impl SubxtTracker {
 	async fn validators_indices(
 		&mut self,
 		block_hash: H256,
+		rpc: &mut impl TrackerRpc,
 	) -> color_eyre::Result<Vec<polkadot_primitives::ValidatorIndex>> {
-		Ok(self.rpc.backing_groups(block_hash).await?.into_iter().flatten().collect())
+		Ok(rpc.backing_groups(block_hash).await?.into_iter().flatten().collect())
 	}
 
 	async fn candidate_backed_in(&self, candidate_hash: H256) -> Option<u32> {
@@ -527,5 +538,194 @@ impl SubxtTracker {
 				.backed
 				.saturating_sub(v.candidate_inclusion.relay_parent_number)
 		})
+	}
+}
+
+#[cfg(test)]
+mod test_process_new_session {
+	use super::*;
+	use crate::test_utils::create_storage_api;
+
+	#[tokio::test]
+	async fn test_sets_new_session() {
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api);
+		assert!(tracker.new_session.is_none());
+
+		tracker.process_new_session(42);
+
+		assert_eq!(tracker.new_session, Some(42));
+	}
+}
+
+#[cfg(test)]
+mod test_maybe_reset_state {
+	use super::*;
+	use crate::test_utils::create_storage_api;
+
+	#[tokio::test]
+	async fn test_resets_state_if_not_backed() {
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api);
+		tracker.current_candidate.set_idle();
+		tracker.new_session = Some(42);
+		tracker.on_demand_order = Some(OnDemandOrder::default());
+		tracker.is_on_demand_scheduled_in_current_block = true;
+		tracker.disputes = vec![DisputesTracker::default()];
+		assert!(!tracker.current_candidate.is_reset);
+
+		tracker.maybe_reset_state();
+
+		assert!(tracker.new_session.is_none());
+		assert!(tracker.on_demand_order.is_none());
+		assert!(!tracker.is_on_demand_scheduled_in_current_block);
+		assert!(tracker.disputes.is_empty());
+		assert!(tracker.current_candidate.is_reset);
+	}
+
+	#[tokio::test]
+	async fn test_resets_state_if_backed() {
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api);
+		tracker.current_candidate.set_backed();
+		tracker.new_session = Some(42);
+		tracker.on_demand_order = Some(OnDemandOrder::default());
+		tracker.on_demand_order_at = Some(BlockWithoutHash::default());
+		tracker.is_on_demand_scheduled_in_current_block = true;
+		tracker.disputes = vec![DisputesTracker::default()];
+		assert!(!tracker.current_candidate.is_reset);
+
+		tracker.maybe_reset_state();
+
+		assert!(tracker.on_demand_order_at.is_none());
+		assert!(tracker.new_session.is_none());
+		assert!(tracker.on_demand_order.is_none());
+		assert!(!tracker.is_on_demand_scheduled_in_current_block);
+		assert!(tracker.disputes.is_empty());
+		assert!(tracker.current_candidate.is_reset);
+	}
+}
+
+#[cfg(test)]
+mod test_inject_block {
+	use super::*;
+	use crate::test_utils::{create_inherent_data, create_storage_api, storage_write};
+	use polkadot_introspector_essentials::{
+		api::subxt_wrapper::SubxtHrmpChannel, collector::CollectorPrefixType,
+		metadata::polkadot_primitives::ValidatorIndex,
+	};
+	use std::collections::{BTreeMap, HashMap};
+
+	struct MockTrackerRpc {}
+
+	#[async_trait::async_trait]
+	impl TrackerRpc for MockTrackerRpc {
+		async fn inbound_hrmp_channels(
+			&mut self,
+			_block_hash: H256,
+		) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+			Ok(Default::default())
+		}
+
+		async fn outbound_hrmp_channels(
+			&mut self,
+			_block_hash: H256,
+		) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+			Ok(Default::default())
+		}
+
+		async fn core_assignments_via_scheduled_paras(
+			&mut self,
+			_block_hash: H256,
+		) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
+			Ok(Default::default())
+		}
+
+		async fn core_assignments_via_claim_queue(
+			&mut self,
+			_block_hash: H256,
+		) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
+			Ok(Default::default())
+		}
+
+		async fn backing_groups(
+			&mut self,
+			_block_hash: H256,
+		) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
+			Ok(Default::default())
+		}
+
+		async fn block_timestamp(&mut self, _block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
+			Ok(Default::default())
+		}
+
+		async fn occupied_cores(
+			&mut self,
+			_block_hash: H256,
+		) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
+			Ok(Default::default())
+		}
+	}
+
+	#[tokio::test]
+	async fn test_changes_nothing_if_there_is_no_inherent_data() {
+		let api = create_storage_api();
+		let mut rpc = MockTrackerRpc {};
+		let mut tracker = SubxtTracker::new(100, api);
+
+		tracker.inject_block(H256::zero(), 0, &mut rpc).await.unwrap();
+
+		assert!(tracker.new_session.is_none());
+		assert!(tracker.current_candidate.candidate.is_none());
+		assert!(tracker.current_relay_block.is_none());
+		assert!(tracker.previous_relay_block.is_none());
+		assert!(tracker.last_non_fork_relay_block_ts.is_none());
+		assert!(tracker.last_backed_at_block_number.is_none());
+		assert!(tracker.last_included_at.is_none());
+		assert!(tracker.previous_included_at.is_none());
+		assert!(tracker.finality_lag.is_none());
+		assert!(tracker.on_demand_order.is_none());
+		assert!(tracker.on_demand_order_at.is_none());
+		assert!(!tracker.is_on_demand_scheduled_in_current_block);
+		assert!(tracker.disputes.is_empty());
+		assert!(!tracker.message_queues.has_hrmp_messages());
+		assert!(tracker.relay_forks.is_empty());
+	}
+
+	#[tokio::test]
+	async fn test_sets_relay_block() {
+		let first_hash = H256::random();
+		let second_hash = H256::random();
+		let mut rpc = MockTrackerRpc {};
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api.clone());
+
+		// Inject a block
+		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &api)
+			.await
+			.unwrap();
+		tracker.inject_block(first_hash, 42, &mut rpc).await.unwrap();
+
+		let current = tracker.current_relay_block.unwrap();
+		assert!(tracker.previous_relay_block.is_none());
+		assert_eq!(current.hash, first_hash);
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(current.ts));
+		assert!(tracker.finality_lag.is_none());
+
+		// Inject a fork and relevant finalized block number
+		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(100), &api)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &api)
+			.await
+			.unwrap();
+		tracker.inject_block(second_hash, 42, &mut rpc).await.unwrap();
+
+		let previous = tracker.previous_relay_block.unwrap();
+		let current = tracker.current_relay_block.unwrap();
+		assert_eq!(previous.hash, first_hash);
+		assert_eq!(current.hash, second_hash);
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(previous.ts));
+		assert_eq!(tracker.finality_lag, Some(2));
 	}
 }

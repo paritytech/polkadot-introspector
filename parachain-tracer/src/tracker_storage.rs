@@ -87,12 +87,13 @@ impl TrackerStorage {
 
 #[cfg(test)]
 mod tests {
+	use crate::test_utils::create_inherent_data;
+
 	use super::*;
 	use polkadot_introspector_essentials::{
 		api::ApiService,
 		chain_events::SubxtDispute,
 		collector::candidate_record::CandidateInclusionRecord,
-		metadata::polkadot::runtime_types::sp_runtime::generic::{digest::Digest, header::Header},
 		storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	};
 	use std::time::Duration;
@@ -129,30 +130,16 @@ mod tests {
 	#[tokio::test]
 	async fn test_reads_inherent_data() {
 		let (storage, api) = setup_client();
-		let parent_hash = H256::random();
 		let hash = H256::random();
 		assert!(storage.inherent_data(hash).await.is_none());
 
+		let data = create_inherent_data(100);
+		let parent_hash = data.parent_header.parent_hash;
 		api.storage()
 			.storage_write_prefixed(
 				CollectorPrefixType::InherentData,
 				hash,
-				StorageEntry::new_onchain(
-					RecordTime::with_ts(0, Duration::from_secs(0)),
-					InherentData {
-						bitfields: Default::default(),
-						backed_candidates: Default::default(),
-						disputes: Default::default(),
-						parent_header: Header {
-							parent_hash,
-							number: Default::default(),
-							state_root: Default::default(),
-							extrinsics_root: Default::default(),
-							digest: Digest { logs: Default::default() },
-							__subxt_unused_type_params: Default::default(),
-						},
-					},
-				),
+				StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), data),
 			)
 			.await
 			.unwrap();

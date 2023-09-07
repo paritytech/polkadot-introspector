@@ -38,6 +38,8 @@ pub struct ParachainBlockInfo {
 	pub assigned_core: Option<u32>,
 	/// Core occupation status.
 	pub core_occupied: bool,
+	#[cfg(test)]
+	pub is_reset: bool,
 }
 
 impl ParachainBlockInfo {
@@ -46,6 +48,11 @@ impl ParachainBlockInfo {
 			self.state = ParachainBlockState::Idle;
 			self.candidate = None;
 			self.candidate_hash = None;
+		}
+
+		#[cfg(test)]
+		{
+			self.is_reset = true;
 		}
 	}
 

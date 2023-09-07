@@ -13,7 +13,12 @@
 
 #![cfg(test)]
 
+use std::time::Duration;
+
+use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
+	api::ApiService,
+	collector::{CollectorPrefixType, CollectorStorageApi},
 	metadata::{
 		polkadot::runtime_types::{
 			bounded_collections::bounded_vec::BoundedVec,
@@ -31,9 +36,20 @@ use polkadot_introspector_essentials::{
 			DisputeStatementSet, InherentData, InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
 		},
 	},
+	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::H256,
 };
 use subxt::utils::bits::DecodedBits;
+
+pub fn rpc_node_url() -> &'static str {
+	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
+
+	if let Ok(url) = std::env::var("WS_URL") {
+		return Box::leak(url.into_boxed_str())
+	}
+
+	RPC_NODE_URL
+}
 
 pub fn create_backed_candidate(para_id: u32) -> BackedCandidate<H256> {
 	BackedCandidate {
@@ -87,7 +103,7 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 	}
 }
 
-pub fn create_inherent_date(para_id: u32) -> InherentData<Header<u32, BlakeTwo256>> {
+pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32, BlakeTwo256>> {
 	InherentData {
 		bitfields: vec![UncheckedSigned {
 			payload: AvailabilityBitfield(DecodedBits::from_iter([true])),
@@ -106,6 +122,25 @@ pub fn create_inherent_date(para_id: u32) -> InherentData<Header<u32, BlakeTwo25
 			__subxt_unused_type_params: Default::default(),
 		},
 	}
+}
+
+pub fn create_storage_api() -> CollectorStorageApi {
+	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default())
+}
+
+pub async fn storage_write<T: Encode>(
+	prefix: CollectorPrefixType,
+	hash: H256,
+	entry: T,
+	api: &CollectorStorageApi,
+) -> color_eyre::Result<()> {
+	api.storage()
+		.storage_write_prefixed(
+			prefix,
+			hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), entry),
+		)
+		.await
 }
 
 fn create_collator_signature() -> collator_app::Signature {
