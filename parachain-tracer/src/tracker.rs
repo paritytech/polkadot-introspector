@@ -879,13 +879,6 @@ mod test_progress {
 		let _progress = tracker.progress(&mut stats, &mock_metrics).await.unwrap();
 	}
 
-	// 	TODO: notify_disputes
-	// self.disputes.iter().for_each(|outcome| {
-	// 	progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
-	// 	stats.on_disputed(outcome);
-	// 	metrics.on_disputed(outcome, self.para_id);
-	// });
-
 	#[tokio::test]
 	async fn test_includes_disputes() {
 		let mut tracker = SubxtTracker::new(100, create_storage_api());
@@ -931,6 +924,88 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_))));
 	}
 
-	// 	TODO: notify_candidate_state
-	// 	TODO: notify_on_demand_order
+	#[tokio::test]
+	async fn test_includes_on_demand_order() {
+		todo!("Implement")
+		// fn notify_on_demand_order(&self, metrics: &impl PrometheusMetrics) {
+		// 	if let Some(ref order) = self.on_demand_order {
+		// 		metrics.handle_on_demand_order(order);
+		// 	}
+		// 	if let Some(delay) = self.on_demand_delay() {
+		// 		if self.is_on_demand_scheduled_in_current_block {
+		// 			metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
+		// 		}
+		// 		if self.current_candidate.is_backed() {
+		// 			metrics.handle_on_demand_delay(delay, self.para_id, "backed");
+		// 		}
+		// 	}
+		// 	if let Some(delay_sec) = self.on_demand_delay_sec() {
+		// 		if self.is_on_demand_scheduled_in_current_block {
+		// 			metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
+		// 		}
+		// 		if self.current_candidate.is_backed() {
+		// 			metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
+		// 		}
+		// 	}
+		// }
+	}
+
+	#[tokio::test]
+	async fn test_includes_candidate_state() {
+		todo!("Implement")
+		// async fn notify_candidate_state(
+		// 	&self,
+		// 	progress: &mut ParachainProgressUpdate,
+		// 	stats: &mut impl Stats,
+		// 	metrics: &impl PrometheusMetrics,
+		// ) {
+		// 	if self.current_candidate.is_idle() {
+		// 		progress.events.push(ParachainConsensusEvent::SkippedSlot);
+		// 		stats.on_skipped_slot(progress);
+		// 		metrics.on_skipped_slot(progress);
+		// 	}
+
+		// 	if self.current_candidate.is_backed() {
+		// 		if let Some(candidate_hash) = self.current_candidate.candidate_hash {
+		// 			progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
+		// 			stats.on_backed();
+		// 			metrics.on_backed(self.para_id);
+		// 		}
+		// 	}
+
+		// 	if self.current_candidate.is_pending() || self.current_candidate.is_included() {
+		// 		progress.bitfield_health.max_bitfield_count = self.current_candidate.max_availability_bits;
+		// 		progress.bitfield_health.available_count = self.current_candidate.current_availability_bits;
+		// 		progress.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
+
+		// 		if self.current_candidate.is_data_available() {
+		// 			if let Some(candidate_hash) = self.current_candidate.candidate_hash {
+		// 				progress.events.push(ParachainConsensusEvent::Included(
+		// 					candidate_hash,
+		// 					self.current_candidate.current_availability_bits,
+		// 					self.current_candidate.max_availability_bits,
+		// 				));
+
+		// 				let backed_in = self.candidate_backed_in(candidate_hash).await;
+		// 				let relay_block = self.current_relay_block.expect("Checked by caller; qed");
+		// 				stats.on_included(relay_block.num, self.previous_included_at.map(|v| v.num), backed_in);
+		// 				metrics.on_included(
+		// 					relay_block.num,
+		// 					self.previous_included_at.map(|v| v.num),
+		// 					backed_in,
+		// 					time_diff(Some(relay_block.ts), self.previous_included_at.map(|v| v.ts)),
+		// 					self.para_id,
+		// 				);
+		// 			}
+		// 		} else if self.is_slow_availability() {
+		// 			progress.events.push(ParachainConsensusEvent::SlowAvailability(
+		// 				self.current_candidate.current_availability_bits,
+		// 				self.current_candidate.max_availability_bits,
+		// 			));
+		// 			stats.on_slow_availability();
+		// 			metrics.on_slow_availability(self.para_id);
+		// 		}
+		// 	}
+		// }
+	}
 }
