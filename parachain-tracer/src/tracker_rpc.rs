@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+use async_trait::async_trait;
+use mockall::*;
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	metadata::polkadot_primitives::ValidatorIndex,
@@ -21,7 +23,8 @@ use polkadot_introspector_essentials::{
 };
 use std::collections::{BTreeMap, HashMap};
 
-#[async_trait::async_trait]
+#[automock]
+#[async_trait]
 pub trait TrackerRpc {
 	async fn inbound_hrmp_channels(
 		&mut self,
@@ -130,18 +133,9 @@ impl TrackerRpc for ParachainTrackerRpc {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::test_utils::rpc_node_url;
 	use polkadot_introspector_essentials::{api::ApiService, storage::RecordsStorageConfig};
 	use subxt::error::{Error, MetadataError};
-
-	fn rpc_node_url() -> &'static str {
-		const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
-
-		if let Ok(url) = std::env::var("WS_URL") {
-			return Box::leak(url.into_boxed_str())
-		}
-
-		RPC_NODE_URL
-	}
 
 	async fn setup_client() -> (ParachainTrackerRpc, H256) {
 		let api: ApiService<H256> =

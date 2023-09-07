@@ -13,8 +13,6 @@
 
 #![cfg(test)]
 
-use std::time::Duration;
-
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
 	api::ApiService,
@@ -39,6 +37,7 @@ use polkadot_introspector_essentials::{
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::H256,
 };
+use std::time::Duration;
 use subxt::utils::bits::DecodedBits;
 
 pub fn rpc_node_url() -> &'static str {

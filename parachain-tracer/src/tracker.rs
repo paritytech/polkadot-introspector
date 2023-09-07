@@ -18,7 +18,7 @@
 use crate::{
 	message_queus_tracker::MessageQueuesTracker,
 	parachain_block_info::ParachainBlockInfo,
-	prometheus::Metrics,
+	prometheus::PrometheusMetrics,
 	stats::ParachainStats,
 	tracker_rpc::TrackerRpc,
 	tracker_storage::TrackerStorage,
@@ -110,7 +110,7 @@ impl SubxtTracker {
 		block_hash: H256,
 		block_number: BlockNumber,
 		stats: &mut ParachainStats,
-		metrics: &Metrics,
+		metrics: &impl PrometheusMetrics,
 		rpc: &mut impl TrackerRpc,
 	) -> color_eyre::Result<Option<ParachainProgressUpdate>> {
 		self.inject_block(block_hash, block_number, rpc).await?;
@@ -157,7 +157,11 @@ impl SubxtTracker {
 	}
 
 	/// Creates a parachain progress.
-	async fn progress(&self, stats: &mut ParachainStats, metrics: &Metrics) -> Option<ParachainProgressUpdate> {
+	async fn progress(
+		&self,
+		stats: &mut ParachainStats,
+		metrics: &impl PrometheusMetrics,
+	) -> Option<ParachainProgressUpdate> {
 		if let Some(block) = self.current_relay_block {
 			let prev_timestamp = self.last_non_fork_relay_block_ts.unwrap_or(block.ts);
 			let mut progress = ParachainProgressUpdate {
@@ -342,7 +346,12 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	fn notify_disputes(&self, progress: &mut ParachainProgressUpdate, stats: &mut ParachainStats, metrics: &Metrics) {
+	fn notify_disputes(
+		&self,
+		progress: &mut ParachainProgressUpdate,
+		stats: &mut ParachainStats,
+		metrics: &impl PrometheusMetrics,
+	) {
 		self.disputes.iter().for_each(|outcome| {
 			progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
 			stats.on_disputed(outcome);
@@ -359,7 +368,7 @@ impl SubxtTracker {
 		}
 	}
 
-	fn notify_current_block_time(&self, stats: &mut ParachainStats, metrics: &Metrics) {
+	fn notify_current_block_time(&self, stats: &mut ParachainStats, metrics: &impl PrometheusMetrics) {
 		if !self.is_fork() {
 			let ts = self.current_block_time();
 			stats.on_block(ts);
@@ -367,13 +376,13 @@ impl SubxtTracker {
 		}
 	}
 
-	fn notify_finality_lag(&self, metrics: &Metrics) {
+	fn notify_finality_lag(&self, metrics: &impl PrometheusMetrics) {
 		if let Some(finality_lag) = self.finality_lag {
 			metrics.on_finality_lag(finality_lag);
 		}
 	}
 
-	fn notify_on_demand_order(&self, metrics: &Metrics) {
+	fn notify_on_demand_order(&self, metrics: &impl PrometheusMetrics) {
 		if let Some(ref order) = self.on_demand_order {
 			metrics.handle_on_demand_order(order);
 		}
@@ -411,7 +420,7 @@ impl SubxtTracker {
 		&self,
 		progress: &mut ParachainProgressUpdate,
 		stats: &mut ParachainStats,
-		metrics: &Metrics,
+		metrics: &impl PrometheusMetrics,
 	) {
 		if self.current_candidate.is_bitfield_propagation_low() {
 			progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
@@ -431,7 +440,7 @@ impl SubxtTracker {
 		&self,
 		progress: &mut ParachainProgressUpdate,
 		stats: &mut ParachainStats,
-		metrics: &Metrics,
+		metrics: &impl PrometheusMetrics,
 	) {
 		if self.current_candidate.is_idle() {
 			progress.events.push(ParachainConsensusEvent::SkippedSlot);
@@ -609,71 +618,20 @@ mod test_maybe_reset_state {
 #[cfg(test)]
 mod test_inject_block {
 	use super::*;
-	use crate::test_utils::{create_inherent_data, create_storage_api, storage_write};
-	use polkadot_introspector_essentials::{
-		api::subxt_wrapper::SubxtHrmpChannel, collector::CollectorPrefixType,
-		metadata::polkadot_primitives::ValidatorIndex,
+	use crate::{
+		test_utils::{create_inherent_data, create_storage_api, storage_write},
+		tracker_rpc::MockTrackerRpc,
 	};
-	use std::collections::{BTreeMap, HashMap};
-
-	struct MockTrackerRpc {}
-
-	#[async_trait::async_trait]
-	impl TrackerRpc for MockTrackerRpc {
-		async fn inbound_hrmp_channels(
-			&mut self,
-			_block_hash: H256,
-		) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
-			Ok(Default::default())
-		}
-
-		async fn outbound_hrmp_channels(
-			&mut self,
-			_block_hash: H256,
-		) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
-			Ok(Default::default())
-		}
-
-		async fn core_assignments_via_scheduled_paras(
-			&mut self,
-			_block_hash: H256,
-		) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
-			Ok(Default::default())
-		}
-
-		async fn core_assignments_via_claim_queue(
-			&mut self,
-			_block_hash: H256,
-		) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
-			Ok(Default::default())
-		}
-
-		async fn backing_groups(
-			&mut self,
-			_block_hash: H256,
-		) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
-			Ok(Default::default())
-		}
-
-		async fn block_timestamp(&mut self, _block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
-			Ok(Default::default())
-		}
-
-		async fn occupied_cores(
-			&mut self,
-			_block_hash: H256,
-		) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
-			Ok(Default::default())
-		}
-	}
+	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 
 	#[tokio::test]
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
+		let hash = H256::random();
 		let api = create_storage_api();
-		let mut rpc = MockTrackerRpc {};
 		let mut tracker = SubxtTracker::new(100, api);
+		let mut mock_rpc = MockTrackerRpc::new();
 
-		tracker.inject_block(H256::zero(), 0, &mut rpc).await.unwrap();
+		tracker.inject_block(hash, 0, &mut mock_rpc).await.unwrap();
 
 		assert!(tracker.new_session.is_none());
 		assert!(tracker.current_candidate.candidate.is_none());
@@ -696,20 +654,26 @@ mod test_inject_block {
 	async fn test_sets_relay_block() {
 		let first_hash = H256::random();
 		let second_hash = H256::random();
-		let mut rpc = MockTrackerRpc {};
 		let api = create_storage_api();
 		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut mock_rpc = MockTrackerRpc::new();
+		mock_rpc
+			.expect_core_assignments_via_scheduled_paras()
+			.returning(|_| Ok(Default::default()));
+		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
+		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
 		// Inject a block
 		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &api)
 			.await
 			.unwrap();
-		tracker.inject_block(first_hash, 42, &mut rpc).await.unwrap();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
+		tracker.inject_block(first_hash, 42, &mut mock_rpc).await.unwrap();
 
 		let current = tracker.current_relay_block.unwrap();
 		assert!(tracker.previous_relay_block.is_none());
 		assert_eq!(current.hash, first_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(current.ts));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(42));
 		assert!(tracker.finality_lag.is_none());
 
 		// Inject a fork and relevant finalized block number
@@ -719,13 +683,140 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &api)
 			.await
 			.unwrap();
-		tracker.inject_block(second_hash, 42, &mut rpc).await.unwrap();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095333000));
+		tracker.inject_block(second_hash, 42, &mut mock_rpc).await.unwrap();
 
 		let previous = tracker.previous_relay_block.unwrap();
 		let current = tracker.current_relay_block.unwrap();
 		assert_eq!(previous.hash, first_hash);
 		assert_eq!(current.hash, second_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(previous.ts));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1694095332000));
 		assert_eq!(tracker.finality_lag, Some(2));
 	}
+}
+
+#[cfg(test)]
+mod test_progress {
+	use std::collections::HashMap;
+
+	use super::*;
+	use crate::{
+		prometheus::Metrics,
+		test_utils::{create_inherent_data, create_storage_api, storage_write},
+		tracker_rpc::MockTrackerRpc,
+	};
+	use polkadot_introspector_essentials::collector::CollectorPrefixType;
+
+	#[tokio::test]
+	async fn test_returns_none_if_no_current_block() {
+		let api = create_storage_api();
+		let tracker = SubxtTracker::new(100, api.clone());
+		let mut stats = ParachainStats::default();
+		let metrics = Metrics::default();
+
+		let progress = tracker.progress(&mut stats, &metrics).await;
+
+		assert!(progress.is_none());
+	}
+
+	#[tokio::test]
+	async fn test_returns_progress_on_current_block() {
+		let hash = H256::random();
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut stats = ParachainStats::default();
+		let metrics = Metrics::default();
+		let mut mock_rpc = MockTrackerRpc::new();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
+		mock_rpc
+			.expect_core_assignments_via_scheduled_paras()
+			.returning(|_| Ok(Default::default()));
+		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
+		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
+
+		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
+			.await
+			.unwrap();
+		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
+
+		assert_eq!(progress.timestamp, 1694095332000);
+		assert_eq!(progress.prev_timestamp, 1694095332000);
+		assert_eq!(progress.block_number, 42);
+		assert_eq!(progress.block_hash, hash);
+		assert_eq!(progress.para_id, 100);
+		assert!(!progress.is_fork);
+		assert!(progress.finality_lag.is_none());
+		assert!(!progress.core_occupied);
+	}
+
+	#[tokio::test]
+	async fn test_includes_new_session_if_exist() {
+		let hash = H256::random();
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut stats = ParachainStats::default();
+		let metrics = Metrics::default();
+		let mut mock_rpc = MockTrackerRpc::new();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
+		mock_rpc
+			.expect_core_assignments_via_scheduled_paras()
+			.returning(|_| Ok(Default::default()));
+		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
+		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
+
+		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
+			.await
+			.unwrap();
+		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
+		assert!(!progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
+
+		tracker.process_new_session(12);
+		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
+
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
+	}
+
+	#[tokio::test]
+	async fn test_includes_core_assignment() {
+		let hash = H256::random();
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut stats = ParachainStats::default();
+		let metrics = Metrics::default();
+		let mut mock_rpc = MockTrackerRpc::new();
+		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
+		mock_rpc
+			.expect_core_assignments_via_scheduled_paras()
+			.returning(|_| Ok(HashMap::from([(0, vec![100])])));
+		mock_rpc.expect_occupied_cores().returning(|_| Ok(vec![CoreOccupied::Paras]));
+		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
+		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
+
+		storage_write(CollectorPrefixType::InherentData, hash, create_inherent_data(100), &api)
+			.await
+			.unwrap();
+		tracker.inject_block(hash, 42, &mut mock_rpc).await.unwrap();
+		let progress = tracker.progress(&mut stats, &metrics).await.unwrap();
+
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::CoreAssigned(0))));
+	}
+
+	// 	TODO: notify_bitfield_propagation
+	// 	TODO: notify_candidate_state
+	// 	TODO: notify_disputes
+	// 	TODO: notify_active_message_queues
+	// 	TODO: notify_current_block_time
+	// 	TODO: notify_finality_lag
+	// 	TODO: notify_on_demand_order
 }

@@ -17,6 +17,7 @@
 use crate::types::{DisputesTracker, ParachainProgressUpdate};
 use clap::Parser;
 use color_eyre::Result;
+use mockall::*;
 use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
 use prometheus_endpoint::{
 	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
@@ -83,6 +84,28 @@ struct MetricsInner {
 	finality_lag: Gauge,
 }
 
+#[automock]
+pub trait PrometheusMetrics {
+	fn on_backed(&self, para_id: u32);
+	fn on_block(&self, time: f64, para_id: u32);
+	fn on_slow_availability(&self, para_id: u32);
+	fn on_bitfields(&self, nbitfields: u32, is_low: bool, para_id: u32);
+	fn on_skipped_slot(&self, update: &ParachainProgressUpdate);
+	fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32);
+	fn on_included(
+		&self,
+		relay_parent_number: u32,
+		previous_included: Option<u32>,
+		backed_in: Option<u32>,
+		para_block_time_sec: Option<Duration>,
+		para_id: u32,
+	);
+	fn handle_on_demand_order(&self, order: &OnDemandOrder);
+	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str);
+	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str);
+	fn on_finality_lag(&self, lag: u32);
+}
+
 /// Parachain tracer prometheus metrics
 #[derive(Default, Clone)]
 pub struct Metrics(Option<MetricsInner>);
@@ -91,14 +114,14 @@ const HISTOGRAM_TIME_BUCKETS_BLOCKS: &[f64] =
 	&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0, 25.0, 35.0, 50.0];
 const HISTOGRAM_TIME_BUCKETS_SECONDS: &[f64] = &[3.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 48.0, 60.0, 90.0, 120.0];
 
-impl Metrics {
-	pub(crate) fn on_backed(&self, para_id: u32) {
+impl PrometheusMetrics for Metrics {
+	fn on_backed(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.backed_count.with_label_values(&[&para_id.to_string()[..]]).inc();
 		}
 	}
 
-	pub(crate) fn on_block(&self, time: f64, para_id: u32) {
+	fn on_block(&self, time: f64, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.relay_block_times
@@ -114,13 +137,13 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_slow_availability(&self, para_id: u32) {
+	fn on_slow_availability(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.slow_avail_count.with_label_values(&[&para_id.to_string()[..]]).inc();
 		}
 	}
 
-	pub(crate) fn on_bitfields(&self, nbitfields: u32, is_low: bool, para_id: u32) {
+	fn on_bitfields(&self, nbitfields: u32, is_low: bool, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.bitfields
@@ -133,7 +156,7 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_skipped_slot(&self, update: &ParachainProgressUpdate) {
+	fn on_skipped_slot(&self, update: &ParachainProgressUpdate) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.skipped_slots
@@ -142,7 +165,7 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32) {
+	fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics.disputes_stats.disputed_count.with_label_values(&[&para_str[..]]).inc();
@@ -168,7 +191,7 @@ impl Metrics {
 	}
 
 	/// Update metrics on candidate inclusion
-	pub(crate) fn on_included(
+	fn on_included(
 		&self,
 		relay_parent_number: u32,
 		previous_included: Option<u32>,
@@ -202,7 +225,7 @@ impl Metrics {
 	}
 
 	/// Update on-demand orders
-	pub(crate) fn handle_on_demand_order(&self, order: &OnDemandOrder) {
+	fn handle_on_demand_order(&self, order: &OnDemandOrder) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = order.para_id.to_string();
 			metrics
@@ -213,7 +236,7 @@ impl Metrics {
 	}
 
 	/// Update on-demand latency in blocks
-	pub(crate) fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str) {
+	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
@@ -224,7 +247,7 @@ impl Metrics {
 	}
 
 	/// Update on-demand latency in seconds
-	pub(crate) fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str) {
+	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
@@ -234,7 +257,7 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_finality_lag(&self, lag: u32) {
+	fn on_finality_lag(&self, lag: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.finality_lag.set(lag.into());
 		}
