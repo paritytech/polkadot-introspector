@@ -858,8 +858,28 @@ mod test_progress {
 		let _progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
 	}
 
+	#[tokio::test]
+	async fn test_includes_finality_lag() {
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut stats = ParachainStats::default();
+		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
+		mock_metrics.expect_on_skipped_slot().returning(|_| ());
+		mock_metrics.expect_on_block().returning(|_, _| ());
+
+		// Without finality lag
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		tracker.finality_lag = None;
+		mock_metrics.expect_on_finality_lag().times(0).returning(|_| ());
+		let _progress = tracker.progress(&mut stats, &mock_metrics).await.unwrap();
+
+		// With finality lag
+		tracker.finality_lag = Some(2);
+		mock_metrics.expect_on_finality_lag().with(eq(2)).once().returning(|_| ());
+		let _progress = tracker.progress(&mut stats, &mock_metrics).await.unwrap();
+	}
+
 	// 	TODO: notify_candidate_state
 	// 	TODO: notify_disputes
-	// 	TODO: notify_finality_lag
 	// 	TODO: notify_on_demand_order
 }
