@@ -58,6 +58,7 @@ pub enum Response<K, P> {
 	Prefixes(Vec<P>),
 	Status(color_eyre::Result<()>),
 }
+#[derive(Clone)]
 pub struct RequestExecutor<K, P> {
 	to_api: Sender<Request<K, P>>,
 }

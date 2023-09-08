@@ -207,7 +207,7 @@ impl ParachainTracer {
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
 		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.subxt());
-		let mut tracker = SubxtTracker::new(para_id, api_service);
+		let mut tracker = SubxtTracker::new(para_id, api_service.storage());
 
 		let metrics = self.metrics.clone();
 		let mut stats = ParachainStats::new(para_id, self.opts.last_skipped_slot_blocks);

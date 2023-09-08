@@ -15,8 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::InherentData,
-	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi, DisputeInfo},
+	api::{storage::RequestExecutor, subxt_wrapper::InherentData},
+	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
 	types::{AccountId32, OnDemandOrder, H256},
 };
 use subxt::config::{substrate::BlakeTwo256, Hasher};
@@ -25,17 +25,16 @@ pub struct TrackerStorage {
 	/// Parachain ID to track.
 	para_id: u32,
 	/// API to access collector's storage
-	api: CollectorStorageApi,
+	storage: RequestExecutor<H256, CollectorPrefixType>,
 }
 
 impl TrackerStorage {
-	pub fn new(para_id: u32, api: CollectorStorageApi) -> Self {
-		Self { para_id, api }
+	pub fn new(para_id: u32, storage: RequestExecutor<H256, CollectorPrefixType>) -> Self {
+		Self { para_id, storage }
 	}
 
 	pub async fn session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
-		self.api
-			.storage()
+		self.storage
 			.storage_read_prefixed(
 				CollectorPrefixType::AccountKeys,
 				BlakeTwo256::hash(&session_index.to_be_bytes()[..]),
@@ -45,40 +44,35 @@ impl TrackerStorage {
 	}
 
 	pub async fn inherent_data(&self, block_hash: H256) -> Option<InherentData> {
-		self.api
-			.storage()
+		self.storage
 			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
 
 	pub async fn on_demand_order(&self, block_hash: H256) -> Option<OnDemandOrder> {
-		self.api
-			.storage()
+		self.storage
 			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
 
 	pub async fn relevant_finalized_block_number(&self, block_hash: H256) -> Option<u32> {
-		self.api
-			.storage()
+		self.storage
 			.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
 
 	pub async fn dispute(&self, block_hash: H256) -> Option<DisputeInfo> {
-		self.api
-			.storage()
+		self.storage
 			.storage_read_prefixed(CollectorPrefixType::Dispute(self.para_id), block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
 
 	pub async fn candidate(&self, candidate_hash: H256) -> Option<CandidateRecord> {
-		self.api
-			.storage()
+		self.storage
 			.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), candidate_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
@@ -93,6 +87,7 @@ mod tests {
 	use polkadot_introspector_essentials::{
 		api::ApiService,
 		chain_events::SubxtDispute,
+		collector::CollectorStorageApi,
 		storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	};
 	use std::time::Duration;
@@ -101,7 +96,7 @@ mod tests {
 	fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
 		let api: CollectorStorageApi =
 			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default());
-		let storage = TrackerStorage::new(100, api.clone());
+		let storage = TrackerStorage::new(100, api.storage());
 
 		(storage, api)
 	}

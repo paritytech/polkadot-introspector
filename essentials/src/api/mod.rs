@@ -16,7 +16,7 @@
 //
 
 pub mod dynamic;
-mod storage;
+pub mod storage;
 pub mod subxt_wrapper;
 
 use crate::{constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig, utils::RetryOptions};

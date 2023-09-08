@@ -27,9 +27,9 @@ use crate::{
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::SubxtWrapperError,
-	collector::{CollectorStorageApi, DisputeInfo},
-	metadata::polkadot_primitives,
+	api::{storage::RequestExecutor, subxt_wrapper::SubxtWrapperError},
+	collector::{CollectorPrefixType, DisputeInfo},
+	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatementSet, ValidatorIndex},
 	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
 use std::{default::Default, time::Duration};
@@ -79,10 +79,10 @@ pub struct SubxtTracker {
 }
 
 impl SubxtTracker {
-	pub fn new(para_id: u32, api: CollectorStorageApi) -> Self {
+	pub fn new(para_id: u32, storage: RequestExecutor<H256, CollectorPrefixType>) -> Self {
 		Self {
 			para_id,
-			storage: TrackerStorage::new(para_id, api),
+			storage: TrackerStorage::new(para_id, storage),
 			current_candidate: Default::default(),
 			new_session: None,
 			current_relay_block: None,
@@ -237,7 +237,7 @@ impl SubxtTracker {
 
 	fn set_current_candidate(
 		&mut self,
-		backed_candidates: Vec<polkadot_primitives::BackedCandidate<H256>>,
+		backed_candidates: Vec<BackedCandidate<H256>>,
 		bitfields_count: usize,
 		block_number: BlockNumber,
 	) {
@@ -273,7 +273,7 @@ impl SubxtTracker {
 		Ok(())
 	}
 
-	async fn set_disputes(&mut self, disputes: &[polkadot_primitives::DisputeStatementSet]) {
+	async fn set_disputes(&mut self, disputes: &[DisputeStatementSet]) {
 		self.disputes = Vec::with_capacity(disputes.len());
 		for dispute_info in disputes {
 			if let Some(DisputeInfo { outcome, session_index, initiated, initiator_indices, concluded, .. }) =
@@ -302,7 +302,7 @@ impl SubxtTracker {
 	async fn set_availability(
 		&mut self,
 		block_hash: H256,
-		bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
+		bitfields: Vec<AvailabilityBitfield>,
 		rpc: &mut impl TrackerRpc,
 	) -> color_eyre::Result<()> {
 		if self.current_candidate.is_backed() {
@@ -519,7 +519,7 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		rpc: &mut impl TrackerRpc,
-	) -> color_eyre::Result<Vec<polkadot_primitives::ValidatorIndex>> {
+	) -> color_eyre::Result<Vec<ValidatorIndex>> {
 		Ok(rpc.backing_groups(block_hash).await?.into_iter().flatten().collect())
 	}
 
@@ -535,11 +535,11 @@ impl SubxtTracker {
 #[cfg(test)]
 mod test_inject_new_session {
 	use super::*;
-	use crate::test_utils::create_storage_api;
+	use crate::test_utils::create_storage;
 
 	#[tokio::test]
 	async fn test_sets_new_session() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		assert!(tracker.new_session.is_none());
 
 		tracker.inject_new_session(42);
@@ -551,11 +551,11 @@ mod test_inject_new_session {
 #[cfg(test)]
 mod test_maybe_reset_state {
 	use super::*;
-	use crate::test_utils::create_storage_api;
+	use crate::test_utils::create_storage;
 
 	#[tokio::test]
 	async fn test_resets_state_if_not_backed() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		tracker.current_candidate.set_idle();
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
@@ -574,7 +574,7 @@ mod test_maybe_reset_state {
 
 	#[tokio::test]
 	async fn test_resets_state_if_backed() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		tracker.current_candidate.set_backed();
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
@@ -598,7 +598,7 @@ mod test_maybe_reset_state {
 mod test_inject_block {
 	use super::*;
 	use crate::{
-		test_utils::{create_inherent_data, create_storage_api, storage_write},
+		test_utils::{create_inherent_data, create_storage, storage_write},
 		tracker_rpc::MockTrackerRpc,
 	};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
@@ -606,7 +606,7 @@ mod test_inject_block {
 	#[tokio::test]
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
 		let hash = H256::random();
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut mock_rpc = MockTrackerRpc::new();
 
 		tracker.inject_block(hash, 0, &mut mock_rpc).await.unwrap();
@@ -632,8 +632,8 @@ mod test_inject_block {
 	async fn test_sets_relay_block() {
 		let first_hash = H256::random();
 		let second_hash = H256::random();
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api.clone());
+		let storage = create_storage();
+		let mut tracker = SubxtTracker::new(100, storage.clone());
 		let mut mock_rpc = MockTrackerRpc::new();
 		mock_rpc
 			.expect_core_assignments_via_scheduled_paras()
@@ -642,7 +642,7 @@ mod test_inject_block {
 		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
 		// Inject a block
-		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &api)
+		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &storage)
 			.await
 			.unwrap();
 		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
@@ -655,10 +655,10 @@ mod test_inject_block {
 		assert!(tracker.finality_lag.is_none());
 
 		// Inject a fork and relevant finalized block number
-		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(100), &api)
+		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(100), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &api)
+		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &storage)
 			.await
 			.unwrap();
 		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095333000));
@@ -679,14 +679,14 @@ mod test_progress {
 	use crate::{
 		prometheus::{Metrics, MockPrometheusMetrics},
 		stats::{MockStats, ParachainStats},
-		test_utils::{create_candidate_record, create_hrmp_channels, create_storage_api, storage_write},
+		test_utils::{create_candidate_record, create_hrmp_channels, create_storage, storage_write},
 	};
 	use mockall::predicate::eq;
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
-		let tracker = SubxtTracker::new(100, create_storage_api());
+		let tracker = SubxtTracker::new(100, create_storage());
 		let mut stats = MockStats::default();
 		let metrics = Metrics::default();
 
@@ -698,7 +698,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_returns_progress_on_current_block() {
 		let hash = H256::random();
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -717,7 +717,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_new_session_if_exist() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -742,7 +742,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_core_assignment() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -759,7 +759,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_slow_propogation() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -802,7 +802,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_message_queues() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -829,7 +829,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_current_block_time() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
@@ -861,7 +861,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_finality_lag() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
@@ -882,7 +882,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_disputes() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
@@ -927,7 +927,7 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_on_demand_order() {
-		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut tracker = SubxtTracker::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
@@ -980,8 +980,8 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_candidate_state() {
 		let candidate_hash = H256::random();
-		let api = create_storage_api();
-		let mut tracker = SubxtTracker::new(100, api.clone());
+		let storage = create_storage();
+		let mut tracker = SubxtTracker::new(100, storage.clone());
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -992,7 +992,7 @@ mod test_progress {
 			CollectorPrefixType::Candidate(100),
 			candidate_hash,
 			create_candidate_record(100, 41, H256::random(), 40),
-			&api,
+			&storage,
 		)
 		.await
 		.unwrap();
