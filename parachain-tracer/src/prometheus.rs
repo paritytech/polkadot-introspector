@@ -17,7 +17,7 @@
 use crate::types::{DisputesTracker, ParachainProgressUpdate};
 use clap::Parser;
 use color_eyre::Result;
-use mockall::*;
+use mockall::automock;
 use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
 use prometheus_endpoint::{
 	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},

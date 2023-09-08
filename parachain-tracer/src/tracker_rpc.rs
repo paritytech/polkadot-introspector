@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use async_trait::async_trait;
-use mockall::*;
+use mockall::automock;
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	metadata::polkadot_primitives::ValidatorIndex,
@@ -133,13 +133,11 @@ impl TrackerRpc for ParachainTrackerRpc {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::test_utils::rpc_node_url;
-	use polkadot_introspector_essentials::{api::ApiService, storage::RecordsStorageConfig};
+	use crate::test_utils::{create_api, rpc_node_url};
 	use subxt::error::{Error, MetadataError};
 
 	async fn setup_client() -> (ParachainTrackerRpc, H256) {
-		let api: ApiService<H256> =
-			ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default());
+		let api = create_api();
 		let rpc = ParachainTrackerRpc::new(100, rpc_node_url(), api.subxt());
 		let block_hash = api.subxt().get_block(rpc_node_url(), None).await.unwrap().header().parent_hash;
 

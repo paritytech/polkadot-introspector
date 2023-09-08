@@ -13,6 +13,7 @@
 
 #![cfg(test)]
 
+use crate::parachain_block_info::ParachainBlockInfo;
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
 	api::{subxt_wrapper::SubxtHrmpChannel, ApiService},
@@ -42,8 +43,6 @@ use polkadot_introspector_essentials::{
 };
 use std::{collections::BTreeMap, time::Duration};
 use subxt::utils::bits::DecodedBits;
-
-use crate::parachain_block_info::ParachainBlockInfo;
 
 pub fn rpc_node_url() -> &'static str {
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
@@ -126,6 +125,10 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32, BlakeTwo25
 			__subxt_unused_type_params: Default::default(),
 		},
 	}
+}
+
+pub fn create_api() -> ApiService<H256> {
+	ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default())
 }
 
 pub fn create_storage_api() -> CollectorStorageApi {
