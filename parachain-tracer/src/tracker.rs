@@ -926,28 +926,54 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_on_demand_order() {
-		todo!("Implement")
-		// fn notify_on_demand_order(&self, metrics: &impl PrometheusMetrics) {
-		// 	if let Some(ref order) = self.on_demand_order {
-		// 		metrics.handle_on_demand_order(order);
-		// 	}
-		// 	if let Some(delay) = self.on_demand_delay() {
-		// 		if self.is_on_demand_scheduled_in_current_block {
-		// 			metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
-		// 		}
-		// 		if self.current_candidate.is_backed() {
-		// 			metrics.handle_on_demand_delay(delay, self.para_id, "backed");
-		// 		}
-		// 	}
-		// 	if let Some(delay_sec) = self.on_demand_delay_sec() {
-		// 		if self.is_on_demand_scheduled_in_current_block {
-		// 			metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
-		// 		}
-		// 		if self.current_candidate.is_backed() {
-		// 			metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
-		// 		}
-		// 	}
-		// }
+		let mut tracker = SubxtTracker::new(100, create_storage_api());
+		let mut stats = ParachainStats::default();
+		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
+		mock_metrics.expect_on_skipped_slot().returning(|_| ());
+		mock_metrics.expect_on_block().returning(|_, _| ());
+
+		// With on-demand order
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		let order = OnDemandOrder { para_id: 100, spot_price: 10000 };
+		tracker.on_demand_order = Some(order.clone());
+		mock_metrics
+			.expect_handle_on_demand_order()
+			.with(eq(order))
+			.once()
+			.returning(|_| ());
+		let _progress = tracker.progress(&mut stats, &mock_metrics).await.unwrap();
+		tracker.on_demand_order = None;
+
+		// With on-demand order at block
+		tracker.on_demand_order_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
+		// If scheduled
+		tracker.is_on_demand_scheduled_in_current_block = true;
+		mock_metrics
+			.expect_handle_on_demand_delay()
+			.with(eq(1), eq(100), eq("scheduled"))
+			.once()
+			.returning(|_, _, _| ());
+		mock_metrics
+			.expect_handle_on_demand_delay_sec()
+			.with(eq(Duration::from_secs(6)), eq(100), eq("scheduled"))
+			.once()
+			.returning(|_, _, _| ());
+		let _progress = tracker.progress(&mut stats, &mock_metrics).await.unwrap();
+		tracker.is_on_demand_scheduled_in_current_block = false;
+		// If backed
+		tracker.current_candidate.set_backed();
+		mock_metrics
+			.expect_handle_on_demand_delay()
+			.with(eq(1), eq(100), eq("backed"))
+			.once()
+			.returning(|_, _, _| ());
+		mock_metrics
+			.expect_handle_on_demand_delay_sec()
+			.with(eq(Duration::from_secs(6)), eq(100), eq("backed"))
+			.once()
+			.returning(|_, _, _| ());
+		let _progress = tracker.progress(&mut stats, &mock_metrics).await.unwrap();
 	}
 
 	#[tokio::test]
