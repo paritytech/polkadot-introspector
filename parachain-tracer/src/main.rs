@@ -53,7 +53,7 @@ use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
 use tracker_rpc::ParachainTrackerRpc;
 
-mod message_queus_tracker;
+mod message_queues_tracker;
 mod parachain_block_info;
 mod prometheus;
 mod stats;

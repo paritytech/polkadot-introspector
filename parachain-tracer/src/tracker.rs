@@ -16,7 +16,7 @@
 
 //! This module tracks parachain blocks.
 use crate::{
-	message_queus_tracker::MessageQueuesTracker,
+	message_queues_tracker::MessageQueuesTracker,
 	parachain_block_info::ParachainBlockInfo,
 	prometheus::PrometheusMetrics,
 	stats::Stats,
