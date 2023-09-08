@@ -52,6 +52,7 @@ use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
 use tracker_rpc::ParachainTrackerRpc;
+use tracker_storage::TrackerStorage;
 
 mod message_queues_tracker;
 mod parachain_block_info;
@@ -207,7 +208,8 @@ impl ParachainTracer {
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
 		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.subxt());
-		let mut tracker = SubxtTracker::new(para_id, api_service.storage());
+		let mut tracker = SubxtTracker::new(para_id);
+		let storage = TrackerStorage::new(para_id, api_service.storage());
 
 		let metrics = self.metrics.clone();
 		let mut stats = ParachainStats::new(para_id, self.opts.last_skipped_slot_blocks);
@@ -220,11 +222,13 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
 								let parent_number = new_head.relay_parent_number;
-								if let Err(e) = tracker.inject_block(*relay_fork, parent_number, &mut rpc).await {
+								if let Err(e) =
+									tracker.inject_block(*relay_fork, parent_number, &mut rpc, &storage).await
+								{
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
 									std::process::exit(1);
 								}
-								if let Some(progress) = tracker.progress(&mut stats, &metrics).await {
+								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await {
 									if is_cli {
 										println!("{}", progress)
 									}
