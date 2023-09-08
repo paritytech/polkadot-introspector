@@ -120,51 +120,11 @@ enum ParachainBlockState {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use polkadot_introspector_essentials::metadata::{
-		polkadot::runtime_types::{
-			bounded_collections::bounded_vec::BoundedVec,
-			polkadot_parachain::primitives::{HeadData, Id, ValidationCodeHash},
-			sp_core::sr25519::{Public, Signature},
-		},
-		polkadot_primitives::{collator_app, CandidateCommitments, CandidateDescriptor, CommittedCandidateReceipt},
-	};
-	use subxt::utils::bits::DecodedBits;
-
-	fn create_info() -> ParachainBlockInfo {
-		let mut info = ParachainBlockInfo::default();
-		info.set_candidate(BackedCandidate {
-			candidate: CommittedCandidateReceipt {
-				descriptor: CandidateDescriptor {
-					para_id: Id(100),
-					relay_parent: Default::default(),
-					collator: collator_app::Public(Public([0; 32])),
-					persisted_validation_data_hash: Default::default(),
-					pov_hash: Default::default(),
-					erasure_root: Default::default(),
-					signature: collator_app::Signature(Signature([0; 64])),
-					para_head: Default::default(),
-					validation_code_hash: ValidationCodeHash(Default::default()),
-				},
-				commitments: CandidateCommitments {
-					upward_messages: BoundedVec(Default::default()),
-					horizontal_messages: BoundedVec(Default::default()),
-					new_validation_code: Default::default(),
-					head_data: HeadData(Default::default()),
-					processed_downward_messages: Default::default(),
-					hrmp_watermark: Default::default(),
-				},
-			},
-			validity_votes: vec![],
-			validator_indices: DecodedBits::from_iter([true]),
-		});
-
-		info
-	}
+	use crate::test_utils::create_para_block_info;
 
 	#[test]
 	fn test_does_not_reset_state_if_not_included() {
-		let mut info = create_info();
+		let mut info = create_para_block_info();
 		info.set_backed();
 
 		assert!(info.is_backed());
@@ -180,7 +140,7 @@ mod tests {
 
 	#[test]
 	fn test_resets_state_if_included() {
-		let mut info = create_info();
+		let mut info = create_para_block_info();
 		info.set_included();
 
 		assert!(info.is_included());
@@ -196,7 +156,7 @@ mod tests {
 
 	#[test]
 	fn test_is_data_available() {
-		let mut info = create_info();
+		let mut info = create_para_block_info();
 		assert!(!info.is_data_available());
 
 		info.max_availability_bits = 200;
@@ -206,7 +166,7 @@ mod tests {
 
 	#[test]
 	fn test_is_bitfield_propagation_low() {
-		let mut info = create_info();
+		let mut info = create_para_block_info();
 		assert!(!info.is_bitfield_propagation_slow());
 
 		info.max_availability_bits = 200;

@@ -43,6 +43,8 @@ use polkadot_introspector_essentials::{
 use std::{collections::BTreeMap, time::Duration};
 use subxt::utils::bits::DecodedBits;
 
+use crate::parachain_block_info::ParachainBlockInfo;
+
 pub fn rpc_node_url() -> &'static str {
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
 
@@ -157,6 +159,37 @@ pub fn create_candidate_record(
 		candidate_first_seen: Duration::from_secs(0),
 		candidate_disputed: None,
 	}
+}
+
+pub fn create_para_block_info() -> ParachainBlockInfo {
+	let mut info = ParachainBlockInfo::default();
+	info.set_candidate(BackedCandidate {
+		candidate: CommittedCandidateReceipt {
+			descriptor: CandidateDescriptor {
+				para_id: Id(100),
+				relay_parent: Default::default(),
+				collator: collator_app::Public(Public([0; 32])),
+				persisted_validation_data_hash: Default::default(),
+				pov_hash: Default::default(),
+				erasure_root: Default::default(),
+				signature: collator_app::Signature(Signature([0; 64])),
+				para_head: Default::default(),
+				validation_code_hash: ValidationCodeHash(Default::default()),
+			},
+			commitments: CandidateCommitments {
+				upward_messages: BoundedVec(Default::default()),
+				horizontal_messages: BoundedVec(Default::default()),
+				new_validation_code: Default::default(),
+				head_data: HeadData(Default::default()),
+				processed_downward_messages: Default::default(),
+				hrmp_watermark: Default::default(),
+			},
+		},
+		validity_votes: vec![],
+		validator_indices: DecodedBits::from_iter([true]),
+	});
+
+	info
 }
 
 pub async fn storage_write<T: Encode>(
