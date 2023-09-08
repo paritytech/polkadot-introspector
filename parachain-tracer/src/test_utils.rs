@@ -16,7 +16,10 @@
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
 	api::{subxt_wrapper::SubxtHrmpChannel, ApiService},
-	collector::{CollectorPrefixType, CollectorStorageApi},
+	collector::{
+		candidate_record::{CandidateInclusionRecord, CandidateRecord},
+		CollectorPrefixType, CollectorStorageApi,
+	},
 	metadata::{
 		polkadot::runtime_types::{
 			bounded_collections::bounded_vec::BoundedVec,
@@ -133,6 +136,27 @@ pub fn create_hrmp_channels() -> BTreeMap<u32, SubxtHrmpChannel> {
 	channels.insert(200, SubxtHrmpChannel { total_size: 0, ..Default::default() });
 
 	channels
+}
+
+pub fn create_candidate_record(
+	para_id: u32,
+	backed: u32,
+	relay_parent: H256,
+	relay_parent_number: u32,
+) -> CandidateRecord {
+	CandidateRecord {
+		candidate_inclusion: CandidateInclusionRecord {
+			parachain_id: para_id,
+			backed,
+			included: None,
+			timedout: None,
+			core_idx: None,
+			relay_parent,
+			relay_parent_number,
+		},
+		candidate_first_seen: Duration::from_secs(0),
+		candidate_disputed: None,
+	}
 }
 
 pub async fn storage_write<T: Encode>(

@@ -679,9 +679,10 @@ mod test_progress {
 	use crate::{
 		prometheus::{Metrics, MockPrometheusMetrics},
 		stats::{MockStats, ParachainStats},
-		test_utils::{create_hrmp_channels, create_storage_api},
+		test_utils::{create_candidate_record, create_hrmp_channels, create_storage_api, storage_write},
 	};
 	use mockall::predicate::eq;
+	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
@@ -978,60 +979,141 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_candidate_state() {
-		todo!("Implement")
-		// async fn notify_candidate_state(
-		// 	&self,
-		// 	progress: &mut ParachainProgressUpdate,
-		// 	stats: &mut impl Stats,
-		// 	metrics: &impl PrometheusMetrics,
-		// ) {
-		// 	if self.current_candidate.is_idle() {
-		// 		progress.events.push(ParachainConsensusEvent::SkippedSlot);
-		// 		stats.on_skipped_slot(progress);
-		// 		metrics.on_skipped_slot(progress);
-		// 	}
+		let candidate_hash = H256::random();
+		let api = create_storage_api();
+		let mut tracker = SubxtTracker::new(100, api.clone());
+		let mut mock_stats = MockStats::default();
+		mock_stats.expect_on_bitfields().returning(|_, _| ());
+		mock_stats.expect_on_block().returning(|_| ());
+		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
+		mock_metrics.expect_on_block().returning(|_, _| ());
+		storage_write(
+			CollectorPrefixType::Candidate(100),
+			candidate_hash,
+			create_candidate_record(100, 41, H256::random(), 40),
+			&api,
+		)
+		.await
+		.unwrap();
 
-		// 	if self.current_candidate.is_backed() {
-		// 		if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-		// 			progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
-		// 			stats.on_backed();
-		// 			metrics.on_backed(self.para_id);
-		// 		}
-		// 	}
+		// When candidate is idle
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		tracker.current_candidate.set_idle();
+		mock_stats.expect_on_skipped_slot().once().returning(|_| ());
+		mock_metrics.expect_on_skipped_slot().once().returning(|_| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
 
-		// 	if self.current_candidate.is_pending() || self.current_candidate.is_included() {
-		// 		progress.bitfield_health.max_bitfield_count = self.current_candidate.max_availability_bits;
-		// 		progress.bitfield_health.available_count = self.current_candidate.current_availability_bits;
-		// 		progress.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot)));
 
-		// 		if self.current_candidate.is_data_available() {
-		// 			if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-		// 				progress.events.push(ParachainConsensusEvent::Included(
-		// 					candidate_hash,
-		// 					self.current_candidate.current_availability_bits,
-		// 					self.current_candidate.max_availability_bits,
-		// 				));
+		// When candidate is backed
+		tracker.current_candidate.set_backed();
+		tracker.current_candidate.candidate_hash = Some(candidate_hash);
+		mock_stats.expect_on_backed().once().returning(|| ());
+		mock_metrics.expect_on_backed().with(eq(100)).once().returning(|_| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
 
-		// 				let backed_in = self.candidate_backed_in(candidate_hash).await;
-		// 				let relay_block = self.current_relay_block.expect("Checked by caller; qed");
-		// 				stats.on_included(relay_block.num, self.previous_included_at.map(|v| v.num), backed_in);
-		// 				metrics.on_included(
-		// 					relay_block.num,
-		// 					self.previous_included_at.map(|v| v.num),
-		// 					backed_in,
-		// 					time_diff(Some(relay_block.ts), self.previous_included_at.map(|v| v.ts)),
-		// 					self.para_id,
-		// 				);
-		// 			}
-		// 		} else if self.is_slow_availability() {
-		// 			progress.events.push(ParachainConsensusEvent::SlowAvailability(
-		// 				self.current_candidate.current_availability_bits,
-		// 				self.current_candidate.max_availability_bits,
-		// 			));
-		// 			stats.on_slow_availability();
-		// 			metrics.on_slow_availability(self.para_id);
-		// 		}
-		// 	}
-		// }
+		assert!(progress.events.iter().any(|e| matches!(e, ParachainConsensusEvent::Backed(_))));
+
+		// When candidate is pending
+		// And data is available
+		tracker.previous_included_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
+		tracker.current_candidate.set_pending();
+		tracker.current_candidate.max_availability_bits = 200;
+		tracker.current_candidate.current_availability_bits = 140;
+		tracker.current_candidate.bitfield_count = 150;
+		mock_stats
+			.expect_on_included()
+			.with(eq(42), eq(Some(41)), eq(Some(1)))
+			.once()
+			.returning(|_, _, _| ());
+		mock_metrics
+			.expect_on_included()
+			.with(eq(42), eq(Some(41)), eq(Some(1)), eq(Some(Duration::from_secs(6))), eq(100))
+			.once()
+			.returning(|_, _, _, _, _| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
+		assert_eq!(progress.bitfield_health.available_count, 140);
+		assert_eq!(progress.bitfield_health.bitfield_count, 150);
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _))));
+
+		// And availability is slow
+		tracker.current_candidate.max_availability_bits = 200;
+		tracker.current_candidate.current_availability_bits = 120;
+		tracker.current_candidate.bitfield_count = 150;
+		tracker.current_candidate.core_occupied = true;
+		tracker.last_backed_at_block_number = Some(41);
+		mock_stats.expect_on_slow_availability().once().returning(|| ());
+		mock_metrics
+			.expect_on_slow_availability()
+			.with(eq(100))
+			.once()
+			.returning(|_| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
+		assert_eq!(progress.bitfield_health.available_count, 120);
+		assert_eq!(progress.bitfield_health.bitfield_count, 150);
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
+
+		// When candidate is included (all checks are same as for pending)
+		// And data is available
+		tracker.previous_included_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
+		tracker.current_candidate.set_included();
+		tracker.current_candidate.max_availability_bits = 200;
+		tracker.current_candidate.current_availability_bits = 140;
+		tracker.current_candidate.bitfield_count = 150;
+		mock_stats
+			.expect_on_included()
+			.with(eq(42), eq(Some(41)), eq(Some(1)))
+			.once()
+			.returning(|_, _, _| ());
+		mock_metrics
+			.expect_on_included()
+			.with(eq(42), eq(Some(41)), eq(Some(1)), eq(Some(Duration::from_secs(6))), eq(100))
+			.once()
+			.returning(|_, _, _, _, _| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
+		assert_eq!(progress.bitfield_health.available_count, 140);
+		assert_eq!(progress.bitfield_health.bitfield_count, 150);
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _))));
+
+		// And availability is slow
+		tracker.current_candidate.max_availability_bits = 200;
+		tracker.current_candidate.current_availability_bits = 120;
+		tracker.current_candidate.bitfield_count = 150;
+		tracker.current_candidate.core_occupied = true;
+		tracker.last_backed_at_block_number = Some(41);
+		mock_stats.expect_on_slow_availability().once().returning(|| ());
+		mock_metrics
+			.expect_on_slow_availability()
+			.with(eq(100))
+			.once()
+			.returning(|_| ());
+		let progress = tracker.progress(&mut mock_stats, &mock_metrics).await.unwrap();
+
+		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
+		assert_eq!(progress.bitfield_health.available_count, 120);
+		assert_eq!(progress.bitfield_health.bitfield_count, 150);
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
 	}
 }

@@ -87,13 +87,12 @@ impl TrackerStorage {
 
 #[cfg(test)]
 mod tests {
-	use crate::test_utils::create_inherent_data;
+	use crate::test_utils::{create_candidate_record, create_inherent_data};
 
 	use super::*;
 	use polkadot_introspector_essentials::{
 		api::ApiService,
 		chain_events::SubxtDispute,
-		collector::candidate_record::CandidateInclusionRecord,
 		storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	};
 	use std::time::Duration;
@@ -234,19 +233,7 @@ mod tests {
 				hash,
 				StorageEntry::new_onchain(
 					RecordTime::with_ts(0, Duration::from_secs(0)),
-					CandidateRecord {
-						candidate_inclusion: CandidateInclusionRecord {
-							parachain_id: 100,
-							backed: 0,
-							included: None,
-							timedout: None,
-							core_idx: None,
-							relay_parent: H256::random(),
-							relay_parent_number: 0,
-						},
-						candidate_first_seen: Duration::from_secs(0),
-						candidate_disputed: None,
-					},
+					create_candidate_record(100, 0, H256::random(), 0),
 				),
 			)
 			.await
