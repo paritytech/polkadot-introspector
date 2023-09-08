@@ -165,7 +165,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_is_bitfield_propagation_low() {
+	fn test_is_bitfield_propagation_slow() {
 		let mut info = create_para_block_info();
 		assert!(!info.is_bitfield_propagation_slow());
 
