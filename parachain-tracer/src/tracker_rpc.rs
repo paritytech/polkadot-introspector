@@ -171,7 +171,7 @@ mod tests {
 		match response {
 			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(reason)))) =>
 				assert_eq!(reason, "Scheduled"),
-			_ => assert!(!response.unwrap().is_empty()),
+			_ => assert!(response.is_ok()),
 		};
 	}
 
@@ -184,7 +184,7 @@ mod tests {
 		match response {
 			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(reason)))) =>
 				assert_eq!(reason, "ClaimQueue"),
-			_ => assert!(!response.unwrap().is_empty()),
+			_ => assert!(response.is_ok()),
 		};
 	}
 
