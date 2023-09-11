@@ -1068,12 +1068,12 @@ mod test_progress {
 		tracker.current_candidate.bitfield_count = 150;
 		mock_stats
 			.expect_on_included()
-			.with(eq(42), eq(Some(41)), eq(Some(1)))
+			.with(eq(42), eq(Some(41)), eq(None))
 			.once()
 			.returning(|_, _, _| ());
 		mock_metrics
 			.expect_on_included()
-			.with(eq(42), eq(Some(41)), eq(Some(1)), eq(Some(Duration::from_secs(6))), eq(100))
+			.with(eq(42), eq(Some(41)), eq(None), eq(Some(Duration::from_secs(6))), eq(100))
 			.once()
 			.returning(|_, _, _, _, _| ());
 		let progress = tracker
@@ -1123,12 +1123,12 @@ mod test_progress {
 		tracker.current_candidate.bitfield_count = 150;
 		mock_stats
 			.expect_on_included()
-			.with(eq(42), eq(Some(41)), eq(Some(1)))
+			.with(eq(42), eq(Some(41)), eq(None))
 			.once()
 			.returning(|_, _, _| ());
 		mock_metrics
 			.expect_on_included()
-			.with(eq(42), eq(Some(41)), eq(Some(1)), eq(Some(Duration::from_secs(6))), eq(100))
+			.with(eq(42), eq(Some(41)), eq(None), eq(Some(Duration::from_secs(6))), eq(100))
 			.once()
 			.returning(|_, _, _, _, _| ());
 		let progress = tracker
