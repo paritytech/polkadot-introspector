@@ -227,10 +227,7 @@ impl Stats for ParachainStats {
 		self.disputes_stats
 			.misbehaving_validators
 			.update(dispute_outcome.misbehaving_validators.len() as u32);
-
-		if let Some(diff) = dispute_outcome.resolve_time {
-			self.disputes_stats.resolution_time.update(diff);
-		}
+		self.disputes_stats.resolution_time.update(dispute_outcome.resolve_time);
 	}
 
 	/// Track block

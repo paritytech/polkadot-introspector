@@ -284,7 +284,7 @@ impl SubxtTracker {
 						outcome,
 						initiated,
 						initiator_indices,
-						concluded,
+						concluded.expect("dispute must be concluded"),
 						storage.session_keys(dispute_info.session).await.as_ref(),
 						storage.session_keys(session_index).await.as_ref(),
 					));

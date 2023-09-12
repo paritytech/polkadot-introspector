@@ -56,7 +56,7 @@ pub struct DisputesTracker {
 	/// A vector of validators voted against supermajority (index + identify)
 	pub misbehaving_validators: Vec<(u32, String)>,
 	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
-	pub resolve_time: Option<u32>,
+	pub resolve_time: u32,
 }
 
 impl DisputesTracker {
@@ -65,7 +65,7 @@ impl DisputesTracker {
 		outcome: SubxtDisputeResult,
 		initiated: u32,
 		initiator_indices: Vec<u32>,
-		concluded: Option<u32>,
+		concluded: u32,
 		session_info: Option<&Vec<AccountId32>>,
 		initiators_session_info: Option<&Vec<AccountId32>>,
 	) -> Self {
@@ -74,7 +74,7 @@ impl DisputesTracker {
 		let initiators = extract_validator_addresses(initiators_session_info, initiator_indices);
 		let misbehaving_validators =
 			extract_misbehaving_validators(session_info, dispute_info, outcome == SubxtDisputeResult::Valid);
-		let resolve_time = Some(concluded.expect("dispute must be concluded").saturating_sub(initiated));
+		let resolve_time = concluded.saturating_sub(initiated);
 
 		Self { outcome, candidate, voted_for, voted_against, initiators, misbehaving_validators, resolve_time }
 	}
@@ -269,16 +269,13 @@ impl Display for ParachainConsensusEvent {
 
 impl Display for DisputesTracker {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		let resolved_time = self
-			.resolve_time
-			.map_or_else(|| "after unknown number of blocks".to_owned(), |diff| format!("after {diff} blocks"));
 		match self.outcome {
 			SubxtDisputeResult::Invalid => {
 				writeln!(
 					f,
 					"\t\t👎 Candidate: {}, resolved invalid ({}); voted for: {}; voted against: {}",
 					format!("{:?}", self.candidate).dark_red(),
-					resolved_time,
+					self.resolve_time,
 					self.voted_for,
 					self.voted_against
 				)?;
@@ -288,7 +285,7 @@ impl Display for DisputesTracker {
 					f,
 					"\t\t👍 Candidate: {}, resolved valid ({}); voted for: {}; voted against: {}",
 					format!("{:?}", self.candidate).bright_green(),
-					resolved_time,
+					self.resolve_time,
 					self.voted_for,
 					self.voted_against
 				)?;
@@ -298,7 +295,7 @@ impl Display for DisputesTracker {
 					f,
 					"\t\t⁉️ Candidate: {}, dispute resolution has been timed out {}; voted for: {}; voted against: {}",
 					format!("{:?}", self.candidate).bright_green(),
-					resolved_time,
+					self.resolve_time,
 					self.voted_for,
 					self.voted_against
 				)?;

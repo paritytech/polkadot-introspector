@@ -191,14 +191,11 @@ impl PrometheusMetrics for Metrics {
 					.with_label_values(&[&para_str[..]])
 					.inc();
 			}
-
-			if let Some(diff) = dispute_outcome.resolve_time {
-				metrics
-					.disputes_stats
-					.resolution_time
-					.with_label_values(&[&para_str[..]])
-					.observe(diff as f64);
-			}
+			metrics
+				.disputes_stats
+				.resolution_time
+				.with_label_values(&[&para_str[..]])
+				.observe(dispute_outcome.resolve_time as f64);
 		}
 	}
 
