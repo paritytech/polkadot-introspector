@@ -554,12 +554,11 @@ mod test_maybe_reset_state {
 	#[tokio::test]
 	async fn test_resets_state_if_not_backed() {
 		let mut tracker = SubxtTracker::new(100);
-		tracker.current_candidate.set_idle();
+		tracker.current_candidate.set_included();
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
-		assert!(!tracker.current_candidate.is_reset);
 
 		tracker.maybe_reset_state();
 
@@ -567,7 +566,7 @@ mod test_maybe_reset_state {
 		assert!(tracker.on_demand_order.is_none());
 		assert!(!tracker.is_on_demand_scheduled_in_current_block);
 		assert!(tracker.disputes.is_empty());
-		assert!(tracker.current_candidate.is_reset);
+		assert!(tracker.current_candidate.is_idle());
 	}
 
 	#[tokio::test]
@@ -579,7 +578,6 @@ mod test_maybe_reset_state {
 		tracker.on_demand_order_at = Some(BlockWithoutHash::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
-		assert!(!tracker.current_candidate.is_reset);
 
 		tracker.maybe_reset_state();
 
@@ -588,7 +586,6 @@ mod test_maybe_reset_state {
 		assert!(tracker.on_demand_order.is_none());
 		assert!(!tracker.is_on_demand_scheduled_in_current_block);
 		assert!(tracker.disputes.is_empty());
-		assert!(tracker.current_candidate.is_reset);
 	}
 }
 
