@@ -290,7 +290,8 @@ impl SubxtTracker {
 					));
 				} else {
 					info!(
-						"dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
+						"parachain {}: dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
+						self.para_id,
 						dispute_info.candidate_hash.0
 					);
 				}
