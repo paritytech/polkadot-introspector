@@ -85,13 +85,21 @@ struct MetricsInner {
 }
 
 #[automock]
+/// Common methods for parachain metrics tracker
 pub trait PrometheusMetrics {
+	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
+	/// Update metrics on new block
 	fn on_block(&self, time: f64, para_id: u32);
+	/// Update metrics on slow availability
 	fn on_slow_availability(&self, para_id: u32);
+	/// Update metrics on bitfields propogation
 	fn on_bitfields(&self, nbitfields: u32, is_low: bool, para_id: u32);
+	/// Update metrics on skipped slot
 	fn on_skipped_slot(&self, update: &ParachainProgressUpdate);
+	/// Update metrics on disputes
 	fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32);
+	/// Update metrics on candidate inclusion
 	fn on_included(
 		&self,
 		relay_parent_number: u32,
@@ -100,9 +108,13 @@ pub trait PrometheusMetrics {
 		para_block_time_sec: Option<Duration>,
 		para_id: u32,
 	);
+	/// Update on-demand orders
 	fn handle_on_demand_order(&self, order: &OnDemandOrder);
+	/// Update on-demand latency in blocks
 	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str);
+	/// Update on-demand latency in seconds
 	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str);
+	/// Update finality lag
 	fn on_finality_lag(&self, lag: u32);
 }
 
@@ -190,7 +202,6 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	/// Update metrics on candidate inclusion
 	fn on_included(
 		&self,
 		relay_parent_number: u32,
@@ -224,7 +235,6 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	/// Update on-demand orders
 	fn handle_on_demand_order(&self, order: &OnDemandOrder) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = order.para_id.to_string();
@@ -235,7 +245,6 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	/// Update on-demand latency in blocks
 	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
@@ -246,7 +255,6 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	/// Update on-demand latency in seconds
 	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
