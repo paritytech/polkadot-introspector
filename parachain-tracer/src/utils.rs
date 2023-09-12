@@ -23,10 +23,7 @@ use std::time::Duration;
 
 /// Returns a time difference between optional timestamps
 pub(crate) fn time_diff(lhs: Option<u64>, rhs: Option<u64>) -> Option<Duration> {
-	match (lhs, rhs) {
-		(Some(lhs), Some(rhs)) => Some(Duration::from_millis(lhs).saturating_sub(Duration::from_millis(rhs))),
-		_ => None,
-	}
+	Some(Duration::from_millis(lhs?).saturating_sub(Duration::from_millis(rhs?)))
 }
 
 #[cfg(test)]
