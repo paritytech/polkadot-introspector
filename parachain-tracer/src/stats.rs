@@ -16,9 +16,10 @@
 
 //! This module keep tracks of the statistics for the parachain events
 
-use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
+use crate::types::{DisputesTracker, ParachainProgressUpdate};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use mockall::automock;
 use polkadot_introspector_essentials::types::H256;
 use std::{
 	collections::VecDeque,
@@ -137,6 +138,17 @@ fn join_skipped_slot_blocks_to_string(blocks: &VecDeque<SkippedSlotBlock>) -> St
 	}
 }
 
+#[automock]
+pub trait Stats {
+	fn on_backed(&mut self);
+	fn on_included(&mut self, relay_parent_number: u32, previous_included: Option<u32>, backed_in: Option<u32>);
+	fn on_disputed(&mut self, dispute_outcome: &DisputesTracker);
+	fn on_block(&mut self, time: Duration);
+	fn on_bitfields(&mut self, nbits: u32, is_low: bool);
+	fn on_slow_availability(&mut self);
+	fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate);
+}
+
 #[derive(Clone, Default)]
 /// Per parachain statistics
 pub struct ParachainStats {
@@ -181,14 +193,15 @@ impl ParachainStats {
 			..Default::default()
 		}
 	}
-
+}
+impl Stats for ParachainStats {
 	/// Update backed counter
-	pub fn on_backed(&mut self) {
+	fn on_backed(&mut self) {
 		self.backed_count += 1;
 	}
 
 	/// Update included counter
-	pub fn on_included(&mut self, relay_parent_number: u32, previous_included: Option<u32>, backed_in: Option<u32>) {
+	fn on_included(&mut self, relay_parent_number: u32, previous_included: Option<u32>, backed_in: Option<u32>) {
 		self.included_count += 1;
 
 		if let Some(previous_block_number) = previous_included {
@@ -202,7 +215,7 @@ impl ParachainStats {
 	}
 
 	/// Update disputed counter
-	pub fn on_disputed(&mut self, dispute_outcome: &DisputesTracker) {
+	fn on_disputed(&mut self, dispute_outcome: &DisputesTracker) {
 		self.disputes_stats.disputed_count += 1;
 
 		if dispute_outcome.voted_for > dispute_outcome.voted_against {
@@ -214,19 +227,16 @@ impl ParachainStats {
 		self.disputes_stats
 			.misbehaving_validators
 			.update(dispute_outcome.misbehaving_validators.len() as u32);
-
-		if let Some(diff) = dispute_outcome.resolve_time {
-			self.disputes_stats.resolution_time.update(diff);
-		}
+		self.disputes_stats.resolution_time.update(dispute_outcome.resolve_time);
 	}
 
 	/// Track block
-	pub fn on_block(&mut self, time: Duration) {
+	fn on_block(&mut self, time: Duration) {
 		self.block_times.update(time.as_secs_f32());
 	}
 
 	/// Track bitfields
-	pub fn on_bitfields(&mut self, nbits: u32, is_low: bool) {
+	fn on_bitfields(&mut self, nbits: u32, is_low: bool) {
 		self.bitfields.update(nbits);
 		if is_low {
 			self.low_bitfields_count += 1;
@@ -234,12 +244,12 @@ impl ParachainStats {
 	}
 
 	/// Notice slow availability
-	pub fn on_slow_availability(&mut self) {
+	fn on_slow_availability(&mut self) {
 		self.slow_avail_count += 1;
 	}
 
 	/// Update count and last blocks details for skipped slots
-	pub fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate) {
+	fn on_skipped_slot(&mut self, update: &ParachainProgressUpdate) {
 		self.skipped_slots += 1;
 
 		if self.last_skipped_slot_blocks.len() >= self.last_skipped_slot_blocks.capacity() {

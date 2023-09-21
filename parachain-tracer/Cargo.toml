@@ -34,3 +34,4 @@ time = { workspace = true }
 tokio = { workspace = true }
 typed-builder = { workspace = true }
 warp = { workspace = true }
+mockall = { workspace = true }

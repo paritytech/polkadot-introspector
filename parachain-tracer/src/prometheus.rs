@@ -14,9 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::{progress::ParachainProgressUpdate, tracker::DisputesTracker};
+use crate::types::{DisputesTracker, ParachainProgressUpdate};
 use clap::Parser;
 use color_eyre::Result;
+use mockall::automock;
 use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
 use prometheus_endpoint::{
 	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
@@ -83,6 +84,40 @@ struct MetricsInner {
 	finality_lag: Gauge,
 }
 
+#[automock]
+/// Common methods for parachain metrics tracker
+pub trait PrometheusMetrics {
+	/// Update metrics on candidate backing
+	fn on_backed(&self, para_id: u32);
+	/// Update metrics on new block
+	fn on_block(&self, time: f64, para_id: u32);
+	/// Update metrics on slow availability
+	fn on_slow_availability(&self, para_id: u32);
+	/// Update metrics on bitfields propogation
+	fn on_bitfields(&self, nbitfields: u32, is_low: bool, para_id: u32);
+	/// Update metrics on skipped slot
+	fn on_skipped_slot(&self, update: &ParachainProgressUpdate);
+	/// Update metrics on disputes
+	fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32);
+	/// Update metrics on candidate inclusion
+	fn on_included(
+		&self,
+		relay_parent_number: u32,
+		previous_included: Option<u32>,
+		backed_in: Option<u32>,
+		para_block_time_sec: Option<Duration>,
+		para_id: u32,
+	);
+	/// Update on-demand orders
+	fn handle_on_demand_order(&self, order: &OnDemandOrder);
+	/// Update on-demand latency in blocks
+	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str);
+	/// Update on-demand latency in seconds
+	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str);
+	/// Update finality lag
+	fn on_finality_lag(&self, lag: u32);
+}
+
 /// Parachain tracer prometheus metrics
 #[derive(Default, Clone)]
 pub struct Metrics(Option<MetricsInner>);
@@ -91,14 +126,14 @@ const HISTOGRAM_TIME_BUCKETS_BLOCKS: &[f64] =
 	&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0, 25.0, 35.0, 50.0];
 const HISTOGRAM_TIME_BUCKETS_SECONDS: &[f64] = &[3.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 48.0, 60.0, 90.0, 120.0];
 
-impl Metrics {
-	pub(crate) fn on_backed(&self, para_id: u32) {
+impl PrometheusMetrics for Metrics {
+	fn on_backed(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.backed_count.with_label_values(&[&para_id.to_string()[..]]).inc();
 		}
 	}
 
-	pub(crate) fn on_block(&self, time: f64, para_id: u32) {
+	fn on_block(&self, time: f64, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.relay_block_times
@@ -114,13 +149,13 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_slow_availability(&self, para_id: u32) {
+	fn on_slow_availability(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.slow_avail_count.with_label_values(&[&para_id.to_string()[..]]).inc();
 		}
 	}
 
-	pub(crate) fn on_bitfields(&self, nbitfields: u32, is_low: bool, para_id: u32) {
+	fn on_bitfields(&self, nbitfields: u32, is_low: bool, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.bitfields
@@ -133,7 +168,7 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_skipped_slot(&self, update: &ParachainProgressUpdate) {
+	fn on_skipped_slot(&self, update: &ParachainProgressUpdate) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.skipped_slots
@@ -142,7 +177,7 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32) {
+	fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics.disputes_stats.disputed_count.with_label_values(&[&para_str[..]]).inc();
@@ -156,19 +191,15 @@ impl Metrics {
 					.with_label_values(&[&para_str[..]])
 					.inc();
 			}
-
-			if let Some(diff) = dispute_outcome.resolve_time {
-				metrics
-					.disputes_stats
-					.resolution_time
-					.with_label_values(&[&para_str[..]])
-					.observe(diff as f64);
-			}
+			metrics
+				.disputes_stats
+				.resolution_time
+				.with_label_values(&[&para_str[..]])
+				.observe(dispute_outcome.resolve_time as f64);
 		}
 	}
 
-	/// Update metrics on candidate inclusion
-	pub(crate) fn on_included(
+	fn on_included(
 		&self,
 		relay_parent_number: u32,
 		previous_included: Option<u32>,
@@ -201,8 +232,7 @@ impl Metrics {
 		}
 	}
 
-	/// Update on-demand orders
-	pub(crate) fn handle_on_demand_order(&self, order: &OnDemandOrder) {
+	fn handle_on_demand_order(&self, order: &OnDemandOrder) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = order.para_id.to_string();
 			metrics
@@ -212,8 +242,7 @@ impl Metrics {
 		}
 	}
 
-	/// Update on-demand latency in blocks
-	pub(crate) fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str) {
+	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
@@ -223,8 +252,7 @@ impl Metrics {
 		}
 	}
 
-	/// Update on-demand latency in seconds
-	pub(crate) fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str) {
+	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str) {
 		if let Some(metrics) = &self.0 {
 			let para_str: String = para_id.to_string();
 			metrics
@@ -234,7 +262,7 @@ impl Metrics {
 		}
 	}
 
-	pub(crate) fn on_finality_lag(&self, lag: u32) {
+	fn on_finality_lag(&self, lag: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.finality_lag.set(lag.into());
 		}

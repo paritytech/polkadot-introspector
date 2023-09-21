@@ -585,7 +585,7 @@ async fn subxt_get_session_next_keys(api: &OnlineClient<PolkadotConfig>, account
 }
 
 /// A wrapper over subxt HRMP channel configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SubxtHrmpChannel {
 	pub max_capacity: u32,
 	pub max_total_size: u32,

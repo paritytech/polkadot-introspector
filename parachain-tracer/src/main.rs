@@ -42,19 +42,30 @@ use polkadot_introspector_essentials::{
 	consumer::{EventConsumerInit, EventStream},
 	historical_subscription::HistoricalSubscription,
 	init,
-	types::{BlockNumber, H256},
+	types::BlockNumber,
 	utils::RetryOptions,
 };
 use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
+use stats::ParachainStats;
 use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
-use tracker::{ParachainBlockTracker, SubxtTracker};
+use tracker::SubxtTracker;
+use tracker_rpc::ParachainTrackerRpc;
+use tracker_storage::TrackerStorage;
 
-mod progress;
+mod message_queues_tracker;
+mod parachain_block_info;
 mod prometheus;
 mod stats;
 mod tracker;
+mod tracker_rpc;
+mod tracker_storage;
+mod types;
+mod utils;
+
+#[cfg(test)]
+mod test_utils;
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
@@ -196,17 +207,12 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		// The subxt API request executor.
-		let executor = api_service.subxt();
-		let mut tracker = tracker::SubxtTracker::new(
-			para_id,
-			self.node.as_str(),
-			executor,
-			api_service,
-			self.opts.last_skipped_slot_blocks,
-		);
+		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.subxt());
+		let mut tracker = SubxtTracker::new(para_id);
+		let storage = TrackerStorage::new(para_id, api_service.storage());
 
 		let metrics = self.metrics.clone();
+		let mut stats = ParachainStats::new(para_id, self.opts.last_skipped_slot_blocks);
 		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
 
 		tokio::spawn(async move {
@@ -215,21 +221,22 @@ impl ParachainTracer {
 					Ok(update_event) => match update_event {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
-								if let Err(e) = process_tracker_update(
-									&mut tracker,
-									*relay_fork,
-									new_head.relay_parent_number,
-									&metrics,
-									is_cli,
-								)
-								.await
+								let parent_number = new_head.relay_parent_number;
+								if let Err(e) =
+									tracker.inject_block(*relay_fork, parent_number, &mut rpc, &storage).await
 								{
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
 									std::process::exit(1);
-								};
+								}
+								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await {
+									if is_cli {
+										println!("{}", progress)
+									}
+								}
+								tracker.maybe_reset_state();
 							},
 						CollectorUpdateEvent::NewSession(idx) => {
-							tracker.new_session(idx).await;
+							tracker.inject_new_session(idx);
 						},
 						CollectorUpdateEvent::Termination(reason) => {
 							info!("collector is terminating");
@@ -249,7 +256,6 @@ impl ParachainTracer {
 				}
 			}
 
-			let stats = tracker.summary();
 			if is_cli {
 				print!("{}", stats);
 			} else {
@@ -331,28 +337,6 @@ impl ParachainTracer {
 		trackers.clear();
 		future::try_join_all(futures).await.unwrap();
 	}
-}
-
-async fn process_tracker_update(
-	tracker: &mut SubxtTracker,
-	relay_hash: H256,
-	relay_parent_number: u32,
-	metrics: &Metrics,
-	is_cli: bool,
-) -> color_eyre::Result<()> {
-	match tracker.inject_block(relay_hash, relay_parent_number).await {
-		Ok(_) => {
-			if let Some(progress) = tracker.progress(metrics).await {
-				if is_cli {
-					println!("{}", progress);
-				}
-			}
-			tracker.maybe_reset_state();
-		},
-		Err(e) => return Err(e),
-	};
-
-	Ok(())
 }
 
 fn evict_stalled(

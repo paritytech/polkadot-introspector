@@ -1,4 +1,4 @@
-// Copyright 2022 Parity Technologies (UK) Ltd.
+// Copyright 2023 Parity Technologies (UK) Ltd.
 // This file is part of polkadot-introspector.
 //
 // polkadot-introspector is free software: you can redistribute it and/or modify
@@ -14,20 +14,91 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-//! This module defines structures used for tool progress tracking
-
-use super::tracker::DisputesTracker;
+use crate::utils::{extract_misbehaving_validators, extract_validator_addresses, extract_votes, format_ts};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
+use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::SubxtHrmpChannel,
 	chain_events::SubxtDisputeResult,
-	types::{BlockNumber, Timestamp, H256},
+	metadata::polkadot_primitives::DisputeStatementSet,
+	types::{AccountId32, BlockNumber, Timestamp, H256},
 };
 use std::{
 	fmt::{self, Display, Formatter, Write},
 	time::Duration,
 };
+
+/// Used to track forks of the relay chain
+#[derive(Debug, Clone)]
+pub struct ForkTracker {
+	#[allow(dead_code)]
+	pub(crate) relay_hash: H256,
+	#[allow(dead_code)]
+	pub(crate) relay_number: u32,
+	pub(crate) backed_candidate: Option<H256>,
+	pub(crate) included_candidate: Option<H256>,
+}
+
+/// An outcome for a dispute
+#[derive(Encode, Decode, Debug, Clone, Default)]
+pub struct DisputesTracker {
+	/// Disputed candidate
+	pub candidate: H256,
+	/// The real outcome
+	pub outcome: SubxtDisputeResult,
+	/// Number of validators voted that a candidate is valid
+	pub voted_for: u32,
+	/// Number of validators voted that a candidate is invalid
+	pub voted_against: u32,
+	/// A vector of validators initiateds the dispute (index + identify)
+	pub initiators: Vec<(u32, String)>,
+	/// A vector of validators voted against supermajority (index + identify)
+	pub misbehaving_validators: Vec<(u32, String)>,
+	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
+	pub resolve_time: u32,
+}
+
+impl DisputesTracker {
+	pub fn new(
+		dispute_info: &DisputeStatementSet,
+		outcome: SubxtDisputeResult,
+		initiated: u32,
+		initiator_indices: Vec<u32>,
+		concluded: u32,
+		session_info: Option<&Vec<AccountId32>>,
+		initiators_session_info: Option<&Vec<AccountId32>>,
+	) -> Self {
+		let candidate = dispute_info.candidate_hash.0;
+		let (voted_for, voted_against) = extract_votes(dispute_info);
+		let initiators = extract_validator_addresses(initiators_session_info, initiator_indices);
+		let misbehaving_validators =
+			extract_misbehaving_validators(session_info, dispute_info, outcome == SubxtDisputeResult::Valid);
+		let resolve_time = concluded.saturating_sub(initiated);
+
+		Self { outcome, candidate, voted_for, voted_against, initiators, misbehaving_validators, resolve_time }
+	}
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Block {
+	pub hash: H256,
+	pub num: BlockNumber,
+	pub ts: Timestamp,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BlockWithoutHash {
+	pub num: BlockNumber,
+	pub ts: Timestamp,
+}
+
+impl From<Block> for BlockWithoutHash {
+	fn from(block: Block) -> Self {
+		let Block { num, ts, .. } = block;
+		Self { num, ts }
+	}
+}
 
 #[derive(Clone, Default)]
 pub struct BitfieldsHealth {
@@ -86,17 +157,6 @@ pub struct ParachainProgressUpdate {
 	pub is_fork: bool,
 	/// Finality lag (best block number - last finalized block number)
 	pub finality_lag: Option<u32>,
-}
-
-/// Format the current block inherent timestamp.
-fn format_ts(duration: Duration, current_block_ts: Timestamp) -> String {
-	let dt = time::OffsetDateTime::from_unix_timestamp_nanos(current_block_ts as i128 * 1_000_000).unwrap();
-	format!(
-		"{} +{}",
-		dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
-			.expect("Invalid datetime format"),
-		format_args!("{}ms", duration.as_millis())
-	)
 }
 
 impl Display for ParachainProgressUpdate {
@@ -209,16 +269,13 @@ impl Display for ParachainConsensusEvent {
 
 impl Display for DisputesTracker {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		let resolved_time = self
-			.resolve_time
-			.map_or_else(|| "after unknown number of blocks".to_owned(), |diff| format!("after {diff} blocks"));
 		match self.outcome {
 			SubxtDisputeResult::Invalid => {
 				writeln!(
 					f,
 					"\t\t👎 Candidate: {}, resolved invalid ({}); voted for: {}; voted against: {}",
 					format!("{:?}", self.candidate).dark_red(),
-					resolved_time,
+					self.resolve_time,
 					self.voted_for,
 					self.voted_against
 				)?;
@@ -228,7 +285,7 @@ impl Display for DisputesTracker {
 					f,
 					"\t\t👍 Candidate: {}, resolved valid ({}); voted for: {}; voted against: {}",
 					format!("{:?}", self.candidate).bright_green(),
-					resolved_time,
+					self.resolve_time,
 					self.voted_for,
 					self.voted_against
 				)?;
@@ -238,7 +295,7 @@ impl Display for DisputesTracker {
 					f,
 					"\t\t⁉️ Candidate: {}, dispute resolution has been timed out {}; voted for: {}; voted against: {}",
 					format!("{:?}", self.candidate).bright_green(),
-					resolved_time,
+					self.resolve_time,
 					self.voted_for,
 					self.voted_against
 				)?;
