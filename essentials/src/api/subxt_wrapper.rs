@@ -170,13 +170,13 @@ pub enum Response {
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
 	/// Availability core assignments for parachains.
-	ScheduledParas(Vec<CoreAssignment>),
+	ScheduledParas(Option<Vec<CoreAssignment>>),
 	/// Claim queue for parachains.
-	ClaimQueue(ClaimQueue),
+	ClaimQueue(Option<ClaimQueue>),
 	/// List of the occupied availability cores.
-	OccupiedCores(Vec<CoreOccupied>),
+	OccupiedCores(Option<Vec<CoreOccupied>>),
 	/// Backing validator groups.
-	BackingGroups(Vec<Vec<polkadot_primitives::ValidatorIndex>>),
+	BackingGroups(Option<Vec<Vec<polkadot_primitives::ValidatorIndex>>>),
 	/// Returns a session index
 	SessionIndex(u32),
 	/// Session info
@@ -190,7 +190,7 @@ pub enum Response {
 	/// HRMP content for a specific channel
 	HRMPContent(Vec<Vec<u8>>),
 	/// The current host configuration
-	HostConfiguration(DynamicHostConfiguration),
+	HostConfiguration(Option<DynamicHostConfiguration>),
 	/// Chain head subscription
 	ChainHeadSubscription((Subscription<FollowEvent<H256>>, String)),
 	/// Unpin hash from chain head subscription
@@ -274,8 +274,7 @@ impl RequestExecutor {
 				let need_to_retry = matches!(
 					e,
 					SubxtWrapperError::SubxtError(subxt::Error::Io(_)) |
-						SubxtWrapperError::SubxtError(subxt::Error::Rpc(_)) |
-						SubxtWrapperError::NoResponseFromDynamicApi(_)
+						SubxtWrapperError::SubxtError(subxt::Error::Rpc(_))
 				);
 				if !need_to_retry {
 					return Err(e)
@@ -350,7 +349,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<CoreAssignment>, SubxtWrapperError> {
+	) -> std::result::Result<Option<Vec<CoreAssignment>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetScheduledParas, ScheduledParas, url, block_hash)
 	}
 
@@ -358,7 +357,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<ClaimQueue, SubxtWrapperError> {
+	) -> std::result::Result<Option<ClaimQueue>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetClaimQueue, ClaimQueue, url, block_hash)
 	}
 
@@ -366,7 +365,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<CoreOccupied>, SubxtWrapperError> {
+	) -> std::result::Result<Option<Vec<CoreOccupied>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetOccupiedCores, OccupiedCores, url, block_hash)
 	}
 
@@ -374,7 +373,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<Vec<polkadot_primitives::ValidatorIndex>>, SubxtWrapperError> {
+	) -> std::result::Result<Option<Vec<Vec<polkadot_primitives::ValidatorIndex>>>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetBackingGroups, BackingGroups, url, block_hash)
 	}
 
@@ -441,7 +440,7 @@ impl RequestExecutor {
 	pub async fn get_host_configuration(
 		&mut self,
 		url: &str,
-	) -> std::result::Result<DynamicHostConfiguration, SubxtWrapperError> {
+	) -> std::result::Result<Option<DynamicHostConfiguration>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetHostConfiguration, HostConfiguration, url, ())
 	}
 
@@ -522,40 +521,50 @@ async fn fetch_dynamic_storage(
 	block_hash: H256,
 	pallet_name: &str,
 	entry_name: &str,
-) -> std::result::Result<Value<u32>, SubxtWrapperError> {
-	api.storage()
+) -> std::result::Result<Option<Value<u32>>, SubxtWrapperError> {
+	match api
+		.storage()
 		.at(block_hash)
 		.fetch(&subxt::dynamic::storage_root(pallet_name, entry_name))
 		.await?
-		.map_or(Err(SubxtWrapperError::NoResponseFromDynamicApi(format!("{pallet_name}.{entry_name}"))), |v| {
-			v.to_value().map_err(|e| e.into())
-		})
+	{
+		Some(v) => v.to_value().map(|v| Some(v)).map_err(|e| e.into()),
+		None => Ok(None), // Value has not found in the storage
+	}
 }
 
 async fn subxt_get_sheduled_paras(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "Scheduled").await?;
-	let paras = decode_scheduled_paras(&value)?;
+	let paras = match fetch_dynamic_storage(api, block_hash, "ParaScheduler", "Scheduled").await? {
+		Some(value) => Some(decode_scheduled_paras(&value)?),
+		None => None,
+	};
 
 	Ok(Response::ScheduledParas(paras))
 }
 
 async fn subxt_get_claim_queue(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ClaimQueue").await?;
-	let queue = decode_claim_queue(&value)?;
+	let queue = match fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ClaimQueue").await? {
+		Some(value) => Some(decode_claim_queue(&value)?),
+		None => None,
+	};
 
 	Ok(Response::ClaimQueue(queue))
 }
 
 async fn subxt_get_occupied_cores(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "AvailabilityCores").await?;
-	let cores = decode_availability_cores(&value)?;
+	let cores = match fetch_dynamic_storage(api, block_hash, "ParaScheduler", "AvailabilityCores").await? {
+		Some(value) => Some(decode_availability_cores(&value)?),
+		None => None,
+	};
 
 	Ok(Response::OccupiedCores(cores))
 }
 
 async fn subxt_get_validator_groups(api: &OnlineClient<PolkadotConfig>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ValidatorGroups").await?;
-	let groups = decode_validator_groups(&value)?;
+	let groups = match fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ValidatorGroups").await? {
+		Some(value) => Some(decode_validator_groups(&value)?),
+		None => None,
+	};
 
 	Ok(Response::BackingGroups(groups))
 }
@@ -673,17 +682,13 @@ async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Res
 	let pallet_name = "Configuration";
 	let entry_name = "ActiveConfig";
 	let addr = subxt::dynamic::storage_root(pallet_name, entry_name);
-	let value = api
-		.storage()
-		.at_latest()
-		.await?
-		.fetch(&addr)
-		.await?
-		.map_or(Err(SubxtWrapperError::NoResponseFromDynamicApi(format!("{pallet_name}.{entry_name}"))), |v| {
-			v.to_value().map_err(|e| e.into())
-		})?;
-
-	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
+	match api.storage().at_latest().await?.fetch(&addr).await? {
+		Some(v) => v
+			.to_value()
+			.map(|v| Response::HostConfiguration(Some(DynamicHostConfiguration::new(v))))
+			.map_err(|e| e.into()),
+		None => Ok(Response::HostConfiguration(None)),
+	}
 }
 
 async fn subxt_get_chain_head_subscription(api: &OnlineClient<PolkadotConfig>) -> Result {
@@ -726,8 +731,6 @@ pub enum SubxtWrapperError {
 	ConnectionError,
 	#[error("decode extinisc error")]
 	DecodeExtrinsicError,
-	#[error("no response from dynamic api: {0}")]
-	NoResponseFromDynamicApi(String),
 	#[error("decode dynamic value error: expected `{0}`, got {1}")]
 	DecodeDynamicError(String, ValueDef<u32>),
 }

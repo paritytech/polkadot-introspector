@@ -262,12 +262,19 @@ impl SubxtTracker {
 				rpc.core_assignments_via_claim_queue(block_hash).await,
 			v => v,
 		}?;
-		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
-			self.current_candidate.assigned_core = Some(core);
-			self.current_candidate.core_occupied =
-				matches!(rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
-			self.is_on_demand_scheduled_in_current_block =
-				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
+		if let Some(assignments) = assignments {
+			if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
+				if let Some(cores) = rpc.occupied_cores(block_hash).await? {
+					self.current_candidate.core_occupied = matches!(cores[core as usize], CoreOccupied::Paras);
+				} else {
+					info!("Occupied cores not found in the storage")
+				}
+				self.current_candidate.assigned_core = Some(core);
+				self.is_on_demand_scheduled_in_current_block =
+					self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
+			}
+		} else {
+			info!("Core assignments not found in the storage")
 		}
 		Ok(())
 	}
@@ -308,9 +315,12 @@ impl SubxtTracker {
 		if self.current_candidate.is_backed() {
 			// We only process availability if our parachain is assigned to an availability core.
 			if let Some(core) = self.current_candidate.assigned_core {
+				if let Some(indices) = self.validators_indices(block_hash, rpc).await? {
+					self.current_candidate.max_availability_bits = indices.len() as u32;
+				} else {
+					info!("Backing groups not found in storage")
+				}
 				self.current_candidate.current_availability_bits = extract_availability_bits_count(bitfields, core);
-				self.current_candidate.max_availability_bits =
-					self.validators_indices(block_hash, rpc).await?.len() as u32;
 
 				if self.current_candidate.is_data_available() {
 					self.current_candidate.set_included();
@@ -520,8 +530,8 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		rpc: &mut impl TrackerRpc,
-	) -> color_eyre::Result<Vec<ValidatorIndex>> {
-		Ok(rpc.backing_groups(block_hash).await?.into_iter().flatten().collect())
+	) -> color_eyre::Result<Option<Vec<ValidatorIndex>>> {
+		Ok(rpc.backing_groups(block_hash).await?.map(|v| v.into_iter().flatten().collect()))
 	}
 
 	async fn candidate_backed_in(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {

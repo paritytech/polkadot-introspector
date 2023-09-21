@@ -358,9 +358,12 @@ fn evict_stalled(
 }
 
 async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> color_eyre::Result<()> {
-	let conf = executor.get_host_configuration(url).await?;
-	println!("Host configuration for {}:", url.to_owned().bold());
-	println!("{}", conf);
+	if let Some(conf) = executor.get_host_configuration(url).await? {
+		println!("Host configuration for {}:", url.to_owned().bold());
+		println!("{}", conf);
+	} else {
+		info!("Host configuration not found in storage");
+	}
 	Ok(())
 }
 
