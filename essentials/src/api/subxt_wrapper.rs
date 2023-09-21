@@ -529,7 +529,7 @@ async fn fetch_dynamic_storage(
 		.await?
 	{
 		Some(v) => v.to_value().map(Some).map_err(|e| e.into()),
-		None => Ok(None), // Value has not found in the storage
+		None => Ok(None),
 	}
 }
 
