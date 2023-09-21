@@ -528,7 +528,7 @@ async fn fetch_dynamic_storage(
 		.fetch(&subxt::dynamic::storage_root(pallet_name, entry_name))
 		.await?
 	{
-		Some(v) => v.to_value().map(|v| Some(v)).map_err(|e| e.into()),
+		Some(v) => v.to_value().map(Some).map_err(|e| e.into()),
 		None => Ok(None), // Value has not found in the storage
 	}
 }
