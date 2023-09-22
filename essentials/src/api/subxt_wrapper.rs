@@ -274,8 +274,7 @@ impl RequestExecutor {
 				let need_to_retry = matches!(
 					e,
 					SubxtWrapperError::SubxtError(subxt::Error::Io(_)) |
-						SubxtWrapperError::SubxtError(subxt::Error::Rpc(_)) |
-						SubxtWrapperError::NoResponseFromDynamicApi(_)
+						SubxtWrapperError::SubxtError(subxt::Error::Rpc(_))
 				);
 				if !need_to_retry {
 					return Err(e)
@@ -527,7 +526,7 @@ async fn fetch_dynamic_storage(
 		.at(block_hash)
 		.fetch(&subxt::dynamic::storage_root(pallet_name, entry_name))
 		.await?
-		.map_or(Err(SubxtWrapperError::NoResponseFromDynamicApi(format!("{pallet_name}.{entry_name}"))), |v| {
+		.map_or(Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}"))), |v| {
 			v.to_value().map_err(|e| e.into())
 		})
 }
@@ -673,15 +672,10 @@ async fn subxt_get_host_configuration(api: &OnlineClient<PolkadotConfig>) -> Res
 	let pallet_name = "Configuration";
 	let entry_name = "ActiveConfig";
 	let addr = subxt::dynamic::storage_root(pallet_name, entry_name);
-	let value = api
-		.storage()
-		.at_latest()
-		.await?
-		.fetch(&addr)
-		.await?
-		.map_or(Err(SubxtWrapperError::NoResponseFromDynamicApi(format!("{pallet_name}.{entry_name}"))), |v| {
-			v.to_value().map_err(|e| e.into())
-		})?;
+	let value = api.storage().at_latest().await?.fetch(&addr).await?.map_or(
+		Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}"))),
+		|v| v.to_value().map_err(|e| e.into()),
+	)?;
 
 	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
 }
@@ -726,8 +720,8 @@ pub enum SubxtWrapperError {
 	ConnectionError,
 	#[error("decode extinisc error")]
 	DecodeExtrinsicError,
-	#[error("no response from dynamic api: {0}")]
-	NoResponseFromDynamicApi(String),
+	#[error("{0} not found in dynamic storage")]
+	EmptyResponseFromDynamicStorage(String),
 	#[error("decode dynamic value error: expected `{0}`, got {1}")]
 	DecodeDynamicError(String, ValueDef<u32>),
 }
