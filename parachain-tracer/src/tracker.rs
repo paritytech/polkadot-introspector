@@ -256,13 +256,18 @@ impl SubxtTracker {
 
 	async fn set_core_assignment(&mut self, block_hash: H256, rpc: &mut impl TrackerRpc) -> color_eyre::Result<()> {
 		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
-		let assignments = match rpc.core_assignments_via_scheduled_paras(block_hash).await {
-			// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
-			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) =>
-				rpc.core_assignments_via_claim_queue(block_hash).await,
-			v => v,
-		}?;
-		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
+		let mut assignments = rpc.core_assignments_via_scheduled_paras(block_hash).await;
+		// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
+		if let Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(_)))) = assignments
+		{
+			assignments = rpc.core_assignments_via_claim_queue(block_hash).await;
+		}
+		if let Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(reason)) = assignments {
+			info!("{}. Nothing to process", reason);
+			return Ok(())
+		}
+
+		if let Some((&core, scheduled_ids)) = assignments?.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(core);
 			self.current_candidate.core_occupied =
 				matches!(rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
