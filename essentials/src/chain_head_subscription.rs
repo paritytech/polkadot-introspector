@@ -143,8 +143,8 @@ impl ChainHeadSubscription {
 							}
 						},
 						FollowEvent::Stop => {
-							info!("Chain head subscription stopped");
-							return;
+							error!("Head subscription to {} dropped by chain", url);
+							std::process::exit(1)
 						},
 					}
 				},
