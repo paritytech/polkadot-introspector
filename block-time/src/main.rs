@@ -23,15 +23,12 @@ use crossterm::{
 };
 use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
-	api::ApiService,
+	api::subxt_wrapper::RequestExecutor,
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
-	init,
-	storage::RecordsStorageConfig,
-	types::H256,
-	utils,
+	init, utils,
 };
 use polkadot_introspector_priority_channel::{channel, Receiver, Sender};
 use prometheus_endpoint::{HistogramVec, Registry};
@@ -97,14 +94,13 @@ struct BlockTimeMonitor {
 	opts: BlockTimeOptions,
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
-	api_service: ApiService<H256>,
+	executor: RequestExecutor,
 	active_endpoints: usize,
 }
 
 impl BlockTimeMonitor {
 	pub fn new(opts: BlockTimeOptions) -> color_eyre::Result<Self> {
-		// This starts the both the storage and subxt APIs.
-		let api_service = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 1000 }, opts.retry.clone());
+		let executor = RequestExecutor::new(opts.retry.clone());
 		let endpoints = opts.nodes.clone();
 		let active_endpoints = endpoints.len();
 
@@ -117,10 +113,10 @@ impl BlockTimeMonitor {
 				socket_addr_str.to_socket_addrs()?.for_each(|addr| {
 					tokio::spawn(prometheus_endpoint::init_prometheus(addr, prometheus_registry.clone()));
 				});
-				Ok(BlockTimeMonitor { opts, block_time_metric, endpoints, api_service, active_endpoints })
+				Ok(BlockTimeMonitor { opts, block_time_metric, endpoints, executor, active_endpoints })
 			},
 			BlockTimeMode::Cli(_) =>
-				Ok(BlockTimeMonitor { opts, block_time_metric: None, endpoints, api_service, active_endpoints }),
+				Ok(BlockTimeMonitor { opts, block_time_metric: None, endpoints, executor, active_endpoints }),
 		}
 	}
 
@@ -142,7 +138,7 @@ impl BlockTimeMonitor {
 					endpoint,
 					self.block_time_metric.clone(),
 					update_channel,
-					self.api_service.clone(),
+					self.executor.clone(),
 					message_tx.clone(),
 				))
 			})
@@ -251,7 +247,7 @@ impl BlockTimeMonitor {
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		// TODO: make this a struct.
 		consumer_config: Receiver<ChainSubscriptionEvent>,
-		api_service: ApiService<H256>,
+		mut executor: RequestExecutor,
 		mut message_tx: Sender<BlockTimeMessage>,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
@@ -259,10 +255,9 @@ impl BlockTimeMonitor {
 		match opts.clone().mode {
 			BlockTimeMode::Prometheus(_) => {},
 			BlockTimeMode::Cli(cli_opts) => {
-				populate_view(url, cli_opts, message_tx.clone(), api_service.clone()).await;
+				populate_view(url, cli_opts, message_tx.clone(), executor.clone()).await;
 			},
 		}
-		let mut executor = api_service.subxt();
 
 		let mut prev_ts = 0;
 		let mut prev_block = 0u32;
@@ -335,11 +330,10 @@ async fn populate_view(
 	url: &str,
 	cli_opts: BlockTimeCliOptions,
 	mut message_tx: Sender<BlockTimeMessage>,
-	api_service: ApiService<H256>,
+	mut executor: RequestExecutor,
 ) {
 	let mut prev_ts = 0u64;
 	let blocks_to_fetch = cli_opts.chart_width;
-	let mut executor = api_service.subxt();
 	let mut block_times: Vec<u64> = Vec::with_capacity(blocks_to_fetch);
 
 	let mut parent_hash = None;
