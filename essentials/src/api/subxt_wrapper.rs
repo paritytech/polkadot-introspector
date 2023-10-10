@@ -201,11 +201,14 @@ impl Debug for Response {
 }
 
 /// Represents a pool for subxt requests
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RequestExecutor {
-	connection_pool: HashMap<String, OnlineClient<PolkadotConfig>>,
+	connection_pool: HashMap<String, ApiClient>,
 	retry: RetryOptions,
 }
+
+#[derive(Clone)]
+struct ApiClient(OnlineClient<PolkadotConfig>);
 
 macro_rules! wrap_subxt_call {
 	($self: ident, $req_ty: ident, $rep_ty: ident, $url: ident, $($arg:expr),*) => (
@@ -219,21 +222,20 @@ macro_rules! wrap_subxt_call {
 
 impl RequestExecutor {
 	pub fn new(retry: RetryOptions) -> Self {
-		Self { retry, ..Default::default() }
+		Self { retry, connection_pool: HashMap::new() }
 	}
 
 	async fn execute_request(&mut self, request: RequestType, url: &str) -> Result {
 		let connection_pool = &mut self.connection_pool;
-		let maybe_api = connection_pool.get(url).cloned();
 		let mut retry = Retry::new(&self.retry);
 
 		loop {
-			let api = match maybe_api {
-				Some(ref api) => api.clone(),
+			let api = match connection_pool.get(url) {
+				Some(api) => api.0.clone(),
 				None => {
 					let new_api = new_client_fn(url, &self.retry).await;
 					if let Some(api) = new_api {
-						connection_pool.insert(url.to_owned(), api.clone());
+						connection_pool.insert(url.to_owned(), ApiClient(api.clone()));
 						api
 					} else {
 						return Err(SubxtWrapperError::ConnectionError)
