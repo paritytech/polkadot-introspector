@@ -31,10 +31,7 @@ use subxt::{
 	backend::{
 		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
 		rpc::RpcClient,
-		unstable::{
-			rpc_methods::{FollowEvent, FollowSubscription},
-			UnstableRpcMethods,
-		},
+		unstable::{rpc_methods::FollowSubscription, UnstableRpcMethods},
 	},
 	dynamic::{At, Value},
 	ext::scale_value::ValueDef,
@@ -547,7 +544,7 @@ async fn fetch_dynamic_storage(
 	api.client
 		.storage()
 		.at(block_hash)
-		.fetch(&subxt::dynamic::storage_root(pallet_name, entry_name))
+		.fetch(&subxt::dynamic::storage(pallet_name, entry_name, Vec::<u8>::new()))
 		.await?
 		.map_or(Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}"))), |v| {
 			v.to_value().map_err(|e| e.into())
@@ -687,7 +684,7 @@ async fn subxt_get_hrmp_content(api: &ApiClient, block_hash: H256, receiver: u32
 async fn subxt_get_host_configuration(api: &ApiClient) -> Result {
 	let pallet_name = "Configuration";
 	let entry_name = "ActiveConfig";
-	let addr = subxt::dynamic::storage_root(pallet_name, entry_name);
+	let addr = subxt::dynamic::storage(pallet_name, entry_name, Vec::<u8>::new());
 	let value = api.client.storage().at_latest().await?.fetch(&addr).await?.map_or(
 		Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}"))),
 		|v| v.to_value().map_err(|e| e.into()),
@@ -709,9 +706,9 @@ async fn subxt_unpin_chain_head(api: &ApiClient, sub_id: &str, hash: H256) -> Re
 async fn subxt_extract_parainherent(
 	block: &subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>,
 ) -> Result {
-	let body = block.body().await?;
-	let ex = body
+	let ex = block
 		.extrinsics()
+		.await?
 		.iter()
 		.take(2)
 		.last()
