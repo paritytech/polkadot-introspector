@@ -28,12 +28,9 @@ use std::{
 	fmt::Debug,
 };
 use subxt::{
+	backend::{legacy::rpc_methods::NumberOrHex, unstable::rpc_methods::FollowEvent},
 	dynamic::{At, Value},
 	ext::scale_value::ValueDef,
-	rpc::{
-		types::{FollowEvent, NumberOrHex},
-		Subscription,
-	},
 	OnlineClient, PolkadotConfig,
 };
 use thiserror::Error;
@@ -496,8 +493,7 @@ async fn subxt_get_block(api: &OnlineClient<PolkadotConfig>, maybe_hash: Option<
 }
 
 async fn subxt_get_block_hash(api: &OnlineClient<PolkadotConfig>, maybe_block_number: Option<BlockNumber>) -> Result {
-	let maybe_subxt_block_number: Option<subxt::rpc::types::BlockNumber> =
-		maybe_block_number.map(|v| NumberOrHex::Number(v.into()).into());
+	let maybe_subxt_block_number = maybe_block_number.map(|v| NumberOrHex::Number(v.into()));
 	Ok(Response::MaybeBlockHash(api.rpc().block_hash(maybe_subxt_block_number).await?))
 }
 
