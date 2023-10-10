@@ -29,8 +29,12 @@ use std::{
 };
 use subxt::{
 	backend::{
-		legacy::rpc_methods::NumberOrHex,
-		unstable::rpc_methods::{FollowEvent, FollowSubscription},
+		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
+		rpc::RpcClient,
+		unstable::{
+			rpc_methods::{FollowEvent, FollowSubscription},
+			UnstableRpcMethods,
+		},
 	},
 	dynamic::{At, Value},
 	ext::scale_value::ValueDef,
@@ -211,7 +215,11 @@ pub struct RequestExecutor {
 }
 
 #[derive(Clone)]
-struct ApiClient(OnlineClient<PolkadotConfig>);
+struct ApiClient {
+	client: OnlineClient<PolkadotConfig>,
+	unstable_rpc_methods: UnstableRpcMethods<PolkadotConfig>,
+	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
+}
 
 macro_rules! wrap_subxt_call {
 	($self: ident, $req_ty: ident, $rep_ty: ident, $url: ident, $($arg:expr),*) => (
@@ -468,8 +476,8 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<ApiClient> {
 	let mut retry = Retry::new(retry);
 
 	loop {
-		match OnlineClient::<PolkadotConfig>::from_url(url.to_owned()).await {
-			Ok(api) => return Some(ApiClient(api)),
+		match build_unstable_client(url).await {
+			Ok(client) => return Some(client),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
 				if (retry.sleep().await).is_err() {
@@ -480,30 +488,43 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<ApiClient> {
 	}
 }
 
+async fn build_unstable_client(url: &str) -> std::result::Result<ApiClient, String> {
+	let rpc_client = RpcClient::from_url(url)
+		.await
+		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+	let client = OnlineClient::from_rpc_client(rpc_client.clone())
+		.await
+		.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
+	let unstable_rpc_methods = UnstableRpcMethods::<PolkadotConfig>::new(rpc_client.clone());
+	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
+
+	Ok(ApiClient { client, unstable_rpc_methods, legacy_rpc_methods })
+}
+
 async fn subxt_get_head(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
-	Ok(Response::MaybeHead(api.0.rpc().header(maybe_hash).await?))
+	Ok(Response::MaybeHead(api.legacy_rpc_methods.chain_get_header(maybe_hash).await?))
 }
 
 async fn subxt_get_block_ts(api: &ApiClient, hash: H256) -> Result {
 	let timestamp = polkadot::storage().timestamp().now();
-	Ok(Response::Timestamp(api.0.storage().at(hash).fetch(&timestamp).await?.unwrap_or_default()))
+	Ok(Response::Timestamp(api.client.storage().at(hash).fetch(&timestamp).await?.unwrap_or_default()))
 }
 
 async fn subxt_get_block(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
 	let block = match maybe_hash {
-		Some(hash) => api.0.blocks().at(hash).await?,
-		None => api.0.blocks().at_latest().await?,
+		Some(hash) => api.client.blocks().at(hash).await?,
+		None => api.client.blocks().at_latest().await?,
 	};
 	Ok(Response::Block(block))
 }
 
 async fn subxt_get_block_hash(api: &ApiClient, maybe_block_number: Option<BlockNumber>) -> Result {
 	let maybe_subxt_block_number = maybe_block_number.map(|v| NumberOrHex::Number(v.into()));
-	Ok(Response::MaybeBlockHash(api.0.rpc().block_hash(maybe_subxt_block_number).await?))
+	Ok(Response::MaybeBlockHash(api.legacy_rpc_methods.chain_get_block_hash(maybe_subxt_block_number).await?))
 }
 
 async fn subxt_get_events(api: &ApiClient, hash: H256) -> Result {
-	Ok(Response::MaybeEvents(Some(api.0.events().at(hash).await?)))
+	Ok(Response::MaybeEvents(Some(api.client.events().at(hash).await?)))
 }
 
 /// Error originated from decoding an extrinsic.
@@ -523,7 +544,7 @@ async fn fetch_dynamic_storage(
 	pallet_name: &str,
 	entry_name: &str,
 ) -> std::result::Result<Value<u32>, SubxtWrapperError> {
-	api.0
+	api.client
 		.storage()
 		.at(block_hash)
 		.fetch(&subxt::dynamic::storage_root(pallet_name, entry_name))
@@ -563,25 +584,25 @@ async fn subxt_get_validator_groups(api: &ApiClient, block_hash: H256) -> Result
 
 async fn subxt_get_session_index(api: &ApiClient, block_hash: H256) -> Result {
 	let addr = polkadot::storage().session().current_index();
-	let session_index = api.0.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
+	let session_index = api.client.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::SessionIndex(session_index))
 }
 
 async fn subxt_get_session_info(api: &ApiClient, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().sessions(session_index);
-	let session_info = api.0.storage().at_latest().await?.fetch(&addr).await?;
+	let session_info = api.client.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionInfo(session_info))
 }
 
 async fn subxt_get_session_account_keys(api: &ApiClient, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().account_keys(session_index);
-	let session_keys = api.0.storage().at_latest().await?.fetch(&addr).await?;
+	let session_keys = api.client.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionAccountKeys(session_keys))
 }
 
 async fn subxt_get_session_next_keys(api: &ApiClient, account: &AccountId32) -> Result {
 	let addr = polkadot::storage().session().next_keys(account);
-	let next_keys = api.0.storage().at_latest().await?.fetch(&addr).await?;
+	let next_keys = api.client.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionNextKeys(next_keys))
 }
 
@@ -616,12 +637,12 @@ impl From<polkadot::runtime_types::polkadot_runtime_parachains::hrmp::HrmpChanne
 async fn subxt_get_inbound_hrmp_channels(api: &ApiClient, block_hash: H256, para_id: u32) -> Result {
 	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 	let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(&Id(para_id));
-	let hrmp_channels = api.0.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
+	let hrmp_channels = api.client.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
 	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
 		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-		api.0
+		api.client
 			.storage()
 			.at(block_hash)
 			.fetch(&addr)
@@ -637,12 +658,12 @@ async fn subxt_get_outbound_hrmp_channels(api: &ApiClient, block_hash: H256, par
 	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(&Id(para_id));
-	let hrmp_channels = api.0.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
+	let hrmp_channels = api.client.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
 	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
 		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-		api.0
+		api.client
 			.storage()
 			.at(block_hash)
 			.fetch(&addr)
@@ -659,7 +680,7 @@ async fn subxt_get_hrmp_content(api: &ApiClient, block_hash: H256, receiver: u32
 
 	let id = HrmpChannelId { sender: Id(sender), recipient: Id(receiver) };
 	let addr = polkadot::storage().hrmp().hrmp_channel_contents(&id);
-	let hrmp_content = api.0.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
+	let hrmp_content = api.client.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::HRMPContent(hrmp_content.into_iter().map(|hrmp_content| hrmp_content.data).collect()))
 }
 
@@ -667,7 +688,7 @@ async fn subxt_get_host_configuration(api: &ApiClient) -> Result {
 	let pallet_name = "Configuration";
 	let entry_name = "ActiveConfig";
 	let addr = subxt::dynamic::storage_root(pallet_name, entry_name);
-	let value = api.0.storage().at_latest().await?.fetch(&addr).await?.map_or(
+	let value = api.client.storage().at_latest().await?.fetch(&addr).await?.map_or(
 		Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}"))),
 		|v| v.to_value().map_err(|e| e.into()),
 	)?;
@@ -676,13 +697,13 @@ async fn subxt_get_host_configuration(api: &ApiClient) -> Result {
 }
 
 async fn subxt_get_chain_head_subscription(api: &ApiClient) -> Result {
-	let sub = api.0.rpc().chainhead_unstable_follow(true).await?;
+	let sub = api.unstable_rpc_methods.chainhead_unstable_follow(true).await?;
 	let sub_id = sub.subscription_id().expect("A subscription ID must be provided").to_string();
 	Ok(Response::ChainHeadSubscription((sub, sub_id)))
 }
 
 async fn subxt_unpin_chain_head(api: &ApiClient, sub_id: &str, hash: H256) -> Result {
-	Ok(Response::UnpinChainHead(api.0.rpc().chainhead_unstable_unpin(sub_id.to_string(), hash).await?))
+	Ok(Response::UnpinChainHead(api.unstable_rpc_methods.chainhead_unstable_unpin(sub_id, hash).await?))
 }
 
 async fn subxt_extract_parainherent(
