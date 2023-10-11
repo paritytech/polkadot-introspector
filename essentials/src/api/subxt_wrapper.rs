@@ -15,9 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use super::dynamic::{decode_claim_queue, decode_validator_groups};
 use crate::{
-	api::dynamic::{decode_availability_cores, decode_scheduled_paras},
+	api::dynamic::{decode_availability_cores, decode_claim_queue, decode_scheduled_paras, decode_validator_groups},
 	metadata::{polkadot, polkadot_primitives},
 	types::{AccountId32, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, SessionKeys, Timestamp, H256},
 	utils::{Retry, RetryOptions},
@@ -215,7 +214,6 @@ pub struct RequestExecutor {
 struct ApiClient {
 	client: OnlineClient<PolkadotConfig>,
 	unstable_rpc_methods: UnstableRpcMethods<PolkadotConfig>,
-	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
 }
 
 macro_rules! wrap_subxt_call {
@@ -252,9 +250,21 @@ impl RequestExecutor {
 			};
 			let reply = match request {
 				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(&api, hash).await,
-				RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
+				RequestType::GetHead(maybe_hash) => {
+					let rpc = build_legacy_rpc_methods(url).await.map_err(|err| {
+						error!("{}", err);
+						SubxtWrapperError::ConnectionError
+					})?;
+					subxt_get_head(&rpc, maybe_hash).await
+				},
 				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
-				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(&api, maybe_block_number).await,
+				RequestType::GetBlockHash(maybe_block_number) => {
+					let rpc = build_legacy_rpc_methods(url).await.map_err(|err| {
+						error!("{}", err);
+						SubxtWrapperError::ConnectionError
+					})?;
+					subxt_get_block_hash(&rpc, maybe_block_number).await
+				},
 				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block).await,
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
@@ -485,6 +495,14 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<ApiClient> {
 	}
 }
 
+async fn build_legacy_rpc_methods(url: &str) -> std::result::Result<LegacyRpcMethods<PolkadotConfig>, String> {
+	let rpc_client = RpcClient::from_url(url)
+		.await
+		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+
+	Ok(LegacyRpcMethods::<PolkadotConfig>::new(rpc_client))
+}
+
 async fn build_unstable_client(url: &str) -> std::result::Result<ApiClient, String> {
 	let rpc_client = RpcClient::from_url(url)
 		.await
@@ -493,13 +511,12 @@ async fn build_unstable_client(url: &str) -> std::result::Result<ApiClient, Stri
 		.await
 		.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
 	let unstable_rpc_methods = UnstableRpcMethods::<PolkadotConfig>::new(rpc_client.clone());
-	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
 
-	Ok(ApiClient { client, unstable_rpc_methods, legacy_rpc_methods })
+	Ok(ApiClient { client, unstable_rpc_methods })
 }
 
-async fn subxt_get_head(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
-	Ok(Response::MaybeHead(api.legacy_rpc_methods.chain_get_header(maybe_hash).await?))
+async fn subxt_get_head(rpc: &LegacyRpcMethods<PolkadotConfig>, maybe_hash: Option<H256>) -> Result {
+	Ok(Response::MaybeHead(rpc.chain_get_header(maybe_hash).await?))
 }
 
 async fn subxt_get_block_ts(api: &ApiClient, hash: H256) -> Result {
@@ -515,9 +532,12 @@ async fn subxt_get_block(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
 	Ok(Response::Block(block))
 }
 
-async fn subxt_get_block_hash(api: &ApiClient, maybe_block_number: Option<BlockNumber>) -> Result {
+async fn subxt_get_block_hash(
+	rpc: &LegacyRpcMethods<PolkadotConfig>,
+	maybe_block_number: Option<BlockNumber>,
+) -> Result {
 	let maybe_subxt_block_number = maybe_block_number.map(|v| NumberOrHex::Number(v.into()));
-	Ok(Response::MaybeBlockHash(api.legacy_rpc_methods.chain_get_block_hash(maybe_subxt_block_number).await?))
+	Ok(Response::MaybeBlockHash(rpc.chain_get_block_hash(maybe_subxt_block_number).await?))
 }
 
 async fn subxt_get_events(api: &ApiClient, hash: H256) -> Result {
