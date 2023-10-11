@@ -29,9 +29,8 @@ use std::{
 };
 use subxt::{
 	backend::{
-		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
+		legacy::{rpc_methods::NumberOrHex, LegacyBackend, LegacyRpcMethods},
 		rpc::RpcClient,
-		unstable::UnstableBackend,
 		StreamOf,
 	},
 	blocks::BlockRef,
@@ -209,7 +208,7 @@ impl Debug for Response {
 /// Represents a pool for subxt requests
 #[derive(Clone)]
 pub struct RequestExecutor {
-	connection_pool: HashMap<String, ApiClient>,
+	connection_pool: HashMap<String, (ApiClient, LegacyRpcMethods<PolkadotConfig>)>,
 	retry: RetryOptions,
 }
 
@@ -236,7 +235,7 @@ impl RequestExecutor {
 		let mut retry = Retry::new(&self.retry);
 
 		loop {
-			let api = match connection_pool.get(url) {
+			let (api, rpc) = match connection_pool.get(url) {
 				Some(api) => api.clone(),
 				None => {
 					let new_api = new_client_fn(url, &self.retry).await;
@@ -250,21 +249,9 @@ impl RequestExecutor {
 			};
 			let reply = match request {
 				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(&api, hash).await,
-				RequestType::GetHead(maybe_hash) => {
-					let rpc = build_legacy_rpc_methods(url).await.map_err(|err| {
-						error!("{}", err);
-						SubxtWrapperError::ConnectionError
-					})?;
-					subxt_get_head(&rpc, maybe_hash).await
-				},
+				RequestType::GetHead(maybe_hash) => subxt_get_head(&rpc, maybe_hash).await,
 				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
-				RequestType::GetBlockHash(maybe_block_number) => {
-					let rpc = build_legacy_rpc_methods(url).await.map_err(|err| {
-						error!("{}", err);
-						SubxtWrapperError::ConnectionError
-					})?;
-					subxt_get_block_hash(&rpc, maybe_block_number).await
-				},
+				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(&rpc, maybe_block_number).await,
 				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block).await,
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
@@ -477,12 +464,12 @@ impl RequestExecutor {
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<ApiClient> {
+async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<(ApiClient, LegacyRpcMethods<PolkadotConfig>)> {
 	let mut retry = Retry::new(retry);
 
 	loop {
-		match build_unstable_client(url).await {
-			Ok(client) => return Some(client),
+		match build_api_client(url).await {
+			Ok(v) => return Some(v),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
 				if (retry.sleep().await).is_err() {
@@ -493,35 +480,19 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<ApiClient> {
 	}
 }
 
-async fn build_legacy_rpc_methods(url: &str) -> std::result::Result<LegacyRpcMethods<PolkadotConfig>, String> {
+async fn build_api_client(url: &str) -> std::result::Result<(ApiClient, LegacyRpcMethods<PolkadotConfig>), String> {
 	let rpc_client = RpcClient::from_url(url)
 		.await
 		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+	let backend = LegacyBackend::new(rpc_client.clone());
 
-	Ok(LegacyRpcMethods::<PolkadotConfig>::new(rpc_client))
-}
-
-async fn build_unstable_client(url: &str) -> std::result::Result<ApiClient, String> {
-	let rpc_client = RpcClient::from_url(url)
-		.await
-		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
-	let (backend, mut driver) = UnstableBackend::builder().build(rpc_client);
-
-	// The unstable backend needs driving:
-	tokio::spawn(async move {
-		use futures::StreamExt;
-		while let Some(val) = driver.next().await {
-			if let Err(e) = val {
-				error!("Error driving unstable backend: {e}");
-				break
-			}
-		}
-	});
-
-	Ok(ApiClient(
-		OnlineClient::from_backend(Arc::new(backend))
-			.await
-			.map_err(|e| format!("Cannot construct OnlineClient from backend: {e}"))?,
+	Ok((
+		ApiClient(
+			OnlineClient::from_backend(Arc::new(backend))
+				.await
+				.map_err(|e| format!("Cannot construct OnlineClient from backend: {e}"))?,
+		),
+		LegacyRpcMethods::<PolkadotConfig>::new(rpc_client),
 	))
 }
 
