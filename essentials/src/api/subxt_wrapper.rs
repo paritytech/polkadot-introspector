@@ -74,7 +74,7 @@ pub enum RequestType {
 	GetOutboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
 	/// Get active host configuration
 	GetHostConfiguration(()),
-	/// Get best block subscription
+	/// Get a subscription to the best blocks chain
 	GetBestBlockSubscription(()),
 	/// Get finalized block subscription
 	GetFinalizedBlockSubscription(()),
