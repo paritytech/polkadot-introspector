@@ -267,8 +267,8 @@ impl BlockTimeMonitor {
 			if let Ok(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
 				let (hash, header) = match event {
-					ChainSubscriptionEvent::NewBestHead(hash) => hash,
-					ChainSubscriptionEvent::NewFinalizedBlock(hash) => hash,
+					ChainSubscriptionEvent::NewBestHead(v) => v,
+					ChainSubscriptionEvent::NewFinalizedBlock(v) => v,
 					ChainSubscriptionEvent::Heartbeat => continue,
 				};
 				let ts = executor.get_block_timestamp(url, hash).await;
