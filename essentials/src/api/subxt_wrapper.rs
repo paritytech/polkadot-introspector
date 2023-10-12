@@ -76,7 +76,7 @@ pub enum RequestType {
 	GetHostConfiguration(()),
 	/// Get a subscription to the best blocks chain
 	GetBestBlockSubscription(()),
-	/// Get finalized block subscription
+	/// Get a subscription to the finalized blocks chain
 	GetFinalizedBlockSubscription(()),
 }
 
