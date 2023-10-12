@@ -25,7 +25,6 @@ use crate::{
 use async_trait::async_trait;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{channel, Sender};
-use subxt::backend::unstable::rpc_methods::FollowEvent;
 use tokio::{
 	sync::broadcast::Sender as BroadcastSender,
 	time::{interval_at, Duration},
@@ -80,15 +79,26 @@ impl ChainHeadSubscription {
 		shutdown_tx: BroadcastSender<()>,
 		retry: RetryOptions,
 	) {
+		use futures::stream::{select, StreamExt};
+		use futures_util::TryStreamExt;
+
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut executor = RequestExecutor::new(retry);
-		let (mut sub, sub_id) = match executor.get_chain_head_subscription(&url).await {
-			Ok(v) => v,
+		let best_sub = match executor.get_best_block_subscription(&url).await {
+			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewBestHead(v.1.hash())),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
 				std::process::exit(1)
 			},
 		};
+		let finalized_sub = match executor.get_finalized_block_subscription(&url).await {
+			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewFinalizedBlock(v.1.hash())),
+			Err(e) => {
+				error!("Subscription to {} failed: {:?}", url, e);
+				std::process::exit(1)
+			},
+		};
+		let mut sub = select(best_sub, finalized_sub);
 
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
@@ -108,47 +118,9 @@ impl ChainHeadSubscription {
 						}
 					};
 
-					match event {
-						// Drain the initialized event
-						FollowEvent::Initialized(init) => {
-							if let Err(e) = executor.unpin_chain_head(&url, &sub_id, init.finalized_block_hash).await {
-								error!("Cannot unpin hash {}: {:?}", init.finalized_block_hash, e);
-							};
-						},
-						FollowEvent::NewBlock(_) => continue,
-						FollowEvent::BestBlockChanged(best_block) => {
-							info!("[{}] Best block imported ({:?})", url, best_block.best_block_hash);
-							if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewBestHead(best_block.best_block_hash)).await {
-								info!("Event consumer has terminated: {:?}, shutting down", e);
-								return;
-							}
-						},
-						FollowEvent::Finalized(finalized) => {
-							for hash in finalized.finalized_block_hashes.iter() {
-								info!("[{}] Finalized block imported ({:?})", url, hash);
-								if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedBlock(*hash)).await {
-									info!("Event consumer has terminated: {:?}, shutting down", e);
-									return;
-								}
-							}
-
-							for hash in finalized
-								.finalized_block_hashes
-								.iter()
-								.chain(finalized.pruned_block_hashes.iter())
-							{
-								if let Err(e) = executor.unpin_chain_head(&url, &sub_id, *hash).await {
-									error!("Cannot unpin hash {}: {:?}", hash, e);
-								};
-							}
-						},
-						FollowEvent::Stop => {
-							error!("Head subscription to {} dropped by chain", url);
-							std::process::exit(1)
-						},
-						_ => {
-							continue
-						},
+					if let Err(e) = update_channel.send(event).await {
+						info!("Event consumer has terminated: {:?}, shutting down", e);
+						return;
 					}
 				},
 				_ = shutdown_rx.recv() => {
