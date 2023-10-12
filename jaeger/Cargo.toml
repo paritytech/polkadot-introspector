@@ -8,6 +8,7 @@ repository.workspace = true
 publish = true
 
 [dependencies]
+base64 = { workspace = true }
 clap = { workspace = true }
 color-eyre = { workspace = true }
 env_logger = { workspace = true }

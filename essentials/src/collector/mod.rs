@@ -114,13 +114,13 @@ pub type CollectorStorageApi = ApiService<H256, CollectorPrefixType>;
 /// A structure used to track disputes progress
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct DisputeInfo {
-	pub initiated: <PolkadotConfig as subxt::Config>::Index,
+	pub initiated: u32,
 	pub initiator_indices: Vec<u32>,
 	pub session_index: u32,
 	pub dispute: SubxtDispute,
 	pub parachain_id: u32,
 	pub outcome: Option<SubxtDisputeResult>,
-	pub concluded: Option<<PolkadotConfig as subxt::Config>::Index>,
+	pub concluded: Option<u32>,
 }
 
 /// The current state of the collector, used to detect forks and track candidates
@@ -145,7 +145,7 @@ struct CollectorState {
 #[derive(Clone, Debug)]
 pub struct NewHeadEvent {
 	/// Relay parent block number
-	pub relay_parent_number: <PolkadotConfig as subxt::Config>::Index,
+	pub relay_parent_number: u32,
 	/// Relay parent block hash (or hashes in case of the forks)
 	pub relay_parent_hashes: Vec<H256>,
 	/// The parachain id (used for broadcasting events)
@@ -372,11 +372,7 @@ impl Collector {
 		self.executor.clone()
 	}
 
-	async fn update_state(
-		&mut self,
-		block_number: <PolkadotConfig as subxt::Config>::Index,
-		block_hash: H256,
-	) -> color_eyre::Result<()> {
+	async fn update_state(&mut self, block_number: u32, block_hash: H256) -> color_eyre::Result<()> {
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {
 			let candidates = self.state.candidates_seen.get(para_id);
 			let disputes_concluded = self.state.disputes_seen.get(para_id).map(|disputes_seen| {

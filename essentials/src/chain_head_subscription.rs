@@ -25,7 +25,7 @@ use crate::{
 use async_trait::async_trait;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{channel, Sender};
-use subxt::rpc::types::FollowEvent;
+use subxt::backend::unstable::rpc_methods::FollowEvent;
 use tokio::{
 	sync::broadcast::Sender as BroadcastSender,
 	time::{interval_at, Duration},
@@ -145,6 +145,9 @@ impl ChainHeadSubscription {
 						FollowEvent::Stop => {
 							error!("Head subscription to {} dropped by chain", url);
 							std::process::exit(1)
+						},
+						_ => {
+							continue
 						},
 					}
 				},
