@@ -61,6 +61,7 @@ impl ApiClient {
 		self.client.events()
 	}
 
+	// We need it only for the historical mode to convert block numbers into their hashes
 	pub async fn legacy_get_block_hash(
 		&self,
 		maybe_block_number: Option<BlockNumber>,
