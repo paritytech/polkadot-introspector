@@ -24,7 +24,7 @@ use crate::{
 		},
 		polkadot_primitives::CandidateDescriptor,
 	},
-	types::OnDemandOrder,
+	types::{Header, OnDemandOrder, H256},
 };
 use color_eyre::{eyre::eyre, Result};
 use parity_scale_codec::{Decode, Encode};
@@ -37,9 +37,9 @@ use subxt::{
 #[derive(Debug)]
 pub enum ChainEvent<T: subxt::Config> {
 	/// New best relay chain head
-	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
+	NewBestHead((H256, Header)),
 	/// New finalized relay chain head
-	NewFinalizedHead(<PolkadotConfig as subxt::Config>::Hash),
+	NewFinalizedHead((H256, Header)),
 	/// Dispute for a specific candidate hash
 	DisputeInitiated(SubxtDispute),
 	/// Conclusion for a dispute

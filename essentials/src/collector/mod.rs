@@ -28,7 +28,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{OnDemandOrder, Timestamp, H256},
+	types::{Header, OnDemandOrder, Timestamp, H256},
 	utils::RetryOptions,
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
@@ -49,10 +49,7 @@ use std::{
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::{
-	config::{
-		substrate::{BlakeTwo256, SubstrateHeader},
-		Hasher,
-	},
+	config::{substrate::BlakeTwo256, Hasher},
 	PolkadotConfig,
 };
 use thiserror::Error;
@@ -308,8 +305,9 @@ impl Collector {
 		event: &ChainSubscriptionEvent,
 	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
 		let new_head_event = match event {
-			ChainSubscriptionEvent::NewBestHead(hash) => ChainEvent::NewBestHead(*hash),
-			ChainSubscriptionEvent::NewFinalizedBlock(hash) => ChainEvent::NewFinalizedHead(*hash),
+			ChainSubscriptionEvent::NewBestHead((hash, header)) => ChainEvent::NewBestHead((*hash, header.clone())),
+			ChainSubscriptionEvent::NewFinalizedBlock((hash, header)) =>
+				ChainEvent::NewFinalizedHead((*hash, header.clone())),
 			ChainSubscriptionEvent::Heartbeat => return Ok(vec![]),
 		};
 		let mut chain_events = vec![new_head_event];
@@ -331,8 +329,8 @@ impl Collector {
 		event: &ChainEvent<T>,
 	) -> color_eyre::Result<(), CollectorError> {
 		match event {
-			ChainEvent::NewBestHead(block_hash) => self.process_new_best_head(*block_hash).await,
-			ChainEvent::NewFinalizedHead(block_hash) => self.process_new_finalized_head(*block_hash).await,
+			ChainEvent::NewBestHead((hash, header)) => self.process_new_best_head(*hash, header).await,
+			ChainEvent::NewFinalizedHead((hash, header)) => self.process_new_finalized_head(*hash, header).await,
 			ChainEvent::CandidateChanged(change_event) => self.process_candidate_change(change_event).await,
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
@@ -453,23 +451,14 @@ impl Collector {
 
 		Ok(())
 	}
-	async fn get_head_details(
+
+	async fn process_new_best_head(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<(SubstrateHeader<u32, BlakeTwo256>, u64, u32), CollectorError> {
-		let header = self
-			.executor
-			.get_block_head(self.endpoint.as_str(), Some(block_hash))
-			.await?
-			.ok_or_else(|| eyre!("Missing block {}", block_hash))?;
+		header: &Header,
+	) -> color_eyre::Result<(), CollectorError> {
 		let ts = self.executor.get_block_timestamp(self.endpoint.as_str(), block_hash).await?;
 		let block_number = header.number;
-
-		Ok((header, ts, block_number))
-	}
-
-	async fn process_new_best_head(&mut self, block_hash: H256) -> color_eyre::Result<(), CollectorError> {
-		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
 
 		if self.state.last_finalized_block_number.is_some() {
 			self.storage_write_prefixed(
@@ -489,8 +478,13 @@ impl Collector {
 		}
 	}
 
-	async fn process_new_finalized_head(&mut self, block_hash: H256) -> color_eyre::Result<(), CollectorError> {
-		let (header, ts, block_number) = self.get_head_details(block_hash).await?;
+	async fn process_new_finalized_head(
+		&mut self,
+		block_hash: H256,
+		header: &Header,
+	) -> color_eyre::Result<(), CollectorError> {
+		let ts = self.executor.get_block_timestamp(self.endpoint.as_str(), block_hash).await?;
+		let block_number = header.number;
 
 		if self.state.last_finalized_block_number.is_none() ||
 			self.state.last_finalized_block_number.unwrap() < block_number
@@ -508,7 +502,7 @@ impl Collector {
 	async fn process_new_head(
 		&mut self,
 		block_hash: H256,
-		header: SubstrateHeader<u32, BlakeTwo256>,
+		header: &Header,
 		ts: Timestamp,
 		block_number: u32,
 	) -> color_eyre::Result<(), CollectorError> {
@@ -660,7 +654,7 @@ impl Collector {
 						.await;
 
 					if let Some(relay_parent) = maybe_relay_parent {
-						let relay_parent: SubstrateHeader<u32, BlakeTwo256> = relay_parent.into_inner()?;
+						let relay_parent: Header = relay_parent.into_inner()?;
 						let relay_block_number = self.state.current_relay_chain_block_number;
 						let candidate_inclusion = CandidateInclusionRecord {
 							relay_parent: change_event.candidate_descriptor.relay_parent,
@@ -1010,8 +1004,8 @@ fn get_unix_time_unwrap() -> Duration {
 
 pub fn new_head_hash(event: &ChainSubscriptionEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
 	match (event, subscribe_mode) {
-		(ChainSubscriptionEvent::NewBestHead(hash), CollectorSubscribeMode::Best) => Some(hash),
-		(ChainSubscriptionEvent::NewFinalizedBlock(hash), CollectorSubscribeMode::Finalized) => Some(hash),
+		(ChainSubscriptionEvent::NewBestHead((hash, _)), CollectorSubscribeMode::Best) => Some(hash),
+		(ChainSubscriptionEvent::NewFinalizedBlock((hash, _)), CollectorSubscribeMode::Finalized) => Some(hash),
 		_ => None,
 	}
 }

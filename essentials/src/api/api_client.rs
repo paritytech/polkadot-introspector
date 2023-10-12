@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::types::{BlockNumber, H256};
+use crate::types::{BlockNumber, Header, H256};
 use subxt::{
 	backend::{
 		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
@@ -23,7 +23,6 @@ use subxt::{
 		StreamOf,
 	},
 	blocks::{BlockRef, BlocksClient},
-	config::substrate::{BlakeTwo256, SubstrateHeader},
 	events::EventsClient,
 	storage::StorageClient,
 	OnlineClient, PolkadotConfig,
@@ -35,7 +34,7 @@ pub struct ApiClient {
 	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
 }
 
-pub type HeaderStream = StreamOf<Result<(SubstrateHeader<u32, BlakeTwo256>, BlockRef<H256>), subxt::Error>>;
+pub type HeaderStream = StreamOf<Result<(Header, BlockRef<H256>), subxt::Error>>;
 
 impl ApiClient {
 	pub async fn build(url: &str) -> Result<ApiClient, String> {

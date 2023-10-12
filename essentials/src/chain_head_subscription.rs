@@ -85,14 +85,14 @@ impl ChainHeadSubscription {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut executor = RequestExecutor::new(retry);
 		let best_sub = match executor.get_best_block_subscription(&url).await {
-			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewBestHead(v.1.hash())),
+			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewBestHead((v.1.hash(), v.0))),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
 				std::process::exit(1)
 			},
 		};
 		let finalized_sub = match executor.get_finalized_block_subscription(&url).await {
-			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewFinalizedBlock(v.1.hash())),
+			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewFinalizedBlock((v.1.hash(), v.0))),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
 				std::process::exit(1)

@@ -24,16 +24,19 @@ use crate::metadata::{
 };
 use parity_scale_codec::{Decode, Encode};
 use std::collections::{BTreeMap, VecDeque};
-use subxt::utils;
+use subxt::{
+	config::substrate::{BlakeTwo256, SubstrateHeader},
+	utils,
+};
 use subxt_runtime_types::polkadot_runtime as runtime;
 
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;
 pub type AccountId32 = utils::AccountId32;
+pub type Header = SubstrateHeader<u32, BlakeTwo256>;
 pub type Timestamp = u64;
 pub type SessionKeys = runtime::SessionKeys;
 pub type SubxtCall = runtime::RuntimeCall;
-
 pub type ClaimQueue = BTreeMap<u32, VecDeque<Option<ParasEntry>>>;
 
 // TODO: Take it from runtime types v5

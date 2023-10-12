@@ -119,8 +119,7 @@ impl HistoricalSubscription {
 		for block_number in from_block_number..=to_block_number {
 			debug!("Subscription advacing to block #{}/#{}", block_number, to_block_number);
 
-			let message = executor.get_block_hash(&url, Some(block_number)).await;
-			let block_hash = match message {
+			let block_hash = match executor.get_block_hash(&url, Some(block_number)).await {
 				Ok(Some(v)) => v,
 				Ok(None) => {
 					error!("Subscription to {} failed, block hash for block #{} not found", url, block_number);
@@ -131,13 +130,30 @@ impl HistoricalSubscription {
 					std::process::exit(1)
 				},
 			};
+			let header = match executor.get_block_head(&url, Some(block_hash)).await {
+				Ok(Some(v)) => v,
+				Ok(None) => {
+					error!("Subscription to {} failed, header for block #{} not found", url, block_number);
+					std::process::exit(1);
+				},
+				Err(e) => {
+					error!("Subscription to {} failed: {:?}", url, e);
+					std::process::exit(1)
+				},
+			};
 
 			info!("[{}] Block imported ({:?})", url, block_hash);
-			if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewBestHead(block_hash)).await {
+			if let Err(e) = update_channel
+				.send(ChainSubscriptionEvent::NewBestHead((block_hash, header.clone())))
+				.await
+			{
 				info!("Event consumer has terminated: {:?}, shutting down", e);
 				return
 			}
-			if let Err(e) = update_channel.send(ChainSubscriptionEvent::NewFinalizedBlock(block_hash)).await {
+			if let Err(e) = update_channel
+				.send(ChainSubscriptionEvent::NewFinalizedBlock((block_hash, header)))
+				.await
+			{
 				info!("Event consumer has terminated: {:?}, shutting down", e);
 				return
 			}
