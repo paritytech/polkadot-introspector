@@ -266,55 +266,47 @@ impl BlockTimeMonitor {
 			debug!("[{}] New loop - waiting for events", url);
 			if let Ok(event) = consumer_config.recv().await {
 				debug!("New event: {:?}", event);
-				let hash = match event {
-					ChainSubscriptionEvent::NewBestHead(hash) => Some(hash),
-					ChainSubscriptionEvent::NewFinalizedBlock(hash) => Some(hash),
+				let (hash, header) = match event {
+					ChainSubscriptionEvent::NewBestHead(v) => v,
+					ChainSubscriptionEvent::NewFinalizedBlock(v) => v,
 					ChainSubscriptionEvent::Heartbeat => continue,
 				};
-				if let Some(hash) = hash {
-					let ts = executor.get_block_timestamp(url, hash).await;
-					let header = executor.get_block_head(url, Some(hash)).await;
+				let ts = executor.get_block_timestamp(url, hash).await;
+				if let Ok(ts) = ts {
+					if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
+						// We know a prev block and this is it's child
+						let block_time_ms = ts.saturating_sub(prev_ts);
+						info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
 
-					if let Ok(ts) = ts {
-						if let Ok(Some(header)) = header {
-							if prev_block != 0 && header.number.saturating_sub(prev_block) == 1 {
-								// We know a prev block and this is it's child
-								let block_time_ms = ts.saturating_sub(prev_ts);
-								info!("[{}] Block time of #{}: {} ms", url, header.number, block_time_ms);
-
-								match opts.mode {
-									BlockTimeMode::Cli(_) => {
-										message_tx
-											.send(BlockTimeMessage::NewBlockTime(url.to_string(), block_time_ms))
-											.await
-											.unwrap();
-									},
-									BlockTimeMode::Prometheus(_) =>
-										if let Some(metric) = metric.clone() {
-											metric.with_label_values(&[url]).observe(block_time_ms as f64)
-										},
-								}
-							} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
-								// We know a prev block, but the diff is > 1. We lost blocks.
-								// TODO(later): fetch the gap and publish the stats.
-								// TODO(later later): Metrics tracking the missed blocks.
-								warn!(
-									"[{}] Missed {} blocks, likely because of WS connectivity issues",
-									url,
-									header.number.saturating_sub(prev_block).saturating_sub(1)
-								);
-							} else if prev_block == 0 {
-								// Just starting up - init metric.
+						match opts.mode {
+							BlockTimeMode::Cli(_) => {
+								message_tx
+									.send(BlockTimeMessage::NewBlockTime(url.to_string(), block_time_ms))
+									.await
+									.unwrap();
+							},
+							BlockTimeMode::Prometheus(_) =>
 								if let Some(metric) = metric.clone() {
-									metric.with_label_values(&[url]).observe(0f64)
-								}
-							}
-							prev_ts = ts;
-							prev_block = header.number;
+									metric.with_label_values(&[url]).observe(block_time_ms as f64)
+								},
+						}
+					} else if prev_block != 0 && header.number.saturating_sub(prev_block) > 1 {
+						// We know a prev block, but the diff is > 1. We lost blocks.
+						// TODO(later): fetch the gap and publish the stats.
+						// TODO(later later): Metrics tracking the missed blocks.
+						warn!(
+							"[{}] Missed {} blocks, likely because of WS connectivity issues",
+							url,
+							header.number.saturating_sub(prev_block).saturating_sub(1)
+						);
+					} else if prev_block == 0 {
+						// Just starting up - init metric.
+						if let Some(metric) = metric.clone() {
+							metric.with_label_values(&[url]).observe(0f64)
 						}
 					}
-				} else {
-					continue
+					prev_ts = ts;
+					prev_block = header.number;
 				}
 			} else {
 				info!("[{}] Update channel disconnected", url);

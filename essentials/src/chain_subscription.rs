@@ -15,14 +15,14 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use subxt::PolkadotConfig;
+use crate::types::{Header, H256};
 
 #[derive(Debug)]
 pub enum ChainSubscriptionEvent {
 	/// New relay chain best head
-	NewBestHead(<PolkadotConfig as subxt::Config>::Hash),
+	NewBestHead((H256, Header)),
 	/// New relay chain finalized head
-	NewFinalizedBlock(<PolkadotConfig as subxt::Config>::Hash),
+	NewFinalizedBlock((H256, Header)),
 	/// Heartbeat event
 	Heartbeat,
 }
