@@ -644,7 +644,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::Timestamp, first_hash, 1, &storage)
+		storage_write(CollectorPrefixType::Timestamp, first_hash, 1_u64, &storage)
 			.await
 			.unwrap();
 		tracker
@@ -655,17 +655,25 @@ mod test_inject_block {
 		let current = tracker.current_relay_block.unwrap();
 		assert!(tracker.previous_relay_block.is_none());
 		assert_eq!(current.hash, first_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1_u64));
 		assert!(tracker.finality_lag.is_none());
 
 		// Inject a fork and relevant finalized block number
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			second_hash,
+			BTreeMap::<u32, Vec<u32>>::default(),
+			&storage,
+		)
+		.await
+		.unwrap();
 		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(100), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::Timestamp, second_hash, 2, &storage)
+		storage_write(CollectorPrefixType::Timestamp, second_hash, 2_u64, &storage)
 			.await
 			.unwrap();
 		tracker
