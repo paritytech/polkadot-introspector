@@ -99,6 +99,8 @@ pub enum CollectorPrefixType {
 	RelevantFinalizedBlockNumber,
 	/// Validators account keys keyed by session index hash (blake2b(session_index))
 	AccountKeys,
+	/// Occupied cores
+	OccupiedCores,
 	/// Inherent data (more expensive to store, so good to have it shared)
 	InherentData,
 	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
@@ -573,6 +575,7 @@ impl Collector {
 		}
 		self.write_parainherent_data(block_hash, block_number, ts).await?;
 		self.write_ts(block_hash, block_number, ts).await?;
+		self.write_occupied_cores(block_hash, block_number, ts).await?;
 
 		debug!(
 			"Success! new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
@@ -620,6 +623,23 @@ impl Collector {
 			CollectorPrefixType::Timestamp,
 			block_hash,
 			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), ts),
+		)
+		.await?;
+
+		Ok(())
+	}
+
+	async fn write_occupied_cores(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		let cores = self.executor.get_occupied_cores(self.endpoint.as_str(), block_hash).await?;
+		self.storage_write_prefixed(
+			CollectorPrefixType::OccupiedCores,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), cores),
 		)
 		.await?;
 

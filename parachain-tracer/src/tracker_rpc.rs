@@ -19,7 +19,7 @@ use mockall::automock;
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	metadata::polkadot_primitives::ValidatorIndex,
-	types::{CoreOccupied, H256},
+	types::H256,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -46,7 +46,6 @@ pub trait TrackerRpc {
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError>;
-	async fn occupied_cores(&mut self, block_hash: H256) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError>;
 }
 
 pub struct ParachainTrackerRpc {
@@ -122,11 +121,6 @@ impl TrackerRpc for ParachainTrackerRpc {
 	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
 		self.executor.get_backing_groups(self.node.as_str(), block_hash).await
 	}
-
-	// TODO: move to the storage
-	async fn occupied_cores(&mut self, block_hash: H256) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
-		self.executor.get_occupied_cores(self.node.as_str(), block_hash).await
-	}
 }
 
 #[cfg(test)]
@@ -192,15 +186,6 @@ mod tests {
 		let (mut rpc, block_hash) = setup_client().await;
 
 		let response = rpc.backing_groups(block_hash).await;
-
-		assert!(!response.unwrap().is_empty());
-	}
-
-	#[tokio::test]
-	async fn test_fetches_occupied_cores() {
-		let (mut rpc, block_hash) = setup_client().await;
-
-		let response = rpc.occupied_cores(block_hash).await;
 
 		assert!(!response.unwrap().is_empty());
 	}

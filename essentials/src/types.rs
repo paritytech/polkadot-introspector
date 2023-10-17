@@ -72,7 +72,7 @@ pub struct Assignment {
 
 // TODO: Take it from runtime types v5
 /// Temporary abstraction to cover core state until v5 types are released
-#[derive(Debug)]
+#[derive(Debug, Decode, Encode)]
 pub enum CoreOccupied {
 	/// The core is not occupied.
 	Free,

@@ -118,7 +118,7 @@ impl SubxtTracker {
 			self.set_forks(block_hash, block_number);
 
 			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
-			self.set_core_assignment(block_hash, rpc).await?;
+			self.set_core_assignment(block_hash, rpc, storage).await?;
 			self.set_disputes(&disputes[..], storage).await;
 
 			self.set_hrmp_channels(block_hash, rpc).await?;
@@ -253,7 +253,12 @@ impl SubxtTracker {
 		}
 	}
 
-	async fn set_core_assignment(&mut self, block_hash: H256, rpc: &mut impl TrackerRpc) -> color_eyre::Result<()> {
+	async fn set_core_assignment(
+		&mut self,
+		block_hash: H256,
+		rpc: &mut impl TrackerRpc,
+		storage: &TrackerStorage,
+	) -> color_eyre::Result<()> {
 		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
 		let mut assignments = rpc.core_assignments_via_scheduled_paras(block_hash).await;
 		// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
@@ -268,8 +273,10 @@ impl SubxtTracker {
 
 		if let Some((&core, scheduled_ids)) = assignments?.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
 			self.current_candidate.assigned_core = Some(core);
-			self.current_candidate.core_occupied =
-				matches!(rpc.occupied_cores(block_hash).await?[core as usize], CoreOccupied::Paras);
+			self.current_candidate.core_occupied = matches!(
+				storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
+				CoreOccupied::Paras
+			);
 			self.is_on_demand_scheduled_in_current_block =
 				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
