@@ -704,7 +704,6 @@ impl Collector {
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, SubxtWrapperError> {
 		let core_assignments = self.executor.get_scheduled_paras(self.endpoint.as_str(), block_hash).await?;
-
 		Ok(core_assignments
 			.iter()
 			.map(|v| (v.core.0, vec![v.para_id.0]))

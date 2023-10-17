@@ -14,14 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::collections::BTreeMap;
-
 use polkadot_introspector_essentials::{
 	api::{storage::RequestExecutor, subxt_wrapper::InherentData},
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
 	metadata::polkadot_primitives::ValidatorIndex,
 	types::{AccountId32, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
+use std::collections::BTreeMap;
 use subxt::config::{substrate::BlakeTwo256, Hasher};
 
 pub struct TrackerStorage {
