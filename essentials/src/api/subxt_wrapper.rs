@@ -60,16 +60,12 @@ pub enum RequestType {
 	GetBackingGroups(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get session index for a specific block.
 	GetSessionIndex(<PolkadotConfig as subxt::Config>::Hash),
-	/// Get information about specific session.
-	GetSessionInfo(u32),
 	/// Get information about validators account keys in some session.
 	GetSessionAccountKeys(u32),
 	/// Get information about validator's next session keys.
 	GetSessionNextKeys(AccountId32),
 	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
 	GetInboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
-	/// Get data from a specific inbound HRMP channel
-	GetHRMPData(<PolkadotConfig as subxt::Config>::Hash, u32, u32),
 	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
 	GetOutboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
 	/// Get active host configuration
@@ -117,9 +113,6 @@ impl Debug for RequestType {
 			RequestType::GetSessionIndex(h) => {
 				format!("get session index: {:?}", h)
 			},
-			RequestType::GetSessionInfo(id) => {
-				format!("get session info: {:?}", id)
-			},
 			RequestType::GetSessionAccountKeys(id) => {
 				format!("get session account keys: {:?}", id)
 			},
@@ -128,9 +121,6 @@ impl Debug for RequestType {
 			},
 			RequestType::GetInboundHRMPChannels(h, para_id) => {
 				format!("get inbound channels: {:?}; para id: {}", h, para_id)
-			},
-			RequestType::GetHRMPData(h, src, dst) => {
-				format!("get hrmp content: {:?}; src: {}; dst: {}", h, src, dst)
 			},
 			RequestType::GetOutboundHRMPChannels(h, para_id) => {
 				format!("get outbount channels: {:?}; para id: {}", h, para_id)
@@ -248,7 +238,6 @@ impl RequestExecutor {
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
 				RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(&api, hash).await,
 				RequestType::GetSessionIndex(hash) => subxt_get_session_index(&api, hash).await,
-				RequestType::GetSessionInfo(session_index) => subxt_get_session_info(&api, session_index).await,
 				RequestType::GetSessionAccountKeys(session_index) =>
 					subxt_get_session_account_keys(&api, session_index).await,
 				RequestType::GetSessionNextKeys(ref account) => subxt_get_session_next_keys(&api, account).await,
@@ -256,8 +245,6 @@ impl RequestExecutor {
 					subxt_get_inbound_hrmp_channels(&api, hash, para_id).await,
 				RequestType::GetOutboundHRMPChannels(hash, para_id) =>
 					subxt_get_outbound_hrmp_channels(&api, hash, para_id).await,
-				RequestType::GetHRMPData(hash, para_id, sender) =>
-					subxt_get_hrmp_content(&api, hash, para_id, sender).await,
 				RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(&api).await,
 				RequestType::GetBestBlockSubscription(_) => subxt_get_best_block_subscription(&api).await,
 				RequestType::GetFinalizedBlockSubscription(_) => subxt_get_finalized_block_subscription(&api).await,
@@ -370,14 +357,6 @@ impl RequestExecutor {
 		wrap_subxt_call!(self, GetBackingGroups, BackingGroups, url, block_hash)
 	}
 
-	pub async fn get_session_info(
-		&mut self,
-		url: &str,
-		session_index: u32,
-	) -> std::result::Result<Option<polkadot_primitives::SessionInfo>, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetSessionInfo, SessionInfo, url, session_index)
-	}
-
 	pub async fn get_session_index(
 		&mut self,
 		url: &str,
@@ -418,16 +397,6 @@ impl RequestExecutor {
 		para_id: u32,
 	) -> std::result::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
 		wrap_subxt_call!(self, GetOutboundHRMPChannels, HRMPChannels, url, block_hash, para_id)
-	}
-
-	pub async fn get_hrmp_content(
-		&mut self,
-		url: &str,
-		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-		receiver_id: u32,
-		sender_id: u32,
-	) -> std::result::Result<Vec<Vec<u8>>, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetHRMPData, HRMPContent, url, block_hash, receiver_id, sender_id)
 	}
 
 	pub async fn get_host_configuration(
@@ -564,12 +533,6 @@ async fn subxt_get_session_index(api: &ApiClient, block_hash: H256) -> Result {
 	Ok(Response::SessionIndex(session_index))
 }
 
-async fn subxt_get_session_info(api: &ApiClient, session_index: u32) -> Result {
-	let addr = polkadot::storage().para_session_info().sessions(session_index);
-	let session_info = api.storage().at_latest().await?.fetch(&addr).await?;
-	Ok(Response::SessionInfo(session_info))
-}
-
 async fn subxt_get_session_account_keys(api: &ApiClient, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().account_keys(session_index);
 	let session_keys = api.storage().at_latest().await?.fetch(&addr).await?;
@@ -647,15 +610,6 @@ async fn subxt_get_outbound_hrmp_channels(api: &ApiClient, block_hash: H256, par
 			});
 	}
 	Ok(Response::HRMPChannels(channels_configuration))
-}
-
-async fn subxt_get_hrmp_content(api: &ApiClient, block_hash: H256, receiver: u32, sender: u32) -> Result {
-	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
-
-	let id = HrmpChannelId { sender: Id(sender), recipient: Id(receiver) };
-	let addr = polkadot::storage().hrmp().hrmp_channel_contents(&id);
-	let hrmp_content = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
-	Ok(Response::HRMPContent(hrmp_content.into_iter().map(|hrmp_content| hrmp_content.data).collect()))
 }
 
 async fn subxt_get_host_configuration(api: &ApiClient) -> Result {
