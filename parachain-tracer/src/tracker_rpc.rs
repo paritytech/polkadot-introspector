@@ -18,7 +18,6 @@ use async_trait::async_trait;
 use mockall::automock;
 use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
-	metadata::polkadot_primitives::ValidatorIndex,
 	types::H256,
 };
 use std::collections::{BTreeMap, HashMap};
@@ -42,10 +41,6 @@ pub trait TrackerRpc {
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError>;
-	async fn backing_groups(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError>;
 }
 
 pub struct ParachainTrackerRpc {
@@ -113,14 +108,6 @@ impl TrackerRpc for ParachainTrackerRpc {
 			})
 			.collect())
 	}
-
-	// TODO: move to the storage
-	async fn backing_groups(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError> {
-		self.executor.get_backing_groups(self.node.as_str(), block_hash).await
-	}
 }
 
 #[cfg(test)]
@@ -179,14 +166,5 @@ mod tests {
 				assert_eq!(reason, "ClaimQueue"),
 			_ => assert!(response.is_ok()),
 		};
-	}
-
-	#[tokio::test]
-	async fn test_fetches_backing_groups() {
-		let (mut rpc, block_hash) = setup_client().await;
-
-		let response = rpc.backing_groups(block_hash).await;
-
-		assert!(!response.unwrap().is_empty());
 	}
 }

@@ -17,6 +17,7 @@
 use polkadot_introspector_essentials::{
 	api::{storage::RequestExecutor, subxt_wrapper::InherentData},
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
+	metadata::polkadot_primitives::ValidatorIndex,
 	types::{AccountId32, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
 use subxt::config::{substrate::BlakeTwo256, Hasher};
@@ -88,6 +89,13 @@ impl TrackerStorage {
 	pub async fn occupied_cores(&self, block_hash: H256) -> Option<Vec<CoreOccupied>> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::OccupiedCores, block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	pub async fn backing_groups(&self, block_hash: H256) -> Option<Vec<Vec<ValidatorIndex>>> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::BackingGroups, block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}

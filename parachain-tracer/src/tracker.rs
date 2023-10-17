@@ -126,7 +126,7 @@ impl SubxtTracker {
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
 			if self.has_backed_candidate() && !self.is_just_backed() {
-				self.set_availability(block_hash, bitfields, rpc).await?;
+				self.set_availability(block_hash, bitfields, storage).await?;
 			}
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
@@ -314,14 +314,14 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		bitfields: Vec<AvailabilityBitfield>,
-		rpc: &mut impl TrackerRpc,
+		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
 		if self.current_candidate.is_backed() {
 			// We only process availability if our parachain is assigned to an availability core.
 			if let Some(core) = self.current_candidate.assigned_core {
 				self.current_candidate.current_availability_bits = extract_availability_bits_count(bitfields, core);
 				self.current_candidate.max_availability_bits =
-					self.validators_indices(block_hash, rpc).await?.len() as u32;
+					self.validators_indices(block_hash, storage).await?.len() as u32;
 
 				if self.current_candidate.is_data_available() {
 					self.current_candidate.set_included();
@@ -530,9 +530,15 @@ impl SubxtTracker {
 	async fn validators_indices(
 		&mut self,
 		block_hash: H256,
-		rpc: &mut impl TrackerRpc,
+		storage: &TrackerStorage,
 	) -> color_eyre::Result<Vec<ValidatorIndex>> {
-		Ok(rpc.backing_groups(block_hash).await?.into_iter().flatten().collect())
+		Ok(storage
+			.backing_groups(block_hash)
+			.await
+			.expect("saved in the collector")
+			.into_iter()
+			.flatten()
+			.collect())
 	}
 
 	async fn candidate_backed_in(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {

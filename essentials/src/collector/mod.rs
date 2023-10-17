@@ -101,6 +101,8 @@ pub enum CollectorPrefixType {
 	AccountKeys,
 	/// Occupied cores
 	OccupiedCores,
+	/// Backing groups
+	BackingGroups,
 	/// Inherent data (more expensive to store, so good to have it shared)
 	InherentData,
 	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
@@ -576,6 +578,7 @@ impl Collector {
 		self.write_parainherent_data(block_hash, block_number, ts).await?;
 		self.write_ts(block_hash, block_number, ts).await?;
 		self.write_occupied_cores(block_hash, block_number, ts).await?;
+		self.write_backing_groups(block_hash, block_number, ts).await?;
 
 		debug!(
 			"Success! new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
@@ -640,6 +643,23 @@ impl Collector {
 			CollectorPrefixType::OccupiedCores,
 			block_hash,
 			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), cores),
+		)
+		.await?;
+
+		Ok(())
+	}
+
+	async fn write_backing_groups(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		let groups = self.executor.get_backing_groups(self.endpoint.as_str(), block_hash).await?;
+		self.storage_write_prefixed(
+			CollectorPrefixType::BackingGroups,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), groups),
 		)
 		.await?;
 
