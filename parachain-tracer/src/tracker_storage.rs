@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::BTreeMap;
+
 use polkadot_introspector_essentials::{
 	api::{storage::RequestExecutor, subxt_wrapper::InherentData},
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
@@ -96,6 +98,13 @@ impl TrackerStorage {
 	pub async fn backing_groups(&self, block_hash: H256) -> Option<Vec<Vec<ValidatorIndex>>> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::BackingGroups, block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	pub async fn core_assignments(&self, block_hash: H256) -> Option<BTreeMap<u32, Vec<u32>>> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::CoreAssignments, block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}

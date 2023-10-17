@@ -20,7 +20,7 @@ use polkadot_introspector_essentials::{
 	api::subxt_wrapper::{RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
 	types::H256,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 #[automock]
 #[async_trait]
@@ -33,14 +33,6 @@ pub trait TrackerRpc {
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError>;
-	async fn core_assignments_via_scheduled_paras(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError>;
-	async fn core_assignments_via_claim_queue(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError>;
 }
 
 pub struct ParachainTrackerRpc {
@@ -77,44 +69,12 @@ impl TrackerRpc for ParachainTrackerRpc {
 			.get_outbound_hrmp_channels(self.node.as_str(), block_hash, self.para_id)
 			.await
 	}
-
-	// TODO: move to the storage
-	async fn core_assignments_via_scheduled_paras(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
-		let core_assignments = self.executor.get_scheduled_paras(self.node.as_str(), block_hash).await?;
-
-		Ok(core_assignments
-			.iter()
-			.map(|v| (v.core.0, vec![v.para_id.0]))
-			.collect::<HashMap<_, _>>())
-	}
-
-	// TODO: move to the storage
-	async fn core_assignments_via_claim_queue(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<HashMap<u32, Vec<u32>>, SubxtWrapperError> {
-		let assignments = self.executor.get_claim_queue(self.node.as_str(), block_hash).await?;
-		Ok(assignments
-			.iter()
-			.map(|(core, queue)| {
-				let ids = queue
-					.iter()
-					.filter_map(|v| v.as_ref().map(|v| v.assignment.para_id))
-					.collect::<Vec<_>>();
-				(*core, ids)
-			})
-			.collect())
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::test_utils::{create_api, rpc_node_url};
-	use subxt::error::{Error, MetadataError};
 
 	async fn setup_client() -> (ParachainTrackerRpc, H256) {
 		let api = create_api();
@@ -140,31 +100,5 @@ mod tests {
 		let response = rpc.outbound_hrmp_channels(block_hash).await;
 
 		assert!(response.is_ok());
-	}
-
-	#[tokio::test]
-	async fn test_fetches_core_assignments_via_scheduled_paras() {
-		let (mut rpc, block_hash) = setup_client().await;
-
-		let response = rpc.core_assignments_via_scheduled_paras(block_hash).await;
-
-		match response {
-			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(reason)))) =>
-				assert_eq!(reason, "Scheduled"),
-			_ => assert!(response.is_ok()),
-		};
-	}
-
-	#[tokio::test]
-	async fn test_fetches_core_assignments_via_claim_queue() {
-		let (mut rpc, block_hash) = setup_client().await;
-
-		let response = rpc.core_assignments_via_claim_queue(block_hash).await;
-
-		match response {
-			Err(SubxtWrapperError::SubxtError(Error::Metadata(MetadataError::StorageEntryNotFound(reason)))) =>
-				assert_eq!(reason, "ClaimQueue"),
-			_ => assert!(response.is_ok()),
-		};
 	}
 }
