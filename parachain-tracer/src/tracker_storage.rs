@@ -17,7 +17,7 @@
 use polkadot_introspector_essentials::{
 	api::{storage::RequestExecutor, subxt_wrapper::InherentData},
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
-	types::{AccountId32, OnDemandOrder, H256},
+	types::{AccountId32, OnDemandOrder, Timestamp, H256},
 };
 use subxt::config::{substrate::BlakeTwo256, Hasher};
 
@@ -71,9 +71,16 @@ impl TrackerStorage {
 			.map(|v| v.into_inner().unwrap())
 	}
 
-	pub async fn candidate(&self, candidate_hash: H256) -> Option<CandidateRecord> {
+	pub async fn candidate(&self, block_hash: H256) -> Option<CandidateRecord> {
 		self.storage
-			.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), candidate_hash)
+			.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	pub async fn block_timestamp(&self, block_hash: H256) -> Option<Timestamp> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::Timestamp, block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}

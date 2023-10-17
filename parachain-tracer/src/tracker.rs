@@ -114,7 +114,7 @@ impl SubxtTracker {
 		if let Some(inherent) = storage.inherent_data(block_hash).await {
 			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
 
-			self.set_relay_block(block_hash, block_number, rpc, storage).await?;
+			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
 
 			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
@@ -196,10 +196,9 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		block_number: BlockNumber,
-		rpc: &mut impl TrackerRpc,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
-		let ts = rpc.block_timestamp(block_hash).await?;
+		let ts = storage.block_timestamp(block_hash).await.expect("saved in the collector");
 		self.previous_relay_block = self.current_relay_block;
 		self.current_relay_block = Some(Block { num: block_number, ts, hash: block_hash });
 
@@ -648,7 +647,9 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &storage)
 			.await
 			.unwrap();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095332000));
+		storage_write(CollectorPrefixType::Timestamp, first_hash, 1694095332, &storage)
+			.await
+			.unwrap();
 		tracker
 			.inject_block(first_hash, 42, &mut mock_rpc, &tracker_storage)
 			.await
@@ -657,7 +658,7 @@ mod test_inject_block {
 		let current = tracker.current_relay_block.unwrap();
 		assert!(tracker.previous_relay_block.is_none());
 		assert_eq!(current.hash, first_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1694095332000));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1694095332));
 		assert!(tracker.finality_lag.is_none());
 
 		// Inject a fork and relevant finalized block number
@@ -667,7 +668,9 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &storage)
 			.await
 			.unwrap();
-		mock_rpc.expect_block_timestamp().returning(|_| Ok(1694095333000));
+		storage_write(CollectorPrefixType::Timestamp, second_hash, 1694095333, &storage)
+			.await
+			.unwrap();
 		tracker
 			.inject_block(second_hash, 42, &mut mock_rpc, &tracker_storage)
 			.await
@@ -677,7 +680,7 @@ mod test_inject_block {
 		let current = tracker.current_relay_block.unwrap();
 		assert_eq!(previous.hash, first_hash);
 		assert_eq!(current.hash, second_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1694095332000));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1694095332));
 		assert_eq!(tracker.finality_lag, Some(2));
 	}
 }

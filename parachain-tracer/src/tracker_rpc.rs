@@ -46,7 +46,6 @@ pub trait TrackerRpc {
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, SubxtWrapperError>;
-	async fn block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError>;
 	async fn occupied_cores(&mut self, block_hash: H256) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError>;
 }
 
@@ -85,6 +84,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 			.await
 	}
 
+	// TODO: move to the storage
 	async fn core_assignments_via_scheduled_paras(
 		&mut self,
 		block_hash: H256,
@@ -97,6 +97,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 			.collect::<HashMap<_, _>>())
 	}
 
+	// TODO: move to the storage
 	async fn core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
@@ -114,6 +115,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 			.collect())
 	}
 
+	// TODO: move to the storage
 	async fn backing_groups(
 		&mut self,
 		block_hash: H256,
@@ -121,10 +123,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 		self.executor.get_backing_groups(self.node.as_str(), block_hash).await
 	}
 
-	async fn block_timestamp(&mut self, block_hash: H256) -> color_eyre::Result<u64, SubxtWrapperError> {
-		self.executor.get_block_timestamp(self.node.as_str(), block_hash).await
-	}
-
+	// TODO: move to the storage
 	async fn occupied_cores(&mut self, block_hash: H256) -> color_eyre::Result<Vec<CoreOccupied>, SubxtWrapperError> {
 		self.executor.get_occupied_cores(self.node.as_str(), block_hash).await
 	}
@@ -195,15 +194,6 @@ mod tests {
 		let response = rpc.backing_groups(block_hash).await;
 
 		assert!(!response.unwrap().is_empty());
-	}
-
-	#[tokio::test]
-	async fn test_fetches_block_timestamp() {
-		let (mut rpc, block_hash) = setup_client().await;
-
-		let response = rpc.block_timestamp(block_hash).await;
-
-		assert!(response.unwrap() > 0);
 	}
 
 	#[tokio::test]

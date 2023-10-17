@@ -87,6 +87,8 @@ pub enum CollectorSubscribeMode {
 /// This type is used to distinguish different keys in the storage
 #[derive(Clone, Copy, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub enum CollectorPrefixType {
+	/// A block's timestamp
+	Timestamp,
 	/// Candidate prefixed by Parachain-Id
 	Candidate(u32),
 	/// A mapping to find out parachain id by candidate hash (e.g. when we don't know the parachain)
@@ -570,6 +572,7 @@ impl Collector {
 			self.broadcast_event(CollectorUpdateEvent::NewSession(cur_session)).await?;
 		}
 		self.write_parainherent_data(block_hash, block_number, ts).await?;
+		self.write_ts(block_hash, block_number, ts).await?;
 
 		debug!(
 			"Success! new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
@@ -603,6 +606,22 @@ impl Collector {
 		} else {
 			warn!("cannot get inherent data for block number {} ({})", block_number, block_hash);
 		}
+
+		Ok(())
+	}
+
+	async fn write_ts(
+		&self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		self.storage_write_prefixed(
+			CollectorPrefixType::Timestamp,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), ts),
+		)
+		.await?;
 
 		Ok(())
 	}
