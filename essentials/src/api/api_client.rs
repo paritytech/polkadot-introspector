@@ -23,9 +23,10 @@ use subxt::{
 		StreamOf,
 	},
 	blocks::{BlockRef, BlocksClient},
+	client::{LightClient, OnlineClientT},
 	events::EventsClient,
 	storage::StorageClient,
-	OnlineClient, PolkadotConfig,
+	Config, OnlineClient, PolkadotConfig,
 };
 
 #[derive(Clone)]
@@ -35,6 +36,7 @@ pub struct ApiClient {
 }
 
 pub type HeaderStream = StreamOf<Result<(Header, BlockRef<H256>), subxt::Error>>;
+pub type MyHeaderStream<C> = StreamOf<Result<(<C as Config>::Header, BlockRef<<C as Config>::Hash>), subxt::Error>>;
 
 impl ApiClient {
 	pub async fn build(url: &str) -> Result<ApiClient, String> {
@@ -76,5 +78,79 @@ impl ApiClient {
 
 	pub async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
 		self.client.backend().stream_finalized_block_headers().await
+	}
+}
+
+#[derive(Clone)]
+pub struct MyApiClient<T = OnlineClient<PolkadotConfig>, C = PolkadotConfig>
+where
+	T: OnlineClientT<C>,
+	C: Config,
+{
+	client: T,
+	legacy_rpc_methods: LegacyRpcMethods<C>,
+}
+
+impl<T, C> MyApiClient<T, C>
+where
+	T: OnlineClientT<C>,
+	C: Config,
+{
+	pub fn storage(&self) -> StorageClient<C, T> {
+		self.client.storage()
+	}
+
+	pub fn blocks(&self) -> BlocksClient<C, T> {
+		self.client.blocks()
+	}
+
+	pub fn events(&self) -> EventsClient<C, T> {
+		self.client.events()
+	}
+
+	// We need it only for the historical mode to convert block numbers into their hashes
+	pub async fn legacy_get_block_hash(
+		&self,
+		maybe_block_number: Option<BlockNumber>,
+	) -> Result<Option<<C>::Hash>, subxt::Error> {
+		let maybe_block_number = maybe_block_number.map(|v| NumberOrHex::Number(v.into()));
+		self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await
+	}
+
+	pub async fn stream_best_block_headers(&self) -> Result<MyHeaderStream<C>, subxt::Error> {
+		self.client.backend().stream_best_block_headers().await
+	}
+
+	pub async fn stream_finalized_block_headers(&self) -> Result<MyHeaderStream<C>, subxt::Error> {
+		self.client.backend().stream_finalized_block_headers().await
+	}
+}
+
+impl MyApiClient<OnlineClient<PolkadotConfig>> {
+	pub async fn build(url: &str) -> Result<MyApiClient, String> {
+		let rpc_client = RpcClient::from_url(url)
+			.await
+			.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+		let client = OnlineClient::from_rpc_client(rpc_client.clone())
+			.await
+			.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
+		let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
+
+		Ok(MyApiClient { client, legacy_rpc_methods })
+	}
+}
+
+impl MyApiClient<LightClient<PolkadotConfig>> {
+	pub async fn build(url: &str) -> Result<MyApiClient<LightClient<PolkadotConfig>>, String> {
+		let rpc_client = RpcClient::from_url(url)
+			.await
+			.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+		let client = LightClient::builder()
+			.build_from_url(url)
+			.await
+			.map_err(|e| format!("Cannot construct LightClient from url: {e}"))?;
+		let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
+
+		Ok(MyApiClient { client, legacy_rpc_methods })
 	}
 }

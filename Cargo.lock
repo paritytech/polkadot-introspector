@@ -3667,6 +3667,7 @@ dependencies = [
  "subxt-macro",
  "subxt-metadata",
  "thiserror",
+ "tokio-stream",
  "tracing",
 ]
 
