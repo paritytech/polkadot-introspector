@@ -87,6 +87,8 @@ pub enum CollectorSubscribeMode {
 /// This type is used to distinguish different keys in the storage
 #[derive(Clone, Copy, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub enum CollectorPrefixType {
+	/// A block's timestamp
+	Timestamp,
 	/// Candidate prefixed by Parachain-Id
 	Candidate(u32),
 	/// A mapping to find out parachain id by candidate hash (e.g. when we don't know the parachain)
@@ -97,6 +99,12 @@ pub enum CollectorPrefixType {
 	RelevantFinalizedBlockNumber,
 	/// Validators account keys keyed by session index hash (blake2b(session_index))
 	AccountKeys,
+	/// Core assignments
+	CoreAssignments,
+	/// Occupied cores
+	OccupiedCores,
+	/// Backing groups
+	BackingGroups,
 	/// Inherent data (more expensive to store, so good to have it shared)
 	InherentData,
 	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
@@ -570,6 +578,10 @@ impl Collector {
 			self.broadcast_event(CollectorUpdateEvent::NewSession(cur_session)).await?;
 		}
 		self.write_parainherent_data(block_hash, block_number, ts).await?;
+		self.write_ts(block_hash, block_number, ts).await?;
+		self.write_occupied_cores(block_hash, block_number, ts).await?;
+		self.write_backing_groups(block_hash, block_number, ts).await?;
+		self.write_core_assignments(block_hash, block_number, ts).await?;
 
 		debug!(
 			"Success! new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
@@ -605,6 +617,114 @@ impl Collector {
 		}
 
 		Ok(())
+	}
+
+	async fn write_ts(
+		&self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		self.storage_write_prefixed(
+			CollectorPrefixType::Timestamp,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), ts),
+		)
+		.await?;
+
+		Ok(())
+	}
+
+	async fn write_occupied_cores(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		let cores = self.executor.get_occupied_cores(self.endpoint.as_str(), block_hash).await?;
+		self.storage_write_prefixed(
+			CollectorPrefixType::OccupiedCores,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), cores),
+		)
+		.await?;
+
+		Ok(())
+	}
+
+	async fn write_backing_groups(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		let groups = self.executor.get_backing_groups(self.endpoint.as_str(), block_hash).await?;
+		self.storage_write_prefixed(
+			CollectorPrefixType::BackingGroups,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), groups),
+		)
+		.await?;
+
+		Ok(())
+	}
+
+	async fn write_core_assignments(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
+		let mut assignments = self.core_assignments_via_scheduled_paras(block_hash).await;
+		// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
+		if let Err(SubxtWrapperError::SubxtError(subxt::error::Error::Metadata(
+			subxt::error::MetadataError::StorageEntryNotFound(_),
+		))) = assignments
+		{
+			assignments = self.core_assignments_via_claim_queue(block_hash).await;
+		}
+		if let Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(reason)) = assignments {
+			info!("{}. Nothing to process, used empty value", reason);
+			assignments = Ok(BTreeMap::default());
+		}
+
+		self.storage_write_prefixed(
+			CollectorPrefixType::CoreAssignments,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), assignments?),
+		)
+		.await?;
+
+		Ok(())
+	}
+
+	async fn core_assignments_via_scheduled_paras(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, SubxtWrapperError> {
+		let core_assignments = self.executor.get_scheduled_paras(self.endpoint.as_str(), block_hash).await?;
+		Ok(core_assignments
+			.iter()
+			.map(|v| (v.core.0, vec![v.para_id.0]))
+			.collect::<BTreeMap<_, _>>())
+	}
+
+	async fn core_assignments_via_claim_queue(
+		&mut self,
+		block_hash: H256,
+	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, SubxtWrapperError> {
+		let assignments = self.executor.get_claim_queue(self.endpoint.as_str(), block_hash).await?;
+		Ok(assignments
+			.iter()
+			.map(|(core, queue)| {
+				let ids = queue
+					.iter()
+					.filter_map(|v| v.as_ref().map(|v| v.assignment.para_id))
+					.collect::<Vec<_>>();
+				(*core, ids)
+			})
+			.collect())
 	}
 
 	async fn process_candidate_change(

@@ -17,8 +17,10 @@
 use polkadot_introspector_essentials::{
 	api::{storage::RequestExecutor, subxt_wrapper::InherentData},
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
-	types::{AccountId32, OnDemandOrder, H256},
+	metadata::polkadot_primitives::ValidatorIndex,
+	types::{AccountId32, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
+use std::collections::BTreeMap;
 use subxt::config::{substrate::BlakeTwo256, Hasher};
 
 pub struct TrackerStorage {
@@ -33,6 +35,7 @@ impl TrackerStorage {
 		Self { para_id, storage }
 	}
 
+	/// Reads validators account keys for the given session index
 	pub async fn session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
 		self.storage
 			.storage_read_prefixed(
@@ -43,6 +46,7 @@ impl TrackerStorage {
 			.map(|v| v.into_inner().unwrap())
 	}
 
+	/// Reads inherent data of a relay block by its block hash
 	pub async fn inherent_data(&self, block_hash: H256) -> Option<InherentData> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
@@ -50,6 +54,7 @@ impl TrackerStorage {
 			.map(|v| v.into_inner().unwrap())
 	}
 
+	/// Reads on-demand order information by para id and block hash when it was placed
 	pub async fn on_demand_order(&self, block_hash: H256) -> Option<OnDemandOrder> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
@@ -57,6 +62,7 @@ impl TrackerStorage {
 			.map(|v| v.into_inner().unwrap())
 	}
 
+	/// Reads the last finalized block number at the moment, when the given block has appeared
 	pub async fn relevant_finalized_block_number(&self, block_hash: H256) -> Option<u32> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::RelevantFinalizedBlockNumber, block_hash)
@@ -64,6 +70,7 @@ impl TrackerStorage {
 			.map(|v| v.into_inner().unwrap())
 	}
 
+	/// Read the dispute info for the given block by parachain id
 	pub async fn dispute(&self, block_hash: H256) -> Option<DisputeInfo> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::Dispute(self.para_id), block_hash)
@@ -71,9 +78,42 @@ impl TrackerStorage {
 			.map(|v| v.into_inner().unwrap())
 	}
 
+	/// Read the candidate info for the given parablock by parachain id
 	pub async fn candidate(&self, candidate_hash: H256) -> Option<CandidateRecord> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::Candidate(self.para_id), candidate_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	/// Read the timestamp for the given relay block
+	pub async fn block_timestamp(&self, block_hash: H256) -> Option<Timestamp> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::Timestamp, block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	/// Read the occupied cores for the given relay block
+	pub async fn occupied_cores(&self, block_hash: H256) -> Option<Vec<CoreOccupied>> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::OccupiedCores, block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	/// Read the backing groups for the given relay block
+	pub async fn backing_groups(&self, block_hash: H256) -> Option<Vec<Vec<ValidatorIndex>>> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::BackingGroups, block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	/// Read the core assignments for the given relay block
+	pub async fn core_assignments(&self, block_hash: H256) -> Option<BTreeMap<u32, Vec<u32>>> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::CoreAssignments, block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
