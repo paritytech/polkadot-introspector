@@ -28,7 +28,7 @@ pub trait EventStream {
 	fn create_consumer(&mut self) -> EventConsumerInit<Self::Event>;
 
 	/// Prepare futures to join.
-	async fn run(self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>>;
+	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>>;
 }
 
 #[derive(Debug)]
