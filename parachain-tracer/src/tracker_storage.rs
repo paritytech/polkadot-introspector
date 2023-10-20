@@ -125,7 +125,7 @@ mod tests {
 
 	use super::*;
 	use polkadot_introspector_essentials::{
-		api::ApiService,
+		api::{subxt_wrapper::ApiClientMode, ApiService},
 		chain_events::SubxtDispute,
 		collector::CollectorStorageApi,
 		storage::{RecordTime, RecordsStorageConfig, StorageEntry},
@@ -134,8 +134,11 @@ mod tests {
 	use subxt::utils::AccountId32;
 
 	fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
-		let api: CollectorStorageApi =
-			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default());
+		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
+			RecordsStorageConfig { max_blocks: 4 },
+			ApiClientMode::Online,
+			Default::default(),
+		);
 		let storage = TrackerStorage::new(100, api.storage());
 
 		(storage, api)

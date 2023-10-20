@@ -16,7 +16,7 @@
 use crate::parachain_block_info::ParachainBlockInfo;
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
-	api::{storage::RequestExecutor, ApiService},
+	api::{storage::RequestExecutor, subxt_wrapper::ApiClientMode, ApiService},
 	collector::{
 		candidate_record::{CandidateInclusionRecord, CandidateRecord},
 		CollectorPrefixType,
@@ -128,11 +128,16 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32, BlakeTwo25
 }
 
 pub fn create_api() -> ApiService<H256> {
-	ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default())
+	ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, ApiClientMode::Online, Default::default())
 }
 
 pub fn create_storage() -> RequestExecutor<H256, CollectorPrefixType> {
-	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, Default::default()).storage()
+	ApiService::new_with_prefixed_storage(
+		RecordsStorageConfig { max_blocks: 4 },
+		ApiClientMode::Online,
+		Default::default(),
+	)
+	.storage()
 }
 
 pub fn create_hrmp_channels() -> BTreeMap<u32, SubxtHrmpChannel> {

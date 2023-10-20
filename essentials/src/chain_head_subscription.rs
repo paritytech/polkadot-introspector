@@ -16,7 +16,7 @@
 //
 
 use crate::{
-	api::subxt_wrapper::RequestExecutor,
+	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
@@ -34,6 +34,7 @@ pub struct ChainHeadSubscription {
 	urls: Vec<String>,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<ChainSubscriptionEvent>>>,
+	api_client_mode: ApiClientMode,
 	retry: RetryOptions,
 }
 
@@ -60,7 +61,7 @@ impl EventStream for ChainHeadSubscription {
 
 	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let futures = self.consumers.clone().into_iter().map(|update_channels| {
-			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.retry.clone())
+			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.api_client_mode, self.retry.clone())
 		});
 
 		Ok(futures.flatten().collect::<Vec<_>>())
@@ -68,8 +69,8 @@ impl EventStream for ChainHeadSubscription {
 }
 
 impl ChainHeadSubscription {
-	pub fn new(urls: Vec<String>, retry: RetryOptions) -> ChainHeadSubscription {
-		ChainHeadSubscription { urls, consumers: Vec::new(), retry }
+	pub fn new(urls: Vec<String>, api_client_mode: ApiClientMode, retry: RetryOptions) -> ChainHeadSubscription {
+		ChainHeadSubscription { urls, consumers: Vec::new(), api_client_mode, retry }
 	}
 
 	// Per node
@@ -77,13 +78,14 @@ impl ChainHeadSubscription {
 		mut update_channel: Sender<ChainSubscriptionEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		shutdown_tx: BroadcastSender<()>,
+		api_client_mode: ApiClientMode,
 		retry: RetryOptions,
 	) {
 		use futures::stream::{select, StreamExt};
 		use futures_util::TryStreamExt;
 
 		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut executor = RequestExecutor::new(retry);
+		let mut executor = RequestExecutor::new(api_client_mode, retry);
 		let best_sub = match executor.get_best_block_subscription(&url).await {
 			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewBestHead((v.1.hash(), v.0))),
 			Err(e) => {
@@ -144,13 +146,20 @@ impl ChainHeadSubscription {
 		update_channels: Vec<Sender<ChainSubscriptionEvent>>,
 		urls: Vec<String>,
 		shutdown_tx: BroadcastSender<()>,
+		api_client_mode: ApiClientMode,
 		retry: RetryOptions,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()
 			.zip(urls.into_iter())
 			.map(|(update_channel, url)| {
-				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), retry.clone()))
+				tokio::spawn(Self::run_per_node(
+					update_channel,
+					url,
+					shutdown_tx.clone(),
+					api_client_mode,
+					retry.clone(),
+				))
 			})
 			.collect()
 	}

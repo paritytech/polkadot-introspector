@@ -18,7 +18,7 @@
 use tokio::sync::broadcast::error::TryRecvError;
 
 use crate::{
-	api::subxt_wrapper::RequestExecutor,
+	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
@@ -39,6 +39,7 @@ pub struct HistoricalSubscription {
 	to_block_number: BlockNumber,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<ChainSubscriptionEvent>>>,
+	api_client_mode: ApiClientMode,
 	retry: RetryOptions,
 }
 
@@ -71,6 +72,7 @@ impl EventStream for HistoricalSubscription {
 				self.from_block_number,
 				self.to_block_number,
 				shutdown_tx.clone(),
+				self.api_client_mode,
 				self.retry.clone(),
 			)
 		});
@@ -84,11 +86,18 @@ impl HistoricalSubscription {
 		urls: Vec<String>,
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
+		api_client_mode: ApiClientMode,
 		retry: RetryOptions,
 	) -> HistoricalSubscription {
-		HistoricalSubscription { urls, from_block_number, to_block_number, consumers: Vec::new(), retry }
+		HistoricalSubscription {
+			urls,
+			from_block_number,
+			to_block_number,
+			consumers: Vec::new(),
+			api_client_mode,
+			retry,
+		}
 	}
-
 	// Per node
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
@@ -96,10 +105,11 @@ impl HistoricalSubscription {
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
+		api_client_mode: ApiClientMode,
 		retry: RetryOptions,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut executor = RequestExecutor::new(retry);
+		let mut executor = RequestExecutor::new(api_client_mode, retry);
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
@@ -194,6 +204,7 @@ impl HistoricalSubscription {
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
+		api_client_mode: ApiClientMode,
 		retry: RetryOptions,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
@@ -206,6 +217,7 @@ impl HistoricalSubscription {
 					from_block_number,
 					to_block_number,
 					shutdown_tx.clone(),
+					api_client_mode,
 					retry.clone(),
 				))
 			})

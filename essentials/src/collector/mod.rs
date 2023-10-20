@@ -19,7 +19,7 @@ mod ws;
 
 use crate::{
 	api::{
-		subxt_wrapper::{RequestExecutor, SubxtWrapperError},
+		subxt_wrapper::{ApiClientMode, RequestExecutor, SubxtWrapperError},
 		ApiService,
 	},
 	chain_events::{
@@ -204,9 +204,10 @@ pub struct Collector {
 }
 
 impl Collector {
-	pub fn new(endpoint: &str, opts: CollectorOptions, retry: RetryOptions) -> Self {
+	pub fn new(endpoint: &str, opts: CollectorOptions, api_client_mode: ApiClientMode, retry: RetryOptions) -> Self {
 		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
 			RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) },
+			api_client_mode,
 			retry,
 		);
 		let ws_listener = if let Some(listen_addr) = opts.listen_addr {

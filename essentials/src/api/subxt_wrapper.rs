@@ -17,7 +17,7 @@
 
 use crate::{
 	api::{
-		api_client::{build_online_client, ApiClientT, HeaderStream},
+		api_client::{build_light_client, build_online_client, ApiClientT, HeaderStream},
 		dynamic::{decode_availability_cores, decode_claim_queue, decode_scheduled_paras, decode_validator_groups},
 	},
 	metadata::polkadot_primitives,
@@ -27,6 +27,7 @@ use crate::{
 	},
 	utils::{Retry, RetryOptions},
 };
+use clap::ValueEnum;
 use log::{error, warn};
 use std::{
 	collections::{hash_map::HashMap, BTreeMap},
@@ -185,6 +186,7 @@ impl Debug for Response {
 /// Represents a pool for subxt requests
 #[derive(Clone)]
 pub struct RequestExecutor {
+	api_client_mode: ApiClientMode,
 	connection_pool: HashMap<String, Box<dyn ApiClientT>>,
 	retry: RetryOptions,
 }
@@ -206,8 +208,8 @@ macro_rules! wrap_subxt_call {
 }
 
 impl RequestExecutor {
-	pub fn new(retry: RetryOptions) -> Self {
-		Self { retry, connection_pool: HashMap::new() }
+	pub fn new(api_client_mode: ApiClientMode, retry: RetryOptions) -> Self {
+		Self { api_client_mode, retry, connection_pool: HashMap::new() }
 	}
 
 	async fn execute_request(&mut self, request: RequestType, url: &str) -> Result {
@@ -218,7 +220,7 @@ impl RequestExecutor {
 			let api: Box<dyn ApiClientT> = match connection_pool.get(url) {
 				Some(api) => dyn_clone::clone_box(&**api),
 				None => {
-					let new_api = new_client_fn(url, &self.retry).await;
+					let new_api = new_client_fn(url, self.api_client_mode, &self.retry).await;
 					if let Some(api) = new_api {
 						connection_pool.insert(url.to_owned(), dyn_clone::clone_box(&*api));
 						api
@@ -415,20 +417,39 @@ impl RequestExecutor {
 	}
 }
 
+/// How to subscribe to subxt blocks
+#[derive(strum::Display, Debug, Clone, Copy, ValueEnum, Default)]
+pub enum ApiClientMode {
+	#[default]
+	Online,
+	Light,
+}
+
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<Box<dyn ApiClientT>> {
+async fn new_client_fn(url: &str, api_client_mode: ApiClientMode, retry: &RetryOptions) -> Option<Box<dyn ApiClientT>> {
 	let mut retry = Retry::new(retry);
 
 	loop {
-		match build_online_client(url).await {
-			Ok(client) => return Some(Box::new(client)),
-			Err(err) => {
-				error!("[{}] Client error: {:?}", url, err);
-				if (retry.sleep().await).is_err() {
-					return None
-				}
+		match api_client_mode {
+			ApiClientMode::Online => match build_online_client(url).await {
+				Ok(client) => return Some(Box::new(client)),
+				Err(err) => {
+					error!("[{}] Client error: {:?}", url, err);
+					if (retry.sleep().await).is_err() {
+						return None
+					}
+				},
 			},
-		};
+			ApiClientMode::Light => match build_light_client(url).await {
+				Ok(client) => return Some(Box::new(client)),
+				Err(err) => {
+					error!("[{}] Client error: {:?}", url, err);
+					if (retry.sleep().await).is_err() {
+						return None
+					}
+				},
+			},
+		}
 	}
 }
 
