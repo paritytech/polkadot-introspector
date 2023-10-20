@@ -17,11 +17,14 @@
 
 use crate::{
 	api::{
-		api_client::{build_api_client, ApiClientT, HeaderStream},
+		api_client::{build_online_client, ApiClientT, HeaderStream},
 		dynamic::{decode_availability_cores, decode_claim_queue, decode_scheduled_paras, decode_validator_groups},
 	},
-	metadata::{polkadot, polkadot_primitives},
-	types::{AccountId32, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, SessionKeys, Timestamp, H256},
+	metadata::polkadot_primitives,
+	types::{
+		AccountId32, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, InherentData, SessionKeys,
+		SubxtHrmpChannel, Timestamp, H256,
+	},
 	utils::{Retry, RetryOptions},
 };
 use log::{error, warn};
@@ -32,7 +35,7 @@ use std::{
 use subxt::{
 	dynamic::{At, Value},
 	ext::scale_value::ValueDef,
-	OnlineClient, PolkadotConfig,
+	PolkadotConfig,
 };
 use thiserror::Error;
 
@@ -43,13 +46,13 @@ pub enum RequestType {
 	/// Get a block header.
 	GetHead(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get a full block.
-	GetBlock(Option<<PolkadotConfig as subxt::Config>::Hash>),
+	GetBlockNumber(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get a block hash.
 	GetBlockHash(Option<BlockNumber>),
 	/// Get block events.
 	GetEvents(<PolkadotConfig as subxt::Config>::Hash),
 	/// Extract the `ParaInherentData` from a given block.
-	ExtractParaInherent(subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>),
+	ExtractParaInherent(Option<<PolkadotConfig as subxt::Config>::Hash>),
 	/// Get the availability core scheduling information at a given block.
 	GetScheduledParas(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get the claim queue scheduling information at a given block.
@@ -86,7 +89,7 @@ impl Debug for RequestType {
 			RequestType::GetHead(h) => {
 				format!("get head: {:?}", h)
 			},
-			RequestType::GetBlock(h) => {
+			RequestType::GetBlockNumber(h) => {
 				format!("get block: {:?}", h)
 			},
 			RequestType::GetBlockHash(h) => {
@@ -95,8 +98,8 @@ impl Debug for RequestType {
 			RequestType::GetEvents(h) => {
 				format!("get events: {:?}", h)
 			},
-			RequestType::ExtractParaInherent(block) => {
-				format!("get inherent for block number: {:?}", block.number())
+			RequestType::ExtractParaInherent(h) => {
+				format!("get inherent for block: {:?}", h)
 			},
 			RequestType::GetScheduledParas(h) => {
 				format!("get scheduled paras: {:?}", h)
@@ -133,14 +136,6 @@ impl Debug for RequestType {
 	}
 }
 
-/// The `InherentData` constructed with the subxt API.
-pub type InherentData = polkadot_primitives::InherentData<
-	polkadot::runtime_types::sp_runtime::generic::header::Header<
-		::core::primitive::u32,
-		polkadot::runtime_types::sp_runtime::traits::BlakeTwo256,
-	>,
->;
-
 /// Response types for APIs.
 pub enum Response {
 	/// A timestamp.
@@ -148,7 +143,7 @@ pub enum Response {
 	/// A block header.
 	MaybeHead(Option<<PolkadotConfig as subxt::Config>::Header>),
 	/// A full block.
-	Block(subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>),
+	BlockNumber(BlockNumber),
 	/// A block hash.
 	MaybeBlockHash(Option<H256>),
 	/// Block events
@@ -235,10 +230,10 @@ impl RequestExecutor {
 			let reply = match request {
 				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(api, hash).await,
 				RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
-				RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
+				RequestType::GetBlockNumber(maybe_hash) => subxt_get_block_number(api, maybe_hash).await,
 				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(api, maybe_block_number).await,
 				RequestType::GetEvents(hash) => subxt_get_events(api, hash).await,
-				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block).await,
+				RequestType::ExtractParaInherent(maybe_hash) => subxt_extract_parainherent(api, maybe_hash).await,
 				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
 				RequestType::GetClaimQueue(hash) => subxt_get_claim_queue(api, hash).await,
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
@@ -292,12 +287,12 @@ impl RequestExecutor {
 		wrap_subxt_call!(self, GetHead, MaybeHead, url, maybe_hash)
 	}
 
-	pub async fn get_block(
+	pub async fn get_block_number(
 		&mut self,
 		url: &str,
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
-	) -> std::result::Result<subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetBlock, Block, url, maybe_hash)
+	) -> std::result::Result<BlockNumber, SubxtWrapperError> {
+		wrap_subxt_call!(self, GetBlockNumber, BlockNumber, url, maybe_hash)
 	}
 
 	pub async fn get_block_hash(
@@ -320,15 +315,8 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
-	) -> std::result::Result<Option<InherentData>, SubxtWrapperError> {
-		match self.get_block(url, maybe_hash).await {
-			Ok(block) => match self.execute_request(RequestType::ExtractParaInherent(block), url).await {
-				Ok(Response::ParaInherentData(data)) => Ok(Some(data)),
-				Err(e) => Err(e),
-				_ => panic!("Expected ParaInherentData, got something else."),
-			},
-			Err(e) => Err(e),
-		}
+	) -> std::result::Result<InherentData, SubxtWrapperError> {
+		wrap_subxt_call!(self, ExtractParaInherent, ParaInherentData, url, maybe_hash)
 	}
 
 	pub async fn get_scheduled_paras(
@@ -432,7 +420,7 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<Box<dyn ApiCli
 	let mut retry = Retry::new(retry);
 
 	loop {
-		match build_api_client(url).await {
+		match build_online_client(url).await {
 			Ok(client) => return Some(Box::new(client)),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
@@ -445,30 +433,21 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<Box<dyn ApiCli
 }
 
 async fn subxt_get_head(api: Box<dyn ApiClientT>, maybe_hash: Option<H256>) -> Result {
-	let block_res = match maybe_hash {
-		Some(hash) => api.blocks().at(hash).await,
-		None => api.blocks().at_latest().await,
-	};
-	let block = match block_res {
+	let head = match api.get_head(maybe_hash).await {
 		Ok(v) => Some(v),
 		Err(subxt::Error::Block(subxt::error::BlockError::NotFound(_))) => None,
 		Err(err) => return Err(err.into()),
 	};
 
-	Ok(Response::MaybeHead(block.map(|v| v.header().clone())))
+	Ok(Response::MaybeHead(head))
 }
 
 async fn subxt_get_block_ts(api: Box<dyn ApiClientT>, hash: H256) -> Result {
-	let timestamp = polkadot::storage().timestamp().now();
-	Ok(Response::Timestamp(api.storage().at(hash).fetch(&timestamp).await?.unwrap_or_default()))
+	Ok(Response::Timestamp(api.get_block_ts(hash).await?.unwrap_or_default()))
 }
 
-async fn subxt_get_block(api: Box<dyn ApiClientT>, maybe_hash: Option<H256>) -> Result {
-	let block = match maybe_hash {
-		Some(hash) => api.blocks().at(hash).await?,
-		None => api.blocks().at_latest().await?,
-	};
-	Ok(Response::Block(block))
+async fn subxt_get_block_number(api: Box<dyn ApiClientT>, maybe_hash: Option<H256>) -> Result {
+	Ok(Response::BlockNumber(api.get_block_number(maybe_hash).await?))
 }
 
 async fn subxt_get_block_hash(api: Box<dyn ApiClientT>, maybe_block_number: Option<BlockNumber>) -> Result {
@@ -476,7 +455,7 @@ async fn subxt_get_block_hash(api: Box<dyn ApiClientT>, maybe_block_number: Opti
 }
 
 async fn subxt_get_events(api: Box<dyn ApiClientT>, hash: H256) -> Result {
-	Ok(Response::MaybeEvents(Some(api.events().at(hash).await?)))
+	Ok(Response::MaybeEvents(Some(api.get_events(hash).await?)))
 }
 
 /// Error originated from decoding an extrinsic.
@@ -492,141 +471,65 @@ pub enum DecodeExtrinsicError {
 
 async fn fetch_dynamic_storage(
 	api: Box<dyn ApiClientT>,
-	block_hash: H256,
+	maybe_hash: Option<H256>,
 	pallet_name: &str,
 	entry_name: &str,
 ) -> std::result::Result<Value<u32>, SubxtWrapperError> {
-	api.storage()
-		.at(block_hash)
-		.fetch(&subxt::dynamic::storage(pallet_name, entry_name, Vec::<u8>::new()))
+	api.fetch_dynamic_storage(maybe_hash, pallet_name, entry_name)
 		.await?
-		.map_or(Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}"))), |v| {
-			v.to_value().map_err(|e| e.into())
-		})
+		.ok_or(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}")))
 }
 
 async fn subxt_get_sheduled_paras(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "Scheduled").await?;
+	let value = fetch_dynamic_storage(api, Some(block_hash), "ParaScheduler", "Scheduled").await?;
 	let paras = decode_scheduled_paras(&value)?;
 
 	Ok(Response::ScheduledParas(paras))
 }
 
 async fn subxt_get_claim_queue(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ClaimQueue").await?;
+	let value = fetch_dynamic_storage(api, Some(block_hash), "ParaScheduler", "ClaimQueue").await?;
 	let queue = decode_claim_queue(&value)?;
 
 	Ok(Response::ClaimQueue(queue))
 }
 
 async fn subxt_get_occupied_cores(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "AvailabilityCores").await?;
+	let value = fetch_dynamic_storage(api, Some(block_hash), "ParaScheduler", "AvailabilityCores").await?;
 	let cores = decode_availability_cores(&value)?;
 
 	Ok(Response::OccupiedCores(cores))
 }
 
 async fn subxt_get_validator_groups(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ValidatorGroups").await?;
+	let value = fetch_dynamic_storage(api, Some(block_hash), "ParaScheduler", "ValidatorGroups").await?;
 	let groups = decode_validator_groups(&value)?;
 
 	Ok(Response::BackingGroups(groups))
 }
 
 async fn subxt_get_session_index(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
-	let addr = polkadot::storage().session().current_index();
-	let session_index = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
-	Ok(Response::SessionIndex(session_index))
+	Ok(Response::SessionIndex(api.get_session_index(block_hash).await?.unwrap_or_default()))
 }
 
 async fn subxt_get_session_account_keys(api: Box<dyn ApiClientT>, session_index: u32) -> Result {
-	let addr = polkadot::storage().para_session_info().account_keys(session_index);
-	let session_keys = api.storage().at_latest().await?.fetch(&addr).await?;
-	Ok(Response::SessionAccountKeys(session_keys))
+	Ok(Response::SessionAccountKeys(api.get_session_account_keys(session_index).await?))
 }
 
 async fn subxt_get_session_next_keys(api: Box<dyn ApiClientT>, account: &AccountId32) -> Result {
-	let addr = polkadot::storage().session().next_keys(account);
-	let next_keys = api.storage().at_latest().await?.fetch(&addr).await?;
-	Ok(Response::SessionNextKeys(next_keys))
-}
-
-/// A wrapper over subxt HRMP channel configuration
-#[derive(Debug, Clone, Default)]
-pub struct SubxtHrmpChannel {
-	pub max_capacity: u32,
-	pub max_total_size: u32,
-	pub max_message_size: u32,
-	pub msg_count: u32,
-	pub total_size: u32,
-	pub mqc_head: Option<H256>,
-	pub sender_deposit: u128,
-	pub recipient_deposit: u128,
-}
-
-impl From<polkadot::runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
-	fn from(channel: polkadot::runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
-		SubxtHrmpChannel {
-			max_capacity: channel.max_capacity,
-			max_total_size: channel.max_total_size,
-			max_message_size: channel.max_message_size,
-			msg_count: channel.msg_count,
-			total_size: channel.total_size,
-			mqc_head: channel.mqc_head,
-			sender_deposit: channel.sender_deposit,
-			recipient_deposit: channel.recipient_deposit,
-		}
-	}
+	Ok(Response::SessionNextKeys(api.get_session_next_keys(account).await?))
 }
 
 async fn subxt_get_inbound_hrmp_channels(api: Box<dyn ApiClientT>, block_hash: H256, para_id: u32) -> Result {
-	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
-	let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(&Id(para_id));
-	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
-	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
-	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
-		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
-		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-		api.storage()
-			.at(block_hash)
-			.fetch(&addr)
-			.await?
-			.map(|hrmp_channel_configuration| {
-				channels_configuration.insert(peer_parachain_id, hrmp_channel_configuration.into())
-			});
-	}
-	Ok(Response::HRMPChannels(channels_configuration))
+	Ok(Response::HRMPChannels(api.get_inbound_hrmp_channels(block_hash, para_id).await?))
 }
 
 async fn subxt_get_outbound_hrmp_channels(api: Box<dyn ApiClientT>, block_hash: H256, para_id: u32) -> Result {
-	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
-
-	let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(&Id(para_id));
-	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
-	let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
-	for peer_parachain_id in hrmp_channels.into_iter().map(|id| id.0) {
-		let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
-		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-		api.storage()
-			.at(block_hash)
-			.fetch(&addr)
-			.await?
-			.map(|hrmp_channel_configuration| {
-				channels_configuration.insert(peer_parachain_id, hrmp_channel_configuration.into())
-			});
-	}
-	Ok(Response::HRMPChannels(channels_configuration))
+	Ok(Response::HRMPChannels(api.get_outbound_hrmp_channels(block_hash, para_id).await?))
 }
 
 async fn subxt_get_host_configuration(api: Box<dyn ApiClientT>) -> Result {
-	let pallet_name = "Configuration";
-	let entry_name = "ActiveConfig";
-	let addr = subxt::dynamic::storage(pallet_name, entry_name, Vec::<u8>::new());
-	let value = api.storage().at_latest().await?.fetch(&addr).await?.map_or(
-		Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}"))),
-		|v| v.to_value().map_err(|e| e.into()),
-	)?;
-
+	let value = fetch_dynamic_storage(api, None, "Configuration", "ActiveConfig").await?;
 	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
 }
 
@@ -638,24 +541,8 @@ async fn subxt_get_finalized_block_subscription(api: Box<dyn ApiClientT>) -> Res
 	Ok(Response::ChainSubscription(api.stream_finalized_block_headers().await?))
 }
 
-async fn subxt_extract_parainherent(
-	block: &subxt::blocks::Block<PolkadotConfig, OnlineClient<PolkadotConfig>>,
-) -> Result {
-	let ex = block
-		.extrinsics()
-		.await?
-		.iter()
-		.take(2)
-		.last()
-		.expect("`ParaInherent` data is always at index #1")
-		.expect("`ParaInherent` data must exist");
-
-	let enter = ex
-		.as_extrinsic::<polkadot::para_inherent::calls::types::Enter>()
-		.expect("Failed to decode `ParaInherent`")
-		.expect("`ParaInherent` must exist");
-
-	Ok(Response::ParaInherentData(enter.data))
+async fn subxt_extract_parainherent(api: Box<dyn ApiClientT>, maybe_hash: Option<H256>) -> Result {
+	Ok(Response::ParaInherentData(api.extract_parainherent(maybe_hash).await?))
 }
 
 #[derive(Debug, Error)]

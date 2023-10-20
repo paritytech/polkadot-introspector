@@ -15,10 +15,10 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use polkadot_introspector_essentials::{
-	api::{storage::RequestExecutor, subxt_wrapper::InherentData},
+	api::storage::RequestExecutor,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
 	metadata::polkadot_primitives::ValidatorIndex,
-	types::{AccountId32, CoreOccupied, OnDemandOrder, Timestamp, H256},
+	types::{AccountId32, CoreOccupied, InherentData, OnDemandOrder, Timestamp, H256},
 };
 use std::collections::BTreeMap;
 use subxt::config::{substrate::BlakeTwo256, Hasher};

@@ -19,7 +19,7 @@ mod ws;
 
 use crate::{
 	api::{
-		subxt_wrapper::{InherentData, RequestExecutor, SubxtWrapperError},
+		subxt_wrapper::{RequestExecutor, SubxtWrapperError},
 		ApiService,
 	},
 	chain_events::{
@@ -28,7 +28,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{Header, OnDemandOrder, Timestamp, H256},
+	types::{Header, InherentData, OnDemandOrder, Timestamp, H256},
 	utils::RetryOptions,
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
@@ -604,17 +604,12 @@ impl Collector {
 			.executor
 			.extract_parainherent_data(self.endpoint.as_str(), Some(block_hash))
 			.await?;
-
-		if let Some(inherent_data) = inherent_data {
-			self.storage_write_prefixed(
-				CollectorPrefixType::InherentData,
-				block_hash,
-				StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), inherent_data),
-			)
-			.await?;
-		} else {
-			warn!("cannot get inherent data for block number {} ({})", block_number, block_hash);
-		}
+		self.storage_write_prefixed(
+			CollectorPrefixType::InherentData,
+			block_hash,
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), inherent_data),
+		)
+		.await?;
 
 		Ok(())
 	}

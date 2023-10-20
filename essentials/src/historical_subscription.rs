@@ -103,8 +103,8 @@ impl HistoricalSubscription {
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
-		let last_block_number = match executor.get_block(&url, None).await {
-			Ok(block) => block.number(),
+		let last_block_number = match executor.get_block_number(&url, None).await {
+			Ok(v) => v,
 			Err(_) => {
 				error!("Subscription to {} failed, last block not found", url);
 				return

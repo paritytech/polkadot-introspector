@@ -20,7 +20,7 @@ use crate::metadata::{
 		runtime_types as subxt_runtime_types,
 		runtime_types::{polkadot_parachain::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind},
 	},
-	polkadot_primitives::CoreIndex,
+	polkadot_primitives,
 };
 use parity_scale_codec::{Decode, Encode};
 use std::collections::{BTreeMap, VecDeque};
@@ -39,11 +39,47 @@ pub type SessionKeys = runtime::SessionKeys;
 pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = BTreeMap<u32, VecDeque<Option<ParasEntry>>>;
 
+/// The `InherentData` constructed with the subxt API.
+pub type InherentData = polkadot_primitives::InherentData<
+	subxt_runtime_types::sp_runtime::generic::header::Header<
+		::core::primitive::u32,
+		subxt_runtime_types::sp_runtime::traits::BlakeTwo256,
+	>,
+>;
+
+/// A wrapper over subxt HRMP channel configuration
+#[derive(Debug, Clone, Default)]
+pub struct SubxtHrmpChannel {
+	pub max_capacity: u32,
+	pub max_total_size: u32,
+	pub max_message_size: u32,
+	pub msg_count: u32,
+	pub total_size: u32,
+	pub mqc_head: Option<H256>,
+	pub sender_deposit: u128,
+	pub recipient_deposit: u128,
+}
+
+impl From<subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
+	fn from(channel: subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
+		SubxtHrmpChannel {
+			max_capacity: channel.max_capacity,
+			max_total_size: channel.max_total_size,
+			max_message_size: channel.max_message_size,
+			msg_count: channel.msg_count,
+			total_size: channel.total_size,
+			mqc_head: channel.mqc_head,
+			sender_deposit: channel.sender_deposit,
+			recipient_deposit: channel.recipient_deposit,
+		}
+	}
+}
+
 // TODO: Take it from runtime types v5
 /// How a free core is scheduled to be assigned.
 pub struct CoreAssignment {
 	/// The core that is assigned.
-	pub core: CoreIndex,
+	pub core: polkadot_primitives::CoreIndex,
 	/// The unique ID of the para that is assigned to the core.
 	pub para_id: Id,
 	/// The kind of the assignment.

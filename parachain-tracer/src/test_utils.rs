@@ -16,7 +16,7 @@
 use crate::parachain_block_info::ParachainBlockInfo;
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
-	api::{storage::RequestExecutor, subxt_wrapper::SubxtHrmpChannel, ApiService},
+	api::{storage::RequestExecutor, ApiService},
 	collector::{
 		candidate_record::{CandidateInclusionRecord, CandidateRecord},
 		CollectorPrefixType,
@@ -39,7 +39,7 @@ use polkadot_introspector_essentials::{
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::H256,
+	types::{SubxtHrmpChannel, H256},
 };
 use std::{collections::BTreeMap, time::Duration};
 use subxt::utils::bits::DecodedBits;

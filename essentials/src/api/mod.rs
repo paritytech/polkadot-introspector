@@ -112,7 +112,7 @@ mod tests {
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
 		let timestamp = subxt.get_block_timestamp(rpc_node_url(), head.hash()).await.unwrap();
-		let _block = subxt.get_block(rpc_node_url(), Some(head.hash())).await.unwrap();
+		let _block = subxt.get_block_number(rpc_node_url(), Some(head.hash())).await.unwrap();
 		assert!(timestamp > 0);
 	}
 
@@ -124,7 +124,6 @@ mod tests {
 		subxt
 			.extract_parainherent_data(rpc_node_url(), None)
 			.await
-			.unwrap()
 			.expect("Inherent data must be present");
 	}
 
