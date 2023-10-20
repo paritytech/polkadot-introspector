@@ -17,7 +17,7 @@
 
 use crate::{
 	api::{
-		api_client::{ApiClient, HeaderStream},
+		api_client::{build_api_client, ApiClientT, HeaderStream},
 		dynamic::{decode_availability_cores, decode_claim_queue, decode_scheduled_paras, decode_validator_groups},
 	},
 	metadata::{polkadot, polkadot_primitives},
@@ -190,8 +190,14 @@ impl Debug for Response {
 /// Represents a pool for subxt requests
 #[derive(Clone)]
 pub struct RequestExecutor {
-	connection_pool: HashMap<String, ApiClient>,
+	connection_pool: HashMap<String, Box<dyn ApiClientT>>,
 	retry: RetryOptions,
+}
+
+impl Clone for Box<dyn ApiClientT> {
+	fn clone(&self) -> Self {
+		dyn_clone::clone_box(&**self)
+	}
 }
 
 macro_rules! wrap_subxt_call {
@@ -214,12 +220,12 @@ impl RequestExecutor {
 		let mut retry = Retry::new(&self.retry);
 
 		loop {
-			let api = match connection_pool.get(url) {
-				Some(api) => api.clone(),
+			let api: Box<dyn ApiClientT> = match connection_pool.get(url) {
+				Some(api) => dyn_clone::clone_box(&**api),
 				None => {
 					let new_api = new_client_fn(url, &self.retry).await;
 					if let Some(api) = new_api {
-						connection_pool.insert(url.to_owned(), api.clone());
+						connection_pool.insert(url.to_owned(), dyn_clone::clone_box(&*api));
 						api
 					} else {
 						return Err(SubxtWrapperError::ConnectionError)
@@ -227,27 +233,27 @@ impl RequestExecutor {
 				},
 			};
 			let reply = match request {
-				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(&api, hash).await,
-				RequestType::GetHead(maybe_hash) => subxt_get_head(&api, maybe_hash).await,
-				RequestType::GetBlock(maybe_hash) => subxt_get_block(&api, maybe_hash).await,
-				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(&api, maybe_block_number).await,
-				RequestType::GetEvents(hash) => subxt_get_events(&api, hash).await,
+				RequestType::GetBlockTimestamp(hash) => subxt_get_block_ts(api, hash).await,
+				RequestType::GetHead(maybe_hash) => subxt_get_head(api, maybe_hash).await,
+				RequestType::GetBlock(maybe_hash) => subxt_get_block(api, maybe_hash).await,
+				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(api, maybe_block_number).await,
+				RequestType::GetEvents(hash) => subxt_get_events(api, hash).await,
 				RequestType::ExtractParaInherent(ref block) => subxt_extract_parainherent(block).await,
-				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(&api, hash).await,
-				RequestType::GetClaimQueue(hash) => subxt_get_claim_queue(&api, hash).await,
-				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(&api, hash).await,
-				RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(&api, hash).await,
-				RequestType::GetSessionIndex(hash) => subxt_get_session_index(&api, hash).await,
+				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
+				RequestType::GetClaimQueue(hash) => subxt_get_claim_queue(api, hash).await,
+				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
+				RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
+				RequestType::GetSessionIndex(hash) => subxt_get_session_index(api, hash).await,
 				RequestType::GetSessionAccountKeys(session_index) =>
-					subxt_get_session_account_keys(&api, session_index).await,
-				RequestType::GetSessionNextKeys(ref account) => subxt_get_session_next_keys(&api, account).await,
+					subxt_get_session_account_keys(api, session_index).await,
+				RequestType::GetSessionNextKeys(ref account) => subxt_get_session_next_keys(api, account).await,
 				RequestType::GetInboundHRMPChannels(hash, para_id) =>
-					subxt_get_inbound_hrmp_channels(&api, hash, para_id).await,
+					subxt_get_inbound_hrmp_channels(api, hash, para_id).await,
 				RequestType::GetOutboundHRMPChannels(hash, para_id) =>
-					subxt_get_outbound_hrmp_channels(&api, hash, para_id).await,
-				RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(&api).await,
-				RequestType::GetBestBlockSubscription(_) => subxt_get_best_block_subscription(&api).await,
-				RequestType::GetFinalizedBlockSubscription(_) => subxt_get_finalized_block_subscription(&api).await,
+					subxt_get_outbound_hrmp_channels(api, hash, para_id).await,
+				RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(api).await,
+				RequestType::GetBestBlockSubscription(_) => subxt_get_best_block_subscription(api).await,
+				RequestType::GetFinalizedBlockSubscription(_) => subxt_get_finalized_block_subscription(api).await,
 			};
 
 			if let Err(e) = reply {
@@ -422,12 +428,12 @@ impl RequestExecutor {
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<ApiClient> {
+async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<Box<dyn ApiClientT>> {
 	let mut retry = Retry::new(retry);
 
 	loop {
-		match ApiClient::build(url).await {
-			Ok(client) => return Some(client),
+		match build_api_client(url).await {
+			Ok(client) => return Some(Box::new(client)),
 			Err(err) => {
 				error!("[{}] Client error: {:?}", url, err);
 				if (retry.sleep().await).is_err() {
@@ -438,7 +444,7 @@ async fn new_client_fn(url: &str, retry: &RetryOptions) -> Option<ApiClient> {
 	}
 }
 
-async fn subxt_get_head(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
+async fn subxt_get_head(api: Box<dyn ApiClientT>, maybe_hash: Option<H256>) -> Result {
 	let block_res = match maybe_hash {
 		Some(hash) => api.blocks().at(hash).await,
 		None => api.blocks().at_latest().await,
@@ -452,12 +458,12 @@ async fn subxt_get_head(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
 	Ok(Response::MaybeHead(block.map(|v| v.header().clone())))
 }
 
-async fn subxt_get_block_ts(api: &ApiClient, hash: H256) -> Result {
+async fn subxt_get_block_ts(api: Box<dyn ApiClientT>, hash: H256) -> Result {
 	let timestamp = polkadot::storage().timestamp().now();
 	Ok(Response::Timestamp(api.storage().at(hash).fetch(&timestamp).await?.unwrap_or_default()))
 }
 
-async fn subxt_get_block(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
+async fn subxt_get_block(api: Box<dyn ApiClientT>, maybe_hash: Option<H256>) -> Result {
 	let block = match maybe_hash {
 		Some(hash) => api.blocks().at(hash).await?,
 		None => api.blocks().at_latest().await?,
@@ -465,11 +471,11 @@ async fn subxt_get_block(api: &ApiClient, maybe_hash: Option<H256>) -> Result {
 	Ok(Response::Block(block))
 }
 
-async fn subxt_get_block_hash(api: &ApiClient, maybe_block_number: Option<BlockNumber>) -> Result {
+async fn subxt_get_block_hash(api: Box<dyn ApiClientT>, maybe_block_number: Option<BlockNumber>) -> Result {
 	Ok(Response::MaybeBlockHash(api.legacy_get_block_hash(maybe_block_number).await?))
 }
 
-async fn subxt_get_events(api: &ApiClient, hash: H256) -> Result {
+async fn subxt_get_events(api: Box<dyn ApiClientT>, hash: H256) -> Result {
 	Ok(Response::MaybeEvents(Some(api.events().at(hash).await?)))
 }
 
@@ -485,7 +491,7 @@ pub enum DecodeExtrinsicError {
 }
 
 async fn fetch_dynamic_storage(
-	api: &ApiClient,
+	api: Box<dyn ApiClientT>,
 	block_hash: H256,
 	pallet_name: &str,
 	entry_name: &str,
@@ -499,47 +505,47 @@ async fn fetch_dynamic_storage(
 		})
 }
 
-async fn subxt_get_sheduled_paras(api: &ApiClient, block_hash: H256) -> Result {
+async fn subxt_get_sheduled_paras(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "Scheduled").await?;
 	let paras = decode_scheduled_paras(&value)?;
 
 	Ok(Response::ScheduledParas(paras))
 }
 
-async fn subxt_get_claim_queue(api: &ApiClient, block_hash: H256) -> Result {
+async fn subxt_get_claim_queue(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ClaimQueue").await?;
 	let queue = decode_claim_queue(&value)?;
 
 	Ok(Response::ClaimQueue(queue))
 }
 
-async fn subxt_get_occupied_cores(api: &ApiClient, block_hash: H256) -> Result {
+async fn subxt_get_occupied_cores(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "AvailabilityCores").await?;
 	let cores = decode_availability_cores(&value)?;
 
 	Ok(Response::OccupiedCores(cores))
 }
 
-async fn subxt_get_validator_groups(api: &ApiClient, block_hash: H256) -> Result {
+async fn subxt_get_validator_groups(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
 	let value = fetch_dynamic_storage(api, block_hash, "ParaScheduler", "ValidatorGroups").await?;
 	let groups = decode_validator_groups(&value)?;
 
 	Ok(Response::BackingGroups(groups))
 }
 
-async fn subxt_get_session_index(api: &ApiClient, block_hash: H256) -> Result {
+async fn subxt_get_session_index(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
 	let addr = polkadot::storage().session().current_index();
 	let session_index = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 	Ok(Response::SessionIndex(session_index))
 }
 
-async fn subxt_get_session_account_keys(api: &ApiClient, session_index: u32) -> Result {
+async fn subxt_get_session_account_keys(api: Box<dyn ApiClientT>, session_index: u32) -> Result {
 	let addr = polkadot::storage().para_session_info().account_keys(session_index);
 	let session_keys = api.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionAccountKeys(session_keys))
 }
 
-async fn subxt_get_session_next_keys(api: &ApiClient, account: &AccountId32) -> Result {
+async fn subxt_get_session_next_keys(api: Box<dyn ApiClientT>, account: &AccountId32) -> Result {
 	let addr = polkadot::storage().session().next_keys(account);
 	let next_keys = api.storage().at_latest().await?.fetch(&addr).await?;
 	Ok(Response::SessionNextKeys(next_keys))
@@ -573,7 +579,7 @@ impl From<polkadot::runtime_types::polkadot_runtime_parachains::hrmp::HrmpChanne
 	}
 }
 
-async fn subxt_get_inbound_hrmp_channels(api: &ApiClient, block_hash: H256, para_id: u32) -> Result {
+async fn subxt_get_inbound_hrmp_channels(api: Box<dyn ApiClientT>, block_hash: H256, para_id: u32) -> Result {
 	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 	let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(&Id(para_id));
 	let hrmp_channels = api.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
@@ -592,7 +598,7 @@ async fn subxt_get_inbound_hrmp_channels(api: &ApiClient, block_hash: H256, para
 	Ok(Response::HRMPChannels(channels_configuration))
 }
 
-async fn subxt_get_outbound_hrmp_channels(api: &ApiClient, block_hash: H256, para_id: u32) -> Result {
+async fn subxt_get_outbound_hrmp_channels(api: Box<dyn ApiClientT>, block_hash: H256, para_id: u32) -> Result {
 	use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
 
 	let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(&Id(para_id));
@@ -612,7 +618,7 @@ async fn subxt_get_outbound_hrmp_channels(api: &ApiClient, block_hash: H256, par
 	Ok(Response::HRMPChannels(channels_configuration))
 }
 
-async fn subxt_get_host_configuration(api: &ApiClient) -> Result {
+async fn subxt_get_host_configuration(api: Box<dyn ApiClientT>) -> Result {
 	let pallet_name = "Configuration";
 	let entry_name = "ActiveConfig";
 	let addr = subxt::dynamic::storage(pallet_name, entry_name, Vec::<u8>::new());
@@ -624,11 +630,11 @@ async fn subxt_get_host_configuration(api: &ApiClient) -> Result {
 	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
 }
 
-async fn subxt_get_best_block_subscription(api: &ApiClient) -> Result {
+async fn subxt_get_best_block_subscription(api: Box<dyn ApiClientT>) -> Result {
 	Ok(Response::ChainSubscription(api.stream_best_block_headers().await?))
 }
 
-async fn subxt_get_finalized_block_subscription(api: &ApiClient) -> Result {
+async fn subxt_get_finalized_block_subscription(api: Box<dyn ApiClientT>) -> Result {
 	Ok(Response::ChainSubscription(api.stream_finalized_block_headers().await?))
 }
 

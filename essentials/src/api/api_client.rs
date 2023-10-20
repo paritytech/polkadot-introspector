@@ -16,6 +16,7 @@
 //
 
 use crate::types::{BlockNumber, Header, H256};
+use dyn_clone::DynClone;
 use subxt::{
 	backend::{
 		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
@@ -38,33 +39,47 @@ pub struct ApiClient {
 pub type HeaderStream = StreamOf<Result<(Header, BlockRef<H256>), subxt::Error>>;
 pub type MyHeaderStream<C> = StreamOf<Result<(<C as Config>::Header, BlockRef<<C as Config>::Hash>), subxt::Error>>;
 
-impl ApiClient {
-	pub async fn build(url: &str) -> Result<ApiClient, String> {
-		let rpc_client = RpcClient::from_url(url)
-			.await
-			.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
-		let client = OnlineClient::from_rpc_client(rpc_client.clone())
-			.await
-			.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
-		let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
+pub async fn build_api_client(url: &str) -> Result<ApiClient, String> {
+	let rpc_client = RpcClient::from_url(url)
+		.await
+		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+	let client = OnlineClient::from_rpc_client(rpc_client.clone())
+		.await
+		.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
+	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
 
-		Ok(ApiClient { client, legacy_rpc_methods })
-	}
+	Ok(ApiClient { client, legacy_rpc_methods })
+}
 
-	pub fn storage(&self) -> StorageClient<PolkadotConfig, OnlineClient<PolkadotConfig>> {
+#[async_trait::async_trait]
+pub trait ApiClientT: DynClone + Send + Sync {
+	fn storage(&self) -> StorageClient<PolkadotConfig, OnlineClient<PolkadotConfig>>;
+	fn blocks(&self) -> BlocksClient<PolkadotConfig, OnlineClient<PolkadotConfig>>;
+	fn events(&self) -> EventsClient<PolkadotConfig, OnlineClient<PolkadotConfig>>;
+	async fn legacy_get_block_hash(
+		&self,
+		maybe_block_number: Option<BlockNumber>,
+	) -> Result<Option<H256>, subxt::Error>;
+	async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error>;
+	async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error>;
+}
+
+#[async_trait::async_trait]
+impl ApiClientT for ApiClient {
+	fn storage(&self) -> StorageClient<PolkadotConfig, OnlineClient<PolkadotConfig>> {
 		self.client.storage()
 	}
 
-	pub fn blocks(&self) -> BlocksClient<PolkadotConfig, OnlineClient<PolkadotConfig>> {
+	fn blocks(&self) -> BlocksClient<PolkadotConfig, OnlineClient<PolkadotConfig>> {
 		self.client.blocks()
 	}
 
-	pub fn events(&self) -> EventsClient<PolkadotConfig, OnlineClient<PolkadotConfig>> {
+	fn events(&self) -> EventsClient<PolkadotConfig, OnlineClient<PolkadotConfig>> {
 		self.client.events()
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes
-	pub async fn legacy_get_block_hash(
+	async fn legacy_get_block_hash(
 		&self,
 		maybe_block_number: Option<BlockNumber>,
 	) -> Result<Option<H256>, subxt::Error> {
@@ -72,11 +87,11 @@ impl ApiClient {
 		self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await
 	}
 
-	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
+	async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
 		self.client.backend().stream_best_block_headers().await
 	}
 
-	pub async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
+	async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
 		self.client.backend().stream_finalized_block_headers().await
 	}
 }
