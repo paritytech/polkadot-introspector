@@ -106,7 +106,7 @@ mod tests {
 	async fn basic_storage_test() {
 		let api = ApiService::new_with_storage(
 			RecordsStorageConfig { max_blocks: 10 },
-			ApiClientMode::Online,
+			ApiClientMode::RPC,
 			RetryOptions::default(),
 		);
 		let storage = api.storage();
@@ -123,7 +123,7 @@ mod tests {
 	async fn basic_subxt_test() {
 		let api = ApiService::<H256>::new_with_storage(
 			RecordsStorageConfig { max_blocks: 10 },
-			ApiClientMode::Online,
+			ApiClientMode::RPC,
 			RetryOptions::default(),
 		);
 		let mut subxt = api.subxt();
@@ -138,7 +138,7 @@ mod tests {
 	async fn extract_parainherent_data() {
 		let api = ApiService::<H256>::new_with_storage(
 			RecordsStorageConfig { max_blocks: 1 },
-			ApiClientMode::Online,
+			ApiClientMode::RPC,
 			RetryOptions::default(),
 		);
 		let mut subxt = api.subxt();
@@ -153,7 +153,7 @@ mod tests {
 	async fn get_scheduled_paras() {
 		let api = ApiService::<H256>::new_with_storage(
 			RecordsStorageConfig { max_blocks: 1 },
-			ApiClientMode::Online,
+			ApiClientMode::RPC,
 			RetryOptions::default(),
 		);
 		let mut subxt = api.subxt();
@@ -168,7 +168,7 @@ mod tests {
 	async fn get_occupied_cores() {
 		let api = ApiService::<H256>::new_with_storage(
 			RecordsStorageConfig { max_blocks: 1 },
-			ApiClientMode::Online,
+			ApiClientMode::RPC,
 			RetryOptions::default(),
 		);
 		let mut subxt = api.subxt();
@@ -183,7 +183,7 @@ mod tests {
 	async fn get_backing_groups() {
 		let api = ApiService::<H256>::new_with_storage(
 			RecordsStorageConfig { max_blocks: 1 },
-			ApiClientMode::Online,
+			ApiClientMode::RPC,
 			RetryOptions::default(),
 		);
 		let mut subxt = api.subxt();

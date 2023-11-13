@@ -136,7 +136,7 @@ mod tests {
 	fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
 		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
 			RecordsStorageConfig { max_blocks: 4 },
-			ApiClientMode::Online,
+			ApiClientMode::RPC,
 			Default::default(),
 		);
 		let storage = TrackerStorage::new(100, api.storage());

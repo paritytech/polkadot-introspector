@@ -421,7 +421,7 @@ impl RequestExecutor {
 #[derive(strum::Display, Debug, Clone, Copy, ValueEnum, Default)]
 pub enum ApiClientMode {
 	#[default]
-	Online,
+	RPC,
 	Light,
 }
 
@@ -431,7 +431,7 @@ async fn new_client_fn(url: &str, api_client_mode: ApiClientMode, retry: &RetryO
 
 	loop {
 		match api_client_mode {
-			ApiClientMode::Online => match build_online_client(url).await {
+			ApiClientMode::RPC => match build_online_client(url).await {
 				Ok(client) => return Some(Box::new(client)),
 				Err(err) => {
 					error!("[{}] Client error: {:?}", url, err);

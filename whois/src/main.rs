@@ -92,7 +92,7 @@ impl Whois {
 		self,
 		consumer_config: EventConsumerInit<TelemetryEvent>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
-		let mut executor = RequestExecutor::new(ApiClientMode::Online, self.opts.retry.clone());
+		let mut executor = RequestExecutor::new(ApiClientMode::RPC, self.opts.retry.clone());
 		let validator = match self.opts.command {
 			WhoisCommand::Account(v) => v.validator,
 			WhoisCommand::Session(v) => match executor.get_session_account_keys(&self.opts.ws, v.session_index).await {
