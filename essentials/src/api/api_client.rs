@@ -210,12 +210,12 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 			.iter()
 			.take(2)
 			.last()
-			.expect("`ParaInherent` data is always at index #1")
-			.expect("`ParaInherent` data must exist");
+			.ok_or_else(|| "`ParaInherent` data is always at index #1".to_string())?
+			.map_err(|_| "`ParaInherent` data must exist".to_string())?;
 		let enter = ex
 			.as_extrinsic::<polkadot::para_inherent::calls::types::Enter>()
-			.expect("Failed to decode `ParaInherent`")
-			.expect("`ParaInherent` must exist");
+			.map_err(|_| "Failed to decode `ParaInherent`".to_string())?
+			.ok_or_else(|| "`ParaInherent` must exist".to_string())?;
 
 		Ok(enter.data)
 	}
