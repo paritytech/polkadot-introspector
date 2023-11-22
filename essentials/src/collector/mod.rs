@@ -1116,7 +1116,7 @@ impl Collector {
 			)
 			.await?;
 
-			return Ok(Some(relay_parent));
+			return Ok(Some(relay_parent))
 		}
 
 		Ok(None)
