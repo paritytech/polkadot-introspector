@@ -678,9 +678,9 @@ impl Collector {
 		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
 		let mut assignments = self.core_assignments_via_scheduled_paras(block_hash).await;
 		// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
-		if let Err(SubxtWrapperError::SubxtError(subxt::error::Error::Metadata(
-			subxt::error::MetadataError::StorageEntryNotFound(_),
-		))) = assignments
+		if let Err(SubxtWrapperError::SubxtError(
+			subxt::error::Error::Metadata(subxt::error::MetadataError::StorageEntryNotFound(_))
+		)) = assignments
 		{
 			assignments = self.core_assignments_via_claim_queue(block_hash).await;
 		}
@@ -765,16 +765,11 @@ impl Collector {
 						),
 					)
 					.await?;
-					// Find the relay parent
-					let maybe_relay_parent = self
-						.storage_read_prefixed(
-							CollectorPrefixType::RelayBlockHeader,
-							change_event.candidate_descriptor.relay_parent,
-						)
-						.await;
 
-					if let Some(relay_parent) = maybe_relay_parent {
-						let relay_parent: Header = relay_parent.into_inner()?;
+					if let Some(relay_parent) = self
+						.read_or_fetch_header(change_event.candidate_descriptor.relay_parent)
+						.await?
+					{
 						let relay_block_number = self.state.current_relay_chain_block_number;
 						let candidate_inclusion = CandidateInclusionRecord {
 							relay_parent: change_event.candidate_descriptor.relay_parent,
@@ -1099,6 +1094,32 @@ impl Collector {
 		)
 		.await?;
 		Ok(())
+	}
+
+	async fn read_or_fetch_header(&self, block_hash: H256) -> Result<Option<Header>, CollectorError> {
+		if let Some(storage_entry) = self
+			.storage_read_prefixed(CollectorPrefixType::RelayBlockHeader, block_hash)
+			.await
+		{
+			return storage_entry.into_inner::<Header>().map(|h| Some(h)).map_err(|e| e.into())
+		}
+
+		if let Some(relay_parent) = self.executor().get_block_head(self.endpoint.as_str(), Some(block_hash)).await? {
+			let ts = self.executor().get_block_timestamp(&self.endpoint, block_hash).await?;
+			self.storage_write_prefixed(
+				CollectorPrefixType::RelayBlockHeader,
+				block_hash,
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(relay_parent.number, Duration::from_secs(ts)),
+					relay_parent.clone(),
+				),
+			)
+			.await?;
+
+			return Ok(Some(relay_parent));
+		}
+
+		Ok(None)
 	}
 
 	async fn storage_read_prefixed(&self, p: CollectorPrefixType, k: H256) -> Option<StorageEntry> {
