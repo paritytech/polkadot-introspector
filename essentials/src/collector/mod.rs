@@ -1101,7 +1101,7 @@ impl Collector {
 			.storage_read_prefixed(CollectorPrefixType::RelayBlockHeader, block_hash)
 			.await
 		{
-			return storage_entry.into_inner::<Header>().map(|h| Some(h)).map_err(|e| e.into())
+			return storage_entry.into_inner::<Header>().map(Some).map_err(|e| e.into())
 		}
 
 		if let Some(relay_parent) = self.executor().get_block_head(self.endpoint.as_str(), Some(block_hash)).await? {
