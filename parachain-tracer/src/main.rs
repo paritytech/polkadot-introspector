@@ -386,21 +386,16 @@ async fn main() -> color_eyre::Result<()> {
 	let tracer = ParachainTracer::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let mut futures = vec![];
-
-	if opts.is_historical {
+	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
-		let mut historical_sub = HistoricalSubscription::new(vec![opts.node.clone()], from, to, opts.retry.clone());
-		let consumer_init = historical_sub.create_consumer();
-
-		futures.extend(tracer.run(&shutdown_tx, consumer_init).await?);
-		futures.extend(historical_sub.run(&shutdown_tx).await?);
+		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, opts.retry.clone()))
 	} else {
-		let mut head_sub = ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone());
-		let consumer_init = head_sub.create_consumer();
-
-		futures.extend(tracer.run(&shutdown_tx, consumer_init).await?);
-		futures.extend(head_sub.run(&shutdown_tx).await?);
+		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone()))
 	};
+	let consumer_init = sub.create_consumer();
+
+	futures.extend(tracer.run(&shutdown_tx, consumer_init).await?);
+	futures.extend(sub.run(&shutdown_tx).await?);
 
 	init::run(futures, &shutdown_tx).await?;
 

@@ -63,8 +63,8 @@ impl EventStream for HistoricalSubscription {
 		EventConsumerInit::new(update_channels)
 	}
 
-	async fn run(self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
-		let futures = self.consumers.into_iter().map(|update_channels| {
+	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+		let futures = self.consumers.clone().into_iter().map(|update_channels| {
 			Self::run_per_consumer(
 				update_channels,
 				self.urls.clone(),
