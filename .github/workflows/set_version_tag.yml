@@ -13,6 +13,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
+          ssh-key: "${{ secrets.COMMIT_KEY }}"
 
       - name: Push new version if exists
         run: |
@@ -25,8 +26,8 @@ jobs:
           if [ "$LATEST_TAG" = "$CURRENT_TAG" ]; then
             echo "The version hasn't changed"
           else
-            git config --global user.name 'GitHub Action'
-            git config --global user.email 'action@github.com'
+            # git config --global user.name 'GitHub Action'
+            # git config --global user.email 'action@github.com'
             git tag $CURRENT_TAG
             git push origin $CURRENT_TAG
             echo "The version has updated"

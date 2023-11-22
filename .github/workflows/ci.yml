@@ -1,0 +1,161 @@
+name: continuous-integration
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '.gitlab-ci.yml'
+      - 'CODEOWNERS'
+      - 'LICENSE'
+      - 'FILE_TEMPLATE'
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOCKERFILE: scripts/ci/dockerfiles/polkadot-introspector_injected.Dockerfile
+  CI_IMAGE: paritytech/ci-unified:bullseye-1.71.0-v20230727
+  IMAGE_NAME: paritytech/polkadot-introspector
+  IMAGE_TAG: STUB_TAG
+  PUSH_IMAGE: false # decision whether to push image will be taken at a later step
+
+jobs:
+  set-image:
+    # GitHub Actions does not allow using 'env' in a container context.
+    # This workaround sets the container image for each job using 'set-image' job output.
+    runs-on: ubuntu-latest
+    outputs:
+      CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
+    steps:
+      - id: set_image
+        run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
+
+# lint
+  lint:
+    runs-on: ubuntu-latest
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: |
+          time cargo +nightly fmt --all -- --check
+
+      - name: Clippy
+        run: |
+          time cargo clippy --all-targets -- -D warnings
+
+      - name: Check
+        run:
+          time cargo check --all-targets --workspace
+
+# test
+  test:
+    runs-on: ubuntu-latest
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Test
+        run: |
+          rustup show
+          cargo --version
+          rustup +nightly show
+          cargo +nightly --version
+          bash --version
+          ./scripts/ci/zombienet/zombie.sh setup
+          ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/network.toml
+          WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --workspace
+          ./scripts/ci/zombienet/zombie.sh shutdown
+
+# build
+  build:
+    runs-on: ubuntu-latest
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build
+        run: |
+          time cargo build --release
+
+      - name: Archive aritfacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: polkadot-introspector
+          path: |
+            target/release/polkadot-block-time
+            target/release/polkadot-jaeger
+            target/release/polkadot-kvdb
+            target/release/polkadot-parachain-tracer
+            target/release/polkadot-whois
+          retention-days: 1
+
+# build/publish docker image
+  build-publish-docker:
+    runs-on: ubuntu-latest
+    needs: [set-image, build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check whether to publish Docker image
+        if: ${{ github.ref_type == 'tag' }}
+        run: |
+          echo "PUSH_IMAGE=true" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: polkadot-introspector
+          path: ./artifacts
+
+      - name: Set permissions
+        run: |
+          chmod +x ./artifacts/*
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        if: ${{ github.ref_type == 'tag' }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build/Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          push: ${{ env.PUSH_IMAGE }}
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          build-args: |
+            VCS_REF="${{ github.sha }}"
+            build-arg BUILD_DATE="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_NAME }}:latest
