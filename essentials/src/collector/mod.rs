@@ -678,9 +678,9 @@ impl Collector {
 		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
 		let mut assignments = self.core_assignments_via_scheduled_paras(block_hash).await;
 		// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
-		if let Err(SubxtWrapperError::SubxtError(
-			subxt::error::Error::Metadata(subxt::error::MetadataError::StorageEntryNotFound(_))
-		)) = assignments
+		if let Err(SubxtWrapperError::SubxtError(subxt::error::Error::Metadata(
+			subxt::error::MetadataError::StorageEntryNotFound(_),
+		))) = assignments
 		{
 			assignments = self.core_assignments_via_claim_queue(block_hash).await;
 		}
