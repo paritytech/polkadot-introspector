@@ -399,7 +399,13 @@ async fn main() -> color_eyre::Result<()> {
 	let mut futures = vec![];
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
-		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, opts.api_client_mode, opts.retry.clone()))
+		Box::new(HistoricalSubscription::new(
+			vec![opts.node.clone()],
+			from,
+			to,
+			opts.api_client_mode,
+			opts.retry.clone(),
+		))
 	} else {
 		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], opts.api_client_mode, opts.retry.clone()))
 	};

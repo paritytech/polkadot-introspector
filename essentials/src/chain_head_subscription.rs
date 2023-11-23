@@ -61,7 +61,13 @@ impl EventStream for ChainHeadSubscription {
 
 	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let futures = self.consumers.clone().into_iter().map(|update_channels| {
-			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), self.api_client_mode, self.retry.clone())
+			Self::run_per_consumer(
+				update_channels,
+				self.urls.clone(),
+				shutdown_tx.clone(),
+				self.api_client_mode,
+				self.retry.clone(),
+			)
 		});
 
 		Ok(futures.flatten().collect::<Vec<_>>())
