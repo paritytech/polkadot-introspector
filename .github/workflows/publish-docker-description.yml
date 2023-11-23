@@ -1,0 +1,24 @@
+name: Publish Docker image description
+
+on:
+  push:
+    branches:
+      - 'master'
+    paths:
+      - 'scripts/ci/dockerfiles/Dockerfile.README.md'
+
+jobs:
+  publish_docker_description:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker Hub Description
+        uses: paritytech-actions/dockerhub-description@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          repository: 'paritytech/polkadot-introspector'
+          short-description: 'Collection of tools for monitoring and introspection of Substrate based blockchains like Polkadot'
+          readme-filepath: 'scripts/ci/dockerfiles/Dockerfile.README.md'
