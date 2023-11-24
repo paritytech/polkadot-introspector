@@ -15,9 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::InherentData,
 	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatement, DisputeStatementSet},
-	types::{AccountId32, Timestamp, H256},
+	types::{AccountId32, InherentData, Timestamp, H256},
 };
 use std::time::Duration;
 

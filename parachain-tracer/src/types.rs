@@ -19,10 +19,9 @@ use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::SubxtHrmpChannel,
 	chain_events::SubxtDisputeResult,
 	metadata::polkadot_primitives::DisputeStatementSet,
-	types::{AccountId32, BlockNumber, Timestamp, H256},
+	types::{AccountId32, BlockNumber, SubxtHrmpChannel, Timestamp, H256},
 };
 use std::{
 	fmt::{self, Display, Formatter, Write},

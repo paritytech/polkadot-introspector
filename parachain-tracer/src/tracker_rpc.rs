@@ -17,8 +17,8 @@
 use async_trait::async_trait;
 use mockall::automock;
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{RequestExecutor, SubxtHrmpChannel, SubxtWrapperError},
-	types::H256,
+	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
+	types::{SubxtHrmpChannel, H256},
 };
 use std::collections::BTreeMap;
 
@@ -79,7 +79,7 @@ mod tests {
 	async fn setup_client() -> (ParachainTrackerRpc, H256) {
 		let api = create_api();
 		let rpc = ParachainTrackerRpc::new(100, rpc_node_url(), api.subxt());
-		let block_hash = api.subxt().get_block(rpc_node_url(), None).await.unwrap().header().parent_hash;
+		let block_hash = api.subxt().get_block_hash(rpc_node_url(), None).await.unwrap().unwrap();
 
 		(rpc, block_hash)
 	}

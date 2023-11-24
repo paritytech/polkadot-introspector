@@ -34,7 +34,7 @@ use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::RequestExecutor,
+	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector,
@@ -100,6 +100,9 @@ pub(crate) struct ParachainTracerOptions {
 	/// Defines subscription mode
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
+	/// Defines client to communicate with rpc node.
+	#[clap(long = "client", default_value_t, value_enum)]
+	pub api_client_mode: ApiClientMode,
 	/// Run in historical mode to trace parachains between specific blocks instead of following live chain progress
 	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
 	is_historical: bool,
@@ -148,16 +151,16 @@ impl ParachainTracer {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
-		let mut collector =
-			Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), self.retry.clone());
+		let mut collector = Collector::new(
+			self.opts.node.as_str(),
+			self.opts.collector_opts.clone(),
+			self.opts.api_client_mode,
+			self.retry.clone(),
+		);
 		collector.spawn(shutdown_tx).await?;
-		if let Err(e) = print_host_configuration(self.opts.node.as_str(), &mut collector.executor()).await {
-			warn!("Cannot get host configuration");
-			return Err(e)
-		}
 
 		println!(
-			"{} will trace {} on {}\n{}",
+			"{}\n\twill trace {}\n\ton {}\n\tusing {} Client",
 			"Parachain Tracer".to_string().purple(),
 			if self.opts.all {
 				"all parachain(s)".to_string()
@@ -165,6 +168,14 @@ impl ParachainTracer {
 				format!("parachain(s) {}", self.opts.para_id.iter().join(","))
 			},
 			&self.node,
+			self.opts.api_client_mode,
+		);
+		if let Err(e) = print_host_configuration(self.opts.node.as_str(), &mut collector.executor()).await {
+			warn!("Cannot get host configuration");
+			return Err(e)
+		}
+		println!(
+			"{}",
 			"-----------------------------------------------------------------------"
 				.to_string()
 				.bold()
@@ -388,9 +399,15 @@ async fn main() -> color_eyre::Result<()> {
 	let mut futures = vec![];
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
-		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, opts.retry.clone()))
+		Box::new(HistoricalSubscription::new(
+			vec![opts.node.clone()],
+			from,
+			to,
+			opts.api_client_mode,
+			opts.retry.clone(),
+		))
 	} else {
-		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], opts.retry.clone()))
+		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], opts.api_client_mode, opts.retry.clone()))
 	};
 	let consumer_init = sub.create_consumer();
 

@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use log::debug;
-use polkadot_introspector_essentials::api::subxt_wrapper::SubxtHrmpChannel;
+use polkadot_introspector_essentials::types::SubxtHrmpChannel;
 use std::collections::BTreeMap;
 
 #[derive(Default)]
