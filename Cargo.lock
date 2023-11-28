@@ -3623,7 +3623,7 @@ dependencies = [
 [[package]]
 name = "substrate-prometheus-endpoint"
 version = "0.10.0-dev"
-source = "git+https://github.com/paritytech/substrate?branch=master#8f0414c761486eb6cea2a091ebdb3d3efbdebb9b"
+source = "git+https://github.com/paritytech/polkadot-sdk?branch=master#b0b4451f31dcd9da04e2952d7c4cdcc219271b88"
 dependencies = [
  "hyper",
  "log",

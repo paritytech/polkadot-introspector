@@ -326,11 +326,15 @@ impl SubxtTracker {
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
-		self.disputes.iter().for_each(|outcome| {
-			progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
-			stats.on_disputed(outcome);
-			metrics.on_disputed(outcome, self.para_id);
-		});
+		if self.disputes.is_empty() {
+			metrics.on_disputed(None, self.para_id);
+		} else {
+			self.disputes.iter().for_each(|outcome| {
+				progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
+				stats.on_disputed(outcome);
+				metrics.on_disputed(Some(outcome.clone()), self.para_id);
+			});
+		}
 	}
 
 	fn notify_active_message_queues(&self, progress: &mut ParachainProgressUpdate) {
