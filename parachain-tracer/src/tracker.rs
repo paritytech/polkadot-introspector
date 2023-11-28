@@ -72,6 +72,9 @@ pub struct SubxtTracker {
 	message_queues: MessageQueuesTracker,
 	/// Current forks
 	relay_forks: Vec<ForkTracker>,
+
+	/// Indicates first run
+	first_run: bool,
 }
 
 impl SubxtTracker {
@@ -93,6 +96,7 @@ impl SubxtTracker {
 			previous_included_at: None,
 			message_queues: Default::default(),
 			relay_forks: vec![],
+			first_run: true,
 		}
 	}
 
@@ -172,6 +176,7 @@ impl SubxtTracker {
 
 	/// Resets state
 	pub fn maybe_reset_state(&mut self) {
+		self.first_run = false;
 		if self.current_candidate.is_backed() {
 			self.on_demand_order_at = None;
 		}
@@ -326,15 +331,15 @@ impl SubxtTracker {
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
-		if self.disputes.is_empty() {
-			metrics.on_disputed(None, self.para_id);
-		} else {
-			self.disputes.iter().for_each(|outcome| {
-				progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
-				stats.on_disputed(outcome);
-				metrics.on_disputed(Some(outcome.clone()), self.para_id);
-			});
+		if self.first_run && self.disputes.is_empty() {
+			metrics.init_disputes(self.para_id);
 		}
+
+		self.disputes.iter().for_each(|outcome| {
+			progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
+			stats.on_disputed(outcome);
+			metrics.on_disputed(outcome, self.para_id);
+		});
 	}
 
 	fn notify_active_message_queues(&self, progress: &mut ParachainProgressUpdate) {
