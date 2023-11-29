@@ -87,6 +87,8 @@ struct MetricsInner {
 #[automock]
 /// Common methods for parachain metrics tracker
 pub trait PrometheusMetrics {
+	/// Set disputed count to zero for continuous charts
+	fn init_disputes(&self, para_id: u32);
 	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
 	/// Update metrics on new block
@@ -177,25 +179,33 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
+	fn init_disputes(&self, para_id: u32) {
+		if let Some(metrics) = &self.0 {
+			let para_string = para_id.to_string();
+			metrics.disputes_stats.disputed_count.with_label_values(&[&para_string]).reset();
+		}
+	}
+
 	fn on_disputed(&self, dispute_outcome: &DisputesTracker, para_id: u32) {
 		if let Some(metrics) = &self.0 {
-			let para_str: String = para_id.to_string();
-			metrics.disputes_stats.disputed_count.with_label_values(&[&para_str[..]]).inc();
+			let para_string = para_id.to_string();
+
+			metrics.disputes_stats.disputed_count.with_label_values(&[&para_string]).inc();
+			metrics
+				.disputes_stats
+				.resolution_time
+				.with_label_values(&[&para_string])
+				.observe(dispute_outcome.resolve_time as f64);
 
 			if dispute_outcome.voted_for > dispute_outcome.voted_against {
-				metrics.disputes_stats.concluded_valid.with_label_values(&[&para_str[..]]).inc();
+				metrics.disputes_stats.concluded_valid.with_label_values(&[&para_string]).inc();
 			} else {
 				metrics
 					.disputes_stats
 					.concluded_invalid
-					.with_label_values(&[&para_str[..]])
+					.with_label_values(&[&para_string])
 					.inc();
 			}
-			metrics
-				.disputes_stats
-				.resolution_time
-				.with_label_values(&[&para_str[..]])
-				.observe(dispute_outcome.resolve_time as f64);
 		}
 	}
 

@@ -72,6 +72,9 @@ pub struct SubxtTracker {
 	message_queues: MessageQueuesTracker,
 	/// Current forks
 	relay_forks: Vec<ForkTracker>,
+
+	/// Indicates first run
+	first_run: bool,
 }
 
 impl SubxtTracker {
@@ -93,6 +96,7 @@ impl SubxtTracker {
 			previous_included_at: None,
 			message_queues: Default::default(),
 			relay_forks: vec![],
+			first_run: true,
 		}
 	}
 
@@ -172,6 +176,7 @@ impl SubxtTracker {
 
 	/// Resets state
 	pub fn maybe_reset_state(&mut self) {
+		self.first_run = false;
 		if self.current_candidate.is_backed() {
 			self.on_demand_order_at = None;
 		}
@@ -326,6 +331,10 @@ impl SubxtTracker {
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
+		if self.first_run && self.disputes.is_empty() {
+			metrics.init_disputes(self.para_id);
+		}
+
 		self.disputes.iter().for_each(|outcome| {
 			progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
 			stats.on_disputed(outcome);
@@ -787,6 +796,7 @@ mod test_progress {
 		mock_stats.expect_on_block().returning(|_| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_backed().returning(|_| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
@@ -864,6 +874,7 @@ mod test_progress {
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 
@@ -901,6 +912,7 @@ mod test_progress {
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
@@ -926,6 +938,7 @@ mod test_progress {
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
 		mock_stats.expect_on_block().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
@@ -975,6 +988,7 @@ mod test_progress {
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
@@ -1032,6 +1046,7 @@ mod test_progress {
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_block().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
 		storage_write(
@@ -1179,5 +1194,28 @@ mod test_progress {
 			.events
 			.iter()
 			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
+	}
+
+	#[tokio::test]
+	async fn test_inits_disputes_metrics() {
+		let mut tracker = SubxtTracker::new(100);
+		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let mut mock_stats = MockStats::default();
+		mock_stats.expect_on_bitfields().returning(|_, _| ());
+		mock_stats.expect_on_block().returning(|_| ());
+		mock_stats.expect_on_skipped_slot().returning(|_| ());
+		let mut mock_metrics = MockPrometheusMetrics::default();
+		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
+		mock_metrics.expect_on_block().returning(|_, _| ());
+		mock_metrics.expect_on_skipped_slot().returning(|_| ());
+		mock_metrics
+			.expect_init_disputes()
+			.returning(|para_id| assert_eq!(para_id, 100));
+
+		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
+		let _progress = tracker
+			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
+			.await
+			.unwrap();
 	}
 }
