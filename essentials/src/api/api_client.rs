@@ -141,7 +141,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<BTreeMap<u32, SubxtHrmpChannel>, subxt::Error> {
-		use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
+		use polkadot::runtime_types::polkadot_parachain_primitives::primitives::{HrmpChannelId, Id};
 		let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(&Id(para_id));
 		let hrmp_channels = self.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
 		let mut channels_configuration: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
@@ -164,7 +164,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<BTreeMap<u32, SubxtHrmpChannel>, subxt::Error> {
-		use polkadot::runtime_types::polkadot_parachain::primitives::{HrmpChannelId, Id};
+		use polkadot::runtime_types::polkadot_parachain_primitives::primitives::{HrmpChannelId, Id};
 
 		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(&Id(para_id));
 		let hrmp_channels = self.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
