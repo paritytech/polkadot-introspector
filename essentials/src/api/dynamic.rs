@@ -2,7 +2,7 @@ use super::subxt_wrapper::SubxtWrapperError::{self, DecodeDynamicError};
 use crate::{
 	metadata::{
 		polkadot::runtime_types::{
-			polkadot_parachain::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind,
+			polkadot_parachain_primitives::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind,
 		},
 		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},

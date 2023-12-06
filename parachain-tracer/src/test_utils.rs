@@ -25,7 +25,7 @@ use polkadot_introspector_essentials::{
 		polkadot::runtime_types::{
 			bounded_collections::bounded_vec::BoundedVec,
 			polkadot_core_primitives::CandidateHash,
-			polkadot_parachain::primitives::{HeadData, Id, ValidationCodeHash},
+			polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
 			sp_core::sr25519::{Public, Signature},
 			sp_runtime::{
 				generic::{digest::Digest, header::Header},

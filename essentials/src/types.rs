@@ -18,7 +18,9 @@
 use crate::metadata::{
 	polkadot::{
 		runtime_types as subxt_runtime_types,
-		runtime_types::{polkadot_parachain::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind},
+		runtime_types::{
+			polkadot_parachain_primitives::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind,
+		},
 	},
 	polkadot_primitives,
 };
