@@ -18,12 +18,12 @@
 use crate::{
 	api::{
 		api_client::{build_light_client, build_online_client, ApiClientT, HeaderStream},
-		dynamic::{decode_availability_cores, decode_claim_queue, decode_scheduled_paras, decode_validator_groups},
+		dynamic::{decode_availability_cores, decode_claim_queue, decode_validator_groups},
 	},
 	metadata::polkadot_primitives,
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, InherentData, SessionKeys,
-		SubxtHrmpChannel, Timestamp, H256,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, InherentData, SessionKeys, SubxtHrmpChannel, Timestamp,
+		H256,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -54,8 +54,6 @@ pub enum RequestType {
 	GetEvents(<PolkadotConfig as subxt::Config>::Hash),
 	/// Extract the `ParaInherentData` from a given block.
 	ExtractParaInherent(Option<<PolkadotConfig as subxt::Config>::Hash>),
-	/// Get the availability core scheduling information at a given block.
-	GetScheduledParas(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get the claim queue scheduling information at a given block.
 	GetClaimQueue(<PolkadotConfig as subxt::Config>::Hash),
 	/// Get occupied core information at a given block.
@@ -101,9 +99,6 @@ impl Debug for RequestType {
 			},
 			RequestType::ExtractParaInherent(h) => {
 				format!("get inherent for block: {:?}", h)
-			},
-			RequestType::GetScheduledParas(h) => {
-				format!("get scheduled paras: {:?}", h)
 			},
 			RequestType::GetClaimQueue(h) => {
 				format!("get claim queue: {:?}", h)
@@ -151,8 +146,6 @@ pub enum Response {
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
-	/// Availability core assignments for parachains.
-	ScheduledParas(Vec<CoreAssignment>),
 	/// Claim queue for parachains.
 	ClaimQueue(ClaimQueue),
 	/// List of the occupied availability cores.
@@ -236,7 +229,6 @@ impl RequestExecutor {
 				RequestType::GetBlockHash(maybe_block_number) => subxt_get_block_hash(api, maybe_block_number).await,
 				RequestType::GetEvents(hash) => subxt_get_events(api, hash).await,
 				RequestType::ExtractParaInherent(maybe_hash) => subxt_extract_parainherent(api, maybe_hash).await,
-				RequestType::GetScheduledParas(hash) => subxt_get_sheduled_paras(api, hash).await,
 				RequestType::GetClaimQueue(hash) => subxt_get_claim_queue(api, hash).await,
 				RequestType::GetOccupiedCores(hash) => subxt_get_occupied_cores(api, hash).await,
 				RequestType::GetBackingGroups(hash) => subxt_get_validator_groups(api, hash).await,
@@ -319,14 +311,6 @@ impl RequestExecutor {
 		maybe_hash: Option<<PolkadotConfig as subxt::Config>::Hash>,
 	) -> std::result::Result<InherentData, SubxtWrapperError> {
 		wrap_subxt_call!(self, ExtractParaInherent, ParaInherentData, url, maybe_hash)
-	}
-
-	pub async fn get_scheduled_paras(
-		&mut self,
-		url: &str,
-		block_hash: <PolkadotConfig as subxt::Config>::Hash,
-	) -> std::result::Result<Vec<CoreAssignment>, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetScheduledParas, ScheduledParas, url, block_hash)
 	}
 
 	pub async fn get_claim_queue(
@@ -499,13 +483,6 @@ async fn fetch_dynamic_storage(
 	api.fetch_dynamic_storage(maybe_hash, pallet_name, entry_name)
 		.await?
 		.ok_or(SubxtWrapperError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}")))
-}
-
-async fn subxt_get_sheduled_paras(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {
-	let value = fetch_dynamic_storage(api, Some(block_hash), "ParaScheduler", "Scheduled").await?;
-	let paras = decode_scheduled_paras(&value)?;
-
-	Ok(Response::ScheduledParas(paras))
 }
 
 async fn subxt_get_claim_queue(api: Box<dyn ApiClientT>, block_hash: H256) -> Result {

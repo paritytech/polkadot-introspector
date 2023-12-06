@@ -1,12 +1,7 @@
 use super::subxt_wrapper::SubxtWrapperError::{self, DecodeDynamicError};
 use crate::{
-	metadata::{
-		polkadot::runtime_types::{
-			polkadot_parachain_primitives::primitives::Id, polkadot_runtime_parachains::scheduler::AssignmentKind,
-		},
-		polkadot_primitives::{CoreIndex, ValidatorIndex},
-	},
-	types::{Assignment, BlockNumber, ClaimQueue, CoreAssignment, CoreOccupied, OnDemandOrder, ParasEntry},
+	metadata::polkadot_primitives::ValidatorIndex,
+	types::{Assignment, BlockNumber, ClaimQueue, CoreOccupied, OnDemandOrder, ParasEntry},
 };
 use log::error;
 use std::collections::{BTreeMap, VecDeque};
@@ -56,24 +51,6 @@ pub(crate) fn decode_availability_cores(raw_cores: &Value<u32>) -> Result<Vec<Co
 	}
 
 	Ok(cores)
-}
-
-pub(crate) fn decode_scheduled_paras(raw_paras: &Value<u32>) -> Result<Vec<CoreAssignment>, SubxtWrapperError> {
-	let decoded_paras = decode_unnamed_composite(raw_paras)?;
-	let mut paras = Vec::with_capacity(decoded_paras.len());
-	for para in decoded_paras.iter() {
-		let core = CoreIndex(decode_composite_u128_value(value_at("core", para)?)? as u32);
-		let para_id = Id(decode_composite_u128_value(value_at("para_id", para)?)? as u32);
-		let kind = match decode_variant(value_at("kind", para)?)?.name.as_str() {
-			"Parachain" => AssignmentKind::Parachain,
-			name => todo!("Add support for {name}"),
-		};
-		let assignment = CoreAssignment { core, para_id, kind };
-
-		paras.push(assignment)
-	}
-
-	Ok(paras)
 }
 
 pub(crate) fn decode_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, SubxtWrapperError> {

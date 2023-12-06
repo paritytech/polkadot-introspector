@@ -150,21 +150,6 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn get_scheduled_paras() {
-		let api = ApiService::<H256>::new_with_storage(
-			RecordsStorageConfig { max_blocks: 1 },
-			ApiClientMode::RPC,
-			RetryOptions::default(),
-		);
-		let mut subxt = api.subxt();
-
-		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
-		let paras = subxt.get_scheduled_paras(rpc_node_url(), head.hash()).await;
-
-		assert!(paras.is_ok());
-	}
-
-	#[tokio::test]
 	async fn get_occupied_cores() {
 		let api = ApiService::<H256>::new_with_storage(
 			RecordsStorageConfig { max_blocks: 1 },

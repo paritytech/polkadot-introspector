@@ -671,39 +671,21 @@ impl Collector {
 		block_number: u32,
 		ts: Timestamp,
 	) -> color_eyre::Result<(), CollectorError> {
-		// After adding On-demand Parachains, `ParaScheduler.Scheduled` API call will be removed
-		let mut assignments = self.core_assignments_via_scheduled_paras(block_hash).await;
-		// `ParaScheduler,Scheduled` not found, try to fetch `ParaScheduler.ClaimQueue`
-		if let Err(SubxtWrapperError::SubxtError(subxt::error::Error::Metadata(
-			subxt::error::MetadataError::StorageEntryNotFound(_),
-		))) = assignments
-		{
-			assignments = self.core_assignments_via_claim_queue(block_hash).await;
-		}
-		if let Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(reason)) = assignments {
-			info!("{}. Nothing to process, used empty value", reason);
-			assignments = Ok(BTreeMap::default());
-		}
-
+		let assignments = match self.core_assignments_via_claim_queue(block_hash).await {
+			Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(reason)) => {
+				info!("{}. Nothing to process, used empty value", reason);
+				BTreeMap::default()
+			},
+			v => v?,
+		};
 		self.storage_write_prefixed(
 			CollectorPrefixType::CoreAssignments,
 			block_hash,
-			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), assignments?),
+			StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), assignments),
 		)
 		.await?;
 
 		Ok(())
-	}
-
-	async fn core_assignments_via_scheduled_paras(
-		&mut self,
-		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, SubxtWrapperError> {
-		let core_assignments = self.executor.get_scheduled_paras(self.endpoint.as_str(), block_hash).await?;
-		Ok(core_assignments
-			.iter()
-			.map(|v| (v.core.0, vec![v.para_id.0]))
-			.collect::<BTreeMap<_, _>>())
 	}
 
 	async fn core_assignments_via_claim_queue(

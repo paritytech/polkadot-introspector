@@ -27,10 +27,7 @@ use polkadot_introspector_essentials::{
 			polkadot_core_primitives::CandidateHash,
 			polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
 			sp_core::sr25519::{Public, Signature},
-			sp_runtime::{
-				generic::{digest::Digest, header::Header},
-				traits::BlakeTwo256,
-			},
+			sp_runtime::generic::{digest::Digest, header::Header},
 		},
 		polkadot_primitives::{
 			collator_app, signed::UncheckedSigned, validator_app, AvailabilityBitfield, BackedCandidate,
@@ -106,7 +103,7 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 	}
 }
 
-pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32, BlakeTwo256>> {
+pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
 	InherentData {
 		bitfields: vec![UncheckedSigned {
 			payload: AvailabilityBitfield(DecodedBits::from_iter([true])),
@@ -122,7 +119,6 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32, BlakeTwo25
 			state_root: Default::default(),
 			extrinsics_root: Default::default(),
 			digest: Digest { logs: Default::default() },
-			__subxt_unused_type_params: Default::default(),
 		},
 	}
 }
