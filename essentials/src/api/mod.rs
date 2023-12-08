@@ -17,6 +17,7 @@
 
 pub mod api_client;
 pub mod dynamic;
+pub mod executor;
 pub mod storage;
 pub mod subxt_wrapper;
 

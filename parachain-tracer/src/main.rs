@@ -34,7 +34,7 @@ use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
+	api::{executor::RpcExecutor, subxt_wrapper::ApiClientMode},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector,
@@ -144,6 +144,7 @@ impl ParachainTracer {
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
+		frontend_executor: &mut RpcExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -170,7 +171,7 @@ impl ParachainTracer {
 			&self.node,
 			self.opts.api_client_mode,
 		);
-		if let Err(e) = print_host_configuration(self.opts.node.as_str(), &mut collector.executor()).await {
+		if let Err(e) = print_host_configuration(self.opts.node.as_str(), frontend_executor).await {
 			warn!("Cannot get host configuration");
 			return Err(e)
 		}
@@ -368,7 +369,7 @@ fn evict_stalled(
 	}
 }
 
-async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> color_eyre::Result<()> {
+async fn print_host_configuration(url: &str, executor: &mut RpcExecutor) -> color_eyre::Result<()> {
 	let conf = executor.get_host_configuration(url).await?;
 	println!("Host configuration for {}:", url.to_owned().bold());
 	println!("{}", conf);
@@ -411,8 +412,14 @@ async fn main() -> color_eyre::Result<()> {
 	};
 	let consumer_init = sub.create_consumer();
 
-	futures.extend(tracer.run(&shutdown_tx, consumer_init).await?);
-	futures.extend(sub.run(&shutdown_tx).await?);
+	let mut rpc_executor = RpcExecutor::new(opts.api_client_mode, opts.retry);
+	let rpc_executor_handle = rpc_executor.start(opts.node)?;
+
+	futures.extend(vec![rpc_executor_handle]);
+	futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut rpc_executor).await?);
+	// futures.extend(sub.run(&shutdown_tx).await?);
+
+	let _ = rpc_executor.close().await;
 
 	init::run(futures, &shutdown_tx).await?;
 
