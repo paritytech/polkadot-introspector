@@ -71,7 +71,7 @@ pub enum RequestType {
 	/// Get information about inbound HRMP channels, accepts block hash and destination ParaId
 	GetOutboundHRMPChannels(<PolkadotConfig as subxt::Config>::Hash, u32),
 	/// Get active host configuration
-	GetHostConfiguration(()),
+	// GetHostConfiguration(()),
 	/// Get a subscription to the best blocks chain
 	GetBestBlockSubscription(()),
 	/// Get a subscription to the finalized blocks chain
@@ -124,7 +124,7 @@ impl Debug for RequestType {
 			RequestType::GetOutboundHRMPChannels(h, para_id) => {
 				format!("get outbount channels: {:?}; para id: {}", h, para_id)
 			},
-			RequestType::GetHostConfiguration(_) => "get host configuration".to_string(),
+			// RequestType::GetHostConfiguration(_) => "get host configuration".to_string(),
 			RequestType::GetBestBlockSubscription(_) => "get best block subscription".to_string(),
 			RequestType::GetFinalizedBlockSubscription(_) => "get finalized block subscription".to_string(),
 		};
@@ -165,7 +165,7 @@ pub enum Response {
 	/// HRMP content for a specific channel
 	HRMPContent(Vec<Vec<u8>>),
 	/// The current host configuration
-	HostConfiguration(DynamicHostConfiguration),
+	// HostConfiguration(DynamicHostConfiguration),
 	/// Chain subscription
 	ChainSubscription(HeaderStream),
 }
@@ -240,7 +240,7 @@ impl RequestExecutor {
 					subxt_get_inbound_hrmp_channels(api, hash, para_id).await,
 				RequestType::GetOutboundHRMPChannels(hash, para_id) =>
 					subxt_get_outbound_hrmp_channels(api, hash, para_id).await,
-				RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(api).await,
+				// RequestType::GetHostConfiguration(_) => subxt_get_host_configuration(api).await,
 				RequestType::GetBestBlockSubscription(_) => subxt_get_best_block_subscription(api).await,
 				RequestType::GetFinalizedBlockSubscription(_) => subxt_get_finalized_block_subscription(api).await,
 			};
@@ -379,12 +379,12 @@ impl RequestExecutor {
 		wrap_subxt_call!(self, GetOutboundHRMPChannels, HRMPChannels, url, block_hash, para_id)
 	}
 
-	pub async fn get_host_configuration(
-		&mut self,
-		url: &str,
-	) -> std::result::Result<DynamicHostConfiguration, SubxtWrapperError> {
-		wrap_subxt_call!(self, GetHostConfiguration, HostConfiguration, url, ())
-	}
+	// pub async fn get_host_configuration(
+	// 	&mut self,
+	// 	url: &str,
+	// ) -> std::result::Result<DynamicHostConfiguration, SubxtWrapperError> {
+	// 	wrap_subxt_call!(self, GetHostConfiguration, HostConfiguration, url, ())
+	// }
 
 	pub async fn get_best_block_subscription(
 		&mut self,
@@ -526,10 +526,10 @@ async fn subxt_get_outbound_hrmp_channels(api: Box<dyn ApiClientT>, block_hash: 
 	Ok(Response::HRMPChannels(api.get_outbound_hrmp_channels(block_hash, para_id).await?))
 }
 
-async fn subxt_get_host_configuration(api: Box<dyn ApiClientT>) -> Result {
-	let value = fetch_dynamic_storage(api, None, "Configuration", "ActiveConfig").await?;
-	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
-}
+// async fn subxt_get_host_configuration(api: Box<dyn ApiClientT>) -> Result {
+// 	let value = fetch_dynamic_storage(api, None, "Configuration", "ActiveConfig").await?;
+// 	Ok(Response::HostConfiguration(DynamicHostConfiguration::new(value)))
+// }
 
 async fn subxt_get_best_block_subscription(api: Box<dyn ApiClientT>) -> Result {
 	Ok(Response::ChainSubscription(api.stream_best_block_headers().await?))
@@ -559,39 +559,3 @@ pub enum SubxtWrapperError {
 	DecodeDynamicError(String, ValueDef<u32>),
 }
 pub type Result = std::result::Result<Response, SubxtWrapperError>;
-
-pub struct DynamicHostConfiguration(Value<u32>);
-
-impl DynamicHostConfiguration {
-	pub fn new(value: Value<u32>) -> Self {
-		Self(value)
-	}
-
-	pub fn at(&self, field: &str) -> String {
-		match self.0.at(field) {
-			Some(value) if matches!(value, Value { value: ValueDef::Variant(_), .. }) => match value.at(0) {
-				Some(inner) => format!("{}", inner),
-				None => format!("{}", 0),
-			},
-			Some(value) => format!("{}", value),
-			None => format!("{}", 0),
-		}
-	}
-}
-
-impl std::fmt::Display for DynamicHostConfiguration {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(
-			f,
-			"\t👀 Max validators: {} / {} per core
-\t👍 Needed approvals: {}
-\t🥔 No show slots: {}
-\t⏳ Delay tranches: {}",
-			self.at("max_validators"),
-			self.at("max_validators_per_core"),
-			self.at("needed_approvals"),
-			self.at("no_show_slots"),
-			self.at("n_delay_tranches"),
-		)
-	}
-}

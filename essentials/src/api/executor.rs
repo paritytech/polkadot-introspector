@@ -3,7 +3,7 @@ use super::{
 	subxt_wrapper::ApiClientMode,
 };
 use crate::{
-	api::{api_client::ApiClientT, subxt_wrapper::DynamicHostConfiguration},
+	api::api_client::ApiClientT,
 	constants::MAX_MSG_QUEUE_SIZE,
 	metadata::polkadot_primitives,
 	types::{
@@ -13,35 +13,67 @@ use crate::{
 	utils::{Retry, RetryOptions},
 };
 use log::error;
-use polkadot_introspector_priority_channel::{channel, Receiver as PriorityReceiver, Sender as PrioritySender};
+use polkadot_introspector_priority_channel::{
+	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
+};
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
-use subxt::{dynamic::Value, PolkadotConfig};
+use subxt::{
+	dynamic::{At, Value},
+	ext::scale_value::ValueDef,
+	PolkadotConfig,
+};
 use thiserror::Error;
-use tokio::sync::oneshot::Sender as OneshotSender;
+use tokio::sync::oneshot::{error::RecvError as OneshotRecvError, Sender as OneshotSender};
 
 enum ExecutorMessage {
 	Close,
 	Rpc(OneshotSender<RpcResponse>, RpcRequest),
 }
 
+#[derive(Debug, Clone)]
 enum RpcRequest {
-	GetBlockTimestamp(OneshotSender<RpcResponse>),
-	GetHead(OneshotSender<RpcResponse>),
-	GetBlockNumber(OneshotSender<RpcResponse>),
-	GetBlockHash(OneshotSender<RpcResponse>),
-	GetEvents(OneshotSender<RpcResponse>),
-	ExtractParaInherent(OneshotSender<RpcResponse>),
-	GetClaimQueue(OneshotSender<RpcResponse>),
-	GetOccupiedCores(OneshotSender<RpcResponse>),
-	GetBackingGroups(OneshotSender<RpcResponse>),
-	GetSessionIndex(OneshotSender<RpcResponse>),
-	GetSessionAccountKeys(OneshotSender<RpcResponse>),
-	GetSessionNextKeys(OneshotSender<RpcResponse>),
-	GetInboundHRMPChannels(OneshotSender<RpcResponse>),
-	GetOutboundHRMPChannels(OneshotSender<RpcResponse>),
+	GetBlockTimestamp(H256),
+	GetHead,
+	GetBlockNumber,
+	GetBlockHash,
+	GetEvents,
+	ExtractParaInherent,
+	GetClaimQueue,
+	GetOccupiedCores,
+	GetBackingGroups,
+	GetSessionIndex,
+	GetSessionAccountKeys,
+	GetSessionNextKeys,
+	GetInboundHRMPChannels,
+	GetOutboundHRMPChannels,
 	GetHostConfiguration,
-	GetBestBlockSubscription(OneshotSender<RpcResponse>),
-	GetFinalizedBlockSubscription(OneshotSender<RpcResponse>),
+	GetBestBlockSubscription,
+	GetFinalizedBlockSubscription,
+}
+
+impl std::fmt::Display for RpcRequest {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		use RpcRequest::*;
+		match *self {
+			GetBlockTimestamp(hash) => write!(f, "GetBlockTimestamp({})", hash),
+			GetHead => write!(f, "GetHead"),
+			GetBlockNumber => write!(f, "GetBlockNumber"),
+			GetBlockHash => write!(f, "GetBlockHash"),
+			GetEvents => write!(f, "GetEvents"),
+			ExtractParaInherent => write!(f, "ExtractParaInherent"),
+			GetClaimQueue => write!(f, "GetClaimQueue"),
+			GetOccupiedCores => write!(f, "GetOccupiedCores"),
+			GetBackingGroups => write!(f, "GetBackingGroups"),
+			GetSessionIndex => write!(f, "GetSessionIndex"),
+			GetSessionAccountKeys => write!(f, "GetSessionAccountKeys"),
+			GetSessionNextKeys => write!(f, "GetSessionNextKeys"),
+			GetInboundHRMPChannels => write!(f, "GetInboundHRMPChannels"),
+			GetOutboundHRMPChannels => write!(f, "GetOutboundHRMPChannels"),
+			GetHostConfiguration => write!(f, "GetHostConfiguration"),
+			GetBestBlockSubscription => write!(f, "GetBestBlockSubscription"),
+			GetFinalizedBlockSubscription => write!(f, "GetFinalizedBlockSubscription"),
+		}
+	}
 }
 
 /// Response types for APIs.
@@ -80,6 +112,26 @@ enum RpcResponse {
 	HostConfiguration(DynamicHostConfiguration),
 	/// Chain subscription
 	ChainSubscription(HeaderStream),
+}
+
+#[derive(Debug, Error)]
+pub enum RpcExecutorError {
+	#[error("Client for url {0} already exists")]
+	ClientAlreadyExists(String),
+	#[error("Client for url {0} not found")]
+	ClientNotFound(String),
+	#[error("subxt error: {0}")]
+	SubxtError(#[from] subxt::error::Error),
+	#[error("subxt connection timeout")]
+	Timeout,
+	#[error("Send failed: {0}")]
+	PrioritySendError(#[from] PrioritySendError),
+	#[error("Recv failed: {0}")]
+	OneshotRecvError(#[from] OneshotRecvError),
+	#[error("{0} not found in dynamic storage")]
+	EmptyResponseFromDynamicStorage(String),
+	#[error("Unexpected response for request {0}")]
+	UnexpectedResponse(RpcRequest),
 }
 
 struct BackendExecutor {
@@ -154,8 +206,9 @@ impl BackendExecutor {
 		client: &Box<dyn ApiClientT>,
 	) -> color_eyre::Result<RpcResponse, RpcExecutorError> {
 		use RpcRequest::*;
-		match request {
-			// GetBlockTimestamp(tx, hash) => subxt_get_block_ts(api, hash).await,
+		use RpcResponse::*;
+		let response = match request {
+			GetBlockTimestamp(hash) => Timestamp(client.get_block_ts(*hash).await?.unwrap_or_default()),
 			// GetHead(tx, maybe_hash) => subxt_get_head(api, maybe_hash).await,
 			// GetBlockNumber(tx, maybe_hash) => subxt_get_block_number(api, maybe_hash).await,
 			// GetBlockHash(tx, maybe_block_number) => subxt_get_block_hash(api, maybe_block_number).await,
@@ -169,27 +222,43 @@ impl BackendExecutor {
 			// GetSessionNextKeys(tx, ref account) => subxt_get_session_next_keys(api, account).await,
 			// GetInboundHRMPChannels(tx, hash, para_id) => subxt_get_inbound_hrmp_channels(api, hash, para_id).await,
 			// GetOutboundHRMPChannels(tx, hash, para_id) => subxt_get_outbound_hrmp_channels(api, hash, para_id).await,
-			GetHostConfiguration => {
-				let value = fetch_dynamic_storage(client, None, "Configuration", "ActiveConfig").await?;
-				Ok(RpcResponse::HostConfiguration(DynamicHostConfiguration::new(value)))
-			},
-			// GetBestBlockSubscription(tx) => subxt_get_best_block_subscription(api).await,
-			// GetFinalizedBlockSubscription(tx) => subxt_get_finalized_block_subscription(api).await,
+			GetHostConfiguration => HostConfiguration(DynamicHostConfiguration::new(
+				fetch_dynamic_storage(client, None, "Configuration", "ActiveConfig").await?,
+			)),
+			GetBestBlockSubscription => ChainSubscription(client.stream_best_block_headers().await?),
+			GetFinalizedBlockSubscription => ChainSubscription(client.stream_finalized_block_headers().await?),
 			_ => todo!(),
-		}
+		};
+
+		Ok(response)
 	}
 }
 
-#[derive(Debug, Error)]
-pub enum RpcExecutorError {
-	#[error("Client for url {0} already exists")]
-	ClientAlreadyExists(String),
-	#[error("subxt error: {0}")]
-	SubxtError(#[from] subxt::error::Error),
-	#[error("subxt connection timeout")]
-	Timeout,
-	#[error("{0} not found in dynamic storage")]
-	EmptyResponseFromDynamicStorage(String),
+macro_rules! wrap_backend_call {
+	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
+		if let Some(to_backend) = $self.connection_pool.get_mut($url) {
+			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
+			to_backend.send(ExecutorMessage::Rpc(tx, RpcRequest::$request_ty)).await?;
+			match rx.await? {
+				RpcResponse::$response_ty(res) => Ok(res),
+				_ => Err(RpcExecutorError::UnexpectedResponse(RpcRequest::$request_ty)),
+			}
+		} else {
+			Err(RpcExecutorError::ClientNotFound($url.into()))
+		}
+	};
+	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
+		if let Some(to_backend) = $self.connection_pool.get_mut($url) {
+			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
+			to_backend.send(ExecutorMessage::Rpc(tx, RpcRequest::$request_ty($($arg),*))).await?;
+			match rx.await? {
+				RpcResponse::$response_ty(res) => Ok(res),
+				_ => Err(RpcExecutorError::UnexpectedResponse(RpcRequest::$request_ty($($arg),*))),
+			}
+		} else {
+			Err(RpcExecutorError::ClientNotFound($url.into()))
+		}
+	};
 }
 
 pub struct RpcExecutor {
@@ -226,25 +295,35 @@ impl RpcExecutor {
 	/// Closes all RPC clients
 	pub async fn close(&mut self) -> color_eyre::Result<()> {
 		for to_backend in self.connection_pool.values_mut() {
-			let _ = to_backend.send(ExecutorMessage::Close).await?;
+			to_backend.send(ExecutorMessage::Close).await?;
 		}
 
 		Ok(())
 	}
 
-	pub async fn get_host_configuration(&mut self, url: &str) -> color_eyre::Result<DynamicHostConfiguration> {
-		if let Some(to_backend) = self.connection_pool.get_mut(url) {
-			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
-			let _ = to_backend
-				.send(ExecutorMessage::Rpc(tx, RpcRequest::GetHostConfiguration))
-				.await?;
-			match rx.await {
-				Ok(RpcResponse::HostConfiguration(res)) => return Ok(res),
-				_ => todo!(""),
-			};
-		} else {
-			todo!("")
-		}
+	pub async fn get_block_ts(&mut self, url: &str, hash: H256) -> color_eyre::Result<Timestamp, RpcExecutorError> {
+		wrap_backend_call!(self, url, GetBlockTimestamp, Timestamp, hash)
+	}
+
+	pub async fn get_host_configuration(
+		&mut self,
+		url: &str,
+	) -> color_eyre::Result<DynamicHostConfiguration, RpcExecutorError> {
+		wrap_backend_call!(self, url, GetHostConfiguration, HostConfiguration)
+	}
+
+	pub async fn get_best_block_subscription(
+		&mut self,
+		url: &str,
+	) -> color_eyre::Result<HeaderStream, RpcExecutorError> {
+		wrap_backend_call!(self, url, GetBestBlockSubscription, ChainSubscription)
+	}
+
+	pub async fn get_finalized_block_subscription(
+		&mut self,
+		url: &str,
+	) -> color_eyre::Result<HeaderStream, RpcExecutorError> {
+		wrap_backend_call!(self, url, GetFinalizedBlockSubscription, ChainSubscription)
 	}
 }
 
@@ -286,4 +365,40 @@ async fn fetch_dynamic_storage(
 		.fetch_dynamic_storage(maybe_hash, pallet_name, entry_name)
 		.await?
 		.ok_or(RpcExecutorError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}")))
+}
+
+pub struct DynamicHostConfiguration(Value<u32>);
+
+impl DynamicHostConfiguration {
+	pub fn new(value: Value<u32>) -> Self {
+		Self(value)
+	}
+
+	pub fn at(&self, field: &str) -> String {
+		match self.0.at(field) {
+			Some(value) if matches!(value, Value { value: ValueDef::Variant(_), .. }) => match value.at(0) {
+				Some(inner) => format!("{}", inner),
+				None => format!("{}", 0),
+			},
+			Some(value) => format!("{}", value),
+			None => format!("{}", 0),
+		}
+	}
+}
+
+impl std::fmt::Display for DynamicHostConfiguration {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"\t👀 Max validators: {} / {} per core
+\t👍 Needed approvals: {}
+\t🥔 No show slots: {}
+\t⏳ Delay tranches: {}",
+			self.at("max_validators"),
+			self.at("max_validators_per_core"),
+			self.at("needed_approvals"),
+			self.at("no_show_slots"),
+			self.at("n_delay_tranches"),
+		)
+	}
 }
