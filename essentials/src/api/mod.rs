@@ -95,7 +95,7 @@ mod tests {
 
 	fn rpc_executor() -> RpcExecutor {
 		let executor = RawRpcExecutor::new(ApiClientMode::RPC, RetryOptions::default());
-		let (executor, _handle) = executor.start(rpc_node_url().into()).unwrap();
+		let (executor, _handle) = executor.init(rpc_node_url().into()).unwrap();
 		executor
 	}
 

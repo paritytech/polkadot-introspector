@@ -131,7 +131,7 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
 
 pub fn create_rpc_executor() -> RpcExecutor {
 	let executor = RawRpcExecutor::new(ApiClientMode::RPC, RetryOptions::default());
-	let (executor, _handle) = executor.start(rpc_node_url().into()).unwrap();
+	let (executor, _handle) = executor.init(rpc_node_url().into()).unwrap();
 	executor
 }
 

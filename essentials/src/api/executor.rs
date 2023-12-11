@@ -65,31 +65,6 @@ pub enum RpcRequest {
 	GetFinalizedBlockSubscription,
 }
 
-impl std::fmt::Display for RpcRequest {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		use RpcRequest::*;
-		match *self {
-			GetBlockTimestamp(hash) => write!(f, "GetBlockTimestamp({})", hash),
-			GetHead(maybe_hash) => write!(f, "GetHead({:?})", maybe_hash),
-			GetBlockNumber(maybe_hash) => write!(f, "GetBlockNumber({:?})", maybe_hash),
-			GetBlockHash(maybe_block_number) => write!(f, "GetBlockHash({:?})", maybe_block_number),
-			GetEvents(hash) => write!(f, "GetEvents({})", hash),
-			ExtractParaInherent(maybe_hash) => write!(f, "ExtractParaInherent({:?})", maybe_hash),
-			GetClaimQueue(hash) => write!(f, "GetClaimQueue({})", hash),
-			GetOccupiedCores(hash) => write!(f, "GetOccupiedCores({})", hash),
-			GetBackingGroups(hash) => write!(f, "GetBackingGroups({})", hash),
-			GetSessionIndex(hash) => write!(f, "GetSessionIndex({})", hash),
-			GetSessionAccountKeys(session) => write!(f, "GetSessionAccountKeys({})", session),
-			GetSessionNextKeys(ref account) => write!(f, "GetSessionNextKeys({})", account),
-			GetInboundHRMPChannels(hash, para_id) => write!(f, "GetInboundHRMPChannels({}, {})", hash, para_id),
-			GetOutboundHRMPChannels(hash, para_id) => write!(f, "GetOutboundHRMPChannels({}, {})", hash, para_id),
-			GetHostConfiguration => write!(f, "GetHostConfiguration"),
-			GetBestBlockSubscription => write!(f, "GetBestBlockSubscription"),
-			GetFinalizedBlockSubscription => write!(f, "GetFinalizedBlockSubscription"),
-		}
-	}
-}
-
 /// Response types for APIs.
 #[derive(Debug)]
 enum RpcResponse {
@@ -141,22 +116,31 @@ pub enum RpcExecutorError {
 	PrioritySendError(#[from] PrioritySendError),
 	#[error("Recv failed: {0}")]
 	OneshotRecvError(#[from] OneshotRecvError),
-	#[error("Unexpected response for request {0}")]
+	#[error("Unexpected response for request {0:?}")]
 	UnexpectedResponse(RpcRequest),
 }
 
-struct BackendExecutor {
+impl RpcExecutorError {
+	pub fn should_repeat(&self) -> bool {
+		matches!(
+			self,
+			RpcExecutorError::SubxtError(subxt::Error::Io(_)) | RpcExecutorError::SubxtError(subxt::Error::Rpc(_))
+		)
+	}
+}
+
+struct RpcExecutorBackend {
 	retry: RetryOptions,
 }
 
-impl BackendExecutor {
-	async fn start(
+impl RpcExecutorBackend {
+	async fn run(
 		&mut self,
 		from_frontend: PriorityReceiver<ExecutorMessage>,
 		url: String,
 		api_client_mode: ApiClientMode,
 	) {
-		let client = match new_client_fn(&url, api_client_mode, &self.retry).await {
+		let client = match build_client(&url, api_client_mode, &self.retry).await {
 			Some(v) => v,
 			None => return,
 		};
@@ -169,14 +153,22 @@ impl BackendExecutor {
 							ExecutorMessage::Close => return,
 							ExecutorMessage::Rpc(tx, request) => {
 								match self.execute_request(&request, &*client).await {
-									Ok(v) => {
-										tx.send(v).unwrap();
+									Ok(response) => {
+										// Not critical, skip it and process next request
+										if let Err(e) = tx.send(response) {
+											error!("Cannot send response back: {:?}", e);
+										}
 									},
-									Err(e) => println!("BackendExecutor: {:?}", e),
+									// Critical, after a few retries RPC client was not able to process the request
+									Err(e) => {
+										error!("Cannot process the request {:?}: {:?}", request, e);
+										return
+									},
 								};
 							}
 						},
-						Err(e) => println!("BackendExecutor: {:?}", e),
+						// Not critical, skip it and process next request
+						Err(e) => error!("Cannot receive a request from the frontend: {:?}", e),
 					}
 				}
 			}
@@ -193,14 +185,9 @@ impl BackendExecutor {
 			match self.match_request(request.to_owned(), client).await {
 				Ok(v) => return Ok(v),
 				Err(e) => {
-					if !matches!(
-						e,
-						RpcExecutorError::SubxtError(subxt::Error::Io(_)) |
-							RpcExecutorError::SubxtError(subxt::Error::Rpc(_))
-					) {
+					if !e.should_repeat() {
 						return Err(e)
 					}
-
 					if (retry.sleep().await).is_err() {
 						return Err(RpcExecutorError::Timeout)
 					}
@@ -265,10 +252,14 @@ macro_rules! wrap_backend_call {
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
 		if let Some(to_backend) = $self.connection_pool.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
+			let request = RpcRequest::$request_ty;
 			to_backend.send(ExecutorMessage::Rpc(tx, RpcRequest::$request_ty)).await?;
 			match rx.await? {
 				RpcResponse::$response_ty(res) => Ok(res),
-				_ => Err(RpcExecutorError::UnexpectedResponse(RpcRequest::$request_ty)),
+				response => {
+					error!("Unexpected request-response pair: {:?} {:?}", request, response);
+					Err(RpcExecutorError::UnexpectedResponse(request))
+				},
 			}
 		} else {
 			Err(RpcExecutorError::ClientNotFound($url.into()))
@@ -281,7 +272,10 @@ macro_rules! wrap_backend_call {
 			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
 			match rx.await? {
 				RpcResponse::$response_ty(res) => Ok(res),
-				_ => Err(RpcExecutorError::UnexpectedResponse(request)),
+				response => {
+					error!("Unexpected request-response pair: {:?} {:?}", request, response);
+					Err(RpcExecutorError::UnexpectedResponse(request))
+				},
 			}
 		} else {
 			Err(RpcExecutorError::ClientNotFound($url.into()))
@@ -308,7 +302,7 @@ pub type RpcExecutor = RawRpcExecutor<Initialized>;
 
 impl<T> RawRpcExecutor<T> {
 	/// Starts new RPC client
-	pub fn start(
+	pub fn init(
 		mut self,
 		url: String,
 	) -> color_eyre::Result<(RawRpcExecutor<Initialized>, Vec<tokio::task::JoinHandle<()>>), RpcExecutorError> {
@@ -316,12 +310,12 @@ impl<T> RawRpcExecutor<T> {
 			Entry::Occupied(_) => Err(RpcExecutorError::ClientAlreadyExists(url)),
 			Entry::Vacant(entry) => {
 				let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-				let _ = entry.insert(to_backend);
+				let _res = entry.insert(to_backend);
 				let retry = self.retry.clone();
 				let api_client_mode = self.api_client_mode;
-				let fut = async move {
-					let mut backend = BackendExecutor { retry };
-					backend.start(from_frontend, url, api_client_mode).await;
+				let future = async move {
+					let mut backend = RpcExecutorBackend { retry };
+					backend.run(from_frontend, url, api_client_mode).await;
 				};
 
 				Ok((
@@ -331,7 +325,7 @@ impl<T> RawRpcExecutor<T> {
 						retry: self.retry,
 						marker: std::marker::PhantomData,
 					},
-					vec![tokio::spawn(fut)],
+					vec![tokio::spawn(future)],
 				))
 			},
 		}
@@ -484,15 +478,14 @@ impl RpcExecutor {
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn new_client_fn(url: &str, api_client_mode: ApiClientMode, retry: &RetryOptions) -> Option<Box<dyn ApiClientT>> {
+async fn build_client(url: &str, api_client_mode: ApiClientMode, retry: &RetryOptions) -> Option<Box<dyn ApiClientT>> {
 	let mut retry = Retry::new(retry);
-
 	loop {
 		match api_client_mode {
 			ApiClientMode::RPC => match build_online_client(url).await {
 				Ok(client) => return Some(Box::new(client)),
 				Err(err) => {
-					error!("[{}] Client error: {:?}", url, err);
+					error!("[{}] RpcClient error: {:?}", url, err);
 					if (retry.sleep().await).is_err() {
 						return None
 					}
@@ -501,7 +494,7 @@ async fn new_client_fn(url: &str, api_client_mode: ApiClientMode, retry: &RetryO
 			ApiClientMode::Light => match build_light_client(url).await {
 				Ok(client) => return Some(Box::new(client)),
 				Err(err) => {
-					error!("[{}] Client error: {:?}", url, err);
+					error!("[{}] LightClient error: {:?}", url, err);
 					if (retry.sleep().await).is_err() {
 						return None
 					}

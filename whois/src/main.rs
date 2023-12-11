@@ -174,7 +174,7 @@ async fn main() -> color_eyre::Result<()> {
 	let whois = Whois::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let rpc_executor = UninitializedRpcExecutor::new(ApiClientMode::RPC, opts.retry.clone());
-	let (rpc_executor, mut futures) = rpc_executor.start(opts.ws.clone())?;
+	let (rpc_executor, mut futures) = rpc_executor.init(opts.ws.clone())?;
 
 	let mut sub = TelemetrySubscription::new(opts.ws.clone(), opts.chain.clone());
 	let consumer_init = sub.create_consumer();

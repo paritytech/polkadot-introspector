@@ -377,10 +377,10 @@ async fn main() -> color_eyre::Result<()> {
 
 	let rpc_executor = UninitializedRpcExecutor::new(ApiClientMode::RPC, opts.retry.clone());
 	let mut nodes = opts.nodes.clone().into_iter();
-	let (mut rpc_executor, mut futures) = rpc_executor.start(nodes.next().unwrap())?;
+	let (mut rpc_executor, mut futures) = rpc_executor.init(nodes.next().unwrap())?;
 
 	for node in nodes {
-		let (new_executor, new_futures) = rpc_executor.start(node)?;
+		let (new_executor, new_futures) = rpc_executor.init(node)?;
 		rpc_executor = new_executor;
 		futures.extend(new_futures);
 	}

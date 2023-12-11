@@ -396,7 +396,7 @@ async fn main() -> color_eyre::Result<()> {
 	let shutdown_tx = init::init_shutdown();
 
 	let rpc_executor = RawRpcExecutor::new(opts.api_client_mode, opts.retry.clone());
-	let (mut rpc_executor, mut futures) = rpc_executor.start(opts.node.clone())?;
+	let (mut rpc_executor, mut futures) = rpc_executor.init(opts.node.clone())?;
 
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
