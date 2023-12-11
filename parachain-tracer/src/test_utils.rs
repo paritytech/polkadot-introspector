@@ -16,7 +16,12 @@
 use crate::parachain_block_info::ParachainBlockInfo;
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
-	api::{api_client::ApiClientMode, executor::RpcExecutor, storage::RequestExecutor, ApiService},
+	api::{
+		api_client::ApiClientMode,
+		executor::{RawRpcExecutor, RpcExecutor},
+		storage::RequestExecutor,
+		ApiService,
+	},
 	collector::{
 		candidate_record::{CandidateInclusionRecord, CandidateRecord},
 		CollectorPrefixType,
@@ -37,6 +42,7 @@ use polkadot_introspector_essentials::{
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{SubxtHrmpChannel, H256},
+	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
 use subxt::utils::bits::DecodedBits;
@@ -123,19 +129,18 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
 	}
 }
 
+pub fn create_rpc_executor() -> RpcExecutor {
+	let executor = RawRpcExecutor::new(ApiClientMode::RPC, RetryOptions::default());
+	let (executor, _handle) = executor.start(rpc_node_url().into()).unwrap();
+	executor
+}
+
 pub fn create_api() -> ApiService<H256> {
-	ApiService::new_with_storage(
-		RecordsStorageConfig { max_blocks: 4 },
-		RpcExecutor::new(ApiClientMode::RPC, Default::default()),
-	)
+	ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, create_rpc_executor())
 }
 
 pub fn create_storage() -> RequestExecutor<H256, CollectorPrefixType> {
-	ApiService::new_with_prefixed_storage(
-		RecordsStorageConfig { max_blocks: 4 },
-		RpcExecutor::new(ApiClientMode::RPC, Default::default()),
-	)
-	.storage()
+	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_rpc_executor()).storage()
 }
 
 pub fn create_hrmp_channels() -> BTreeMap<u32, SubxtHrmpChannel> {

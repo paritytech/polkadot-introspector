@@ -34,7 +34,10 @@ use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
-	api::{api_client::ApiClientMode, executor::RpcExecutor},
+	api::{
+		api_client::ApiClientMode,
+		executor::{RawRpcExecutor, RpcExecutor},
+	},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector,
@@ -392,8 +395,8 @@ async fn main() -> color_eyre::Result<()> {
 	let tracer = ParachainTracer::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
 
-	let mut rpc_executor = RpcExecutor::new(opts.api_client_mode, opts.retry.clone());
-	let mut futures = rpc_executor.start(opts.node.clone())?;
+	let rpc_executor = RawRpcExecutor::new(opts.api_client_mode, opts.retry.clone());
+	let (mut rpc_executor, mut futures) = rpc_executor.start(opts.node.clone())?;
 
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;

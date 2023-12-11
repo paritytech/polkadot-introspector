@@ -18,7 +18,7 @@ use clap::{Args, Parser, Subcommand};
 use polkadot_introspector_essentials::{
 	api::{
 		api_client::ApiClientMode,
-		executor::{RpcExecutor, RpcExecutorError},
+		executor::{RpcExecutor, RpcExecutorError, UninitializedRpcExecutor},
 	},
 	consumer::{EventConsumerInit, EventStream},
 	init,
@@ -94,8 +94,8 @@ impl Whois {
 	async fn run(
 		self,
 		consumer_config: EventConsumerInit<TelemetryEvent>,
+		mut executor: RpcExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
-		let mut executor = RpcExecutor::new(ApiClientMode::RPC, self.opts.retry.clone());
 		let validator = match self.opts.command {
 			WhoisCommand::Account(v) => v.validator,
 			WhoisCommand::Session(v) => match executor.get_session_account_keys(&self.opts.ws, v.session_index).await {
@@ -173,12 +173,13 @@ async fn main() -> color_eyre::Result<()> {
 
 	let whois = Whois::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-	let mut futures = vec![];
+	let rpc_executor = UninitializedRpcExecutor::new(ApiClientMode::RPC, opts.retry.clone());
+	let (rpc_executor, mut futures) = rpc_executor.start(opts.ws.clone())?;
 
 	let mut sub = TelemetrySubscription::new(opts.ws.clone(), opts.chain.clone());
 	let consumer_init = sub.create_consumer();
 
-	futures.extend(whois.run(consumer_init).await?);
+	futures.extend(whois.run(consumer_init, rpc_executor).await?);
 	futures.extend(sub.run(&shutdown_tx).await?);
 
 	init::run(futures, &shutdown_tx).await?;

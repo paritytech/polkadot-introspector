@@ -290,20 +290,28 @@ macro_rules! wrap_backend_call {
 }
 
 #[derive(Clone)]
-pub struct RpcExecutor {
+pub struct Initialized;
+
+#[derive(Clone)]
+pub struct Uninitialized;
+
+#[derive(Clone)]
+pub struct RawRpcExecutor<State = Uninitialized> {
 	connection_pool: HashMap<String, PrioritySender<ExecutorMessage>>,
 	api_client_mode: ApiClientMode,
 	retry: RetryOptions,
+	marker: std::marker::PhantomData<State>,
 }
 
-impl RpcExecutor {
-	/// Creates new RPC executor
-	pub fn new(api_client_mode: ApiClientMode, retry: RetryOptions) -> Self {
-		Self { api_client_mode, retry, connection_pool: Default::default() }
-	}
+pub type UninitializedRpcExecutor = RawRpcExecutor<Uninitialized>;
+pub type RpcExecutor = RawRpcExecutor<Initialized>;
 
+impl<T> RawRpcExecutor<T> {
 	/// Starts new RPC client
-	pub fn start(&mut self, url: String) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, RpcExecutorError> {
+	pub fn start(
+		mut self,
+		url: String,
+	) -> color_eyre::Result<(RawRpcExecutor<Initialized>, Vec<tokio::task::JoinHandle<()>>), RpcExecutorError> {
 		match self.connection_pool.entry(url.clone()) {
 			Entry::Occupied(_) => Err(RpcExecutorError::ClientAlreadyExists(url)),
 			Entry::Vacant(entry) => {
@@ -316,11 +324,28 @@ impl RpcExecutor {
 					backend.start(from_frontend, url, api_client_mode).await;
 				};
 
-				Ok(vec![tokio::spawn(fut)])
+				Ok((
+					RawRpcExecutor::<Initialized> {
+						connection_pool: self.connection_pool,
+						api_client_mode: self.api_client_mode,
+						retry: self.retry,
+						marker: std::marker::PhantomData,
+					},
+					vec![tokio::spawn(fut)],
+				))
 			},
 		}
 	}
+}
 
+impl UninitializedRpcExecutor {
+	/// Creates new RPC executor
+	pub fn new(api_client_mode: ApiClientMode, retry: RetryOptions) -> UninitializedRpcExecutor {
+		Self { api_client_mode, retry, connection_pool: Default::default(), marker: std::marker::PhantomData }
+	}
+}
+
+impl RpcExecutor {
 	/// Closes all RPC clients
 	pub async fn close(&mut self) -> color_eyre::Result<()> {
 		for to_backend in self.connection_pool.values_mut() {
