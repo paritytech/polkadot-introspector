@@ -15,21 +15,18 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use tokio::sync::broadcast::error::TryRecvError;
-
 use crate::{
-	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
+	api::executor::RpcExecutor,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
 	types::BlockNumber,
-	utils::RetryOptions,
 };
 use async_trait::async_trait;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{channel, Sender};
 use tokio::{
-	sync::broadcast::Sender as BroadcastSender,
+	sync::broadcast::{error::TryRecvError, Sender as BroadcastSender},
 	time::{interval_at, Duration},
 };
 
@@ -39,8 +36,7 @@ pub struct HistoricalSubscription {
 	to_block_number: BlockNumber,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<ChainSubscriptionEvent>>>,
-	api_client_mode: ApiClientMode,
-	retry: RetryOptions,
+	executor: RpcExecutor,
 }
 
 #[async_trait]
@@ -72,8 +68,7 @@ impl EventStream for HistoricalSubscription {
 				self.from_block_number,
 				self.to_block_number,
 				shutdown_tx.clone(),
-				self.api_client_mode,
-				self.retry.clone(),
+				&self.executor,
 			)
 		});
 
@@ -86,18 +81,11 @@ impl HistoricalSubscription {
 		urls: Vec<String>,
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
-		api_client_mode: ApiClientMode,
-		retry: RetryOptions,
+		executor: RpcExecutor,
 	) -> HistoricalSubscription {
-		HistoricalSubscription {
-			urls,
-			from_block_number,
-			to_block_number,
-			consumers: Vec::new(),
-			api_client_mode,
-			retry,
-		}
+		Self { urls, from_block_number, to_block_number, consumers: Vec::new(), executor }
 	}
+
 	// Per node
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
@@ -105,11 +93,9 @@ impl HistoricalSubscription {
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
-		api_client_mode: ApiClientMode,
-		retry: RetryOptions,
+		mut executor: RpcExecutor,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut executor = RequestExecutor::new(api_client_mode, retry);
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
@@ -204,8 +190,7 @@ impl HistoricalSubscription {
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
-		api_client_mode: ApiClientMode,
-		retry: RetryOptions,
+		executor: &RpcExecutor,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()
@@ -217,8 +202,7 @@ impl HistoricalSubscription {
 					from_block_number,
 					to_block_number,
 					shutdown_tx.clone(),
-					api_client_mode,
-					retry.clone(),
+					executor.clone(),
 				))
 			})
 			.collect()

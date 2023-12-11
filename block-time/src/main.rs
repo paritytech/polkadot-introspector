@@ -23,7 +23,6 @@ use crossterm::{
 };
 use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,

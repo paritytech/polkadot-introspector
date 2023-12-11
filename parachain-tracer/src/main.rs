@@ -34,7 +34,7 @@ use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
-	api::{executor::RpcExecutor, subxt_wrapper::ApiClientMode},
+	api::{api_client::ApiClientMode, executor::RpcExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector,
@@ -124,7 +124,6 @@ pub(crate) struct ParachainTracerOptions {
 #[derive(Clone)]
 pub(crate) struct ParachainTracer {
 	opts: ParachainTracerOptions,
-	retry: RetryOptions,
 	node: String,
 	metrics: Metrics,
 }
@@ -133,10 +132,9 @@ impl ParachainTracer {
 	pub(crate) fn new(mut opts: ParachainTracerOptions) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let node = opts.node.clone();
-		let retry = opts.retry.clone();
 		opts.mode = opts.mode.or(Some(ParachainTracerMode::Cli));
 
-		Ok(ParachainTracer { opts, node, metrics: Default::default(), retry })
+		Ok(ParachainTracer { opts, node, metrics: Default::default() })
 	}
 
 	/// Spawn the UI and subxt tasks and return their futures.
@@ -144,7 +142,7 @@ impl ParachainTracer {
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
-		frontend_executor: &mut RpcExecutor,
+		rpc_executor: &mut RpcExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -152,12 +150,8 @@ impl ParachainTracer {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
-		let mut collector = Collector::new(
-			self.opts.node.as_str(),
-			self.opts.collector_opts.clone(),
-			self.opts.api_client_mode,
-			self.retry.clone(),
-		);
+		let mut collector =
+			Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), rpc_executor.clone());
 		collector.spawn(shutdown_tx).await?;
 
 		println!(
@@ -171,7 +165,7 @@ impl ParachainTracer {
 			&self.node,
 			self.opts.api_client_mode,
 		);
-		if let Err(e) = print_host_configuration(self.opts.node.as_str(), frontend_executor).await {
+		if let Err(e) = print_host_configuration(self.opts.node.as_str(), rpc_executor).await {
 			warn!("Cannot get host configuration");
 			return Err(e)
 		}
@@ -219,7 +213,7 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.subxt());
+		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.executor());
 		let mut tracker = SubxtTracker::new(para_id);
 		let storage = TrackerStorage::new(para_id, api_service.storage());
 
@@ -398,30 +392,22 @@ async fn main() -> color_eyre::Result<()> {
 	let tracer = ParachainTracer::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let mut futures = vec![];
+	let mut rpc_executor = RpcExecutor::new(opts.api_client_mode, opts.retry.clone());
+	let rpc_executor_handle = rpc_executor.start(opts.node.clone())?;
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
-		Box::new(HistoricalSubscription::new(
-			vec![opts.node.clone()],
-			from,
-			to,
-			opts.api_client_mode,
-			opts.retry.clone(),
-		))
+		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, rpc_executor.clone()))
 	} else {
-		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], opts.api_client_mode, opts.retry.clone()))
+		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], rpc_executor.clone()))
 	};
 	let consumer_init = sub.create_consumer();
 
-	let mut rpc_executor = RpcExecutor::new(opts.api_client_mode, opts.retry);
-	let rpc_executor_handle = rpc_executor.start(opts.node)?;
-
 	futures.extend(vec![rpc_executor_handle]);
 	futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut rpc_executor).await?);
-	// futures.extend(sub.run(&shutdown_tx).await?);
-
-	let _ = rpc_executor.close().await;
+	futures.extend(sub.run(&shutdown_tx).await?);
 
 	init::run(futures, &shutdown_tx).await?;
+	rpc_executor.close().await?;
 
 	Ok(())
 }

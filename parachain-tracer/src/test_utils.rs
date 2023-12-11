@@ -16,7 +16,7 @@
 use crate::parachain_block_info::ParachainBlockInfo;
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
-	api::{storage::RequestExecutor, subxt_wrapper::ApiClientMode, ApiService},
+	api::{storage::RequestExecutor, ApiService},
 	collector::{
 		candidate_record::{CandidateInclusionRecord, CandidateRecord},
 		CollectorPrefixType,

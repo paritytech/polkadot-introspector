@@ -125,7 +125,7 @@ mod tests {
 
 	use super::*;
 	use polkadot_introspector_essentials::{
-		api::{subxt_wrapper::ApiClientMode, ApiService},
+		api::ApiService,
 		chain_events::SubxtDispute,
 		collector::CollectorStorageApi,
 		storage::{RecordTime, RecordsStorageConfig, StorageEntry},

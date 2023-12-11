@@ -17,7 +17,7 @@
 use async_trait::async_trait;
 use mockall::automock;
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{RequestExecutor, SubxtWrapperError},
+	api::executor::{RpcExecutor, RpcExecutorError},
 	types::{SubxtHrmpChannel, H256},
 };
 use std::collections::BTreeMap;
@@ -28,11 +28,11 @@ pub trait TrackerRpc {
 	async fn inbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError>;
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError>;
 	async fn outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError>;
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError>;
 }
 
 pub struct ParachainTrackerRpc {
@@ -41,11 +41,11 @@ pub struct ParachainTrackerRpc {
 	/// RPC node endpoint.
 	node: String,
 	/// A subxt API wrapper.
-	executor: RequestExecutor,
+	executor: RpcExecutor,
 }
 
 impl ParachainTrackerRpc {
-	pub fn new(para_id: u32, node: &str, executor: RequestExecutor) -> Self {
+	pub fn new(para_id: u32, node: &str, executor: RpcExecutor) -> Self {
 		Self { para_id, node: node.to_string(), executor }
 	}
 }
@@ -55,7 +55,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 	async fn inbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError> {
 		self.executor
 			.get_inbound_hrmp_channels(self.node.as_str(), block_hash, self.para_id)
 			.await
@@ -64,7 +64,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 	async fn outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, SubxtWrapperError> {
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError> {
 		self.executor
 			.get_outbound_hrmp_channels(self.node.as_str(), block_hash, self.para_id)
 			.await
@@ -78,8 +78,8 @@ mod tests {
 
 	async fn setup_client() -> (ParachainTrackerRpc, H256) {
 		let api = create_api();
-		let rpc = ParachainTrackerRpc::new(100, rpc_node_url(), api.subxt());
-		let block_hash = api.subxt().get_block_hash(rpc_node_url(), None).await.unwrap().unwrap();
+		let rpc = ParachainTrackerRpc::new(100, rpc_node_url(), api.executor());
+		let block_hash = api.executor().get_block_hash(rpc_node_url(), None).await.unwrap().unwrap();
 
 		(rpc, block_hash)
 	}

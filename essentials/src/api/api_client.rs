@@ -19,6 +19,7 @@ use crate::{
 	metadata::polkadot,
 	types::{AccountId32, BlockNumber, Header, InherentData, SessionKeys, SubxtHrmpChannel, Timestamp, H256},
 };
+use clap::ValueEnum;
 use dyn_clone::DynClone;
 use std::collections::BTreeMap;
 use subxt::{
@@ -36,6 +37,14 @@ use subxt::{
 };
 
 pub type HeaderStream = StreamOf<Result<(Header, BlockRef<H256>), subxt::Error>>;
+
+/// How to subscribe to subxt blocks
+#[derive(strum::Display, Debug, Clone, Copy, ValueEnum, Default)]
+pub enum ApiClientMode {
+	#[default]
+	RPC,
+	Light,
+}
 
 #[async_trait::async_trait]
 pub trait ApiClientT: DynClone + Send + Sync {

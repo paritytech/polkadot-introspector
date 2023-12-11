@@ -16,7 +16,6 @@
 
 use clap::{Args, Parser, Subcommand};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{ApiClientMode, RequestExecutor, SubxtWrapperError},
 	consumer::{EventConsumerInit, EventStream},
 	init,
 	telemetry_feed::{AddedNode, TelemetryFeed},

@@ -19,7 +19,8 @@ mod ws;
 
 use crate::{
 	api::{
-		subxt_wrapper::{ApiClientMode, RequestExecutor, SubxtWrapperError},
+		dynamic::DynamicError,
+		executor::{RpcExecutor, RpcExecutorError},
 		ApiService,
 	},
 	chain_events::{
@@ -29,7 +30,6 @@ use crate::{
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{Header, InherentData, OnDemandOrder, Timestamp, H256},
-	utils::RetryOptions,
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -186,7 +186,7 @@ pub enum CollectorError {
 	#[error(transparent)]
 	NonFatal(#[from] color_eyre::Report),
 	#[error(transparent)]
-	ExecutorFatal(#[from] SubxtWrapperError),
+	ExecutorFatal(#[from] RpcExecutorError),
 	#[error(transparent)]
 	SendFatal(#[from] polkadot_introspector_priority_channel::SendError),
 }
@@ -199,16 +199,15 @@ pub struct Collector {
 	subscribe_channels: BTreeMap<u32, Vec<Sender<CollectorUpdateEvent>>>,
 	broadcast_channels: Vec<Sender<CollectorUpdateEvent>>,
 	state: CollectorState,
-	executor: RequestExecutor,
+	executor: RpcExecutor,
 	subscribe_mode: CollectorSubscribeMode,
 }
 
 impl Collector {
-	pub fn new(endpoint: &str, opts: CollectorOptions, api_client_mode: ApiClientMode, retry: RetryOptions) -> Self {
+	pub fn new(endpoint: &str, opts: CollectorOptions, rpc_executor: RpcExecutor) -> Self {
 		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
 			RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) },
-			api_client_mode,
-			retry,
+			rpc_executor,
 		);
 		let ws_listener = if let Some(listen_addr) = opts.listen_addr {
 			let ws_listener_config = WebSocketListenerConfig::builder().listen_addr(listen_addr).build();
@@ -218,7 +217,7 @@ impl Collector {
 		} else {
 			None
 		};
-		let executor = api.subxt();
+		let executor = api.executor();
 		Self {
 			api,
 			ws_listener,
@@ -374,8 +373,8 @@ impl Collector {
 		self.api.clone()
 	}
 
-	/// Returns Subxt request executor
-	pub fn executor(&self) -> RequestExecutor {
+	/// Returns RPC executor
+	pub fn executor(&self) -> RpcExecutor {
 		self.executor.clone()
 	}
 
@@ -672,7 +671,7 @@ impl Collector {
 		ts: Timestamp,
 	) -> color_eyre::Result<(), CollectorError> {
 		let assignments = match self.core_assignments_via_claim_queue(block_hash).await {
-			Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(reason)) => {
+			Err(RpcExecutorError::DynamicError(DynamicError::EmptyResponseFromDynamicStorage(reason))) => {
 				info!("{}. Nothing to process, used empty value", reason);
 				BTreeMap::default()
 			},
@@ -691,7 +690,7 @@ impl Collector {
 	async fn core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, SubxtWrapperError> {
+	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, RpcExecutorError> {
 		let assignments = self.executor.get_claim_queue(self.endpoint.as_str(), block_hash).await?;
 		Ok(assignments
 			.iter()
