@@ -375,22 +375,19 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let rpc_executor = UninitializedRpcExecutor::new(ApiClientMode::RPC, opts.retry.clone());
 	let mut nodes = opts.nodes.clone().into_iter();
-	let (mut rpc_executor, mut futures) = rpc_executor.init(nodes.next().unwrap())?;
-
+	let mut rpc_executor =
+		UninitializedRpcExecutor::new(ApiClientMode::RPC, opts.retry.clone()).init(nodes.next().unwrap())?;
 	for node in nodes {
-		let (new_executor, new_futures) = rpc_executor.init(node)?;
+		let new_executor = rpc_executor.init(node)?;
 		rpc_executor = new_executor;
-		futures.extend(new_futures);
 	}
-
 	let monitor = BlockTimeMonitor::new(opts.clone(), rpc_executor.clone())?;
 	let shutdown_tx = init::init_shutdown();
-
 	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), rpc_executor);
 	let consumer_init = sub.create_consumer();
 
+	let mut futures = vec![];
 	futures.extend(monitor.run(consumer_init).await?);
 	futures.extend(sub.run(&shutdown_tx).await?);
 

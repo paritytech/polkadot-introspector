@@ -302,10 +302,7 @@ pub type RpcExecutor = RawRpcExecutor<Initialized>;
 
 impl<T> RawRpcExecutor<T> {
 	/// Starts new RPC client
-	pub fn init(
-		mut self,
-		url: String,
-	) -> color_eyre::Result<(RawRpcExecutor<Initialized>, Vec<tokio::task::JoinHandle<()>>), RpcExecutorError> {
+	pub fn init(mut self, url: String) -> color_eyre::Result<RpcExecutor, RpcExecutorError> {
 		match self.connection_pool.entry(url.clone()) {
 			Entry::Occupied(_) => Err(RpcExecutorError::ClientAlreadyExists(url)),
 			Entry::Vacant(entry) => {
@@ -313,20 +310,17 @@ impl<T> RawRpcExecutor<T> {
 				let _res = entry.insert(to_backend);
 				let retry = self.retry.clone();
 				let api_client_mode = self.api_client_mode;
-				let future = async move {
+				tokio::spawn(async move {
 					let mut backend = RpcExecutorBackend { retry };
 					backend.run(from_frontend, url, api_client_mode).await;
-				};
+				});
 
-				Ok((
-					RawRpcExecutor::<Initialized> {
-						connection_pool: self.connection_pool,
-						api_client_mode: self.api_client_mode,
-						retry: self.retry,
-						marker: std::marker::PhantomData,
-					},
-					vec![tokio::spawn(future)],
-				))
+				Ok(RpcExecutor {
+					connection_pool: self.connection_pool,
+					api_client_mode: self.api_client_mode,
+					retry: self.retry,
+					marker: std::marker::PhantomData,
+				})
 			},
 		}
 	}

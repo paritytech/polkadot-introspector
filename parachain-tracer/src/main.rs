@@ -394,10 +394,8 @@ async fn main() -> color_eyre::Result<()> {
 
 	let tracer = ParachainTracer::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-
-	let rpc_executor = UninitializedRpcExecutor::new(opts.api_client_mode, opts.retry.clone());
-	let (mut rpc_executor, mut futures) = rpc_executor.init(opts.node.clone())?;
-
+	let mut rpc_executor =
+		UninitializedRpcExecutor::new(opts.api_client_mode, opts.retry.clone()).init(opts.node.clone())?;
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
 		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, rpc_executor.clone()))
@@ -406,6 +404,7 @@ async fn main() -> color_eyre::Result<()> {
 	};
 	let consumer_init = sub.create_consumer();
 
+	let mut futures = vec![];
 	futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut rpc_executor).await?);
 	futures.extend(sub.run(&shutdown_tx).await?);
 
