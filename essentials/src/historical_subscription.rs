@@ -194,7 +194,7 @@ impl HistoricalSubscription {
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()
-			.zip(urls.into_iter())
+			.zip(urls)
 			.map(|(update_channel, url)| {
 				tokio::spawn(Self::run_per_node(
 					update_channel,

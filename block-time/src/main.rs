@@ -23,6 +23,7 @@ use crossterm::{
 };
 use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
+	api::{api_client::ApiClientMode, executor::RpcExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -93,13 +94,13 @@ struct BlockTimeMonitor {
 	opts: BlockTimeOptions,
 	block_time_metric: Option<HistogramVec>,
 	endpoints: Vec<String>,
-	executor: RequestExecutor,
+	executor: RpcExecutor,
 	active_endpoints: usize,
 }
 
 impl BlockTimeMonitor {
 	pub fn new(opts: BlockTimeOptions) -> color_eyre::Result<Self> {
-		let executor = RequestExecutor::new(ApiClientMode::RPC, opts.retry.clone());
+		let executor = RpcExecutor::new(ApiClientMode::RPC, opts.retry.clone());
 		let endpoints = opts.nodes.clone();
 		let active_endpoints = endpoints.len();
 
@@ -246,7 +247,7 @@ impl BlockTimeMonitor {
 		metric: Option<prometheus_endpoint::HistogramVec>,
 		// TODO: make this a struct.
 		consumer_config: Receiver<ChainSubscriptionEvent>,
-		mut executor: RequestExecutor,
+		mut executor: RpcExecutor,
 		mut message_tx: Sender<BlockTimeMessage>,
 	) {
 		// Make static string out of uri so we can use it as Prometheus label.
@@ -321,7 +322,7 @@ async fn populate_view(
 	url: &str,
 	cli_opts: BlockTimeCliOptions,
 	mut message_tx: Sender<BlockTimeMessage>,
-	mut executor: RequestExecutor,
+	mut executor: RpcExecutor,
 ) {
 	let mut prev_ts = 0u64;
 	let blocks_to_fetch = cli_opts.chart_width;
@@ -376,7 +377,8 @@ async fn main() -> color_eyre::Result<()> {
 	let shutdown_tx = init::init_shutdown();
 	let mut futures = vec![];
 
-	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), ApiClientMode::RPC, opts.retry.clone());
+	let mut sub =
+		ChainHeadSubscription::new(opts.nodes.clone(), RpcExecutor::new(ApiClientMode::RPC, opts.retry.clone()));
 	let consumer_init = sub.create_consumer();
 
 	futures.extend(monitor.run(consumer_init).await?);

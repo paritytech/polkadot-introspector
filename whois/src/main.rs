@@ -16,6 +16,10 @@
 
 use clap::{Args, Parser, Subcommand};
 use polkadot_introspector_essentials::{
+	api::{
+		api_client::ApiClientMode,
+		executor::{RpcExecutor, RpcExecutorError},
+	},
 	consumer::{EventConsumerInit, EventStream},
 	init,
 	telemetry_feed::{AddedNode, TelemetryFeed},
@@ -73,7 +77,7 @@ pub enum WhoisError {
 	#[error("Validator with given index not found")]
 	NoValidator,
 	#[error("Can't connect to relay chain")]
-	SubxtError(SubxtWrapperError),
+	SubxtError(RpcExecutorError),
 	#[error("Can't connect to telemetry feed")]
 	TelemetryError(color_eyre::Report),
 }
@@ -91,7 +95,7 @@ impl Whois {
 		self,
 		consumer_config: EventConsumerInit<TelemetryEvent>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
-		let mut executor = RequestExecutor::new(ApiClientMode::RPC, self.opts.retry.clone());
+		let mut executor = RpcExecutor::new(ApiClientMode::RPC, self.opts.retry.clone());
 		let validator = match self.opts.command {
 			WhoisCommand::Account(v) => v.validator,
 			WhoisCommand::Session(v) => match executor.get_session_account_keys(&self.opts.ws, v.session_index).await {

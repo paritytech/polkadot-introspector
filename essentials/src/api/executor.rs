@@ -168,7 +168,7 @@ impl BackendExecutor {
 						Ok(message) => match message {
 							ExecutorMessage::Close => return,
 							ExecutorMessage::Rpc(tx, request) => {
-								match self.execute_request(&request, &client).await {
+								match self.execute_request(&request, &*client).await {
 									Ok(v) => {
 										tx.send(v).unwrap();
 									},
@@ -186,7 +186,7 @@ impl BackendExecutor {
 	async fn execute_request(
 		&mut self,
 		request: &RpcRequest,
-		client: &Box<dyn ApiClientT>,
+		client: &dyn ApiClientT,
 	) -> color_eyre::Result<RpcResponse, RpcExecutorError> {
 		let mut retry = Retry::new(&self.retry);
 		loop {
@@ -212,7 +212,7 @@ impl BackendExecutor {
 	async fn match_request(
 		&mut self,
 		request: RpcRequest,
-		client: &Box<dyn ApiClientT>,
+		client: &dyn ApiClientT,
 	) -> color_eyre::Result<RpcResponse, RpcExecutorError> {
 		use RpcRequest::*;
 		use RpcResponse::*;
