@@ -186,7 +186,7 @@ impl BackendExecutor {
 	async fn execute_request(
 		&mut self,
 		request: &RpcRequest,
-		client: &dyn ApiClientT,
+		client: &Box<dyn ApiClientT>,
 	) -> color_eyre::Result<RpcResponse, RpcExecutorError> {
 		let mut retry = Retry::new(&self.retry);
 		loop {
@@ -212,7 +212,7 @@ impl BackendExecutor {
 	async fn match_request(
 		&mut self,
 		request: RpcRequest,
-		client: &dyn ApiClientT,
+		client: &Box<dyn ApiClientT>,
 	) -> color_eyre::Result<RpcResponse, RpcExecutorError> {
 		use RpcRequest::*;
 		use RpcResponse::*;

@@ -188,7 +188,7 @@ fn decode_u128_value(value: &Value<u32>) -> Result<u128, DynamicError> {
 }
 
 pub async fn fetch_dynamic_storage(
-	client: &dyn ApiClientT,
+	client: &Box<dyn ApiClientT>,
 	maybe_hash: Option<H256>,
 	pallet_name: &str,
 	entry_name: &str,
