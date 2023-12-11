@@ -91,6 +91,7 @@ impl std::fmt::Display for RpcRequest {
 }
 
 /// Response types for APIs.
+#[derive(Debug)]
 enum RpcResponse {
 	/// A timestamp.
 	Timestamp(Timestamp),
@@ -169,15 +170,13 @@ impl BackendExecutor {
 							ExecutorMessage::Rpc(tx, request) => {
 								match self.execute_request(&request, &client).await {
 									Ok(v) => {
-										let _ = tx.send(v);
+										tx.send(v).unwrap();
 									},
-									Err(_e) => {
-										todo!()
-									}
+									Err(e) => println!("BackendExecutor: {:?}", e),
 								};
 							}
 						},
-						Err(_) => todo!(),
+						Err(e) => println!("BackendExecutor: {:?}", e),
 					}
 				}
 			}
@@ -304,7 +303,7 @@ impl RpcExecutor {
 	}
 
 	/// Starts new RPC client
-	pub fn start(&mut self, url: String) -> color_eyre::Result<tokio::task::JoinHandle<()>, RpcExecutorError> {
+	pub fn start(&mut self, url: String) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, RpcExecutorError> {
 		match self.connection_pool.entry(url.clone()) {
 			Entry::Occupied(_) => Err(RpcExecutorError::ClientAlreadyExists(url)),
 			Entry::Vacant(entry) => {
@@ -317,7 +316,7 @@ impl RpcExecutor {
 					backend.start(from_frontend, url, api_client_mode).await;
 				};
 
-				Ok(tokio::spawn(fut))
+				Ok(vec![tokio::spawn(fut)])
 			},
 		}
 	}

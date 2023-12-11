@@ -199,6 +199,7 @@ pub async fn fetch_dynamic_storage(
 		.ok_or(DynamicError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}")))
 }
 
+#[derive(Debug)]
 pub struct DynamicHostConfiguration(Value<u32>);
 
 impl DynamicHostConfiguration {
