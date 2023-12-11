@@ -79,7 +79,7 @@ where
 }
 #[cfg(test)]
 mod tests {
-	use super::{executor::RawRpcExecutor, *};
+	use super::{executor::UninitializedRpcExecutor, *};
 	use crate::{api::api_client::ApiClientMode, storage::StorageEntry, types::H256, utils::RetryOptions};
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
 
@@ -94,7 +94,7 @@ mod tests {
 	}
 
 	fn rpc_executor() -> RpcExecutor {
-		let executor = RawRpcExecutor::new(ApiClientMode::RPC, RetryOptions::default());
+		let executor = UninitializedRpcExecutor::new(ApiClientMode::RPC, RetryOptions::default());
 		let (executor, _handle) = executor.init(rpc_node_url().into()).unwrap();
 		executor
 	}

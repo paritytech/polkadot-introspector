@@ -18,7 +18,7 @@ use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
 	api::{
 		api_client::ApiClientMode,
-		executor::{RawRpcExecutor, RpcExecutor},
+		executor::{RpcExecutor, UninitializedRpcExecutor},
 		storage::RequestExecutor,
 		ApiService,
 	},
@@ -130,7 +130,7 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
 }
 
 pub fn create_rpc_executor() -> RpcExecutor {
-	let executor = RawRpcExecutor::new(ApiClientMode::RPC, RetryOptions::default());
+	let executor = UninitializedRpcExecutor::new(ApiClientMode::RPC, RetryOptions::default());
 	let (executor, _handle) = executor.init(rpc_node_url().into()).unwrap();
 	executor
 }
