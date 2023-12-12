@@ -154,21 +154,15 @@ impl RpcExecutorBackend {
 							ExecutorMessage::Rpc(tx, request) => {
 								match self.execute_request(&request, &*client).await {
 									Ok(response) => {
-										// Not critical, skip it and process next request
 										if let Err(e) = tx.send(response) {
-											error!("Cannot send response back: {:?}", e);
+											return error!("Cannot send response back: {:?}", e);
 										}
 									},
-									// Critical, after a few retries RPC client was not able to process the request
-									Err(e) => {
-										error!("Cannot process the request {:?}: {:?}", request, e);
-										return
-									},
+									Err(e) => return error!("Cannot process the request {:?}: {:?}", request, e),
 								};
 							}
 						},
-						// Not critical, skip it and process next request
-						Err(e) => error!("Cannot receive a request from the frontend: {:?}", e),
+						Err(e) => return error!("Cannot receive a request from the frontend: {:?}", e),
 					}
 				}
 			}
@@ -297,32 +291,56 @@ pub struct RawRpcExecutor<State = Uninitialized> {
 	marker: std::marker::PhantomData<State>,
 }
 
+pub trait RpcExecutorNodes {
+	fn nodes(&self) -> impl Iterator<Item = String>;
+}
+
+impl RpcExecutorNodes for Vec<String> {
+	fn nodes(&self) -> impl Iterator<Item = String> {
+		self.to_owned().into_iter()
+	}
+}
+
+impl RpcExecutorNodes for String {
+	fn nodes(&self) -> impl Iterator<Item = String> {
+		vec![self.to_owned()].into_iter()
+	}
+}
+
+impl RpcExecutorNodes for &str {
+	fn nodes(&self) -> impl Iterator<Item = String> {
+		vec![self.to_string()].into_iter()
+	}
+}
+
 pub type UninitializedRpcExecutor = RawRpcExecutor<Uninitialized>;
 pub type RpcExecutor = RawRpcExecutor<Initialized>;
 
 impl<T> RawRpcExecutor<T> {
 	/// Starts new RPC client
-	pub fn init(mut self, url: String) -> color_eyre::Result<RpcExecutor, RpcExecutorError> {
-		match self.connection_pool.entry(url.clone()) {
-			Entry::Occupied(_) => Err(RpcExecutorError::ClientAlreadyExists(url)),
-			Entry::Vacant(entry) => {
-				let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-				let _res = entry.insert(to_backend);
-				let retry = self.retry.clone();
-				let api_client_mode = self.api_client_mode;
-				tokio::spawn(async move {
-					let mut backend = RpcExecutorBackend { retry };
-					backend.run(from_frontend, url, api_client_mode).await;
-				});
-
-				Ok(RpcExecutor {
-					connection_pool: self.connection_pool,
-					api_client_mode: self.api_client_mode,
-					retry: self.retry,
-					marker: std::marker::PhantomData,
-				})
-			},
+	pub fn init(mut self, nodes: impl RpcExecutorNodes) -> color_eyre::Result<RpcExecutor, RpcExecutorError> {
+		for node in nodes.nodes() {
+			match self.connection_pool.entry(node.clone()) {
+				Entry::Occupied(_) => return Err(RpcExecutorError::ClientAlreadyExists(node)),
+				Entry::Vacant(entry) => {
+					let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
+					let _ = entry.insert(to_backend);
+					let retry = self.retry.clone();
+					let api_client_mode = self.api_client_mode;
+					tokio::spawn(async move {
+						let mut backend = RpcExecutorBackend { retry };
+						backend.run(from_frontend, node, api_client_mode).await;
+					});
+				},
+			};
 		}
+
+		Ok(RpcExecutor {
+			connection_pool: self.connection_pool,
+			api_client_mode: self.api_client_mode,
+			retry: self.retry,
+			marker: std::marker::PhantomData,
+		})
 	}
 }
 
