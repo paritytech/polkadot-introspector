@@ -242,55 +242,6 @@ impl RpcExecutorBackend {
 	}
 }
 
-macro_rules! wrap_backend_call {
-	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
-		if let Some(to_backend) = $self.connection_pool.get_mut($url) {
-			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
-			let request = RpcRequest::$request_ty;
-			to_backend.send(ExecutorMessage::Rpc(tx, RpcRequest::$request_ty)).await?;
-			match rx.await? {
-				RpcResponse::$response_ty(res) => Ok(res),
-				response => {
-					error!("Unexpected request-response pair: {:?} {:?}", request, response);
-					Err(RpcExecutorError::UnexpectedResponse(request))
-				},
-			}
-		} else {
-			Err(RpcExecutorError::ClientNotFound($url.into()))
-		}
-	};
-	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
-		if let Some(to_backend) = $self.connection_pool.get_mut($url) {
-			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
-			let request = RpcRequest::$request_ty($($arg),*);
-			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
-			match rx.await? {
-				RpcResponse::$response_ty(res) => Ok(res),
-				response => {
-					error!("Unexpected request-response pair: {:?} {:?}", request, response);
-					Err(RpcExecutorError::UnexpectedResponse(request))
-				},
-			}
-		} else {
-			Err(RpcExecutorError::ClientNotFound($url.into()))
-		}
-	};
-}
-
-#[derive(Clone)]
-pub struct Initialized;
-
-#[derive(Clone)]
-pub struct Uninitialized;
-
-#[derive(Clone)]
-pub struct RawRpcExecutor<State = Uninitialized> {
-	connection_pool: HashMap<String, PrioritySender<ExecutorMessage>>,
-	api_client_mode: ApiClientMode,
-	retry: RetryOptions,
-	marker: std::marker::PhantomData<State>,
-}
-
 pub trait RpcExecutorNodes {
 	fn nodes(&self) -> impl Iterator<Item = String>;
 }
@@ -313,48 +264,74 @@ impl RpcExecutorNodes for &str {
 	}
 }
 
-pub type UninitializedRpcExecutor = RawRpcExecutor<Uninitialized>;
-pub type RpcExecutor = RawRpcExecutor<Initialized>;
-
-impl<T> RawRpcExecutor<T> {
-	/// Starts new RPC client
-	pub fn init(mut self, nodes: impl RpcExecutorNodes) -> color_eyre::Result<RpcExecutor, RpcExecutorError> {
-		for node in nodes.nodes() {
-			match self.connection_pool.entry(node.clone()) {
-				Entry::Occupied(_) => return Err(RpcExecutorError::ClientAlreadyExists(node)),
-				Entry::Vacant(entry) => {
-					let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-					let _ = entry.insert(to_backend);
-					let retry = self.retry.clone();
-					let api_client_mode = self.api_client_mode;
-					tokio::spawn(async move {
-						let mut backend = RpcExecutorBackend { retry };
-						backend.run(from_frontend, node, api_client_mode).await;
-					});
-				},
-			};
-		}
-
-		Ok(RpcExecutor {
-			connection_pool: self.connection_pool,
-			api_client_mode: self.api_client_mode,
-			retry: self.retry,
-			marker: std::marker::PhantomData,
-		})
+/// Creates new RPC executor
+pub fn build_rpc_executor(
+	nodes: impl RpcExecutorNodes,
+	api_client_mode: ApiClientMode,
+	retry: RetryOptions,
+) -> color_eyre::Result<RpcExecutor, RpcExecutorError> {
+	let mut clients = HashMap::new();
+	for node in nodes.nodes() {
+		match clients.entry(node.clone()) {
+			Entry::Occupied(_) => return Err(RpcExecutorError::ClientAlreadyExists(node)),
+			Entry::Vacant(entry) => {
+				let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
+				let _ = entry.insert(to_backend);
+				let retry = retry.clone();
+				let api_client_mode = api_client_mode;
+				tokio::spawn(async move {
+					let mut backend = RpcExecutorBackend { retry };
+					backend.run(from_frontend, node, api_client_mode).await;
+				});
+			},
+		};
 	}
+
+	Ok(RpcExecutor(clients))
 }
 
-impl UninitializedRpcExecutor {
-	/// Creates new RPC executor
-	pub fn new(api_client_mode: ApiClientMode, retry: RetryOptions) -> UninitializedRpcExecutor {
-		Self { api_client_mode, retry, connection_pool: Default::default(), marker: std::marker::PhantomData }
-	}
+#[derive(Clone)]
+pub struct RpcExecutor(HashMap<String, PrioritySender<ExecutorMessage>>);
+
+macro_rules! wrap_backend_call {
+	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
+		if let Some(to_backend) = $self.0.get_mut($url) {
+			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
+			let request = RpcRequest::$request_ty;
+			to_backend.send(ExecutorMessage::Rpc(tx, RpcRequest::$request_ty)).await?;
+			match rx.await? {
+				RpcResponse::$response_ty(res) => Ok(res),
+				response => {
+					error!("Unexpected request-response pair: {:?} {:?}", request, response);
+					Err(RpcExecutorError::UnexpectedResponse(request))
+				},
+			}
+		} else {
+			Err(RpcExecutorError::ClientNotFound($url.into()))
+		}
+	};
+	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
+		if let Some(to_backend) = $self.0.get_mut($url) {
+			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
+			let request = RpcRequest::$request_ty($($arg),*);
+			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
+			match rx.await? {
+				RpcResponse::$response_ty(res) => Ok(res),
+				response => {
+					error!("Unexpected request-response pair: {:?} {:?}", request, response);
+					Err(RpcExecutorError::UnexpectedResponse(request))
+				},
+			}
+		} else {
+			Err(RpcExecutorError::ClientNotFound($url.into()))
+		}
+	};
 }
 
 impl RpcExecutor {
 	/// Closes all RPC clients
 	pub async fn close(&mut self) -> color_eyre::Result<()> {
-		for to_backend in self.connection_pool.values_mut() {
+		for to_backend in self.0.values_mut() {
 			to_backend.send(ExecutorMessage::Close).await?;
 		}
 

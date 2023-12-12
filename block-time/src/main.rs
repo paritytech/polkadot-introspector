@@ -25,7 +25,7 @@ use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
 	api::{
 		api_client::ApiClientMode,
-		executor::{RpcExecutor, UninitializedRpcExecutor},
+		executor::{build_rpc_executor, RpcExecutor},
 	},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
@@ -375,8 +375,7 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let rpc_executor =
-		UninitializedRpcExecutor::new(ApiClientMode::RPC, opts.retry.clone()).init(opts.nodes.clone())?;
+	let rpc_executor = build_rpc_executor(opts.nodes.clone(), ApiClientMode::RPC, opts.retry.clone())?;
 	let monitor = BlockTimeMonitor::new(opts.clone(), rpc_executor.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), rpc_executor);
