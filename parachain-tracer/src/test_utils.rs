@@ -16,12 +16,7 @@
 use crate::parachain_block_info::ParachainBlockInfo;
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
-	api::{
-		api_client::ApiClientMode,
-		executor::{build_executor, RequestExecutor},
-		storage::RequestExecutor,
-		ApiService,
-	},
+	api::{api_client::ApiClientMode, executor, storage, ApiService},
 	collector::{
 		candidate_record::{CandidateInclusionRecord, CandidateRecord},
 		CollectorPrefixType,
@@ -129,16 +124,16 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
 	}
 }
 
-pub fn create_rpc_executor() -> RequestExecutor {
-	build_executor(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
+pub fn create_executor() -> executor::RequestExecutor {
+	executor::RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
 }
 
 pub fn create_api() -> ApiService<H256> {
-	ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, create_rpc_executor())
+	ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor())
 }
 
-pub fn create_storage() -> RequestExecutor<H256, CollectorPrefixType> {
-	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_rpc_executor()).storage()
+pub fn create_storage() -> storage::RequestExecutor<H256, CollectorPrefixType> {
+	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor()).storage()
 }
 
 pub fn create_hrmp_channels() -> BTreeMap<u32, SubxtHrmpChannel> {
@@ -205,7 +200,7 @@ pub async fn storage_write<T: Encode>(
 	prefix: CollectorPrefixType,
 	hash: H256,
 	entry: T,
-	storage: &RequestExecutor<H256, CollectorPrefixType>,
+	storage: &storage::RequestExecutor<H256, CollectorPrefixType>,
 ) -> color_eyre::Result<()> {
 	storage
 		.storage_write_prefixed(

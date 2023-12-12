@@ -121,7 +121,7 @@ impl TrackerStorage {
 
 #[cfg(test)]
 mod tests {
-	use crate::test_utils::{create_candidate_record, create_inherent_data, create_rpc_executor};
+	use crate::test_utils::{create_candidate_record, create_executor, create_inherent_data};
 
 	use super::*;
 	use polkadot_introspector_essentials::{
@@ -135,7 +135,7 @@ mod tests {
 
 	fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
 		let api: CollectorStorageApi =
-			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_rpc_executor());
+			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor());
 		let storage = TrackerStorage::new(100, api.storage());
 
 		(storage, api)

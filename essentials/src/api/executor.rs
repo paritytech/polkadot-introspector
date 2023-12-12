@@ -268,32 +268,6 @@ impl RequestExecutorNodes for &str {
 	}
 }
 
-/// Creates new RPC executor
-pub fn build_executor(
-	nodes: impl RequestExecutorNodes,
-	api_client_mode: ApiClientMode,
-	retry: RetryOptions,
-) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
-	let mut clients = HashMap::new();
-	for node in nodes.nodes() {
-		match clients.entry(node.clone()) {
-			Entry::Occupied(_) => return Err(RequestExecutorError::ClientAlreadyExists(node)),
-			Entry::Vacant(entry) => {
-				let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-				let _ = entry.insert(to_backend);
-				let retry = retry.clone();
-				let api_client_mode = api_client_mode;
-				tokio::spawn(async move {
-					let mut backend = RequestExecutorBackend { retry };
-					backend.run(from_frontend, node, api_client_mode).await;
-				});
-			},
-		};
-	}
-
-	Ok(RequestExecutor(clients))
-}
-
 #[derive(Clone)]
 pub struct RequestExecutor(HashMap<String, PrioritySender<ExecutorMessage>>);
 
@@ -333,6 +307,32 @@ macro_rules! wrap_backend_call {
 }
 
 impl RequestExecutor {
+	/// Creates new RPC executor
+	pub fn build(
+		nodes: impl RequestExecutorNodes,
+		api_client_mode: ApiClientMode,
+		retry: RetryOptions,
+	) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
+		let mut clients = HashMap::new();
+		for node in nodes.nodes() {
+			match clients.entry(node.clone()) {
+				Entry::Occupied(_) => return Err(RequestExecutorError::ClientAlreadyExists(node)),
+				Entry::Vacant(entry) => {
+					let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
+					let _ = entry.insert(to_backend);
+					let retry = retry.clone();
+					let api_client_mode = api_client_mode;
+					tokio::spawn(async move {
+						let mut backend = RequestExecutorBackend { retry };
+						backend.run(from_frontend, node, api_client_mode).await;
+					});
+				},
+			};
+		}
+
+		Ok(RequestExecutor(clients))
+	}
+
 	/// Closes all RPC clients
 	pub async fn close(&mut self) -> color_eyre::Result<()> {
 		for to_backend in self.0.values_mut() {

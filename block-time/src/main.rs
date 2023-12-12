@@ -23,10 +23,7 @@ use crossterm::{
 };
 use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
-	api::{
-		api_client::ApiClientMode,
-		executor::{build_executor, RequestExecutor},
-	},
+	api::{api_client::ApiClientMode, executor::RequestExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -375,7 +372,7 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let rpc_executor = build_executor(opts.nodes.clone(), ApiClientMode::RPC, opts.retry.clone())?;
+	let rpc_executor = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, opts.retry.clone())?;
 	let monitor = BlockTimeMonitor::new(opts.clone(), rpc_executor.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), rpc_executor);

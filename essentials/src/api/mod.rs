@@ -79,7 +79,7 @@ where
 }
 #[cfg(test)]
 mod tests {
-	use super::{executor::build_executor, *};
+	use super::*;
 	use crate::{api::api_client::ApiClientMode, storage::StorageEntry, types::H256, utils::RetryOptions};
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
 
@@ -94,7 +94,7 @@ mod tests {
 	}
 
 	fn rpc_executor() -> RequestExecutor {
-		build_executor(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
+		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
 	}
 
 	#[tokio::test]
