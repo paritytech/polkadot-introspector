@@ -245,24 +245,24 @@ impl RequestExecutorBackend {
 }
 
 pub trait RequestExecutorNodes {
-	fn unique_nodes(&self) -> impl Iterator<Item = String>;
+	fn unique_nodes(&self) -> HashSet<String>;
 }
 
 impl RequestExecutorNodes for Vec<String> {
-	fn unique_nodes(&self) -> impl Iterator<Item = String> {
-		self.iter().collect::<HashSet<_>>().into_iter().cloned()
+	fn unique_nodes(&self) -> HashSet<String> {
+		self.iter().cloned().collect()
 	}
 }
 
 impl RequestExecutorNodes for String {
-	fn unique_nodes(&self) -> impl Iterator<Item = String> {
-		std::iter::once(self).into_iter().cloned()
+	fn unique_nodes(&self) -> HashSet<String> {
+		std::iter::once(self).cloned().collect()
 	}
 }
 
 impl RequestExecutorNodes for &str {
-	fn unique_nodes(&self) -> impl Iterator<Item = String> {
-		std::iter::once(self.to_string()).into_iter()
+	fn unique_nodes(&self) -> HashSet<String> {
+		std::iter::once(self.to_string()).collect()
 	}
 }
 
