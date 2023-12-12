@@ -20,7 +20,7 @@ mod ws;
 use crate::{
 	api::{
 		dynamic::DynamicError,
-		executor::{RpcExecutor, RpcExecutorError},
+		executor::{RequestExecutor, RequestExecutorError},
 		ApiService,
 	},
 	chain_events::{
@@ -186,7 +186,7 @@ pub enum CollectorError {
 	#[error(transparent)]
 	NonFatal(#[from] color_eyre::Report),
 	#[error(transparent)]
-	ExecutorFatal(#[from] RpcExecutorError),
+	ExecutorFatal(#[from] RequestExecutorError),
 	#[error(transparent)]
 	SendFatal(#[from] polkadot_introspector_priority_channel::SendError),
 }
@@ -199,12 +199,12 @@ pub struct Collector {
 	subscribe_channels: BTreeMap<u32, Vec<Sender<CollectorUpdateEvent>>>,
 	broadcast_channels: Vec<Sender<CollectorUpdateEvent>>,
 	state: CollectorState,
-	executor: RpcExecutor,
+	executor: RequestExecutor,
 	subscribe_mode: CollectorSubscribeMode,
 }
 
 impl Collector {
-	pub fn new(endpoint: &str, opts: CollectorOptions, rpc_executor: RpcExecutor) -> Self {
+	pub fn new(endpoint: &str, opts: CollectorOptions, rpc_executor: RequestExecutor) -> Self {
 		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
 			RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) },
 			rpc_executor,
@@ -257,7 +257,7 @@ impl Collector {
 						Ok(subxt_events) =>
 							for event in subxt_events.iter() {
 								if let Err(error) = self.process_chain_event(event).await {
-									error!("collector service could not process event: {}", error);
+									error!("collector service could not process event: {:?}", error);
 									match error {
 										CollectorError::ExecutorFatal(e) => {
 											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
@@ -274,7 +274,7 @@ impl Collector {
 											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
 												TerminationReason::Abnormal(
 													1,
-													format!("Collector's chanel error: {}", e),
+													format!("Collector's channel error: {}", e),
 												),
 											))
 											.await
@@ -286,7 +286,7 @@ impl Collector {
 								}
 							},
 						Err(e) => {
-							error!("collector service could not process events: {}", e);
+							error!("collector service could not process events: {:?}", e);
 							self.broadcast_event_priority(CollectorUpdateEvent::Termination(
 								TerminationReason::Abnormal(1, format!("Collector's service error: {}", e)),
 							))
@@ -374,7 +374,7 @@ impl Collector {
 	}
 
 	/// Returns RPC executor
-	pub fn executor(&self) -> RpcExecutor {
+	pub fn executor(&self) -> RequestExecutor {
 		self.executor.clone()
 	}
 
@@ -671,7 +671,7 @@ impl Collector {
 		ts: Timestamp,
 	) -> color_eyre::Result<(), CollectorError> {
 		let assignments = match self.core_assignments_via_claim_queue(block_hash).await {
-			Err(RpcExecutorError::DynamicError(DynamicError::EmptyResponseFromDynamicStorage(reason))) => {
+			Err(RequestExecutorError::DynamicError(DynamicError::EmptyResponseFromDynamicStorage(reason))) => {
 				info!("{}. Nothing to process, used empty value", reason);
 				BTreeMap::default()
 			},
@@ -690,7 +690,7 @@ impl Collector {
 	async fn core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, RpcExecutorError> {
+	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, RequestExecutorError> {
 		let assignments = self.executor.get_claim_queue(self.endpoint.as_str(), block_hash).await?;
 		Ok(assignments
 			.iter()

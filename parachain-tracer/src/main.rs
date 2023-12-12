@@ -36,7 +36,7 @@ use log::{error, info, warn};
 use polkadot_introspector_essentials::{
 	api::{
 		api_client::ApiClientMode,
-		executor::{build_rpc_executor, RpcExecutor},
+		executor::{build_executor, RequestExecutor},
 	},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
@@ -145,7 +145,7 @@ impl ParachainTracer {
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
-		rpc_executor: &mut RpcExecutor,
+		rpc_executor: &mut RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -366,7 +366,7 @@ fn evict_stalled(
 	}
 }
 
-async fn print_host_configuration(url: &str, executor: &mut RpcExecutor) -> color_eyre::Result<()> {
+async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> color_eyre::Result<()> {
 	let conf = executor.get_host_configuration(url).await?;
 	println!("Host configuration for {}:", url.to_owned().bold());
 	println!("{}", conf);
@@ -394,7 +394,7 @@ async fn main() -> color_eyre::Result<()> {
 
 	let tracer = ParachainTracer::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-	let mut rpc_executor = build_rpc_executor(opts.node.clone(), opts.api_client_mode, opts.retry.clone())?;
+	let mut rpc_executor = build_executor(opts.node.clone(), opts.api_client_mode, opts.retry.clone())?;
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
 		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, rpc_executor.clone()))

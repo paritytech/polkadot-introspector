@@ -16,7 +16,7 @@
 //
 
 use crate::{
-	api::executor::RpcExecutor,
+	api::executor::RequestExecutor,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
@@ -36,7 +36,7 @@ pub struct HistoricalSubscription {
 	to_block_number: BlockNumber,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<ChainSubscriptionEvent>>>,
-	executor: RpcExecutor,
+	executor: RequestExecutor,
 }
 
 #[async_trait]
@@ -81,7 +81,7 @@ impl HistoricalSubscription {
 		urls: Vec<String>,
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
-		executor: RpcExecutor,
+		executor: RequestExecutor,
 	) -> HistoricalSubscription {
 		Self { urls, from_block_number, to_block_number, consumers: Vec::new(), executor }
 	}
@@ -93,7 +93,7 @@ impl HistoricalSubscription {
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
-		mut executor: RpcExecutor,
+		mut executor: RequestExecutor,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
@@ -190,7 +190,7 @@ impl HistoricalSubscription {
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
 		shutdown_tx: BroadcastSender<()>,
-		executor: &RpcExecutor,
+		executor: &RequestExecutor,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()

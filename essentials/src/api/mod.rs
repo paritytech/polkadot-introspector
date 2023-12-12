@@ -20,7 +20,7 @@ pub mod dynamic;
 pub mod executor;
 pub mod storage;
 
-use crate::{api::executor::RpcExecutor, constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
+use crate::{api::executor::RequestExecutor, constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
 use std::{fmt::Debug, hash::Hash};
 use tokio::sync::mpsc::{channel, Sender};
 
@@ -28,7 +28,7 @@ use tokio::sync::mpsc::{channel, Sender};
 #[derive(Clone)]
 pub struct ApiService<K, P = ()> {
 	storage_tx: Sender<storage::Request<K, P>>,
-	rpc_executor: RpcExecutor,
+	rpc_executor: RequestExecutor,
 }
 
 // Common methods
@@ -41,7 +41,7 @@ where
 		storage::RequestExecutor::new(self.storage_tx.clone())
 	}
 
-	pub fn executor(&self) -> RpcExecutor {
+	pub fn executor(&self) -> RequestExecutor {
 		self.rpc_executor.clone()
 	}
 }
@@ -51,7 +51,7 @@ impl<K> ApiService<K, ()>
 where
 	K: Eq + Sized + Hash + Debug + Clone + Send + 'static,
 {
-	pub fn new_with_storage(storage_config: RecordsStorageConfig, rpc_executor: RpcExecutor) -> ApiService<K> {
+	pub fn new_with_storage(storage_config: RecordsStorageConfig, rpc_executor: RequestExecutor) -> ApiService<K> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		tokio::spawn(storage::api_handler_task(storage_rx, storage_config));
@@ -68,7 +68,7 @@ where
 {
 	pub fn new_with_prefixed_storage(
 		storage_config: RecordsStorageConfig,
-		rpc_executor: RpcExecutor,
+		rpc_executor: RequestExecutor,
 	) -> ApiService<K, P> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
@@ -79,7 +79,7 @@ where
 }
 #[cfg(test)]
 mod tests {
-	use super::{executor::build_rpc_executor, *};
+	use super::{executor::build_executor, *};
 	use crate::{api::api_client::ApiClientMode, storage::StorageEntry, types::H256, utils::RetryOptions};
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
 
@@ -93,8 +93,8 @@ mod tests {
 		RPC_NODE_URL
 	}
 
-	fn rpc_executor() -> RpcExecutor {
-		build_rpc_executor(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
+	fn rpc_executor() -> RequestExecutor {
+		build_executor(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
 	}
 
 	#[tokio::test]

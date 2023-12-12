@@ -17,7 +17,7 @@
 use async_trait::async_trait;
 use mockall::automock;
 use polkadot_introspector_essentials::{
-	api::executor::{RpcExecutor, RpcExecutorError},
+	api::executor::{RequestExecutor, RequestExecutorError},
 	types::{SubxtHrmpChannel, H256},
 };
 use std::collections::BTreeMap;
@@ -28,11 +28,11 @@ pub trait TrackerRpc {
 	async fn inbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError>;
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError>;
 	async fn outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError>;
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError>;
 }
 
 pub struct ParachainTrackerRpc {
@@ -41,11 +41,11 @@ pub struct ParachainTrackerRpc {
 	/// RPC node endpoint.
 	node: String,
 	/// A subxt API wrapper.
-	executor: RpcExecutor,
+	executor: RequestExecutor,
 }
 
 impl ParachainTrackerRpc {
-	pub fn new(para_id: u32, node: &str, executor: RpcExecutor) -> Self {
+	pub fn new(para_id: u32, node: &str, executor: RequestExecutor) -> Self {
 		Self { para_id, node: node.to_string(), executor }
 	}
 }
@@ -55,7 +55,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 	async fn inbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError> {
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
 		self.executor
 			.get_inbound_hrmp_channels(self.node.as_str(), block_hash, self.para_id)
 			.await
@@ -64,7 +64,7 @@ impl TrackerRpc for ParachainTrackerRpc {
 	async fn outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError> {
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
 		self.executor
 			.get_outbound_hrmp_channels(self.node.as_str(), block_hash, self.para_id)
 			.await

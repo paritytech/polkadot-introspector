@@ -41,11 +41,11 @@ use tokio::sync::oneshot::{error::RecvError as OneshotRecvError, Sender as Onesh
 
 enum ExecutorMessage {
 	Close,
-	Rpc(OneshotSender<RpcResponse>, RpcRequest),
+	Rpc(OneshotSender<Response>, Request),
 }
 
 #[derive(Debug, Clone)]
-pub enum RpcRequest {
+pub enum Request {
 	GetBlockTimestamp(H256),
 	GetHead(Option<H256>),
 	GetBlockNumber(Option<H256>),
@@ -67,7 +67,7 @@ pub enum RpcRequest {
 
 /// Response types for APIs.
 #[derive(Debug)]
-enum RpcResponse {
+enum Response {
 	/// A timestamp.
 	Timestamp(Timestamp),
 	/// A block header.
@@ -101,7 +101,7 @@ enum RpcResponse {
 }
 
 #[derive(Debug, Error)]
-pub enum RpcExecutorError {
+pub enum RequestExecutorError {
 	#[error("Client for url {0} already exists")]
 	ClientAlreadyExists(String),
 	#[error("Client for url {0} not found")]
@@ -117,23 +117,24 @@ pub enum RpcExecutorError {
 	#[error("Recv failed: {0}")]
 	OneshotRecvError(#[from] OneshotRecvError),
 	#[error("Unexpected response for request {0:?}")]
-	UnexpectedResponse(RpcRequest),
+	UnexpectedResponse(Request),
 }
 
-impl RpcExecutorError {
+impl RequestExecutorError {
 	pub fn should_repeat(&self) -> bool {
 		matches!(
 			self,
-			RpcExecutorError::SubxtError(subxt::Error::Io(_)) | RpcExecutorError::SubxtError(subxt::Error::Rpc(_))
+			RequestExecutorError::SubxtError(subxt::Error::Io(_)) |
+				RequestExecutorError::SubxtError(subxt::Error::Rpc(_))
 		)
 	}
 }
 
-struct RpcExecutorBackend {
+struct RequestExecutorBackend {
 	retry: RetryOptions,
 }
 
-impl RpcExecutorBackend {
+impl RequestExecutorBackend {
 	async fn run(
 		&mut self,
 		from_frontend: PriorityReceiver<ExecutorMessage>,
@@ -174,9 +175,9 @@ impl RpcExecutorBackend {
 
 	async fn execute_request(
 		&mut self,
-		request: &RpcRequest,
+		request: &Request,
 		client: &dyn ApiClientT,
-	) -> color_eyre::Result<RpcResponse, RpcExecutorError> {
+	) -> color_eyre::Result<Response, RequestExecutorError> {
 		let mut retry = Retry::new(&self.retry);
 		loop {
 			match self.match_request(request.to_owned(), client).await {
@@ -186,7 +187,7 @@ impl RpcExecutorBackend {
 						return Err(e)
 					}
 					if (retry.sleep().await).is_err() {
-						return Err(RpcExecutorError::Timeout)
+						return Err(RequestExecutorError::Timeout)
 					}
 				},
 			}
@@ -195,11 +196,11 @@ impl RpcExecutorBackend {
 
 	async fn match_request(
 		&mut self,
-		request: RpcRequest,
+		request: Request,
 		client: &dyn ApiClientT,
-	) -> color_eyre::Result<RpcResponse, RpcExecutorError> {
-		use RpcRequest::*;
-		use RpcResponse::*;
+	) -> color_eyre::Result<Response, RequestExecutorError> {
+		use Request::*;
+		use Response::*;
 		let response = match request {
 			GetBlockTimestamp(hash) => Timestamp(client.get_block_ts(hash).await?.unwrap_or_default()),
 			GetHead(maybe_hash) => {
@@ -245,93 +246,93 @@ impl RpcExecutorBackend {
 	}
 }
 
-pub trait RpcExecutorNodes {
+pub trait RequestExecutorNodes {
 	fn nodes(&self) -> impl Iterator<Item = String>;
 }
 
-impl RpcExecutorNodes for Vec<String> {
+impl RequestExecutorNodes for Vec<String> {
 	fn nodes(&self) -> impl Iterator<Item = String> {
 		self.to_owned().into_iter()
 	}
 }
 
-impl RpcExecutorNodes for String {
+impl RequestExecutorNodes for String {
 	fn nodes(&self) -> impl Iterator<Item = String> {
 		vec![self.to_owned()].into_iter()
 	}
 }
 
-impl RpcExecutorNodes for &str {
+impl RequestExecutorNodes for &str {
 	fn nodes(&self) -> impl Iterator<Item = String> {
 		vec![self.to_string()].into_iter()
 	}
 }
 
 /// Creates new RPC executor
-pub fn build_rpc_executor(
-	nodes: impl RpcExecutorNodes,
+pub fn build_executor(
+	nodes: impl RequestExecutorNodes,
 	api_client_mode: ApiClientMode,
 	retry: RetryOptions,
-) -> color_eyre::Result<RpcExecutor, RpcExecutorError> {
+) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
 	let mut clients = HashMap::new();
 	for node in nodes.nodes() {
 		match clients.entry(node.clone()) {
-			Entry::Occupied(_) => return Err(RpcExecutorError::ClientAlreadyExists(node)),
+			Entry::Occupied(_) => return Err(RequestExecutorError::ClientAlreadyExists(node)),
 			Entry::Vacant(entry) => {
 				let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
 				let _ = entry.insert(to_backend);
 				let retry = retry.clone();
 				let api_client_mode = api_client_mode;
 				tokio::spawn(async move {
-					let mut backend = RpcExecutorBackend { retry };
+					let mut backend = RequestExecutorBackend { retry };
 					backend.run(from_frontend, node, api_client_mode).await;
 				});
 			},
 		};
 	}
 
-	Ok(RpcExecutor(clients))
+	Ok(RequestExecutor(clients))
 }
 
 #[derive(Clone)]
-pub struct RpcExecutor(HashMap<String, PrioritySender<ExecutorMessage>>);
+pub struct RequestExecutor(HashMap<String, PrioritySender<ExecutorMessage>>);
 
 macro_rules! wrap_backend_call {
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
 		if let Some(to_backend) = $self.0.get_mut($url) {
-			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
-			let request = RpcRequest::$request_ty;
-			to_backend.send(ExecutorMessage::Rpc(tx, RpcRequest::$request_ty)).await?;
+			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
+			let request = Request::$request_ty;
+			to_backend.send(ExecutorMessage::Rpc(tx, Request::$request_ty)).await?;
 			match rx.await? {
-				RpcResponse::$response_ty(res) => Ok(res),
+				Response::$response_ty(res) => Ok(res),
 				response => {
 					error!("Unexpected request-response pair: {:?} {:?}", request, response);
-					Err(RpcExecutorError::UnexpectedResponse(request))
+					Err(RequestExecutorError::UnexpectedResponse(request))
 				},
 			}
 		} else {
-			Err(RpcExecutorError::ClientNotFound($url.into()))
+			Err(RequestExecutorError::ClientNotFound($url.into()))
 		}
 	};
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
 		if let Some(to_backend) = $self.0.get_mut($url) {
-			let (tx, rx) = tokio::sync::oneshot::channel::<RpcResponse>();
-			let request = RpcRequest::$request_ty($($arg),*);
+			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
+			let request = Request::$request_ty($($arg),*);
 			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
 			match rx.await? {
-				RpcResponse::$response_ty(res) => Ok(res),
+				Response::$response_ty(res) => Ok(res),
 				response => {
 					error!("Unexpected request-response pair: {:?} {:?}", request, response);
-					Err(RpcExecutorError::UnexpectedResponse(request))
+					Err(RequestExecutorError::UnexpectedResponse(request))
 				},
 			}
 		} else {
-			Err(RpcExecutorError::ClientNotFound($url.into()))
+			Err(RequestExecutorError::ClientNotFound($url.into()))
 		}
 	};
 }
 
-impl RpcExecutor {
+impl RequestExecutor {
 	/// Closes all RPC clients
 	pub async fn close(&mut self) -> color_eyre::Result<()> {
 		for to_backend in self.0.values_mut() {
@@ -345,7 +346,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Timestamp, RpcExecutorError> {
+	) -> color_eyre::Result<Timestamp, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBlockTimestamp, Timestamp, hash)
 	}
 
@@ -353,7 +354,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<H256>,
-	) -> color_eyre::Result<Option<Header>, RpcExecutorError> {
+	) -> color_eyre::Result<Option<Header>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetHead, MaybeHead, maybe_hash)
 	}
 
@@ -361,7 +362,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<H256>,
-	) -> color_eyre::Result<BlockNumber, RpcExecutorError> {
+	) -> color_eyre::Result<BlockNumber, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBlockNumber, BlockNumber, maybe_hash)
 	}
 
@@ -369,7 +370,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		maybe_block_number: Option<BlockNumber>,
-	) -> color_eyre::Result<Option<H256>, RpcExecutorError> {
+	) -> color_eyre::Result<Option<H256>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBlockHash, MaybeBlockHash, maybe_block_number)
 	}
 
@@ -377,7 +378,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Option<subxt::events::Events<PolkadotConfig>>, RpcExecutorError> {
+	) -> color_eyre::Result<Option<subxt::events::Events<PolkadotConfig>>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetEvents, MaybeEvents, hash)
 	}
 
@@ -385,11 +386,15 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<H256>,
-	) -> color_eyre::Result<InherentData, RpcExecutorError> {
+	) -> color_eyre::Result<InherentData, RequestExecutorError> {
 		wrap_backend_call!(self, url, ExtractParaInherent, ParaInherentData, maybe_hash)
 	}
 
-	pub async fn get_claim_queue(&mut self, url: &str, hash: H256) -> color_eyre::Result<ClaimQueue, RpcExecutorError> {
+	pub async fn get_claim_queue(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<ClaimQueue, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetClaimQueue, ClaimQueue, hash)
 	}
 
@@ -397,7 +402,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Vec<CoreOccupied>, RpcExecutorError> {
+	) -> color_eyre::Result<Vec<CoreOccupied>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetOccupiedCores, OccupiedCores, hash)
 	}
 
@@ -405,11 +410,11 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Vec<Vec<polkadot_primitives::ValidatorIndex>>, RpcExecutorError> {
+	) -> color_eyre::Result<Vec<Vec<polkadot_primitives::ValidatorIndex>>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBackingGroups, BackingGroups, hash)
 	}
 
-	pub async fn get_session_index(&mut self, url: &str, hash: H256) -> color_eyre::Result<u32, RpcExecutorError> {
+	pub async fn get_session_index(&mut self, url: &str, hash: H256) -> color_eyre::Result<u32, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetSessionIndex, SessionIndex, hash)
 	}
 
@@ -417,7 +422,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		session_index: u32,
-	) -> color_eyre::Result<Option<Vec<AccountId32>>, RpcExecutorError> {
+	) -> color_eyre::Result<Option<Vec<AccountId32>>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetSessionAccountKeys, SessionAccountKeys, session_index)
 	}
 
@@ -425,7 +430,7 @@ impl RpcExecutor {
 		&mut self,
 		url: &str,
 		account: AccountId32,
-	) -> color_eyre::Result<Option<SessionKeys>, RpcExecutorError> {
+	) -> color_eyre::Result<Option<SessionKeys>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetSessionNextKeys, SessionNextKeys, account)
 	}
 
@@ -434,7 +439,7 @@ impl RpcExecutor {
 		url: &str,
 		hash: H256,
 		para_id: u32,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError> {
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetInboundHRMPChannels, HRMPChannels, hash, para_id)
 	}
 
@@ -443,28 +448,28 @@ impl RpcExecutor {
 		url: &str,
 		hash: H256,
 		para_id: u32,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RpcExecutorError> {
+	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetOutboundHRMPChannels, HRMPChannels, hash, para_id)
 	}
 
 	pub async fn get_host_configuration(
 		&mut self,
 		url: &str,
-	) -> color_eyre::Result<DynamicHostConfiguration, RpcExecutorError> {
+	) -> color_eyre::Result<DynamicHostConfiguration, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetHostConfiguration, HostConfiguration)
 	}
 
 	pub async fn get_best_block_subscription(
 		&mut self,
 		url: &str,
-	) -> color_eyre::Result<HeaderStream, RpcExecutorError> {
+	) -> color_eyre::Result<HeaderStream, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBestBlockSubscription, ChainSubscription)
 	}
 
 	pub async fn get_finalized_block_subscription(
 		&mut self,
 		url: &str,
-	) -> color_eyre::Result<HeaderStream, RpcExecutorError> {
+	) -> color_eyre::Result<HeaderStream, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetFinalizedBlockSubscription, ChainSubscription)
 	}
 }

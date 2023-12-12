@@ -16,7 +16,7 @@
 //
 
 use crate::{
-	api::executor::RpcExecutor,
+	api::executor::RequestExecutor,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
@@ -33,7 +33,7 @@ pub struct ChainHeadSubscription {
 	urls: Vec<String>,
 	/// One sender per consumer per URL.
 	consumers: Vec<Vec<Sender<ChainSubscriptionEvent>>>,
-	executor: RpcExecutor,
+	executor: RequestExecutor,
 }
 
 #[async_trait]
@@ -67,7 +67,7 @@ impl EventStream for ChainHeadSubscription {
 }
 
 impl ChainHeadSubscription {
-	pub fn new(urls: Vec<String>, executor: RpcExecutor) -> ChainHeadSubscription {
+	pub fn new(urls: Vec<String>, executor: RequestExecutor) -> ChainHeadSubscription {
 		ChainHeadSubscription { urls, consumers: Vec::new(), executor }
 	}
 
@@ -76,7 +76,7 @@ impl ChainHeadSubscription {
 		mut update_channel: Sender<ChainSubscriptionEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		shutdown_tx: BroadcastSender<()>,
-		mut executor: RpcExecutor,
+		mut executor: RequestExecutor,
 	) {
 		use futures::stream::{select, StreamExt};
 		use futures_util::TryStreamExt;
@@ -142,7 +142,7 @@ impl ChainHeadSubscription {
 		update_channels: Vec<Sender<ChainSubscriptionEvent>>,
 		urls: Vec<String>,
 		shutdown_tx: BroadcastSender<()>,
-		executor: &RpcExecutor,
+		executor: &RequestExecutor,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()
