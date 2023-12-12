@@ -34,7 +34,7 @@ use log::error;
 use polkadot_introspector_priority_channel::{
 	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
 };
-use std::collections::{hash_map::Entry, BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use subxt::PolkadotConfig;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError as OneshotRecvError, Sender as OneshotSender};
@@ -102,8 +102,6 @@ enum Response {
 
 #[derive(Debug, Error)]
 pub enum RequestExecutorError {
-	#[error("Client for url {0} already exists")]
-	ClientAlreadyExists(String),
 	#[error("Client for url {0} not found")]
 	ClientNotFound(String),
 	#[error("subxt error: {0}")]
@@ -247,24 +245,24 @@ impl RequestExecutorBackend {
 }
 
 pub trait RequestExecutorNodes {
-	fn nodes(&self) -> impl Iterator<Item = String>;
+	fn unique_nodes(&self) -> impl Iterator<Item = String>;
 }
 
 impl RequestExecutorNodes for Vec<String> {
-	fn nodes(&self) -> impl Iterator<Item = String> {
-		self.to_owned().into_iter()
+	fn unique_nodes(&self) -> impl Iterator<Item = String> {
+		self.iter().collect::<HashSet<_>>().into_iter().cloned()
 	}
 }
 
 impl RequestExecutorNodes for String {
-	fn nodes(&self) -> impl Iterator<Item = String> {
-		vec![self.to_owned()].into_iter()
+	fn unique_nodes(&self) -> impl Iterator<Item = String> {
+		std::iter::once(self).into_iter().cloned()
 	}
 }
 
 impl RequestExecutorNodes for &str {
-	fn nodes(&self) -> impl Iterator<Item = String> {
-		vec![self.to_string()].into_iter()
+	fn unique_nodes(&self) -> impl Iterator<Item = String> {
+		std::iter::once(self.to_string()).into_iter()
 	}
 }
 
@@ -314,20 +312,15 @@ impl RequestExecutor {
 		retry: RetryOptions,
 	) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
 		let mut clients = HashMap::new();
-		for node in nodes.nodes() {
-			match clients.entry(node.clone()) {
-				Entry::Occupied(_) => return Err(RequestExecutorError::ClientAlreadyExists(node)),
-				Entry::Vacant(entry) => {
-					let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-					let _ = entry.insert(to_backend);
-					let retry = retry.clone();
-					let api_client_mode = api_client_mode;
-					tokio::spawn(async move {
-						let mut backend = RequestExecutorBackend { retry };
-						backend.run(from_frontend, node, api_client_mode).await;
-					});
-				},
-			};
+		for node in nodes.unique_nodes() {
+			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
+			let _ = clients.insert(node.clone(), to_backend);
+			let retry = retry.clone();
+			let api_client_mode = api_client_mode;
+			tokio::spawn(async move {
+				let mut backend = RequestExecutorBackend { retry };
+				backend.run(from_frontend, node, api_client_mode).await;
+			});
 		}
 
 		Ok(RequestExecutor(clients))
