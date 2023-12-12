@@ -141,7 +141,7 @@ impl RequestExecutorBackend {
 	) {
 		let client = match build_client(&url, api_client_mode, &self.retry).await {
 			Some(v) => v,
-			None => return,
+			None => return error!("Cannot build a RPC client for {}", url),
 		};
 
 		loop {
