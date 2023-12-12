@@ -145,28 +145,24 @@ impl RequestExecutorBackend {
 		};
 
 		loop {
-			tokio::select! {
-				message = from_frontend.recv() => {
-					match message {
-						Ok(message) => match message {
-							ExecutorMessage::Close => return,
-							ExecutorMessage::Rpc(tx, request) => {
-								match self.execute_request(&request, &*client).await {
-									Ok(response) => {
-										// Not critical, skip it and process next request
-										if let Err(e) = tx.send(response) {
-											error!("Cannot send response back: {:?}", e);
-										}
-									},
-									// Critical, after a few retries RPC client was not able to process the request
-									Err(e) => return error!("Cannot process the request {:?}: {:?}", request, e),
-								};
-							}
-						},
-						// Not critical, skip it and process next request
-						Err(e) => error!("Cannot receive a request from the frontend: {:?}", e),
-					}
-				}
+			match from_frontend.recv().await {
+				Ok(message) => match message {
+					ExecutorMessage::Close => return,
+					ExecutorMessage::Rpc(tx, request) => {
+						match self.execute_request(&request, &*client).await {
+							Ok(response) => {
+								// Not critical, skip it and process next request
+								if let Err(e) = tx.send(response) {
+									error!("Cannot send response back: {:?}", e);
+								}
+							},
+							// Critical, after a few retries RPC client was not able to process the request
+							Err(e) => return error!("Cannot process the request {:?}: {:?}", request, e),
+						};
+					},
+				},
+				// Not critical, skip it and process next request
+				Err(e) => error!("Cannot receive a request from the frontend: {:?}", e),
 			}
 		}
 	}
