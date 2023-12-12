@@ -119,7 +119,7 @@ pub enum RequestExecutorError {
 }
 
 impl RequestExecutorError {
-	pub fn should_repeat(&self) -> bool {
+	pub fn should_retry(&self) -> bool {
 		matches!(
 			self,
 			RequestExecutorError::SubxtError(subxt::Error::Io(_)) |
@@ -181,7 +181,7 @@ impl RequestExecutorBackend {
 			match self.match_request(request.to_owned(), client).await {
 				Ok(v) => return Ok(v),
 				Err(e) => {
-					if !e.should_repeat() {
+					if !e.should_retry() {
 						return Err(e)
 					}
 					if (retry.sleep().await).is_err() {
