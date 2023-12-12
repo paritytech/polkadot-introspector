@@ -154,15 +154,18 @@ impl RpcExecutorBackend {
 							ExecutorMessage::Rpc(tx, request) => {
 								match self.execute_request(&request, &*client).await {
 									Ok(response) => {
+										// Not critical, skip it and process next request
 										if let Err(e) = tx.send(response) {
-											return error!("Cannot send response back: {:?}", e);
+											error!("Cannot send response back: {:?}", e);
 										}
 									},
+									// Critical, after a few retries RPC client was not able to process the request
 									Err(e) => return error!("Cannot process the request {:?}: {:?}", request, e),
 								};
 							}
 						},
-						Err(e) => return error!("Cannot receive a request from the frontend: {:?}", e),
+						// Not critical, skip it and process next request
+						Err(e) => error!("Cannot receive a request from the frontend: {:?}", e),
 					}
 				}
 			}
