@@ -28,7 +28,7 @@ use tokio::sync::mpsc::{channel, Sender};
 #[derive(Clone)]
 pub struct ApiService<K, P = ()> {
 	storage_tx: Sender<storage::Request<K, P>>,
-	rpc_executor: RequestExecutor,
+	executor: RequestExecutor,
 }
 
 // Common methods
@@ -42,7 +42,7 @@ where
 	}
 
 	pub fn executor(&self) -> RequestExecutor {
-		self.rpc_executor.clone()
+		self.executor.clone()
 	}
 }
 
@@ -51,12 +51,12 @@ impl<K> ApiService<K, ()>
 where
 	K: Eq + Sized + Hash + Debug + Clone + Send + 'static,
 {
-	pub fn new_with_storage(storage_config: RecordsStorageConfig, rpc_executor: RequestExecutor) -> ApiService<K> {
+	pub fn new_with_storage(storage_config: RecordsStorageConfig, executor: RequestExecutor) -> ApiService<K> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		tokio::spawn(storage::api_handler_task(storage_rx, storage_config));
 
-		Self { storage_tx, rpc_executor }
+		Self { storage_tx, executor }
 	}
 }
 
@@ -68,13 +68,13 @@ where
 {
 	pub fn new_with_prefixed_storage(
 		storage_config: RecordsStorageConfig,
-		rpc_executor: RequestExecutor,
+		executor: RequestExecutor,
 	) -> ApiService<K, P> {
 		let (storage_tx, storage_rx) = channel(MAX_MSG_QUEUE_SIZE);
 
 		tokio::spawn(storage::api_handler_task_prefixed(storage_rx, storage_config));
 
-		Self { storage_tx, rpc_executor }
+		Self { storage_tx, executor }
 	}
 }
 #[cfg(test)]
@@ -93,13 +93,13 @@ mod tests {
 		RPC_NODE_URL
 	}
 
-	fn rpc_executor() -> RequestExecutor {
+	fn request_executor() -> RequestExecutor {
 		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
 	}
 
 	#[tokio::test]
 	async fn basic_storage_test() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, rpc_executor());
+		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor());
 		let storage = api.storage();
 		let key = BlakeTwo256::hash_of(&100);
 		storage
@@ -112,7 +112,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn basic_subxt_test() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, rpc_executor());
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor());
 		let mut subxt = api.executor();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
@@ -123,7 +123,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn extract_parainherent_data() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, rpc_executor());
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor());
 		let mut subxt = api.executor();
 
 		subxt
@@ -134,7 +134,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_occupied_cores() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, rpc_executor());
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor());
 		let mut subxt = api.executor();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
@@ -145,7 +145,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_backing_groups() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, rpc_executor());
+		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor());
 		let mut subxt = api.executor();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();

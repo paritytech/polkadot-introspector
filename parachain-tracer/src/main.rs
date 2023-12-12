@@ -142,7 +142,7 @@ impl ParachainTracer {
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
-		rpc_executor: &mut RequestExecutor,
+		executor: &mut RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -150,8 +150,7 @@ impl ParachainTracer {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
-		let mut collector =
-			Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), rpc_executor.clone());
+		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), executor.clone());
 		collector.spawn(shutdown_tx).await?;
 
 		println!(
@@ -165,7 +164,7 @@ impl ParachainTracer {
 			&self.node,
 			self.opts.api_client_mode,
 		);
-		if let Err(e) = print_host_configuration(self.opts.node.as_str(), rpc_executor).await {
+		if let Err(e) = print_host_configuration(self.opts.node.as_str(), executor).await {
 			warn!("Cannot get host configuration");
 			return Err(e)
 		}
@@ -391,21 +390,21 @@ async fn main() -> color_eyre::Result<()> {
 
 	let tracer = ParachainTracer::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-	let mut rpc_executor = RequestExecutor::build(opts.node.clone(), opts.api_client_mode, opts.retry.clone())?;
+	let mut executor = RequestExecutor::build(opts.node.clone(), opts.api_client_mode, opts.retry.clone())?;
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
-		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, rpc_executor.clone()))
+		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, executor.clone()))
 	} else {
-		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], rpc_executor.clone()))
+		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], executor.clone()))
 	};
 	let consumer_init = sub.create_consumer();
 
 	let mut futures = vec![];
-	futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut rpc_executor).await?);
+	futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut executor).await?);
 	futures.extend(sub.run(&shutdown_tx).await?);
 
 	init::run(futures, &shutdown_tx).await?;
-	rpc_executor.close().await?;
+	executor.close().await?;
 
 	Ok(())
 }
