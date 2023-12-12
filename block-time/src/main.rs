@@ -375,10 +375,11 @@ async fn main() -> color_eyre::Result<()> {
 	let executor = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, opts.retry.clone())?;
 	let monitor = BlockTimeMonitor::new(opts.clone(), executor.clone())?;
 	let shutdown_tx = init::init_shutdown();
+	let mut futures = vec![];
+
 	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), executor);
 	let consumer_init = sub.create_consumer();
 
-	let mut futures = vec![];
 	futures.extend(monitor.run(consumer_init).await?);
 	futures.extend(sub.run(&shutdown_tx).await?);
 
