@@ -15,6 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+use std::collections::BTreeMap;
+
 use crate::{
 	metadata::polkadot::{
 		self,
@@ -24,7 +26,6 @@ use crate::{
 };
 use clap::ValueEnum;
 use dyn_clone::DynClone;
-use std::collections::BTreeMap;
 use subxt::{
 	backend::{
 		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
@@ -58,16 +59,11 @@ pub trait ApiClientT: DynClone + Send + Sync {
 	async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error>;
 	async fn get_session_account_keys(&self, session_index: u32) -> Result<Option<Vec<AccountId32>>, subxt::Error>;
 	async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error>;
-	async fn get_inbound_hrmp_channels(
+	async fn get_inbound_outbound_hrmp_channels(
 		&self,
 		block_hash: H256,
-		para_id: u32,
-	) -> Result<BTreeMap<u32, SubxtHrmpChannel>, subxt::Error>;
-	async fn get_outbound_hrmp_channels(
-		&self,
-		block_hash: H256,
-		para_id: u32,
-	) -> Result<BTreeMap<u32, SubxtHrmpChannel>, subxt::Error>;
+		para_ids: Vec<u32>,
+	) -> Result<Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>, subxt::Error>;
 	async fn fetch_dynamic_storage(
 		&self,
 		maybe_hash: Option<H256>,
@@ -113,31 +109,47 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		}
 	}
 
-	async fn get_hrmp_channels(
+	async fn get_hrmp_ingress_channels_index(&self, block_hash: H256, para_id: u32) -> Result<Vec<u32>, subxt::Error> {
+		let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(Id(para_id));
+		Ok(self
+			.storage()
+			.at(block_hash)
+			.fetch(&addr)
+			.await?
+			.unwrap_or_default()
+			.iter()
+			.map(|id| id.0)
+			.collect())
+	}
+
+	async fn get_hrmp_egress_channels_index(&self, block_hash: H256, para_id: u32) -> Result<Vec<u32>, subxt::Error> {
+		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
+		Ok(self
+			.storage()
+			.at(block_hash)
+			.fetch(&addr)
+			.await?
+			.unwrap_or_default()
+			.iter()
+			.map(|id| id.0)
+			.collect())
+	}
+
+	async fn get_hrmp_channel_digests(
 		&self,
 		block_hash: H256,
 		para_id: u32,
-		channel_ids: Vec<Id>,
-	) -> Result<BTreeMap<u32, SubxtHrmpChannel>, subxt::Error> {
-		let channels = futures::future::try_join_all(channel_ids.iter().map(|id| {
-			let peer_parachain_id = id.0;
-			let id = HrmpChannelId { sender: Id(peer_parachain_id), recipient: Id(para_id) };
-			let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-			let storage = self.storage();
-			tokio::spawn(async move {
-				storage
-					.at(block_hash)
-					.fetch(&addr)
-					.await
-					.into_iter()
-					.filter_map(|channel| channel.map(|channel| (peer_parachain_id, channel.into())))
-					.collect::<Vec<(u32, SubxtHrmpChannel)>>()
-			})
-		}))
-		.await
-		.map_err(|e| subxt::Error::Other(format!("{}", e)))?;
-
-		Ok(channels.into_iter().flatten().collect())
+	) -> Result<Vec<(u32, Vec<u32>)>, subxt::Error> {
+		let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
+		Ok(self
+			.storage()
+			.at(block_hash)
+			.fetch(&addr)
+			.await?
+			.unwrap_or_default()
+			.into_iter()
+			.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
+			.collect())
 	}
 }
 
@@ -175,24 +187,48 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		self.storage().at_latest().await?.fetch(&addr).await
 	}
 
-	async fn get_inbound_hrmp_channels(
+	async fn get_inbound_outbound_hrmp_channels(
 		&self,
 		block_hash: H256,
-		para_id: u32,
-	) -> Result<BTreeMap<u32, SubxtHrmpChannel>, subxt::Error> {
-		let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(Id(para_id));
-		let channel_ids = self.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
-		self.get_hrmp_channels(block_hash, para_id, channel_ids).await
-	}
+		para_ids: Vec<u32>,
+	) -> color_eyre::Result<Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>, subxt::Error>
+	{
+		let start = std::time::Instant::now();
+		let mut len = 0;
 
-	async fn get_outbound_hrmp_channels(
-		&self,
-		block_hash: H256,
-		para_id: u32,
-	) -> Result<BTreeMap<u32, SubxtHrmpChannel>, subxt::Error> {
-		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
-		let channel_ids = self.storage().at(block_hash).fetch(&addr).await?.unwrap_or_default();
-		self.get_hrmp_channels(block_hash, para_id, channel_ids).await
+		let mut res = Vec::new();
+
+		for para_id in para_ids {
+			let mut inbound: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
+			let inbound_index = self.get_hrmp_channel_digests(block_hash, para_id).await?;
+			for (_, senders) in inbound_index {
+				for sender in senders {
+					let id = HrmpChannelId { sender: Id(sender), recipient: Id(para_id) };
+					let addr = polkadot::storage().hrmp().hrmp_channels(&id);
+					if let Some(channel) = self.storage().at(block_hash).fetch(&addr).await? {
+						inbound.insert(sender, channel.into());
+					}
+				}
+			}
+			len = len + inbound.len();
+
+			let mut outbound: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
+			let outbound_index = self.get_hrmp_egress_channels_index(block_hash, para_id).await?;
+			for recipient in outbound_index {
+				let id = HrmpChannelId { sender: Id(para_id), recipient: Id(recipient) };
+				let addr = polkadot::storage().hrmp().hrmp_channels(&id);
+				if let Some(channel) = self.storage().at(block_hash).fetch(&addr).await? {
+					outbound.insert(recipient, channel.into());
+				}
+			}
+			len = len + outbound.len();
+
+			res.push((para_id, inbound, outbound));
+		}
+
+		let duration = start.elapsed();
+		println!("{} requests = {:?}", len, duration);
+		Ok(res)
 	}
 
 	async fn fetch_dynamic_storage(

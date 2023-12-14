@@ -38,7 +38,7 @@ pub type InherentData =
 	polkadot_primitives::InherentData<subxt_runtime_types::sp_runtime::generic::header::Header<::core::primitive::u32>>;
 
 /// A wrapper over subxt HRMP channel configuration
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Encode, Decode)]
 pub struct SubxtHrmpChannel {
 	pub max_capacity: u32,
 	pub max_total_size: u32,

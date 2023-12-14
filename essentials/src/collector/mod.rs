@@ -111,6 +111,8 @@ pub enum CollectorPrefixType {
 	Dispute(u32),
 	/// On-demand order information by parachain id
 	OnDemandOrder(u32),
+	/// Inbound/Outbound HRMP channel configuration
+	InboundOutboundHrmpChannels(u32),
 }
 
 /// A type that defines prefix + hash itself
@@ -189,6 +191,8 @@ pub enum CollectorError {
 	ExecutorFatal(#[from] RequestExecutorError),
 	#[error(transparent)]
 	SendFatal(#[from] polkadot_introspector_priority_channel::SendError),
+	#[error("Collector other error: {0}")]
+	Other(String),
 }
 
 pub struct Collector {
@@ -524,6 +528,7 @@ impl Collector {
 
 		match block_number.cmp(&self.state.current_relay_chain_block_number) {
 			Ordering::Greater => {
+				self.write_hrmp_channels(block_hash, block_number, ts).await?;
 				self.update_state(block_number, block_hash).await?;
 			},
 			Ordering::Equal => {
@@ -590,6 +595,37 @@ impl Collector {
 			self.state.current_relay_chain_block_number,
 			self.state.current_relay_chain_block_hashes
 		);
+
+		Ok(())
+	}
+
+	async fn write_hrmp_channels(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		let para_ids: Vec<u32> = if self.subscribe_channels.is_empty() {
+			self.state.candidates_seen.keys().cloned().collect()
+		} else {
+			self.subscribe_channels.keys().cloned().collect()
+		};
+
+		for (para_id, inbound, outbound) in self
+			.executor()
+			.get_inbound_outbound_hrmp_channels(&self.endpoint, block_hash, para_ids)
+			.await?
+		{
+			self.storage_write_prefixed(
+				CollectorPrefixType::InboundOutboundHrmpChannels(para_id),
+				block_hash,
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(block_number, Duration::from_secs(ts)),
+					(inbound, outbound),
+				),
+			)
+			.await?;
+		}
 
 		Ok(())
 	}

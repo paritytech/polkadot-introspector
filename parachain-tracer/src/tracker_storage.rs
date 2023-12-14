@@ -18,7 +18,7 @@ use polkadot_introspector_essentials::{
 	api::storage::RequestExecutor,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
 	metadata::polkadot_primitives::ValidatorIndex,
-	types::{AccountId32, CoreOccupied, InherentData, OnDemandOrder, Timestamp, H256},
+	types::{AccountId32, CoreOccupied, InherentData, OnDemandOrder, SubxtHrmpChannel, Timestamp, H256},
 };
 use std::collections::BTreeMap;
 use subxt::config::{substrate::BlakeTwo256, Hasher};
@@ -114,6 +114,17 @@ impl TrackerStorage {
 	pub async fn core_assignments(&self, block_hash: H256) -> Option<BTreeMap<u32, Vec<u32>>> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::CoreAssignments, block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
+
+	/// TODO
+	pub async fn inbound_outbound_hrmp_channels(
+		&self,
+		block_hash: H256,
+	) -> Option<(BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::InboundOutboundHrmpChannels(self.para_id), block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}

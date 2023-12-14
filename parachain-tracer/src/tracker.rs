@@ -123,7 +123,7 @@ impl SubxtTracker {
 			self.set_core_assignment(block_hash, storage).await?;
 			self.set_disputes(&disputes[..], storage).await;
 
-			self.set_hrmp_channels(block_hash, rpc).await?;
+			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
@@ -187,9 +187,8 @@ impl SubxtTracker {
 		self.current_candidate.maybe_reset();
 	}
 
-	async fn set_hrmp_channels(&mut self, block_hash: H256, rpc: &mut impl TrackerRpc) -> color_eyre::Result<()> {
-		let inbound = rpc.inbound_hrmp_channels(block_hash).await?;
-		let outbound = rpc.outbound_hrmp_channels(block_hash).await?;
+	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
+		let (inbound, outbound) = storage.inbound_outbound_hrmp_channels(block_hash).await.unwrap_or_default();
 		self.message_queues.set_hrmp_channels(inbound, outbound);
 
 		Ok(())

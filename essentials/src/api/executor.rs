@@ -58,8 +58,7 @@ pub enum Request {
 	GetSessionIndex(H256),
 	GetSessionAccountKeys(u32),
 	GetSessionNextKeys(AccountId32),
-	GetInboundHRMPChannels(H256, u32),
-	GetOutboundHRMPChannels(H256, u32),
+	GetInboundOutBoundHrmpChannels(H256, Vec<u32>),
 	GetHostConfiguration,
 	GetBestBlockSubscription,
 	GetFinalizedBlockSubscription,
@@ -92,8 +91,8 @@ enum Response {
 	SessionAccountKeys(Option<Vec<AccountId32>>),
 	/// Session next keys for a validator
 	SessionNextKeys(Option<SessionKeys>),
-	/// HRMP channels for some parachain (e.g. who are sending messages to us)
-	HRMPChannels(BTreeMap<u32, SubxtHrmpChannel>),
+	/// HRMP channels for given parachain (e.g. who are sending messages to us)
+	InboundOutBoundHrmpChannels(Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>),
 	/// The current host configuration
 	HostConfiguration(DynamicHostConfiguration),
 	/// Chain subscription
@@ -225,10 +224,8 @@ impl RequestExecutorBackend {
 			GetSessionAccountKeys(session_index) =>
 				SessionAccountKeys(client.get_session_account_keys(session_index).await?),
 			GetSessionNextKeys(ref account) => SessionNextKeys(client.get_session_next_keys(account).await?),
-			GetInboundHRMPChannels(hash, para_id) =>
-				HRMPChannels(client.get_inbound_hrmp_channels(hash, para_id).await?),
-			GetOutboundHRMPChannels(hash, para_id) =>
-				HRMPChannels(client.get_outbound_hrmp_channels(hash, para_id).await?),
+			GetInboundOutBoundHrmpChannels(hash, para_ids) =>
+				InboundOutBoundHrmpChannels(client.get_inbound_outbound_hrmp_channels(hash, para_ids).await?),
 			GetHostConfiguration => HostConfiguration(DynamicHostConfiguration::new(
 				fetch_dynamic_storage(client, None, "Configuration", "ActiveConfig").await?,
 			)),
@@ -423,22 +420,16 @@ impl RequestExecutor {
 		wrap_backend_call!(self, url, GetSessionNextKeys, SessionNextKeys, account)
 	}
 
-	pub async fn get_inbound_hrmp_channels(
+	pub async fn get_inbound_outbound_hrmp_channels(
 		&mut self,
 		url: &str,
 		hash: H256,
-		para_id: u32,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetInboundHRMPChannels, HRMPChannels, hash, para_id)
-	}
-
-	pub async fn get_outbound_hrmp_channels(
-		&mut self,
-		url: &str,
-		hash: H256,
-		para_id: u32,
-	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetOutboundHRMPChannels, HRMPChannels, hash, para_id)
+		para_ids: Vec<u32>,
+	) -> color_eyre::Result<
+		Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>,
+		RequestExecutorError,
+	> {
+		wrap_backend_call!(self, url, GetInboundOutBoundHrmpChannels, InboundOutBoundHrmpChannels, hash, para_ids)
 	}
 
 	pub async fn get_host_configuration(

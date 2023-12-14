@@ -56,18 +56,14 @@ impl TrackerRpc for ParachainTrackerRpc {
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
-		self.executor
-			.get_inbound_hrmp_channels(self.node.as_str(), block_hash, self.para_id)
-			.await
+		todo!()
 	}
 
 	async fn outbound_hrmp_channels(
 		&mut self,
 		block_hash: H256,
 	) -> color_eyre::Result<BTreeMap<u32, SubxtHrmpChannel>, RequestExecutorError> {
-		self.executor
-			.get_outbound_hrmp_channels(self.node.as_str(), block_hash, self.para_id)
-			.await
+		todo!()
 	}
 }
 
