@@ -200,21 +200,25 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 
 		for para_id in para_ids {
 			let mut inbound: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
-			let inbound_index = self.get_hrmp_channel_digests(block_hash, para_id).await?;
-			for (_, senders) in inbound_index {
-				for sender in senders {
-					let id = HrmpChannelId { sender: Id(sender), recipient: Id(para_id) };
-					let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-					if let Some(channel) = self.storage().at(block_hash).fetch(&addr).await? {
-						inbound.insert(sender, channel.into());
-					}
+			let inbound_ids: Vec<_> = self
+				.get_hrmp_channel_digests(block_hash, para_id)
+				.await?
+				.into_iter()
+				.map(|(_, v)| v)
+				.flatten()
+				.collect();
+			for sender in inbound_ids {
+				let id = HrmpChannelId { sender: Id(sender), recipient: Id(para_id) };
+				let addr = polkadot::storage().hrmp().hrmp_channels(&id);
+				if let Some(channel) = self.storage().at(block_hash).fetch(&addr).await? {
+					inbound.insert(sender, channel.into());
 				}
 			}
 			len = len + inbound.len();
 
 			let mut outbound: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
-			let outbound_index = self.get_hrmp_egress_channels_index(block_hash, para_id).await?;
-			for recipient in outbound_index {
+			let outbound_ids = self.get_hrmp_egress_channels_index(block_hash, para_id).await?;
+			for recipient in outbound_ids {
 				let id = HrmpChannelId { sender: Id(para_id), recipient: Id(recipient) };
 				let addr = polkadot::storage().hrmp().hrmp_channels(&id);
 				if let Some(channel) = self.storage().at(block_hash).fetch(&addr).await? {
