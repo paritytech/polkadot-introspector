@@ -51,7 +51,6 @@ use stats::ParachainStats;
 use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
-use tracker_rpc::ParachainTrackerRpc;
 use tracker_storage::TrackerStorage;
 
 mod message_queues_tracker;
@@ -59,7 +58,6 @@ mod parachain_block_info;
 mod prometheus;
 mod stats;
 mod tracker;
-mod tracker_rpc;
 mod tracker_storage;
 mod types;
 mod utils;
@@ -212,7 +210,6 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.executor());
 		let mut tracker = SubxtTracker::new(para_id);
 		let storage = TrackerStorage::new(para_id, api_service.storage());
 
@@ -227,9 +224,7 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
 								let parent_number = new_head.relay_parent_number;
-								if let Err(e) =
-									tracker.inject_block(*relay_fork, parent_number, &mut rpc, &storage).await
-								{
+								if let Err(e) = tracker.inject_block(*relay_fork, parent_number, &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
 									std::process::exit(1);
 								}

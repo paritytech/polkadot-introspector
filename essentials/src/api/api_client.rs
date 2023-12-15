@@ -20,7 +20,10 @@ use std::collections::BTreeMap;
 use crate::{
 	metadata::polkadot::{
 		self,
-		runtime_types::polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+		runtime_types::{
+			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+			polkadot_runtime_parachains::hrmp::HrmpChannel,
+		},
 	},
 	types::{AccountId32, BlockNumber, Header, InherentData, SessionKeys, SubxtHrmpChannel, Timestamp, H256},
 };
@@ -109,23 +112,13 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		}
 	}
 
-	async fn get_hrmp_ingress_channels_index(&self, block_hash: H256, para_id: u32) -> Result<Vec<u32>, subxt::Error> {
-		let addr = polkadot::storage().hrmp().hrmp_ingress_channels_index(Id(para_id));
-		Ok(self
-			.storage()
-			.at(block_hash)
-			.fetch(&addr)
-			.await?
-			.unwrap_or_default()
-			.iter()
-			.map(|id| id.0)
-			.collect())
-	}
-
-	async fn get_hrmp_egress_channels_index(&self, block_hash: H256, para_id: u32) -> Result<Vec<u32>, subxt::Error> {
+	async fn get_hrmp_egress_channels_index(
+		storage: StorageClient<PolkadotConfig, T>,
+		block_hash: H256,
+		para_id: u32,
+	) -> Result<Vec<u32>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
-		Ok(self
-			.storage()
+		Ok(storage
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
@@ -136,13 +129,12 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	async fn get_hrmp_channel_digests(
-		&self,
+		storage: StorageClient<PolkadotConfig, T>,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<(u32, Vec<u32>)>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
-		Ok(self
-			.storage()
+		Ok(storage
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
@@ -150,6 +142,17 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.into_iter()
 			.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
 			.collect())
+	}
+
+	async fn get_hrmp_channels(
+		storage: StorageClient<PolkadotConfig, T>,
+		block_hash: H256,
+		sender: u32,
+		recipient: u32,
+	) -> Result<Option<(u32, u32, HrmpChannel)>, subxt::Error> {
+		let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
+		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
+		Ok(storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v)))
 	}
 }
 
@@ -198,34 +201,81 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 
 		let mut res = Vec::new();
 
-		for para_id in para_ids {
-			let mut inbound: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
-			let inbound_ids: Vec<_> = self
-				.get_hrmp_channel_digests(block_hash, para_id)
-				.await?
-				.into_iter()
-				.map(|(_, v)| v)
-				.flatten()
-				.collect();
-			for sender in inbound_ids {
-				let id = HrmpChannelId { sender: Id(sender), recipient: Id(para_id) };
-				let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-				if let Some(channel) = self.storage().at(block_hash).fetch(&addr).await? {
-					inbound.insert(sender, channel.into());
-				}
-			}
-			len = len + inbound.len();
+		let inbound_ids: Vec<Vec<u32>> = futures::future::try_join_all(
+			para_ids
+				.iter()
+				.map(|&para_id| tokio::spawn(Self::get_hrmp_channel_digests(self.storage(), block_hash, para_id))),
+		)
+		.await
+		.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
+		.into_iter()
+		.collect::<Result<Vec<_>, subxt::Error>>()?
+		.into_iter()
+		.map(|v| v.into_iter().map(|(_, v)| v).flatten().collect())
+		.collect();
 
-			let mut outbound: BTreeMap<u32, SubxtHrmpChannel> = BTreeMap::new();
-			let outbound_ids = self.get_hrmp_egress_channels_index(block_hash, para_id).await?;
-			for recipient in outbound_ids {
-				let id = HrmpChannelId { sender: Id(para_id), recipient: Id(recipient) };
-				let addr = polkadot::storage().hrmp().hrmp_channels(&id);
-				if let Some(channel) = self.storage().at(block_hash).fetch(&addr).await? {
-					outbound.insert(recipient, channel.into());
-				}
-			}
-			len = len + outbound.len();
+		let inbound_channels: Vec<Option<(u32, u32, HrmpChannel)>> = futures::future::try_join_all(
+			para_ids
+				.iter()
+				.zip(inbound_ids)
+				.map(|(para_id, ids)| ids.into_iter().map(|sender| (*para_id, sender)).collect::<Vec<(u32, u32)>>())
+				.flatten()
+				.map(|(para_id, sender)| {
+					tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, sender, para_id))
+				}),
+		)
+		.await
+		.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
+		.into_iter()
+		.collect::<Result<Vec<_>, subxt::Error>>()?;
+
+		len = len + inbound_channels.len();
+
+		let mut inbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
+		for (sender, para_id, channel) in inbound_channels.into_iter().filter_map(|v| v) {
+			let ids = inbound_by_para_id.entry(para_id).or_default();
+			ids.insert(sender, channel.into());
+		}
+
+		let outbound_ids: Vec<Vec<u32>> =
+			futures::future::try_join_all(para_ids.iter().map(|&para_id| {
+				tokio::spawn(Self::get_hrmp_egress_channels_index(self.storage(), block_hash, para_id))
+			}))
+			.await
+			.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
+			.into_iter()
+			.collect::<Result<Vec<_>, subxt::Error>>()?;
+
+		let outbound_channels: Vec<Option<(u32, u32, HrmpChannel)>> = futures::future::try_join_all(
+			para_ids
+				.iter()
+				.zip(outbound_ids)
+				.map(|(para_id, ids)| {
+					ids.into_iter()
+						.map(|recipient| (*para_id, recipient))
+						.collect::<Vec<(u32, u32)>>()
+				})
+				.flatten()
+				.map(|(para_id, recipient)| {
+					tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, para_id, recipient))
+				}),
+		)
+		.await
+		.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
+		.into_iter()
+		.collect::<Result<Vec<_>, subxt::Error>>()?;
+
+		len = len + outbound_channels.len();
+
+		let mut outbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
+		for (para_id, recipient, channel) in outbound_channels.into_iter().filter_map(|v| v) {
+			let ids = outbound_by_para_id.entry(para_id).or_default();
+			ids.insert(recipient, channel.into());
+		}
+
+		for para_id in para_ids {
+			let inbound = inbound_by_para_id.get(&para_id).cloned().unwrap_or_default();
+			let outbound = outbound_by_para_id.get(&para_id).cloned().unwrap_or_default();
 
 			res.push((para_id, inbound, outbound));
 		}

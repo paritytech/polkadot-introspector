@@ -128,10 +128,6 @@ pub fn create_executor() -> executor::RequestExecutor {
 	executor::RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
 }
 
-pub fn create_api() -> ApiService<H256> {
-	ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor())
-}
-
 pub fn create_storage() -> storage::RequestExecutor<H256, CollectorPrefixType> {
 	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor()).storage()
 }
