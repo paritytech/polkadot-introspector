@@ -25,8 +25,8 @@ use crate::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	metadata::polkadot_primitives,
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InherentData, SessionKeys, SubxtHrmpChannel,
-		Timestamp, H256,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData,
+		SessionKeys, SubxtHrmpChannel, Timestamp, H256,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -92,7 +92,7 @@ enum Response {
 	/// Session next keys for a validator
 	SessionNextKeys(Option<SessionKeys>),
 	/// HRMP channels for given parachain (e.g. who are sending messages to us)
-	InboundOutBoundHrmpChannels(Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>),
+	InboundOutBoundHrmpChannels(InboundOutBoundHrmpChannels),
 	/// The current host configuration
 	HostConfiguration(DynamicHostConfiguration),
 	/// Chain subscription
@@ -309,7 +309,6 @@ impl RequestExecutor {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
 			let _ = clients.insert(node.clone(), to_backend);
 			let retry = retry.clone();
-			let api_client_mode = api_client_mode;
 			tokio::spawn(async move {
 				let mut backend = RequestExecutorBackend { retry };
 				backend.run(from_frontend, node, api_client_mode).await;

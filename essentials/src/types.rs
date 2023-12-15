@@ -102,3 +102,5 @@ pub struct OnDemandOrder {
 	pub para_id: u32,
 	pub spot_price: u128,
 }
+
+pub type InboundOutBoundHrmpChannels = Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>;

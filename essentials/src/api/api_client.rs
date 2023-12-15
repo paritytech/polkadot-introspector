@@ -166,14 +166,13 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let inbound_ids: Vec<_> = join_requests(inbound_ids_fut)
 			.await?
 			.iter()
-			.map(|v| -> Vec<_> { v.iter().map(|(_, v)| v).flatten().cloned().collect() })
+			.map(|v| -> Vec<_> { v.iter().flat_map(|(_, v)| v).cloned().collect() })
 			.collect();
 
 		Ok(inbound_ids
 			.into_iter()
 			.zip(para_ids)
-			.map(|(ids, para_id)| -> Vec<_> { ids.into_iter().map(|sender| (sender, para_id)).collect() })
-			.flatten()
+			.flat_map(|(ids, para_id)| -> Vec<_> { ids.into_iter().map(|sender| (sender, para_id)).collect() })
 			.collect())
 	}
 
@@ -190,8 +189,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		Ok(para_ids
 			.into_iter()
 			.zip(outbound_ids)
-			.map(|(para_id, ids)| -> Vec<_> { ids.into_iter().map(|recipient| (para_id, recipient)).collect() })
-			.flatten()
+			.flat_map(|(para_id, ids)| -> Vec<_> { ids.into_iter().map(|recipient| (para_id, recipient)).collect() })
 			.collect())
 	}
 }
@@ -240,11 +238,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		let inbound_channels_fut = inbound_pairs.iter().map(|(sender, para_id)| {
 			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *sender, *para_id))
 		});
-		let inbound_channels: Vec<_> = join_requests(inbound_channels_fut)
-			.await?
-			.into_iter()
-			.filter_map(|v| v)
-			.collect();
+		let inbound_channels: Vec<_> = join_requests(inbound_channels_fut).await?.into_iter().flatten().collect();
 
 		let mut inbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
 		for (sender, para_id, channel) in inbound_channels {
@@ -256,11 +250,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		let outbound_channels_fut = outbound_pairs.iter().map(|(para_id, recipient)| {
 			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *para_id, *recipient))
 		});
-		let outbound_channels: Vec<_> = join_requests(outbound_channels_fut)
-			.await?
-			.into_iter()
-			.filter_map(|v| v)
-			.collect();
+		let outbound_channels: Vec<_> = join_requests(outbound_channels_fut).await?.into_iter().flatten().collect();
 
 		let mut outbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
 		for (para_id, recipient, channel) in outbound_channels {
