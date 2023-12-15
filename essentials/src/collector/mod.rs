@@ -70,6 +70,9 @@ pub struct CollectorOptions {
 	/// WS listen address to bind to
 	#[clap(short = 'l', long = "listen")]
 	listen_addr: Option<SocketAddr>,
+	/// Collect metrics for HRMP channels
+	#[clap(long = "channels", default_value_t = false)]
+	pub hrmp_channels: bool,
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
 	pub subscribe_mode: CollectorSubscribeMode,
 }
@@ -205,6 +208,7 @@ pub struct Collector {
 	state: CollectorState,
 	executor: RequestExecutor,
 	subscribe_mode: CollectorSubscribeMode,
+	hrmp_channels: bool,
 }
 
 impl Collector {
@@ -232,6 +236,7 @@ impl Collector {
 			broadcast_channels: Default::default(),
 			executor,
 			subscribe_mode: opts.subscribe_mode,
+			hrmp_channels: opts.hrmp_channels,
 		}
 	}
 
@@ -605,6 +610,10 @@ impl Collector {
 		block_number: u32,
 		ts: Timestamp,
 	) -> color_eyre::Result<(), CollectorError> {
+		if !self.hrmp_channels {
+			return Ok(())
+		}
+
 		let para_ids: Vec<u32> = if self.subscribe_channels.is_empty() {
 			self.state.candidates_seen.keys().cloned().collect()
 		} else {
