@@ -102,7 +102,7 @@ jobs:
           time cargo build --release
 
       - name: Archive aritfacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: polkadot-introspector
           path: |
