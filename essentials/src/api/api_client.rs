@@ -154,6 +154,46 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
 		Ok(storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v)))
 	}
+
+	async fn get_inbound_hrmp_channel_pairs(
+		&self,
+		block_hash: H256,
+		para_ids: Vec<u32>,
+	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
+		let inbound_ids_fut = para_ids
+			.iter()
+			.map(|&para_id| tokio::spawn(Self::get_hrmp_channel_digests(self.storage(), block_hash, para_id)));
+		let inbound_ids: Vec<_> = join_requests(inbound_ids_fut)
+			.await?
+			.iter()
+			.map(|v| -> Vec<_> { v.iter().map(|(_, v)| v).flatten().cloned().collect() })
+			.collect();
+
+		Ok(inbound_ids
+			.into_iter()
+			.zip(para_ids)
+			.map(|(ids, para_id)| -> Vec<_> { ids.into_iter().map(|sender| (sender, para_id)).collect() })
+			.flatten()
+			.collect())
+	}
+
+	async fn get_outbound_hrmp_channel_pairs(
+		&self,
+		block_hash: H256,
+		para_ids: Vec<u32>,
+	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
+		let outbound_ids_fut = para_ids
+			.iter()
+			.map(|&para_id| tokio::spawn(Self::get_hrmp_egress_channels_index(self.storage(), block_hash, para_id)));
+		let outbound_ids: Vec<Vec<u32>> = join_requests(outbound_ids_fut).await?;
+
+		Ok(para_ids
+			.into_iter()
+			.zip(outbound_ids)
+			.map(|(para_id, ids)| -> Vec<_> { ids.into_iter().map(|recipient| (para_id, recipient)).collect() })
+			.flatten()
+			.collect())
+	}
 }
 
 #[async_trait::async_trait]
@@ -196,93 +236,48 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		para_ids: Vec<u32>,
 	) -> color_eyre::Result<Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>, subxt::Error>
 	{
-		let start = std::time::Instant::now();
-		let mut len = 0;
-
-		let mut res = Vec::new();
-
-		let inbound_ids: Vec<Vec<u32>> = futures::future::try_join_all(
-			para_ids
-				.iter()
-				.map(|&para_id| tokio::spawn(Self::get_hrmp_channel_digests(self.storage(), block_hash, para_id))),
-		)
-		.await
-		.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
-		.into_iter()
-		.collect::<Result<Vec<_>, subxt::Error>>()?
-		.into_iter()
-		.map(|v| v.into_iter().map(|(_, v)| v).flatten().collect())
-		.collect();
-
-		let inbound_channels: Vec<Option<(u32, u32, HrmpChannel)>> = futures::future::try_join_all(
-			para_ids
-				.iter()
-				.zip(inbound_ids)
-				.map(|(para_id, ids)| ids.into_iter().map(|sender| (*para_id, sender)).collect::<Vec<(u32, u32)>>())
-				.flatten()
-				.map(|(para_id, sender)| {
-					tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, sender, para_id))
-				}),
-		)
-		.await
-		.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
-		.into_iter()
-		.collect::<Result<Vec<_>, subxt::Error>>()?;
-
-		len = len + inbound_channels.len();
+		let inbound_pairs = self.get_inbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
+		let inbound_channels_fut = inbound_pairs.iter().map(|(sender, para_id)| {
+			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *sender, *para_id))
+		});
+		let inbound_channels: Vec<_> = join_requests(inbound_channels_fut)
+			.await?
+			.into_iter()
+			.filter_map(|v| v)
+			.collect();
 
 		let mut inbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
-		for (sender, para_id, channel) in inbound_channels.into_iter().filter_map(|v| v) {
-			let ids = inbound_by_para_id.entry(para_id).or_default();
-			ids.insert(sender, channel.into());
+		for (sender, para_id, channel) in inbound_channels {
+			let channels = inbound_by_para_id.entry(para_id).or_default();
+			channels.insert(sender, channel.into());
 		}
 
-		let outbound_ids: Vec<Vec<u32>> =
-			futures::future::try_join_all(para_ids.iter().map(|&para_id| {
-				tokio::spawn(Self::get_hrmp_egress_channels_index(self.storage(), block_hash, para_id))
-			}))
-			.await
-			.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
+		let outbound_pairs = self.get_outbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
+		let outbound_channels_fut = outbound_pairs.iter().map(|(para_id, recipient)| {
+			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *para_id, *recipient))
+		});
+		let outbound_channels: Vec<_> = join_requests(outbound_channels_fut)
+			.await?
 			.into_iter()
-			.collect::<Result<Vec<_>, subxt::Error>>()?;
-
-		let outbound_channels: Vec<Option<(u32, u32, HrmpChannel)>> = futures::future::try_join_all(
-			para_ids
-				.iter()
-				.zip(outbound_ids)
-				.map(|(para_id, ids)| {
-					ids.into_iter()
-						.map(|recipient| (*para_id, recipient))
-						.collect::<Vec<(u32, u32)>>()
-				})
-				.flatten()
-				.map(|(para_id, recipient)| {
-					tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, para_id, recipient))
-				}),
-		)
-		.await
-		.map_err(|e| subxt::Error::Other(format!("{:?}", e)))?
-		.into_iter()
-		.collect::<Result<Vec<_>, subxt::Error>>()?;
-
-		len = len + outbound_channels.len();
+			.filter_map(|v| v)
+			.collect();
 
 		let mut outbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
-		for (para_id, recipient, channel) in outbound_channels.into_iter().filter_map(|v| v) {
-			let ids = outbound_by_para_id.entry(para_id).or_default();
-			ids.insert(recipient, channel.into());
+		for (para_id, recipient, channel) in outbound_channels {
+			let channels = outbound_by_para_id.entry(para_id).or_default();
+			channels.insert(recipient, channel.into());
 		}
 
-		for para_id in para_ids {
-			let inbound = inbound_by_para_id.get(&para_id).cloned().unwrap_or_default();
-			let outbound = outbound_by_para_id.get(&para_id).cloned().unwrap_or_default();
-
-			res.push((para_id, inbound, outbound));
-		}
-
-		let duration = start.elapsed();
-		println!("{} requests = {:?}", len, duration);
-		Ok(res)
+		Ok(para_ids
+			.into_iter()
+			.map(|para_id| {
+				(
+					para_id,
+					inbound_by_para_id.get(&para_id).cloned().unwrap_or_default(),
+					outbound_by_para_id.get(&para_id).cloned().unwrap_or_default(),
+				)
+			})
+			.collect())
 	}
 
 	async fn fetch_dynamic_storage(
@@ -362,4 +357,15 @@ pub async fn build_light_client(url: &str) -> Result<ApiClient<LightClient<Polka
 	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
 
 	Ok(ApiClient { client, legacy_rpc_methods })
+}
+
+async fn join_requests<I, T>(fut: I) -> Result<Vec<T>, subxt::Error>
+where
+	I: IntoIterator<Item = tokio::task::JoinHandle<Result<T, subxt::Error>>>,
+{
+	futures::future::try_join_all(fut)
+		.await
+		.map_err(|e| subxt::Error::Other(format!("Cannot join requests: {:?}", e)))?
+		.into_iter()
+		.collect::<Result<Vec<_>, subxt::Error>>()
 }
