@@ -15,8 +15,6 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use std::collections::BTreeMap;
-
 use crate::{
 	metadata::polkadot::{
 		self,
@@ -29,6 +27,7 @@ use crate::{
 };
 use clap::ValueEnum;
 use dyn_clone::DynClone;
+use std::collections::BTreeMap;
 use subxt::{
 	backend::{
 		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
