@@ -19,7 +19,8 @@ mod ws;
 
 use crate::{
 	api::{
-		subxt_wrapper::{ApiClientMode, RequestExecutor, SubxtWrapperError},
+		dynamic::DynamicError,
+		executor::{RequestExecutor, RequestExecutorError},
 		ApiService,
 	},
 	chain_events::{
@@ -29,7 +30,6 @@ use crate::{
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{Header, InherentData, OnDemandOrder, Timestamp, H256},
-	utils::RetryOptions,
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -70,6 +70,9 @@ pub struct CollectorOptions {
 	/// WS listen address to bind to
 	#[clap(short = 'l', long = "listen")]
 	listen_addr: Option<SocketAddr>,
+	/// Collect metrics for HRMP channels
+	#[clap(long = "channels", default_value_t = false)]
+	pub hrmp_channels: bool,
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
 	pub subscribe_mode: CollectorSubscribeMode,
 }
@@ -111,6 +114,8 @@ pub enum CollectorPrefixType {
 	Dispute(u32),
 	/// On-demand order information by parachain id
 	OnDemandOrder(u32),
+	/// Inbound/Outbound HRMP channel configuration
+	InboundOutboundHrmpChannels(u32),
 }
 
 /// A type that defines prefix + hash itself
@@ -186,9 +191,11 @@ pub enum CollectorError {
 	#[error(transparent)]
 	NonFatal(#[from] color_eyre::Report),
 	#[error(transparent)]
-	ExecutorFatal(#[from] SubxtWrapperError),
+	ExecutorFatal(#[from] RequestExecutorError),
 	#[error(transparent)]
 	SendFatal(#[from] polkadot_introspector_priority_channel::SendError),
+	#[error("Collector other error: {0}")]
+	Other(String),
 }
 
 pub struct Collector {
@@ -201,14 +208,14 @@ pub struct Collector {
 	state: CollectorState,
 	executor: RequestExecutor,
 	subscribe_mode: CollectorSubscribeMode,
+	hrmp_channels: bool,
 }
 
 impl Collector {
-	pub fn new(endpoint: &str, opts: CollectorOptions, api_client_mode: ApiClientMode, retry: RetryOptions) -> Self {
+	pub fn new(endpoint: &str, opts: CollectorOptions, executor: RequestExecutor) -> Self {
 		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
 			RecordsStorageConfig { max_blocks: opts.max_blocks.unwrap_or(64) },
-			api_client_mode,
-			retry,
+			executor,
 		);
 		let ws_listener = if let Some(listen_addr) = opts.listen_addr {
 			let ws_listener_config = WebSocketListenerConfig::builder().listen_addr(listen_addr).build();
@@ -218,7 +225,7 @@ impl Collector {
 		} else {
 			None
 		};
-		let executor = api.subxt();
+		let executor = api.executor();
 		Self {
 			api,
 			ws_listener,
@@ -229,6 +236,7 @@ impl Collector {
 			broadcast_channels: Default::default(),
 			executor,
 			subscribe_mode: opts.subscribe_mode,
+			hrmp_channels: opts.hrmp_channels,
 		}
 	}
 
@@ -258,7 +266,7 @@ impl Collector {
 						Ok(subxt_events) =>
 							for event in subxt_events.iter() {
 								if let Err(error) = self.process_chain_event(event).await {
-									error!("collector service could not process event: {}", error);
+									error!("collector service could not process event: {:?}", error);
 									match error {
 										CollectorError::ExecutorFatal(e) => {
 											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
@@ -275,7 +283,7 @@ impl Collector {
 											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
 												TerminationReason::Abnormal(
 													1,
-													format!("Collector's chanel error: {}", e),
+													format!("Collector's channel error: {}", e),
 												),
 											))
 											.await
@@ -287,7 +295,7 @@ impl Collector {
 								}
 							},
 						Err(e) => {
-							error!("collector service could not process events: {}", e);
+							error!("collector service could not process events: {:?}", e);
 							self.broadcast_event_priority(CollectorUpdateEvent::Termination(
 								TerminationReason::Abnormal(1, format!("Collector's service error: {}", e)),
 							))
@@ -374,7 +382,7 @@ impl Collector {
 		self.api.clone()
 	}
 
-	/// Returns Subxt request executor
+	/// Returns RPC executor
 	pub fn executor(&self) -> RequestExecutor {
 		self.executor.clone()
 	}
@@ -525,6 +533,7 @@ impl Collector {
 
 		match block_number.cmp(&self.state.current_relay_chain_block_number) {
 			Ordering::Greater => {
+				self.write_hrmp_channels(block_hash, block_number, ts).await?;
 				self.update_state(block_number, block_hash).await?;
 			},
 			Ordering::Equal => {
@@ -591,6 +600,41 @@ impl Collector {
 			self.state.current_relay_chain_block_number,
 			self.state.current_relay_chain_block_hashes
 		);
+
+		Ok(())
+	}
+
+	async fn write_hrmp_channels(
+		&mut self,
+		block_hash: H256,
+		block_number: u32,
+		ts: Timestamp,
+	) -> color_eyre::Result<(), CollectorError> {
+		if !self.hrmp_channels {
+			return Ok(())
+		}
+
+		let para_ids: Vec<u32> = if self.subscribe_channels.is_empty() {
+			self.state.candidates_seen.keys().cloned().collect()
+		} else {
+			self.subscribe_channels.keys().cloned().collect()
+		};
+
+		for (para_id, inbound, outbound) in self
+			.executor()
+			.get_inbound_outbound_hrmp_channels(&self.endpoint, block_hash, para_ids)
+			.await?
+		{
+			self.storage_write_prefixed(
+				CollectorPrefixType::InboundOutboundHrmpChannels(para_id),
+				block_hash,
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(block_number, Duration::from_secs(ts)),
+					(inbound, outbound),
+				),
+			)
+			.await?;
+		}
 
 		Ok(())
 	}
@@ -672,7 +716,7 @@ impl Collector {
 		ts: Timestamp,
 	) -> color_eyre::Result<(), CollectorError> {
 		let assignments = match self.core_assignments_via_claim_queue(block_hash).await {
-			Err(SubxtWrapperError::EmptyResponseFromDynamicStorage(reason)) => {
+			Err(RequestExecutorError::DynamicError(DynamicError::EmptyResponseFromDynamicStorage(reason))) => {
 				info!("{}. Nothing to process, used empty value", reason);
 				BTreeMap::default()
 			},
@@ -691,7 +735,7 @@ impl Collector {
 	async fn core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, SubxtWrapperError> {
+	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, RequestExecutorError> {
 		let assignments = self.executor.get_claim_queue(self.endpoint.as_str(), block_hash).await?;
 		Ok(assignments
 			.iter()

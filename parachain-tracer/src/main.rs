@@ -34,7 +34,7 @@ use futures::{future, stream::FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
+	api::{api_client::ApiClientMode, executor::RequestExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector,
@@ -51,7 +51,6 @@ use stats::ParachainStats;
 use std::{collections::HashMap, default::Default, ops::DerefMut};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
-use tracker_rpc::ParachainTrackerRpc;
 use tracker_storage::TrackerStorage;
 
 mod message_queues_tracker;
@@ -59,7 +58,6 @@ mod parachain_block_info;
 mod prometheus;
 mod stats;
 mod tracker;
-mod tracker_rpc;
 mod tracker_storage;
 mod types;
 mod utils;
@@ -124,7 +122,6 @@ pub(crate) struct ParachainTracerOptions {
 #[derive(Clone)]
 pub(crate) struct ParachainTracer {
 	opts: ParachainTracerOptions,
-	retry: RetryOptions,
 	node: String,
 	metrics: Metrics,
 }
@@ -133,10 +130,9 @@ impl ParachainTracer {
 	pub(crate) fn new(mut opts: ParachainTracerOptions) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let node = opts.node.clone();
-		let retry = opts.retry.clone();
 		opts.mode = opts.mode.or(Some(ParachainTracerMode::Cli));
 
-		Ok(ParachainTracer { opts, node, metrics: Default::default(), retry })
+		Ok(ParachainTracer { opts, node, metrics: Default::default() })
 	}
 
 	/// Spawn the UI and subxt tasks and return their futures.
@@ -144,6 +140,7 @@ impl ParachainTracer {
 		mut self,
 		shutdown_tx: &BroadcastSender<()>,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
+		executor: &mut RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
@@ -151,12 +148,7 @@ impl ParachainTracer {
 			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
 		}
 
-		let mut collector = Collector::new(
-			self.opts.node.as_str(),
-			self.opts.collector_opts.clone(),
-			self.opts.api_client_mode,
-			self.retry.clone(),
-		);
+		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), executor.clone());
 		collector.spawn(shutdown_tx).await?;
 
 		println!(
@@ -170,7 +162,7 @@ impl ParachainTracer {
 			&self.node,
 			self.opts.api_client_mode,
 		);
-		if let Err(e) = print_host_configuration(self.opts.node.as_str(), &mut collector.executor()).await {
+		if let Err(e) = print_host_configuration(self.opts.node.as_str(), executor).await {
 			warn!("Cannot get host configuration");
 			return Err(e)
 		}
@@ -218,7 +210,6 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		let mut rpc = ParachainTrackerRpc::new(para_id, self.node.as_str(), api_service.subxt());
 		let mut tracker = SubxtTracker::new(para_id);
 		let storage = TrackerStorage::new(para_id, api_service.storage());
 
@@ -233,9 +224,7 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
 								let parent_number = new_head.relay_parent_number;
-								if let Err(e) =
-									tracker.inject_block(*relay_fork, parent_number, &mut rpc, &storage).await
-								{
+								if let Err(e) = tracker.inject_block(*relay_fork, parent_number, &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
 									std::process::exit(1);
 								}
@@ -396,25 +385,21 @@ async fn main() -> color_eyre::Result<()> {
 
 	let tracer = ParachainTracer::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-	let mut futures = vec![];
+	let mut executor = RequestExecutor::build(opts.node.clone(), opts.api_client_mode, opts.retry.clone())?;
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
-		Box::new(HistoricalSubscription::new(
-			vec![opts.node.clone()],
-			from,
-			to,
-			opts.api_client_mode,
-			opts.retry.clone(),
-		))
+		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, executor.clone()))
 	} else {
-		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], opts.api_client_mode, opts.retry.clone()))
+		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], executor.clone()))
 	};
 	let consumer_init = sub.create_consumer();
 
-	futures.extend(tracer.run(&shutdown_tx, consumer_init).await?);
+	let mut futures = vec![];
+	futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut executor).await?);
 	futures.extend(sub.run(&shutdown_tx).await?);
 
 	init::run(futures, &shutdown_tx).await?;
+	executor.close().await?;
 
 	Ok(())
 }

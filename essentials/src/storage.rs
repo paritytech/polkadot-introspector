@@ -207,10 +207,7 @@ where
 		self.direct_records.insert(key.clone(), entry);
 
 		if !is_persistent {
-			self.ephemeral_records
-				.entry(block_number)
-				.or_insert_with(Default::default)
-				.insert(key);
+			self.ephemeral_records.entry(block_number).or_default().insert(key);
 		}
 
 		self.prune();
@@ -430,10 +427,7 @@ where
 		self.last_block = Some(block_number);
 		direct_storage.insert(key.clone(), entry);
 
-		self.ephemeral_records
-			.entry(block_number)
-			.or_insert_with(Default::default)
-			.insert(key);
+		self.ephemeral_records.entry(block_number).or_default().insert(key);
 
 		self.prune();
 		Ok(())

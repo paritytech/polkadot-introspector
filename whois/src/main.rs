@@ -16,7 +16,10 @@
 
 use clap::{Args, Parser, Subcommand};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{ApiClientMode, RequestExecutor, SubxtWrapperError},
+	api::{
+		api_client::ApiClientMode,
+		executor::{RequestExecutor, RequestExecutorError},
+	},
 	consumer::{EventConsumerInit, EventStream},
 	init,
 	telemetry_feed::{AddedNode, TelemetryFeed},
@@ -74,7 +77,7 @@ pub enum WhoisError {
 	#[error("Validator with given index not found")]
 	NoValidator,
 	#[error("Can't connect to relay chain")]
-	SubxtError(SubxtWrapperError),
+	SubxtError(RequestExecutorError),
 	#[error("Can't connect to telemetry feed")]
 	TelemetryError(color_eyre::Report),
 }
@@ -91,8 +94,8 @@ impl Whois {
 	async fn run(
 		self,
 		consumer_config: EventConsumerInit<TelemetryEvent>,
+		mut executor: RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
-		let mut executor = RequestExecutor::new(ApiClientMode::RPC, self.opts.retry.clone());
 		let validator = match self.opts.command {
 			WhoisCommand::Account(v) => v.validator,
 			WhoisCommand::Session(v) => match executor.get_session_account_keys(&self.opts.ws, v.session_index).await {
@@ -170,12 +173,12 @@ async fn main() -> color_eyre::Result<()> {
 
 	let whois = Whois::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-	let mut futures = vec![];
-
+	let executor = RequestExecutor::build(opts.ws.clone(), ApiClientMode::RPC, opts.retry.clone())?;
 	let mut sub = TelemetrySubscription::new(opts.ws.clone(), opts.chain.clone());
 	let consumer_init = sub.create_consumer();
 
-	futures.extend(whois.run(consumer_init).await?);
+	let mut futures = vec![];
+	futures.extend(whois.run(consumer_init, executor).await?);
 	futures.extend(sub.run(&shutdown_tx).await?);
 
 	init::run(futures, &shutdown_tx).await?;

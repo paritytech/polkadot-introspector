@@ -23,7 +23,7 @@ use crossterm::{
 };
 use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
-	api::subxt_wrapper::{ApiClientMode, RequestExecutor},
+	api::{api_client::ApiClientMode, executor::RequestExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -99,8 +99,7 @@ struct BlockTimeMonitor {
 }
 
 impl BlockTimeMonitor {
-	pub fn new(opts: BlockTimeOptions) -> color_eyre::Result<Self> {
-		let executor = RequestExecutor::new(ApiClientMode::RPC, opts.retry.clone());
+	pub fn new(opts: BlockTimeOptions, executor: RequestExecutor) -> color_eyre::Result<Self> {
 		let endpoints = opts.nodes.clone();
 		let active_endpoints = endpoints.len();
 
@@ -373,11 +372,12 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let monitor = BlockTimeMonitor::new(opts.clone())?;
+	let executor = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, opts.retry.clone())?;
+	let monitor = BlockTimeMonitor::new(opts.clone(), executor.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let mut futures = vec![];
 
-	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), ApiClientMode::RPC, opts.retry.clone());
+	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), executor);
 	let consumer_init = sub.create_consumer();
 
 	futures.extend(monitor.run(consumer_init).await?);

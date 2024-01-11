@@ -20,7 +20,6 @@ use crate::{
 	parachain_block_info::ParachainBlockInfo,
 	prometheus::PrometheusMetrics,
 	stats::Stats,
-	tracker_rpc::TrackerRpc,
 	tracker_storage::TrackerStorage,
 	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
 	utils::{backed_candidate, extract_availability_bits_count, extract_inherent_fields, time_diff},
@@ -110,7 +109,6 @@ impl SubxtTracker {
 		&mut self,
 		block_hash: H256,
 		block_number: BlockNumber,
-		rpc: &mut impl TrackerRpc,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
 		if let Some(inherent) = storage.inherent_data(block_hash).await {
@@ -123,7 +121,7 @@ impl SubxtTracker {
 			self.set_core_assignment(block_hash, storage).await?;
 			self.set_disputes(&disputes[..], storage).await;
 
-			self.set_hrmp_channels(block_hash, rpc).await?;
+			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
 
 			// If a candidate was backed in this relay block, we don't need to process availability now.
@@ -187,9 +185,8 @@ impl SubxtTracker {
 		self.current_candidate.maybe_reset();
 	}
 
-	async fn set_hrmp_channels(&mut self, block_hash: H256, rpc: &mut impl TrackerRpc) -> color_eyre::Result<()> {
-		let inbound = rpc.inbound_hrmp_channels(block_hash).await?;
-		let outbound = rpc.outbound_hrmp_channels(block_hash).await?;
+	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
+		let (inbound, outbound) = storage.inbound_outbound_hrmp_channels(block_hash).await.unwrap_or_default();
 		self.message_queues.set_hrmp_channels(inbound, outbound);
 
 		Ok(())
@@ -603,10 +600,7 @@ mod test_inject_block {
 	use std::collections::BTreeMap;
 
 	use super::*;
-	use crate::{
-		test_utils::{create_inherent_data, create_storage, storage_write},
-		tracker_rpc::MockTrackerRpc,
-	};
+	use crate::test_utils::{create_inherent_data, create_storage, storage_write};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 
 	#[tokio::test]
@@ -614,9 +608,8 @@ mod test_inject_block {
 		let hash = H256::random();
 		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage());
-		let mut mock_rpc = MockTrackerRpc::new();
 
-		tracker.inject_block(hash, 0, &mut mock_rpc, &tracker_storage).await.unwrap();
+		tracker.inject_block(hash, 0, &tracker_storage).await.unwrap();
 
 		assert!(tracker.new_session.is_none());
 		assert!(tracker.current_candidate.candidate.is_none());
@@ -642,9 +635,6 @@ mod test_inject_block {
 		let storage = create_storage();
 		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, storage.clone());
-		let mut mock_rpc = MockTrackerRpc::new();
-		mock_rpc.expect_inbound_hrmp_channels().returning(|_| Ok(Default::default()));
-		mock_rpc.expect_outbound_hrmp_channels().returning(|_| Ok(Default::default()));
 
 		// Inject a block
 		storage_write(CollectorPrefixType::CoreAssignments, first_hash, BTreeMap::<u32, Vec<u32>>::default(), &storage)
@@ -656,10 +646,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, first_hash, 1_u64, &storage)
 			.await
 			.unwrap();
-		tracker
-			.inject_block(first_hash, 42, &mut mock_rpc, &tracker_storage)
-			.await
-			.unwrap();
+		tracker.inject_block(first_hash, 42, &tracker_storage).await.unwrap();
 
 		let current = tracker.current_relay_block.unwrap();
 		assert!(tracker.previous_relay_block.is_none());
@@ -685,10 +672,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, second_hash, 2_u64, &storage)
 			.await
 			.unwrap();
-		tracker
-			.inject_block(second_hash, 42, &mut mock_rpc, &tracker_storage)
-			.await
-			.unwrap();
+		tracker.inject_block(second_hash, 42, &tracker_storage).await.unwrap();
 
 		let previous = tracker.previous_relay_block.unwrap();
 		let current = tracker.current_relay_block.unwrap();

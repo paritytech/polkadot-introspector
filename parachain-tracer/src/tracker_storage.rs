@@ -18,7 +18,7 @@ use polkadot_introspector_essentials::{
 	api::storage::RequestExecutor,
 	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
 	metadata::polkadot_primitives::ValidatorIndex,
-	types::{AccountId32, CoreOccupied, InherentData, OnDemandOrder, Timestamp, H256},
+	types::{AccountId32, CoreOccupied, InherentData, OnDemandOrder, SubxtHrmpChannel, Timestamp, H256},
 };
 use std::collections::BTreeMap;
 use subxt::config::{substrate::BlakeTwo256, Hasher};
@@ -117,15 +117,26 @@ impl TrackerStorage {
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
+
+	/// TODO
+	pub async fn inbound_outbound_hrmp_channels(
+		&self,
+		block_hash: H256,
+	) -> Option<(BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)> {
+		self.storage
+			.storage_read_prefixed(CollectorPrefixType::InboundOutboundHrmpChannels(self.para_id), block_hash)
+			.await
+			.map(|v| v.into_inner().unwrap())
+	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::test_utils::{create_candidate_record, create_inherent_data};
+	use crate::test_utils::{create_candidate_record, create_executor, create_inherent_data};
 
 	use super::*;
 	use polkadot_introspector_essentials::{
-		api::{subxt_wrapper::ApiClientMode, ApiService},
+		api::ApiService,
 		chain_events::SubxtDispute,
 		collector::CollectorStorageApi,
 		storage::{RecordTime, RecordsStorageConfig, StorageEntry},
@@ -134,11 +145,8 @@ mod tests {
 	use subxt::utils::AccountId32;
 
 	fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
-		let api: CollectorStorageApi = ApiService::new_with_prefixed_storage(
-			RecordsStorageConfig { max_blocks: 4 },
-			ApiClientMode::RPC,
-			Default::default(),
-		);
+		let api: CollectorStorageApi =
+			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor());
 		let storage = TrackerStorage::new(100, api.storage());
 
 		(storage, api)
