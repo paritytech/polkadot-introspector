@@ -40,7 +40,7 @@ parity-db = "0.4.12"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/polkadot-sdk", branch = "master" }
 rand = "0.8.5"
 rasciigraph = "0.2.0"
-reqwest = { version = "0.11.22" }
+reqwest = { version = "0.11.23" }
 rocksdb = "0.21.0"
 serde = "1.0.193"
 serde_bytes = "0.11.12"
