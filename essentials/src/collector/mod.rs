@@ -19,7 +19,6 @@ mod ws;
 
 use crate::{
 	api::{
-		dynamic::DynamicError,
 		executor::{RequestExecutor, RequestExecutorError},
 		ApiService,
 	},
@@ -715,13 +714,7 @@ impl Collector {
 		block_number: u32,
 		ts: Timestamp,
 	) -> color_eyre::Result<(), CollectorError> {
-		let assignments = match self.core_assignments_via_claim_queue(block_hash).await {
-			Err(RequestExecutorError::DynamicError(DynamicError::EmptyResponseFromDynamicStorage(reason))) => {
-				info!("{}. Nothing to process, used empty value", reason);
-				BTreeMap::default()
-			},
-			v => v?,
-		};
+		let assignments = self.core_assignments_via_claim_queue(block_hash).await?;
 		self.storage_write_prefixed(
 			CollectorPrefixType::CoreAssignments,
 			block_hash,

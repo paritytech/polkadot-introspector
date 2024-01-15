@@ -18,8 +18,8 @@ use crate::{
 	api::{
 		api_client::{build_light_client, build_online_client, ApiClientMode, ApiClientT, HeaderStream},
 		dynamic::{
-			decode_availability_cores, decode_claim_queue, decode_validator_groups, fetch_dynamic_storage,
-			DynamicError, DynamicHostConfiguration,
+			self, decode_availability_cores, decode_claim_queue, decode_validator_groups, fetch_dynamic_storage,
+			DynamicHostConfiguration,
 		},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -30,7 +30,7 @@ use crate::{
 	},
 	utils::{Retry, RetryOptions},
 };
-use log::error;
+use log::{error, info};
 use polkadot_introspector_priority_channel::{
 	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
 };
@@ -106,7 +106,7 @@ pub enum RequestExecutorError {
 	#[error("subxt error: {0}")]
 	SubxtError(#[from] subxt::error::Error),
 	#[error("dynamic error: {0}")]
-	DynamicError(#[from] DynamicError),
+	DynamicError(#[from] dynamic::DynamicError),
 	#[error("subxt connection timeout")]
 	Timeout,
 	#[error("Send failed: {0}")]
@@ -209,8 +209,14 @@ impl RequestExecutorBackend {
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => {
-				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ClaimQueue").await?;
-				ClaimQueue(decode_claim_queue(&value)?)
+				match fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ClaimQueue").await {
+					Ok(value) => ClaimQueue(decode_claim_queue(&value)?),
+					Err(dynamic::DynamicError::EmptyResponseFromDynamicStorage(reason)) => {
+						info!("{}. Received an empty claim queue", reason);
+						ClaimQueue(BTreeMap::default())
+					},
+					Err(e) => Err(e)?,
+				}
 			},
 			GetOccupiedCores(hash) => {
 				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "AvailabilityCores").await?;
