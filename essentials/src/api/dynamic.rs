@@ -95,7 +95,13 @@ pub(crate) fn decode_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, Dynamic
 		let decoded_core = decode_composite_u128_value(raw_core)? as u32;
 		let mut paras_entries = VecDeque::new();
 		for composite in decode_unnamed_composite(raw_para_entries)? {
-			paras_entries.push_back(decode_paras_entry_option(composite)?)
+			match &composite.value {
+				// v5
+				ValueDef::Variant(_) => paras_entries.push_back(decode_paras_entry_option(composite)?),
+				// v7
+				ValueDef::Composite(_) => paras_entries.push_back(Some(decode_paras_entry(composite)?)),
+				_ => panic!("No more"),
+			};
 		}
 		let _ = claim_queue.insert(decoded_core, paras_entries);
 	}
@@ -137,7 +143,29 @@ fn decode_paras_entry_option(raw: &Value<u32>) -> Result<Option<ParasEntry>, Dyn
 }
 
 fn decode_paras_entry(raw: &Value<u32>) -> Result<ParasEntry, DynamicError> {
-	let para_id = decode_composite_u128_value(value_at("para_id", value_at("assignment", raw)?)?)? as u32;
+	let raw_assignment = value_at("assignment", raw)?;
+	let para_id = match &raw_assignment.value {
+		// v5
+		ValueDef::Composite(_) => decode_composite_u128_value(value_at("para_id", raw_assignment)?),
+		// v7
+		ValueDef::Variant(_) => match decode_variant(raw_assignment)?.name.as_str() {
+			"Bulk" => decode_u128_value(
+				raw_assignment
+					.at(0)
+					.ok_or(DynamicError::DecodeDynamicError(
+						"v7 bulk assignment".to_string(),
+						raw_assignment.value.clone(),
+					))?
+					.at(0)
+					.ok_or(DynamicError::DecodeDynamicError(
+						"v7 bulk assignment".to_string(),
+						raw_assignment.value.clone(),
+					))?,
+			),
+			_ => Err(DynamicError::DecodeDynamicError("v7 assignment".to_string(), raw_assignment.value.clone())),
+		},
+		_ => Err(DynamicError::DecodeDynamicError("assignment".to_string(), raw_assignment.value.clone())),
+	}? as u32;
 	let assignment = Assignment { para_id };
 	let availability_timeouts = decode_u128_value(value_at("availability_timeouts", raw)?)? as u32;
 	let ttl = decode_u128_value(value_at("ttl", raw)?)? as BlockNumber;
