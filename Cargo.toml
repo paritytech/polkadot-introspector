@@ -36,7 +36,7 @@ hex = "0.4.3"
 itertools = "0.10.5"
 log = "0.4.20"
 mockall = "0.11.4"
-parity-db = "0.4.12"
+parity-db = "0.4.13"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/polkadot-sdk", branch = "master" }
 rand = "0.8.5"
 rasciigraph = "0.2.0"
