@@ -152,9 +152,15 @@ fn decode_paras_entry(raw: &Value<u32>) -> Result<ParasEntry, DynamicError> {
 			"Bulk" => decode_u128_value(
 				raw_assignment
 					.at(0)
-					.ok_or(DynamicError::DecodeDynamicError("v7 bulk assignment".to_string(), raw_assignment.value.clone()))?
+					.ok_or(DynamicError::DecodeDynamicError(
+						"v7 bulk assignment".to_string(),
+						raw_assignment.value.clone(),
+					))?
 					.at(0)
-					.ok_or(DynamicError::DecodeDynamicError("v7 bulk assignment".to_string(), raw_assignment.value.clone()))?,
+					.ok_or(DynamicError::DecodeDynamicError(
+						"v7 bulk assignment".to_string(),
+						raw_assignment.value.clone(),
+					))?,
 			),
 			_ => Err(DynamicError::DecodeDynamicError("v7 assignment".to_string(), raw_assignment.value.clone())),
 		},
