@@ -110,7 +110,7 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
 			payload: AvailabilityBitfield(DecodedBits::from_iter([true])),
 			validator_index: ValidatorIndex(1),
 			signature: create_validator_signature(),
-			__subxt_unused_type_params: Default::default(),
+			__ignore: Default::default(),
 		}],
 		backed_candidates: vec![create_backed_candidate(para_id)],
 		disputes: vec![create_dispute_statement_set()],
