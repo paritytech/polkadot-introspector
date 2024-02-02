@@ -52,7 +52,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 subxt = { default-features = false, features = ["jsonrpsee", "native", "unstable-light-client"], version = "0.34.0" }
 base64 = "0.21.7"
 thiserror = "1.0.56"
-time = { version = "0.3.31", features = ["formatting"] }
+time = { version = "0.3.32", features = ["formatting"] }
 tokio = { version = "1.35.1", features = ["macros", "rt", "rt-multi-thread", "signal"] }
 tokio-tungstenite = { version = "0.20.1", features = ["native-tls"] }
 typed-builder = "0.14.0"
