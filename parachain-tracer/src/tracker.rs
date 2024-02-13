@@ -124,8 +124,7 @@ impl SubxtTracker {
 			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
 
-			// If a candidate was backed in this relay block, we don't need to process availability now.
-			if self.has_backed_candidate() && !self.is_just_backed() {
+			if self.has_backed_candidate() {
 				self.set_availability(block_hash, bitfields, storage).await?;
 			}
 		} else {
@@ -503,11 +502,6 @@ impl SubxtTracker {
 			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
-	}
-
-	fn is_just_backed(&self) -> bool {
-		self.last_backed_at_block_number.is_some() &&
-			self.last_backed_at_block_number == self.current_relay_block.map(|v| v.num)
 	}
 
 	fn is_slow_availability(&self) -> bool {
