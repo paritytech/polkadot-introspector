@@ -152,7 +152,7 @@ impl ParachainTracer {
 		collector.spawn(shutdown_tx).await?;
 
 		println!(
-			"{}\n\twill trace {}\n\ton {}\n\tusing {} Client",
+			"{}\n\twill trace {}\n\ton {}\n\tusing {} Client\n",
 			"Parachain Tracer".to_string().purple(),
 			if self.opts.all {
 				"all parachain(s)".to_string()
