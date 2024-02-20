@@ -312,7 +312,7 @@ impl SubxtTracker {
 						self.current_candidate.candidate_hash;
 					self.previous_included_at = self.last_included_at;
 					self.last_included_at = self.current_relay_block.map(|v| v.into());
-				} else {
+				} else if !self.is_just_backed() {
 					self.current_candidate.set_pending();
 				}
 			}
@@ -502,6 +502,11 @@ impl SubxtTracker {
 			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
+	}
+
+	fn is_just_backed(&self) -> bool {
+		self.last_backed_at_block_number.is_some() &&
+			self.last_backed_at_block_number == self.current_relay_block.map(|v| v.num)
 	}
 
 	fn is_slow_availability(&self) -> bool {

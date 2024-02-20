@@ -18,4 +18,4 @@
 #[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
 pub mod polkadot {}
 
-pub use polkadot::runtime_types::polkadot_primitives::v5 as polkadot_primitives;
+pub use polkadot::runtime_types::polkadot_primitives::v6 as polkadot_primitives;
