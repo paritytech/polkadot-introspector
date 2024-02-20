@@ -182,14 +182,11 @@ impl Display for ParachainProgressUpdate {
 		writeln!(buf, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })?;
 		writeln!(
 			buf,
-			"\t🐌 Finality lag: {}",
+			"\t🐌 Finality lag: {}{}",
 			self.finality_lag
-				.map_or_else(|| "NA".to_owned(), |lag| format!("{} blocks", lag))
+				.map_or_else(|| "NA".to_owned(), |lag| format!("{} blocks", lag)),
+			if self.events.is_empty() { "" } else { "\n" },
 		)?;
-
-		if !self.events.is_empty() {
-			writeln!(buf, "",)?;
-		}
 		for event in &self.events {
 			write!(buf, "{}", event)?;
 		}
