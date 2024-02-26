@@ -178,17 +178,18 @@ impl Display for ParachainProgressUpdate {
 				format!("{}", self.para_id).bold(),
 			)?;
 		}
-		for event in &self.events {
-			write!(buf, "{}", event)?;
-		}
 		writeln!(buf, "\t🔗 Relay block hash: {} ", format!("{:?}", self.block_hash).bold())?;
 		writeln!(buf, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })?;
 		writeln!(
 			buf,
-			"\t🐌 Finality lag: {}",
+			"\t🐌 Finality lag: {}{}",
 			self.finality_lag
-				.map_or_else(|| "NA".to_owned(), |lag| format!("{} blocks", lag))
+				.map_or_else(|| "NA".to_owned(), |lag| format!("{} blocks", lag)),
+			if self.events.is_empty() { "" } else { "\n" },
 		)?;
+		for event in &self.events {
+			write!(buf, "{}", event)?;
+		}
 		f.write_str(buf.as_str())
 	}
 }
@@ -200,41 +201,41 @@ impl Display for ParachainConsensusEvent {
 				writeln!(f, "\t- Parachain assigned to core index {}", core_id)
 			},
 			ParachainConsensusEvent::Backed(candidate_hash) => {
-				writeln!(f, "\t{}", "CANDIDATE BACKED".to_string().bold().green())?;
-				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
+				writeln!(f, "\t- {}", "CANDIDATE BACKED".to_string().bold().green())?;
+				writeln!(f, "\t  💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
 			},
 			ParachainConsensusEvent::Included(candidate_hash, bits_available, max_bits) => {
-				writeln!(f, "\t{}", "CANDIDATE INCLUDED".to_string().bold().green())?;
-				writeln!(f, "\t💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
-				writeln!(f, "\t🟢 Availability bits: {}/{}", bits_available, max_bits)
+				writeln!(f, "\t- {}", "CANDIDATE INCLUDED".to_string().bold().green())?;
+				writeln!(f, "\t  💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
+				writeln!(f, "\t  🟢 Availability bits: {}/{}", bits_available, max_bits)
 			},
 			ParachainConsensusEvent::Disputed(outcome) => {
-				writeln!(f, "\t{}", "💔 Dispute tracked:".to_string().bold())?;
+				writeln!(f, "\t- {}", "💔 Dispute tracked:".to_string().bold())?;
 				write!(f, "{}", outcome)
 			},
 			ParachainConsensusEvent::SkippedSlot => {
-				writeln!(f, "\t{}, no candidate backed", "SLOW BACKING".to_string().bold().red(),)
+				writeln!(f, "\t- {}, no candidate backed", "SLOW BACKING".to_string().bold().red(),)
 			},
 			ParachainConsensusEvent::SlowAvailability(bits_available, max_bits) => {
-				writeln!(f, "\t{}", "SLOW AVAILABILITY".to_string().bold().yellow())?;
-				writeln!(f, "\t🟢 Availability bits: {}/{}", bits_available, max_bits)
+				writeln!(f, "\t- {}", "SLOW AVAILABILITY".to_string().bold().yellow())?;
+				writeln!(f, "\t  🟢 Availability bits: {}/{}", bits_available, max_bits)
 			},
 			ParachainConsensusEvent::SlowBitfieldPropagation(bitfields_count, max_bits) => {
 				writeln!(
 					f,
-					"\t{} bitfield count {}/{}",
+					"\t- {} bitfield count {}/{}",
 					"SLOW BITFIELD PROPAGATION".to_string().dark_red(),
 					bitfields_count,
 					max_bits
 				)
 			},
 			ParachainConsensusEvent::NewSession(session_index) => {
-				writeln!(f, "\t✨ New session tracked: {}", session_index)
+				writeln!(f, "\t- ✨ New session tracked: {}", session_index)
 			},
 			ParachainConsensusEvent::MessageQueues(inbound, outbound) => {
 				if !inbound.is_empty() {
 					let total: u32 = inbound.iter().map(|(_, channel)| channel.total_size).sum();
-					writeln!(f, "\t👉 Inbound HRMP messages, received {} bytes in total", total)?;
+					writeln!(f, "\t- 👉 Inbound HRMP messages, received {} bytes in total", total)?;
 
 					for (peer_parachain, channel) in inbound {
 						if channel.total_size > 0 {
@@ -248,7 +249,7 @@ impl Display for ParachainConsensusEvent {
 				}
 				if !outbound.is_empty() {
 					let total: u32 = inbound.iter().map(|(_, channel)| channel.total_size).sum();
-					writeln!(f, "\t👉 Outbound HRMP messages, sent {} bytes in total", total)?;
+					writeln!(f, "\t- 👉 Outbound HRMP messages, sent {} bytes in total", total)?;
 
 					for (peer_parachain, channel) in outbound {
 						if channel.total_size > 0 {
