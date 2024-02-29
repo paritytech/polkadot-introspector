@@ -269,6 +269,7 @@ impl BlockTimeMonitor {
 					ChainSubscriptionEvent::NewBestHead(v) => v,
 					ChainSubscriptionEvent::NewFinalizedBlock(v) => v,
 					ChainSubscriptionEvent::Heartbeat => continue,
+					ChainSubscriptionEvent::Termination => break,
 				};
 				let ts = executor.get_block_timestamp(url, hash).await;
 				if let Ok(ts) = ts {

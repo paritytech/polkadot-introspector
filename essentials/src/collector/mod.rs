@@ -261,6 +261,13 @@ impl Collector {
 		tokio::spawn(async move {
 			loop {
 				match consumer_channel.next().await {
+					None | Some(ChainSubscriptionEvent::Termination) => {
+						error!("no more events from the consumer channel");
+						self.broadcast_event_priority(CollectorUpdateEvent::Termination(TerminationReason::Normal))
+							.await
+							.unwrap();
+						return
+					},
 					Some(event) => match self.collect_chain_events(&event).await {
 						Ok(subxt_events) =>
 							for event in subxt_events.iter() {
@@ -303,13 +310,6 @@ impl Collector {
 							return
 						},
 					},
-					None => {
-						error!("no more events from the consumer channel");
-						self.broadcast_event_priority(CollectorUpdateEvent::Termination(TerminationReason::Normal))
-							.await
-							.unwrap();
-						return
-					},
 				}
 			}
 		})
@@ -324,7 +324,7 @@ impl Collector {
 			ChainSubscriptionEvent::NewBestHead((hash, header)) => ChainEvent::NewBestHead((*hash, header.clone())),
 			ChainSubscriptionEvent::NewFinalizedBlock((hash, header)) =>
 				ChainEvent::NewFinalizedHead((*hash, header.clone())),
-			ChainSubscriptionEvent::Heartbeat => return Ok(vec![]),
+			_ => return Ok(vec![]),
 		};
 		let mut chain_events = vec![new_head_event];
 
