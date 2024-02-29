@@ -261,8 +261,15 @@ impl Collector {
 		tokio::spawn(async move {
 			loop {
 				match consumer_channel.next().await {
-					None | Some(ChainSubscriptionEvent::Termination) => {
+					None => {
 						error!("no more events from the consumer channel");
+						self.broadcast_event_priority(CollectorUpdateEvent::Termination(TerminationReason::Normal))
+							.await
+							.unwrap();
+						return
+					},
+					Some(ChainSubscriptionEvent::Termination) => {
+						info!("subscribtion terminated");
 						self.broadcast_event_priority(CollectorUpdateEvent::Termination(TerminationReason::Normal))
 							.await
 							.unwrap();
