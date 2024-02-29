@@ -25,4 +25,6 @@ pub enum ChainSubscriptionEvent {
 	NewFinalizedBlock((H256, Header)),
 	/// Heartbeat event
 	Heartbeat,
+	/// Subscription terminated
+	Termination,
 }

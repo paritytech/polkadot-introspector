@@ -123,12 +123,14 @@ impl ChainHeadSubscription {
 				},
 				_ = shutdown_rx.recv() => {
 					info!("Received interrupt signal shutting down subscription");
+					if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
+						info!("Event consumer has already terminated: {:?}", e);
+					}
 					return;
 				}
 				_ = heartbeat_periodic.tick() => {
 					debug!("sent heartbeat to subscribers");
-					let res = update_channel.send(ChainSubscriptionEvent::Heartbeat).await;
-					if let Err(e) = res {
+					if let Err(e) = update_channel.send(ChainSubscriptionEvent::Heartbeat).await {
 						info!("Event consumer has terminated: {:?}, shutting down", e);
 						return;
 					}
