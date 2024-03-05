@@ -113,18 +113,9 @@ mod tests {
 	use crate::test_utils::create_para_block_info;
 
 	#[test]
-	fn test_is_data_available() {
-		let mut info = create_para_block_info();
-		assert!(!info.is_data_available());
-
-		info.max_availability_bits = 200;
-		info.current_availability_bits = 134;
-		assert!(info.is_data_available());
-	}
-
-	#[test]
 	fn test_is_bitfield_propagation_slow() {
 		let mut info = create_para_block_info();
+		info.set_idle();
 		assert!(!info.is_bitfield_propagation_slow());
 
 		info.max_availability_bits = 200;

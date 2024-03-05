@@ -99,7 +99,7 @@ impl From<Block> for BlockWithoutHash {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// Events related to parachain blocks from consensus perspective.
 pub enum ParachainConsensusEvent {
 	/// A core has been assigned to a parachain.

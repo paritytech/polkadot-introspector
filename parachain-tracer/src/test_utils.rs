@@ -162,8 +162,7 @@ pub fn create_candidate_record(
 }
 
 pub fn create_para_block_info() -> ParachainBlockInfo {
-	let mut info = ParachainBlockInfo::default();
-	info.set_candidate(BackedCandidate {
+	let candidate = BackedCandidate {
 		candidate: CommittedCandidateReceipt {
 			descriptor: CandidateDescriptor {
 				para_id: Id(100),
@@ -187,9 +186,9 @@ pub fn create_para_block_info() -> ParachainBlockInfo {
 		},
 		validity_votes: vec![],
 		validator_indices: DecodedBits::from_iter([true]),
-	});
-
-	info
+	};
+	let hash = ParachainBlockInfo::candidate_hash(candidate);
+	ParachainBlockInfo::new(Some(hash))
 }
 
 pub async fn storage_write<T: Encode>(
