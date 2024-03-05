@@ -89,10 +89,6 @@ impl ParachainBlockInfo {
 		len == 1 || len > 1 && self.state[len - 2] != self.state[len - 1]
 	}
 
-	pub fn is_data_available(&self) -> bool {
-		self.current_availability_bits > (self.max_availability_bits / 3) * 2
-	}
-
 	pub fn is_bitfield_propagation_slow(&self) -> bool {
 		self.max_availability_bits > 0 && !self.is_idle() && self.bitfield_count <= (self.max_availability_bits / 3) * 2
 	}

@@ -462,10 +462,6 @@ impl SubxtTracker {
 			}
 
 			if candidate.is_pending() {
-				progress.bitfield_health.max_bitfield_count = candidate.max_availability_bits;
-				progress.bitfield_health.available_count = candidate.current_availability_bits;
-				progress.bitfield_health.bitfield_count = candidate.bitfield_count;
-
 				if self.is_slow_availability() {
 					progress.events.push(ParachainConsensusEvent::SlowAvailability(
 						candidate.current_availability_bits,

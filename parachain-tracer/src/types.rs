@@ -99,16 +99,6 @@ impl From<Block> for BlockWithoutHash {
 	}
 }
 
-#[derive(Clone, Default)]
-pub struct BitfieldsHealth {
-	/// Maximum bitfield count, equal to number of parachain validators.
-	pub max_bitfield_count: u32,
-	/// Current bitfield count in the relay chain block.
-	pub bitfield_count: u32,
-	/// Sum of all bits for a given parachain.
-	pub available_count: u32,
-}
-
 #[derive(Clone)]
 /// Events related to parachain blocks from consensus perspective.
 pub enum ParachainConsensusEvent {
@@ -146,8 +136,6 @@ pub struct ParachainProgressUpdate {
 	pub block_number: BlockNumber,
 	/// Relay chain block hash.
 	pub block_hash: H256,
-	/// Bitfields health metrics.
-	pub bitfield_health: BitfieldsHealth,
 	/// Core occupation.
 	pub core_occupied: bool,
 	/// Consensus events happening for the para under a relay parent.
