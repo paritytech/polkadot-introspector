@@ -256,9 +256,7 @@ impl SubxtTracker {
 		for candidate in self.candidates.iter_mut() {
 			if let Some(candidate_hash) = candidate.candidate_hash {
 				if let Some(stored_candidate) = storage.candidate(candidate_hash).await {
-					candidate.backed_at = Some(stored_candidate.candidate_inclusion.backed);
-					candidate.included_at = stored_candidate.candidate_inclusion.included;
-					if candidate.included_at.is_some() {
+					if stored_candidate.candidate_inclusion.included.is_some() {
 						candidate.set_included();
 						last_included = candidate.candidate_hash;
 					}
@@ -521,7 +519,7 @@ impl SubxtTracker {
 	}
 
 	fn has_backed_candidate(&self) -> bool {
-		self.candidates.iter().any(|candidate| candidate.backed_at.is_some()) ||
+		self.candidates.iter().any(|candidate| candidate.candidate_hash.is_some()) ||
 			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())

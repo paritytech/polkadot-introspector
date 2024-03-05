@@ -24,10 +24,6 @@ use subxt::config::{substrate::BlakeTwo256, Hasher};
 pub struct ParachainBlockInfo {
 	/// Candidate hash
 	pub candidate_hash: Option<H256>,
-	/// Relay block number on which the candidate was backed
-	pub backed_at: Option<u32>,
-	/// Relay block number on which the candidate was included
-	pub included_at: Option<u32>,
 	/// The number of signed bitfields.
 	pub bitfield_count: u32,
 	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
