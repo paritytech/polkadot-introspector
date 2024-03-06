@@ -459,15 +459,13 @@ impl SubxtTracker {
 				}
 			}
 
-			if candidate.is_pending() {
-				if self.is_slow_availability() {
-					progress.events.push(ParachainConsensusEvent::SlowAvailability(
-						candidate.current_availability_bits,
-						candidate.max_availability_bits,
-					));
-					stats.on_slow_availability();
-					metrics.on_slow_availability(self.para_id);
-				}
+			if candidate.is_pending() && self.is_slow_availability() {
+				progress.events.push(ParachainConsensusEvent::SlowAvailability(
+					candidate.current_availability_bits,
+					candidate.max_availability_bits,
+				));
+				stats.on_slow_availability();
+				metrics.on_slow_availability(self.para_id);
 			}
 
 			if candidate.is_included() {
