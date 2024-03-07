@@ -35,7 +35,7 @@ pub struct ParachainBlockInfo {
 	/// Core occupation status.
 	pub core_occupied: bool,
 	/// The current state.
-	state: Vec<ParachainBlockState>,
+	state: ParachainBlockState,
 }
 
 impl ParachainBlockInfo {
@@ -49,40 +49,35 @@ impl ParachainBlockInfo {
 	}
 
 	pub fn set_idle(&mut self) {
-		self.state.push(ParachainBlockState::Idle)
+		self.state = ParachainBlockState::Idle
 	}
 
 	pub fn set_backed(&mut self) {
-		self.state.push(ParachainBlockState::Backed)
+		self.state = ParachainBlockState::Backed
 	}
 
 	pub fn set_pending(&mut self) {
-		self.state.push(ParachainBlockState::PendingAvailability)
+		self.state = ParachainBlockState::PendingAvailability
 	}
 
 	pub fn set_included(&mut self) {
-		self.state.push(ParachainBlockState::Included)
+		self.state = ParachainBlockState::Included
 	}
 
 	pub fn is_idle(&self) -> bool {
-		self.state.last() == Some(&ParachainBlockState::Idle)
+		self.state == ParachainBlockState::Idle
 	}
 
 	pub fn is_backed(&self) -> bool {
-		self.state.last() == Some(&ParachainBlockState::Backed)
+		self.state == ParachainBlockState::Backed
 	}
 
 	pub fn is_pending(&self) -> bool {
-		self.state.last() == Some(&ParachainBlockState::PendingAvailability)
+		self.state == ParachainBlockState::PendingAvailability
 	}
 
 	pub fn is_included(&self) -> bool {
-		self.state.last() == Some(&ParachainBlockState::Included)
-	}
-
-	pub fn has_state_changed(&self) -> bool {
-		let len = self.state.len();
-		len == 1 || len > 1 && self.state[len - 2] != self.state[len - 1]
+		self.state == ParachainBlockState::Included
 	}
 
 	pub fn is_bitfield_propagation_slow(&self) -> bool {

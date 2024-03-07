@@ -236,7 +236,7 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) {
 		let current_candidate_hash =
-			backed_candidate(backed_candidates, self.para_id).map(|v| ParachainBlockInfo::candidate_hash(v));
+			backed_candidate(backed_candidates, self.para_id).map(ParachainBlockInfo::candidate_hash);
 		let mut current_candidate = ParachainBlockInfo::new(current_candidate_hash);
 
 		if current_candidate.candidate_hash.is_some() {
@@ -441,10 +441,6 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) {
 		for candidate in self.candidates.iter() {
-			if !candidate.has_state_changed() {
-				continue;
-			}
-
 			if candidate.is_idle() {
 				progress.events.push(ParachainConsensusEvent::SkippedSlot);
 				stats.on_skipped_slot(progress);
