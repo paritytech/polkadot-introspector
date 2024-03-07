@@ -11,6 +11,7 @@ publish = true
 [dependencies]
 async-channel = { workspace = true }
 futures = { workspace = true }
+pin-project-lite = "0.2.13"
 rand = { workspace = true }
 thiserror = { workspace = true }
 
