@@ -152,7 +152,7 @@ pub fn create_candidate_record(
 			backed,
 			included: None,
 			timedout: None,
-			core_idx: None,
+			core_idx: 1,
 			relay_parent,
 			relay_parent_number,
 		},

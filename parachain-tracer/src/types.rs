@@ -24,6 +24,7 @@ use polkadot_introspector_essentials::{
 	types::{AccountId32, BlockNumber, SubxtHrmpChannel, Timestamp, H256},
 };
 use std::{
+	collections::HashMap,
 	fmt::{self, Display, Formatter, Write},
 	time::Duration,
 };
@@ -137,7 +138,7 @@ pub struct ParachainProgressUpdate {
 	/// Relay chain block hash.
 	pub block_hash: H256,
 	/// Core occupation.
-	pub core_occupied: bool,
+	pub core_occupied: HashMap<u32, bool>,
 	/// Consensus events happening for the para under a relay parent.
 	pub events: Vec<ParachainConsensusEvent>,
 	/// If we are in the fork chain, then this flag will be `true`

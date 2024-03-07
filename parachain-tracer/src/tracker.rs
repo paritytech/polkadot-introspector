@@ -22,7 +22,7 @@ use crate::{
 	stats::Stats,
 	tracker_storage::TrackerStorage,
 	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
-	utils::{backed_candidate, extract_availability_bits_count, extract_inherent_fields, time_diff},
+	utils::{backed_candidates_by_para_id, extract_availability_bits_count, extract_inherent_fields, time_diff},
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
@@ -30,7 +30,7 @@ use polkadot_introspector_essentials::{
 	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatementSet, ValidatorIndex},
 	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
-use std::{default::Default, time::Duration};
+use std::{collections::HashMap, default::Default, time::Duration};
 
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
@@ -40,7 +40,9 @@ pub struct SubxtTracker {
 	/// A new session index.
 	new_session: Option<u32>,
 	/// Information about current parachain block we track.
-	candidates: Vec<ParachainBlockInfo>,
+	candidates: HashMap<u32, Vec<ParachainBlockInfo>>,
+	/// Core assignments for current para_id
+	cores: HashMap<u32, Vec<u32>>,
 	/// Current relay chain block.
 	current_relay_block: Option<Block>,
 	/// Previous relay chain block.
@@ -80,7 +82,8 @@ impl SubxtTracker {
 	pub fn new(para_id: u32) -> Self {
 		Self {
 			para_id,
-			candidates: vec![],
+			candidates: HashMap::new(),
+			cores: HashMap::new(),
 			new_session: None,
 			current_relay_block: None,
 			previous_relay_block: None,
@@ -116,9 +119,11 @@ impl SubxtTracker {
 
 			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
-			self.set_candidates(backed_candidates, bitfields.len(), block_number, storage)
+			self.set_cores(block_hash, storage).await;
+			self.set_included_candidates(storage).await;
+			self.set_backed_candidates(backed_candidates, bitfields.len(), block_number, storage)
 				.await;
-			self.set_core_assignment(block_hash, storage).await?;
+			self.set_core_assignment(block_hash, storage).await;
 			self.set_disputes(&disputes[..], storage).await;
 			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
@@ -147,7 +152,11 @@ impl SubxtTracker {
 				para_id: self.para_id,
 				is_fork: self.is_fork(),
 				finality_lag: self.finality_lag,
-				core_occupied: self.candidates.last().map_or(false, |v| v.core_occupied),
+				core_occupied: self
+					.candidates
+					.iter()
+					.map(|(core_idx, v)| (*core_idx, v.last().map_or(false, |v| v.core_occupied)))
+					.collect(),
 				..Default::default()
 			};
 
@@ -170,14 +179,18 @@ impl SubxtTracker {
 	/// Resets state
 	pub fn maybe_reset_state(&mut self) {
 		self.first_run = false;
-		if self.is_current_candidate_backed() {
-			self.on_demand_order_at = None;
+		for &core in self.cores.keys() {
+			if self.is_current_candidate_backed(core) {
+				self.on_demand_order_at = None;
+			}
 		}
 		self.new_session = None;
 		self.on_demand_order = None;
 		self.is_on_demand_scheduled_in_current_block = false;
 		self.disputes.clear();
-		self.candidates.retain(|v| !v.is_included() && !v.is_idle());
+		self.candidates
+			.values_mut()
+			.for_each(|v| v.retain(|v| !v.is_included() && !v.is_idle()));
 	}
 
 	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
@@ -228,32 +241,14 @@ impl SubxtTracker {
 		});
 	}
 
-	async fn set_candidates(
-		&mut self,
-		backed_candidates: Vec<BackedCandidate<H256>>,
-		bitfields_count: usize,
-		block_number: BlockNumber,
-		storage: &TrackerStorage,
-	) {
-		let current_candidate_hash =
-			backed_candidate(backed_candidates, self.para_id).map(ParachainBlockInfo::candidate_hash);
-		let mut current_candidate = ParachainBlockInfo::new(current_candidate_hash);
+	async fn set_cores(&mut self, block_hash: H256, storage: &TrackerStorage) {
+		let assignments = storage.core_assignments(block_hash).await.expect("saved in the collector");
+		self.cores = assignments.into_iter().filter(|(_, ids)| ids.contains(&self.para_id)).collect();
+	}
 
-		if current_candidate.candidate_hash.is_some() {
-			current_candidate.bitfield_count = bitfields_count as u32;
-			current_candidate.set_backed();
-			if let Some(current_fork) = self.relay_forks.last_mut() {
-				current_fork.backed_candidate = current_candidate.candidate_hash;
-			}
-			self.last_backed_at_block_number = Some(block_number);
-			self.candidates.push(current_candidate);
-		} else if !self.has_backed_candidate() {
-			current_candidate.set_idle();
-			self.candidates.push(current_candidate);
-		}
-
+	async fn set_included_candidates(&mut self, storage: &TrackerStorage) {
 		let mut last_included = None;
-		for candidate in self.candidates.iter_mut() {
+		for candidate in self.all_candidates_mut() {
 			if let Some(candidate_hash) = candidate.candidate_hash {
 				if let Some(stored_candidate) = storage.candidate(candidate_hash).await {
 					if stored_candidate.candidate_inclusion.included.is_some() {
@@ -270,21 +265,59 @@ impl SubxtTracker {
 		}
 	}
 
-	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
-		let assignments = storage.core_assignments(block_hash).await.expect("saved in the collector");
-		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
-			if let Some(current_candidate) = self.candidates.last_mut() {
-				current_candidate.assigned_core = Some(core);
-				current_candidate.core_occupied = matches!(
-					storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
-					CoreOccupied::Paras
-				);
+	async fn candidate_core(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {
+		storage.candidate(candidate_hash).await.map(|v| v.core_idx())
+	}
+
+	async fn set_backed_candidates(
+		&mut self,
+		backed_candidates: Vec<BackedCandidate<H256>>,
+		bitfields_count: usize,
+		block_number: BlockNumber,
+		storage: &TrackerStorage,
+	) {
+		let candidate_hashes =
+			backed_candidates_by_para_id(backed_candidates, self.para_id).map(ParachainBlockInfo::candidate_hash);
+		let mut used_cores = vec![];
+		for candidate_hash in candidate_hashes {
+			if let Some(core) = self.candidate_core(candidate_hash, storage).await {
+				let mut candidate = ParachainBlockInfo::new(Some(candidate_hash));
+				candidate.assigned_core = Some(core);
+				candidate.bitfield_count = bitfields_count as u32;
+				candidate.set_backed();
+
+				if let Some(current_fork) = self.relay_forks.last_mut() {
+					current_fork.backed_candidate = candidate.candidate_hash;
+				}
+				self.last_backed_at_block_number = Some(block_number);
+				self.candidates.entry(core).or_default().push(candidate);
+
+				used_cores.push(core)
+			}
+		}
+
+		let idle_cores = self.cores.keys().filter(|v| !used_cores.contains(v)).cloned();
+		for core in idle_cores {
+			if !self.has_backed_candidate(core) {
+				self.candidates.entry(core).or_default().push(ParachainBlockInfo::new(None));
+			}
+		}
+	}
+
+	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) {
+		for (&core, scheduled_ids) in self.cores.iter() {
+			if let Some(candidate) = self.current_candidate_mut(core) {
+				if candidate.is_backed() {
+					candidate.core_occupied = matches!(
+						storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
+						CoreOccupied::Paras
+					);
+				}
 			}
 
 			self.is_on_demand_scheduled_in_current_block =
 				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
 		}
-		Ok(())
 	}
 
 	async fn set_disputes(&mut self, disputes: &[DisputeStatementSet], storage: &TrackerStorage) {
@@ -320,14 +353,13 @@ impl SubxtTracker {
 		bitfields: Vec<AvailabilityBitfield>,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
-		if self.is_current_candidate_backed() {
-			let is_just_backed = self.is_just_backed();
-			let max_bits = self.validators_indices(block_hash, storage).await?.len() as u32;
-			let candidate = self.candidates.last_mut().expect("Checked above");
+		for &core in self.cores.keys() {
+			if self.is_current_candidate_backed(core) {
+				let is_just_backed = self.is_just_backed();
+				let max_bits = self.validators_indices(block_hash, storage).await?.len() as u32;
+				let candidate = self.current_candidate_mut(core).expect("Checked above");
 
-			// We only process availability if our parachain is assigned to an availability core.
-			if let Some(core) = candidate.assigned_core {
-				candidate.current_availability_bits = extract_availability_bits_count(bitfields, core);
+				candidate.current_availability_bits = extract_availability_bits_count(&bitfields, core);
 				candidate.max_availability_bits = max_bits;
 
 				if !is_just_backed {
@@ -387,16 +419,20 @@ impl SubxtTracker {
 			if self.is_on_demand_scheduled_in_current_block {
 				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
 			}
-			if self.is_current_candidate_backed() {
-				metrics.handle_on_demand_delay(delay, self.para_id, "backed");
+			for &core in self.cores.keys() {
+				if self.is_current_candidate_backed(core) {
+					metrics.handle_on_demand_delay(delay, self.para_id, "backed");
+				}
 			}
 		}
 		if let Some(delay_sec) = self.on_demand_delay_sec() {
 			if self.is_on_demand_scheduled_in_current_block {
 				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
 			}
-			if self.is_current_candidate_backed() {
-				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
+			for &core in self.cores.keys() {
+				if self.is_current_candidate_backed(core) {
+					metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
+				}
 			}
 		}
 	}
@@ -408,9 +444,9 @@ impl SubxtTracker {
 	}
 
 	fn notify_core_assignment(&self, progress: &mut ParachainProgressUpdate) {
-		if let Some(candidate) = self.candidates.last() {
-			if let Some(assigned_core) = candidate.assigned_core {
-				progress.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core));
+		for &core in self.cores.keys() {
+			if self.current_candidate(core).is_some() {
+				progress.events.push(ParachainConsensusEvent::CoreAssigned(core));
 			}
 		}
 	}
@@ -421,15 +457,17 @@ impl SubxtTracker {
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
-		if let Some(candidate) = self.candidates.last() {
-			if candidate.is_bitfield_propagation_slow() {
-				progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
-					candidate.bitfield_count,
-					candidate.max_availability_bits,
-				))
+		for &core in self.cores.keys() {
+			if let Some(candidate) = self.current_candidate(core) {
+				if candidate.is_bitfield_propagation_slow() {
+					progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
+						candidate.bitfield_count,
+						candidate.max_availability_bits,
+					))
+				}
+				stats.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow());
+				metrics.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow(), self.para_id);
 			}
-			stats.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow());
-			metrics.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow(), self.para_id);
 		}
 	}
 
@@ -440,7 +478,7 @@ impl SubxtTracker {
 		metrics: &impl PrometheusMetrics,
 		storage: &TrackerStorage,
 	) {
-		for candidate in self.candidates.iter() {
+		for candidate in self.all_candidates() {
 			if candidate.is_idle() {
 				progress.events.push(ParachainConsensusEvent::SkippedSlot);
 				stats.on_skipped_slot(progress);
@@ -455,7 +493,7 @@ impl SubxtTracker {
 				}
 			}
 
-			if candidate.is_pending() && self.is_slow_availability() {
+			if candidate.is_pending() && self.is_slow_availability(candidate.assigned_core.expect("must be assigned")) {
 				progress.events.push(ParachainConsensusEvent::SlowAvailability(
 					candidate.current_availability_bits,
 					candidate.max_availability_bits,
@@ -493,6 +531,22 @@ impl SubxtTracker {
 		Duration::from_millis(cur_ts).saturating_sub(Duration::from_millis(base_ts))
 	}
 
+	fn current_candidate(&self, core: u32) -> Option<&ParachainBlockInfo> {
+		self.candidates.get(&core).map(|v| v.last()).flatten()
+	}
+
+	fn current_candidate_mut(&self, core: u32) -> Option<&mut ParachainBlockInfo> {
+		self.candidates.get(&core).map(|v| v.last_mut()).flatten()
+	}
+
+	fn all_candidates(&mut self) -> impl Iterator<Item = &ParachainBlockInfo> {
+		self.candidates.iter().flat_map(|(_, v)| v.iter())
+	}
+
+	fn all_candidates_mut(&mut self) -> impl Iterator<Item = &mut ParachainBlockInfo> {
+		self.candidates.iter_mut().flat_map(|(_, v)| v.iter_mut())
+	}
+
 	fn is_fork(&self) -> bool {
 		match (self.current_relay_block, self.previous_relay_block) {
 			(Some(a), Some(b)) => a.num == b.num,
@@ -512,15 +566,17 @@ impl SubxtTracker {
 		time_diff(self.current_relay_block.map(|v| v.ts), self.on_demand_order_at.map(|v| v.ts))
 	}
 
-	fn has_backed_candidate(&self) -> bool {
-		self.candidates.iter().any(|candidate| candidate.candidate_hash.is_some()) ||
+	fn has_backed_candidate(&self, core: u32) -> bool {
+		self.candidates
+			.get(&core)
+			.map_or(false, |v| v.iter().any(|candidate| candidate.candidate_hash.is_some())) ||
 			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
 	}
 
-	fn is_current_candidate_backed(&self) -> bool {
-		self.candidates.last().map_or(false, |v| v.is_backed())
+	fn is_current_candidate_backed(&self, core: u32) -> bool {
+		self.current_candidate(core).map_or(false, |v| v.is_backed())
 	}
 
 	fn is_just_backed(&self) -> bool {
@@ -528,13 +584,13 @@ impl SubxtTracker {
 			self.last_backed_at_block_number == self.current_relay_block.map(|v| v.num)
 	}
 
-	fn is_slow_availability(&self) -> bool {
-		self.candidates.last().map_or(false, |v| v.core_occupied) &&
+	fn is_slow_availability(&self, core: u32) -> bool {
+		self.current_candidate(core).map_or(false, |v| v.core_occupied) &&
 			self.last_backed_at_block_number != self.current_relay_block.map(|v| v.num)
 	}
 
 	async fn validators_indices(
-		&mut self,
+		&self,
 		block_hash: H256,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<Vec<ValidatorIndex>> {
