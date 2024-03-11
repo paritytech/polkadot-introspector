@@ -637,7 +637,7 @@ mod test_maybe_reset_state {
 		let mut tracker = SubxtTracker::new(100);
 		let mut candidate = ParachainBlockInfo::new(None);
 		candidate.set_included();
-		tracker.candidates.push(candidate);
+		tracker.candidates.entry(0).or_default().push(candidate);
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
@@ -657,7 +657,7 @@ mod test_maybe_reset_state {
 		let mut tracker = SubxtTracker::new(100);
 		let mut candidate = ParachainBlockInfo::new(None);
 		candidate.set_backed();
-		tracker.candidates.push(candidate);
+		tracker.candidates.entry(0).or_default().push(candidate);
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.on_demand_order_at = Some(BlockWithoutHash::default());
@@ -809,7 +809,9 @@ mod test_progress {
 		assert_eq!(progress.para_id, 100);
 		assert!(!progress.is_fork);
 		assert!(progress.finality_lag.is_none());
-		assert!(!progress.core_occupied);
+		for (_, core_occupied) in progress.core_occupied {
+			assert!(!core_occupied);
+		}
 	}
 
 	#[tokio::test]
@@ -849,7 +851,7 @@ mod test_progress {
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		candidate.assigned_core = Some(0);
 		candidate.core_occupied = true;
-		tracker.candidates.push(candidate);
+		tracker.candidates.entry(0).or_default().push(candidate);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
 		assert!(progress
@@ -876,7 +878,7 @@ mod test_progress {
 		// Bitfields propogation isn't slow
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		candidate.bitfield_count = 120;
-		tracker.candidates.push(candidate);
+		tracker.candidates.entry(0).or_default().push(candidate);
 		mock_stats.expect_on_bitfields().with(eq(120), eq(false)).returning(|_, _| ());
 		mock_metrics
 			.expect_on_bitfields()
@@ -893,7 +895,7 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
 
 		// Bitfields propogation is slow
-		let candidate = tracker.candidates.last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
 		candidate.set_backed();
 		candidate.max_availability_bits = 200;
 		mock_stats.expect_on_bitfields().with(eq(120), eq(true)).returning(|_, _| ());
@@ -1098,7 +1100,7 @@ mod test_progress {
 		tracker.is_on_demand_scheduled_in_current_block = false;
 		// If backed
 		candidate.set_backed();
-		tracker.candidates.push(candidate);
+		tracker.candidates.entry(0).or_default().push(candidate);
 		mock_metrics
 			.expect_handle_on_demand_delay()
 			.with(eq(1), eq(100), eq("backed"))
@@ -1117,7 +1119,7 @@ mod test_progress {
 		let candidate_hash = H256::random();
 		let storage = create_storage();
 		let mut tracker = SubxtTracker::new(100);
-		let mut candidate = ParachainBlockInfo::new(None);
+		let candidate = ParachainBlockInfo::new(None);
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
@@ -1137,8 +1139,7 @@ mod test_progress {
 
 		// When candidate is idle
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		candidate.set_idle();
-		tracker.candidates.push(candidate);
+		tracker.candidates.entry(0).or_default().push(candidate);
 		mock_stats.expect_on_skipped_slot().once().returning(|_| ());
 		mock_metrics.expect_on_skipped_slot().once().returning(|_| ());
 		let progress = tracker
@@ -1152,7 +1153,7 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot)));
 
 		// When candidate is backed
-		let candidate = tracker.candidates.last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
 		candidate.set_backed();
 		candidate.candidate_hash = Some(candidate_hash);
 		mock_stats.expect_on_backed().once().returning(|| ());
@@ -1166,7 +1167,7 @@ mod test_progress {
 
 		// When candidate is pending
 		// And data is available
-		let candidate = tracker.candidates.last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
 		candidate.set_pending();
 		candidate.max_availability_bits = 200;
 		candidate.current_availability_bits = 140;
@@ -1180,7 +1181,7 @@ mod test_progress {
 		assert!(progress.events.is_empty());
 
 		// And availability is slow
-		let candidate = tracker.candidates.last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
 		candidate.max_availability_bits = 200;
 		candidate.current_availability_bits = 120;
 		candidate.bitfield_count = 150;
@@ -1203,7 +1204,7 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
 
 		// When candidate is included and data is available
-		let candidate = tracker.candidates.last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
 		candidate.set_included();
 		candidate.max_availability_bits = 200;
 		candidate.current_availability_bits = 140;
