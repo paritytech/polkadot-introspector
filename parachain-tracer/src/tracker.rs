@@ -637,11 +637,13 @@ mod test_maybe_reset_state {
 		let mut tracker = SubxtTracker::new(100);
 		let mut candidate = ParachainBlockInfo::new(None);
 		candidate.set_included();
+		candidate.assigned_core = Some(0);
 		tracker.candidates.entry(0).or_default().push(candidate);
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
+		tracker.cores.entry(0).or_default().push(100);
 
 		tracker.maybe_reset_state();
 
@@ -649,7 +651,9 @@ mod test_maybe_reset_state {
 		assert!(tracker.on_demand_order.is_none());
 		assert!(!tracker.is_on_demand_scheduled_in_current_block);
 		assert!(tracker.disputes.is_empty());
-		assert!(tracker.candidates.is_empty());
+		for (_, candidates) in tracker.candidates {
+			assert!(candidates.is_empty());
+		}
 	}
 
 	#[tokio::test]
@@ -657,13 +661,16 @@ mod test_maybe_reset_state {
 		let mut tracker = SubxtTracker::new(100);
 		let mut candidate = ParachainBlockInfo::new(None);
 		candidate.set_backed();
+		candidate.assigned_core = Some(0);
 		tracker.candidates.entry(0).or_default().push(candidate);
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.on_demand_order_at = Some(BlockWithoutHash::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
+		tracker.cores.entry(0).or_default().push(100);
 
+		assert!(tracker.is_current_candidate_backed(0));
 		tracker.maybe_reset_state();
 
 		assert!(tracker.on_demand_order_at.is_none());
@@ -852,6 +859,7 @@ mod test_progress {
 		candidate.assigned_core = Some(0);
 		candidate.core_occupied = true;
 		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.cores.entry(0).or_default().push(100);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
 		assert!(progress
@@ -865,6 +873,7 @@ mod test_progress {
 		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut candidate = ParachainBlockInfo::new(None);
+		candidate.assigned_core = Some(0);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -879,6 +888,7 @@ mod test_progress {
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		candidate.bitfield_count = 120;
 		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.cores.entry(0).or_default().push(100);
 		mock_stats.expect_on_bitfields().with(eq(120), eq(false)).returning(|_, _| ());
 		mock_metrics
 			.expect_on_bitfields()
@@ -1100,7 +1110,9 @@ mod test_progress {
 		tracker.is_on_demand_scheduled_in_current_block = false;
 		// If backed
 		candidate.set_backed();
+		candidate.assigned_core = Some(0);
 		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.cores.entry(0).or_default().push(100);
 		mock_metrics
 			.expect_handle_on_demand_delay()
 			.with(eq(1), eq(100), eq("backed"))
@@ -1156,6 +1168,7 @@ mod test_progress {
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
 		candidate.set_backed();
 		candidate.candidate_hash = Some(candidate_hash);
+		candidate.assigned_core = Some(0);
 		mock_stats.expect_on_backed().once().returning(|| ());
 		mock_metrics.expect_on_backed().with(eq(100)).once().returning(|_| ());
 		let progress = tracker
