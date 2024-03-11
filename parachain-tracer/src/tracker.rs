@@ -251,7 +251,7 @@ impl SubxtTracker {
 		for candidate in self.all_candidates_mut() {
 			if let Some(candidate_hash) = candidate.candidate_hash {
 				if let Some(stored_candidate) = storage.candidate(candidate_hash).await {
-					if stored_candidate.candidate_inclusion.included.is_some() {
+					if stored_candidate.is_included() {
 						candidate.set_included();
 						last_included = candidate.candidate_hash;
 					}
@@ -263,10 +263,6 @@ impl SubxtTracker {
 			self.previous_included_at = self.last_included_at;
 			self.last_included_at = self.current_relay_block.map(|v| v.into());
 		}
-	}
-
-	async fn candidate_core(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {
-		storage.candidate(candidate_hash).await.map(|v| v.core_idx())
 	}
 
 	async fn set_backed_candidates(
@@ -610,6 +606,10 @@ impl SubxtTracker {
 				.backed
 				.saturating_sub(v.candidate_inclusion.relay_parent_number)
 		})
+	}
+
+	async fn candidate_core(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {
+		storage.candidate(candidate_hash).await.map(|v| v.core_idx())
 	}
 }
 

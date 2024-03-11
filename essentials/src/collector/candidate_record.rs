@@ -109,6 +109,11 @@ pub struct CandidateRecord {
 }
 
 impl CandidateRecord {
+	/// Returns if a candidate has been included
+	pub fn is_included(&self) -> bool {
+		self.candidate_inclusion.included.is_some()
+	}
+
 	/// Returns if a candidate has been disputed
 	#[allow(dead_code)]
 	pub fn is_disputed(&self) -> bool {
