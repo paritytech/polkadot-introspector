@@ -836,7 +836,7 @@ mod test_inject_block {
 
 		let block_hash = H256::random();
 		let mut candidate = create_para_block_info(100);
-		let candidate_hash = candidate.candidate_hash.unwrap().clone();
+		let candidate_hash = candidate.candidate_hash.unwrap();
 		candidate.set_backed();
 		tracker.candidates.entry(0).or_default().push(candidate);
 
