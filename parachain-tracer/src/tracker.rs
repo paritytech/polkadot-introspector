@@ -533,11 +533,11 @@ impl SubxtTracker {
 	}
 
 	fn current_candidate(&self, core: u32) -> Option<&ParachainBlockInfo> {
-		self.candidates.get(&core).map(|v| v.last()).flatten()
+		self.candidates.get(&core).and_then(|v| v.last())
 	}
 
 	fn current_candidate_mut(&mut self, core: u32) -> Option<&mut ParachainBlockInfo> {
-		self.candidates.get_mut(&core).map(|v| v.last_mut()).flatten()
+		self.candidates.get_mut(&core).and_then(|v| v.last_mut())
 	}
 
 	fn all_candidates(&self) -> impl Iterator<Item = &ParachainBlockInfo> {

@@ -229,7 +229,7 @@ mod test_extract_votes {
 	}
 }
 
-pub(crate) fn extract_availability_bits_count(bitfields: &Vec<AvailabilityBitfield>, core: u32) -> u32 {
+pub(crate) fn extract_availability_bits_count(bitfields: &[AvailabilityBitfield], core: u32) -> u32 {
 	bitfields
 		.iter()
 		.map(|v| v.0.as_bits().get(core as usize).expect("core index must be in the bitfield") as u32)
