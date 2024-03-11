@@ -244,10 +244,7 @@ mod test_extract_availability_bits_count {
 	#[test]
 	fn test_counts_availability_bits() {
 		assert_eq!(
-			extract_availability_bits_count(
-				&vec![AvailabilityBitfield(DecodedBits::from_iter([true, false, true]))],
-				0
-			),
+			extract_availability_bits_count(&[AvailabilityBitfield(DecodedBits::from_iter([true, false, true]))], 0),
 			1
 		);
 	}
