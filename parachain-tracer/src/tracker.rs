@@ -272,8 +272,8 @@ impl SubxtTracker {
 		block_number: BlockNumber,
 		storage: &TrackerStorage,
 	) {
-		let candidate_hashes =
-			backed_candidates_by_para_id(backed_candidates, self.para_id).map(ParachainBlockInfo::candidate_hash);
+		let candidate_hashes = backed_candidates_by_para_id(backed_candidates, self.para_id)
+			.map(|v| ParachainBlockInfo::candidate_hash(&v));
 		let mut used_cores = vec![];
 		for candidate_hash in candidate_hashes {
 			if let Some(core) = self.candidate_core(candidate_hash, storage).await {
@@ -683,11 +683,12 @@ mod test_maybe_reset_state {
 
 #[cfg(test)]
 mod test_inject_block {
-	use std::collections::BTreeMap;
-
 	use super::*;
-	use crate::test_utils::{create_inherent_data, create_storage, storage_write};
+	use crate::test_utils::{
+		create_candidate_record, create_inherent_data, create_para_block_info, create_storage, storage_write,
+	};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
+	use std::collections::BTreeMap;
 
 	#[tokio::test]
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
@@ -723,9 +724,14 @@ mod test_inject_block {
 		let tracker_storage = TrackerStorage::new(100, storage.clone());
 
 		// Inject a block
-		storage_write(CollectorPrefixType::CoreAssignments, first_hash, BTreeMap::<u32, Vec<u32>>::default(), &storage)
-			.await
-			.unwrap();
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			first_hash,
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
+			&storage,
+		)
+		.await
+		.unwrap();
 		storage_write(CollectorPrefixType::BackingGroups, first_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
@@ -747,7 +753,7 @@ mod test_inject_block {
 		storage_write(
 			CollectorPrefixType::CoreAssignments,
 			second_hash,
-			BTreeMap::<u32, Vec<u32>>::default(),
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
 			&storage,
 		)
 		.await
@@ -772,6 +778,102 @@ mod test_inject_block {
 		assert_eq!(current.hash, second_hash);
 		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1));
 		assert_eq!(tracker.finality_lag, Some(2));
+	}
+
+	#[tokio::test]
+	async fn test_sets_backed_candidates() {
+		let storage = create_storage();
+		let tracker_storage = TrackerStorage::new(100, storage.clone());
+		let mut tracker = SubxtTracker::new(100);
+
+		let block_hash = H256::random();
+		let inherent_data = create_inherent_data(100);
+		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
+		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate);
+
+		// Inject a block
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			block_hash,
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
+			&storage,
+		)
+		.await
+		.unwrap();
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Paras], &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::InherentData, block_hash, inherent_data, &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
+			.await
+			.unwrap();
+		storage_write(
+			CollectorPrefixType::Candidate(100),
+			candidate_hash,
+			create_candidate_record(100, 42, None, H256::random(), 40),
+			&storage,
+		)
+		.await
+		.unwrap();
+
+		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
+
+		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap();
+		assert!(candidate.candidate_hash == Some(candidate_hash));
+		assert!(candidate.is_backed());
+	}
+
+	#[tokio::test]
+	async fn test_sets_included_candidates() {
+		let storage = create_storage();
+		let tracker_storage = TrackerStorage::new(100, storage.clone());
+		let mut tracker = SubxtTracker::new(100);
+
+		let block_hash = H256::random();
+		let mut candidate = create_para_block_info(100);
+		let candidate_hash = candidate.candidate_hash.unwrap().clone();
+		candidate.set_backed();
+		tracker.candidates.entry(0).or_default().push(candidate);
+
+		// Inject a block
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			block_hash,
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
+			&storage,
+		)
+		.await
+		.unwrap();
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Free], &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::InherentData, block_hash, create_inherent_data(100), &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
+			.await
+			.unwrap();
+		storage_write(
+			CollectorPrefixType::Candidate(100),
+			candidate_hash,
+			create_candidate_record(100, 41, Some(42), H256::random(), 40),
+			&storage,
+		)
+		.await
+		.unwrap();
+
+		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
+
+		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap();
+		assert!(candidate.is_included());
 	}
 }
 
@@ -1143,7 +1245,7 @@ mod test_progress {
 		storage_write(
 			CollectorPrefixType::Candidate(100),
 			candidate_hash,
-			create_candidate_record(100, 41, H256::random(), 40),
+			create_candidate_record(100, 41, None, H256::random(), 40),
 			&storage,
 		)
 		.await

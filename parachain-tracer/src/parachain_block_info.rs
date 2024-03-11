@@ -43,7 +43,7 @@ impl ParachainBlockInfo {
 		Self { candidate_hash, ..Default::default() }
 	}
 
-	pub fn candidate_hash(candidate: BackedCandidate<H256>) -> H256 {
+	pub fn candidate_hash(candidate: &BackedCandidate<H256>) -> H256 {
 		let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
 		BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash))
 	}
@@ -101,7 +101,7 @@ mod tests {
 
 	#[test]
 	fn test_is_bitfield_propagation_slow() {
-		let mut info = create_para_block_info();
+		let mut info = create_para_block_info(100);
 		assert!(!info.is_bitfield_propagation_slow());
 
 		info.max_availability_bits = 200;
