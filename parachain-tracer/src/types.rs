@@ -168,7 +168,9 @@ impl Display for ParachainProgressUpdate {
 			)?;
 		}
 		writeln!(buf, "\t🔗 Relay block hash: {} ", format!("{:?}", self.block_hash).bold())?;
-		writeln!(buf, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })?;
+		for (&core, &core_occupied) in self.core_occupied.iter() {
+			writeln!(buf, "\t🥝 Availability core #{} {}", core, if core_occupied { "OCCUPIED" } else { "FREE" })?;
+		}
 		writeln!(
 			buf,
 			"\t🐌 Finality lag: {}{}",

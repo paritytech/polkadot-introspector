@@ -305,7 +305,7 @@ impl SubxtTracker {
 	}
 
 	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) {
-		for (&core, scheduled_ids) in self.cores.iter() {
+		for (core, scheduled_ids) in self.cores.clone() {
 			if let Some(candidate) = self.current_candidate_mut(core) {
 				if candidate.is_backed() {
 					candidate.core_occupied = matches!(
@@ -353,7 +353,8 @@ impl SubxtTracker {
 		bitfields: Vec<AvailabilityBitfield>,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
-		for &core in self.cores.keys() {
+		let core_ids: Vec<u32> = self.cores.keys().cloned().collect();
+		for core in core_ids {
 			if self.is_current_candidate_backed(core) {
 				let is_just_backed = self.is_just_backed();
 				let max_bits = self.validators_indices(block_hash, storage).await?.len() as u32;
@@ -535,11 +536,11 @@ impl SubxtTracker {
 		self.candidates.get(&core).map(|v| v.last()).flatten()
 	}
 
-	fn current_candidate_mut(&self, core: u32) -> Option<&mut ParachainBlockInfo> {
-		self.candidates.get(&core).map(|v| v.last_mut()).flatten()
+	fn current_candidate_mut(&mut self, core: u32) -> Option<&mut ParachainBlockInfo> {
+		self.candidates.get_mut(&core).map(|v| v.last_mut()).flatten()
 	}
 
-	fn all_candidates(&mut self) -> impl Iterator<Item = &ParachainBlockInfo> {
+	fn all_candidates(&self) -> impl Iterator<Item = &ParachainBlockInfo> {
 		self.candidates.iter().flat_map(|(_, v)| v.iter())
 	}
 
