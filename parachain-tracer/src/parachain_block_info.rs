@@ -35,7 +35,7 @@ pub struct ParachainBlockInfo {
 	/// Core occupation status.
 	pub core_occupied: bool,
 	/// The current state.
-	state: ParachainBlockState,
+	pub state: ParachainBlockState,
 }
 
 impl ParachainBlockInfo {
@@ -68,10 +68,6 @@ impl ParachainBlockInfo {
 		self.state == ParachainBlockState::Backed
 	}
 
-	pub fn is_pending(&self) -> bool {
-		self.state == ParachainBlockState::PendingAvailability
-	}
-
 	pub fn is_included(&self) -> bool {
 		self.state == ParachainBlockState::Included
 	}
@@ -83,7 +79,7 @@ impl ParachainBlockInfo {
 
 /// The state of parachain block.
 #[derive(Encode, Decode, Debug, Default, Clone, PartialEq, Eq)]
-enum ParachainBlockState {
+pub enum ParachainBlockState {
 	// Parachain block pipeline is idle.
 	#[default]
 	Idle,
