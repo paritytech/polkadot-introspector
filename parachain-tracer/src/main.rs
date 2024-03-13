@@ -266,7 +266,7 @@ impl ParachainTracer {
 
 	async fn watch_node_broadcast(
 		self,
-		mut from_collector: Receiver<CollectorUpdateEvent>,
+		from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) {
 		let mut trackers = HashMap::new();
@@ -277,6 +277,7 @@ impl ParachainTracer {
 		let mut best_known_block: u32 = 0;
 		let max_stall = self.opts.max_parachain_stall;
 		let mut futures = FuturesUnordered::new();
+		let mut from_collector = Box::pin(from_collector);
 
 		loop {
 			tokio::select! {

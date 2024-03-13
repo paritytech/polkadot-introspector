@@ -21,6 +21,7 @@ use std::{
 use async_channel::bounded;
 pub use async_channel::{TryRecvError, TrySendError};
 use futures::Stream;
+use pin_project_lite::pin_project;
 
 /// Creates a new channel with a specified capacity and returns a tuple of Sender and Receiver structs.
 ///
@@ -44,11 +45,15 @@ pub fn channel_with_capacities<T>(bulk_capacity: usize, priority_capacity: usize
 	(Sender { inner_priority: tx_priority, inner: tx }, Receiver { inner_priority: rx_priority, inner: rx })
 }
 
-/// A receiver tracking the messages consumed by itself.
-#[derive(Debug)]
-pub struct Receiver<T> {
-	inner: async_channel::Receiver<T>,
-	inner_priority: async_channel::Receiver<T>,
+pin_project! {
+	/// A receiver tracking the messages consumed by itself.
+	#[derive(Debug)]
+	pub struct Receiver<T> {
+		#[pin]
+		inner: async_channel::Receiver<T>,
+		#[pin]
+		inner_priority: async_channel::Receiver<T>,
+	}
 }
 
 impl<T> std::ops::Deref for Receiver<T> {
@@ -66,10 +71,11 @@ impl<T> std::ops::DerefMut for Receiver<T> {
 
 impl<T> Stream for Receiver<T> {
 	type Item = T;
-	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-		match async_channel::Receiver::poll_next(Pin::new(&mut self.inner_priority), cx) {
+	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		let this = self.project();
+		match async_channel::Receiver::poll_next(this.inner_priority, cx) {
 			Poll::Ready(maybe_value) => Poll::Ready(maybe_value),
-			Poll::Pending => match async_channel::Receiver::poll_next(Pin::new(&mut self.inner), cx) {
+			Poll::Pending => match async_channel::Receiver::poll_next(this.inner, cx) {
 				Poll::Ready(maybe_value) => Poll::Ready(maybe_value),
 				Poll::Pending => Poll::Pending,
 			},
