@@ -256,9 +256,10 @@ impl Collector {
 	/// Process async channels in the endless loop
 	pub async fn run_with_consumer_channel(
 		mut self,
-		mut consumer_channel: Receiver<ChainSubscriptionEvent>,
+		consumer_channel: Receiver<ChainSubscriptionEvent>,
 	) -> tokio::task::JoinHandle<()> {
 		tokio::spawn(async move {
+			let mut consumer_channel = Box::pin(consumer_channel);
 			loop {
 				match consumer_channel.next().await {
 					None => {
