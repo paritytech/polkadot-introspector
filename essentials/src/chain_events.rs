@@ -73,6 +73,8 @@ pub struct SubxtCandidateEvent {
 	pub parachain_id: u32,
 	/// The event type
 	pub event_type: SubxtCandidateEventType,
+	/// Core index
+	pub core_idx: u32,
 }
 
 /// A helper structure to keep track of a dispute and it's relay parent
@@ -126,6 +128,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
+			decoded.2 .0,
 			SubxtCandidateEventType::Backed,
 		))))
 	}
@@ -135,6 +138,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
+			decoded.2 .0,
 			SubxtCandidateEventType::Included,
 		))))
 	}
@@ -144,6 +148,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
+			decoded.2 .0,
 			SubxtCandidateEventType::TimedOut,
 		))))
 	}
@@ -190,9 +195,10 @@ fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
 fn create_candidate_event(
 	commitments_hash: <PolkadotConfig as subxt::Config>::Hash,
 	candidate_descriptor: CandidateDescriptor<<PolkadotConfig as subxt::Config>::Hash>,
+	core_idx: u32,
 	event_type: SubxtCandidateEventType,
 ) -> SubxtCandidateEvent {
 	let candidate_hash = BlakeTwo256::hash_of(&(&candidate_descriptor, commitments_hash));
 	let parachain_id = candidate_descriptor.para_id.0;
-	SubxtCandidateEvent { event_type, candidate_descriptor, parachain_id, candidate_hash }
+	SubxtCandidateEvent { event_type, candidate_descriptor, parachain_id, candidate_hash, core_idx }
 }

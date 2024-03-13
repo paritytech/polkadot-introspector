@@ -35,7 +35,7 @@ pub struct CandidateInclusionRecord<T: Encode + Decode + Clone> {
 	/// Relay parent block number when a candidate was timed out
 	pub timedout: Option<u32>,
 	/// Observed core index
-	pub core_idx: Option<u32>,
+	pub core_idx: u32,
 	/// Stated relay parent
 	pub relay_parent: T,
 	/// Stated relay parent number
@@ -109,6 +109,11 @@ pub struct CandidateRecord {
 }
 
 impl CandidateRecord {
+	/// Returns if a candidate has been included
+	pub fn is_included(&self) -> bool {
+		self.candidate_inclusion.included.is_some()
+	}
+
 	/// Returns if a candidate has been disputed
 	#[allow(dead_code)]
 	pub fn is_disputed(&self) -> bool {
@@ -143,5 +148,9 @@ impl CandidateRecord {
 
 	pub fn parachain_id(&self) -> u32 {
 		self.candidate_inclusion.parachain_id
+	}
+
+	pub fn core_idx(&self) -> u32 {
+		self.candidate_inclusion.core_idx
 	}
 }

@@ -24,6 +24,7 @@ use polkadot_introspector_essentials::{
 	types::{AccountId32, BlockNumber, SubxtHrmpChannel, Timestamp, H256},
 };
 use std::{
+	collections::HashMap,
 	fmt::{self, Display, Formatter, Write},
 	time::Duration,
 };
@@ -99,17 +100,7 @@ impl From<Block> for BlockWithoutHash {
 	}
 }
 
-#[derive(Clone, Default)]
-pub struct BitfieldsHealth {
-	/// Maximum bitfield count, equal to number of parachain validators.
-	pub max_bitfield_count: u32,
-	/// Current bitfield count in the relay chain block.
-	pub bitfield_count: u32,
-	/// Sum of all bits for a given parachain.
-	pub available_count: u32,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// Events related to parachain blocks from consensus perspective.
 pub enum ParachainConsensusEvent {
 	/// A core has been assigned to a parachain.
@@ -146,10 +137,8 @@ pub struct ParachainProgressUpdate {
 	pub block_number: BlockNumber,
 	/// Relay chain block hash.
 	pub block_hash: H256,
-	/// Bitfields health metrics.
-	pub bitfield_health: BitfieldsHealth,
 	/// Core occupation.
-	pub core_occupied: bool,
+	pub core_occupied: HashMap<u32, bool>,
 	/// Consensus events happening for the para under a relay parent.
 	pub events: Vec<ParachainConsensusEvent>,
 	/// If we are in the fork chain, then this flag will be `true`
@@ -179,7 +168,9 @@ impl Display for ParachainProgressUpdate {
 			)?;
 		}
 		writeln!(buf, "\t🔗 Relay block hash: {} ", format!("{:?}", self.block_hash).bold())?;
-		writeln!(buf, "\t🥝 Availability core {}", if !self.core_occupied { "FREE" } else { "OCCUPIED" })?;
+		for (&core, &core_occupied) in self.core_occupied.iter() {
+			writeln!(buf, "\t🥝 Availability core #{} {}", core, if core_occupied { "OCCUPIED" } else { "FREE" })?;
+		}
 		writeln!(
 			buf,
 			"\t🐌 Finality lag: {}{}",

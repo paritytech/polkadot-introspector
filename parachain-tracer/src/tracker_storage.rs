@@ -279,7 +279,7 @@ mod tests {
 				hash,
 				StorageEntry::new_onchain(
 					RecordTime::with_ts(0, Duration::from_secs(0)),
-					create_candidate_record(100, 0, H256::random(), 0),
+					create_candidate_record(100, 0, None, H256::random(), 0),
 				),
 			)
 			.await

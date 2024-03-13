@@ -150,13 +150,13 @@ mod test_extract_inherent_fields {
 	}
 }
 
-pub(crate) fn backed_candidate(
+pub(crate) fn backed_candidates_by_para_id(
 	backed_candidates: Vec<BackedCandidate<H256>>,
 	para_id: u32,
-) -> Option<BackedCandidate<H256>> {
+) -> impl Iterator<Item = BackedCandidate<H256>> {
 	backed_candidates
 		.into_iter()
-		.find(|candidate| candidate.candidate.descriptor.para_id.0 == para_id)
+		.filter(move |candidate| candidate.candidate.descriptor.para_id.0 == para_id)
 }
 
 #[cfg(test)]
@@ -166,9 +166,12 @@ mod test_backed_candidate {
 
 	#[test]
 	fn test_returns_a_candidate() {
-		let found = backed_candidate(vec![create_backed_candidate(100), create_backed_candidate(200)], 100).unwrap();
+		let found_candidates =
+			backed_candidates_by_para_id(vec![create_backed_candidate(100), create_backed_candidate(200)], 100);
 
-		assert_eq!(found.candidate.descriptor.para_id.0, 100);
+		for found in found_candidates {
+			assert_eq!(found.candidate.descriptor.para_id.0, 100);
+		}
 	}
 }
 
@@ -226,7 +229,7 @@ mod test_extract_votes {
 	}
 }
 
-pub(crate) fn extract_availability_bits_count(bitfields: Vec<AvailabilityBitfield>, core: u32) -> u32 {
+pub(crate) fn extract_availability_bits_count(bitfields: &[AvailabilityBitfield], core: u32) -> u32 {
 	bitfields
 		.iter()
 		.map(|v| v.0.as_bits().get(core as usize).expect("core index must be in the bitfield") as u32)
@@ -241,7 +244,7 @@ mod test_extract_availability_bits_count {
 	#[test]
 	fn test_counts_availability_bits() {
 		assert_eq!(
-			extract_availability_bits_count(vec![AvailabilityBitfield(DecodedBits::from_iter([true, false, true]))], 0),
+			extract_availability_bits_count(&[AvailabilityBitfield(DecodedBits::from_iter([true, false, true]))], 0),
 			1
 		);
 	}

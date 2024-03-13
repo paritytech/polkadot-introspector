@@ -22,12 +22,8 @@ use subxt::config::{substrate::BlakeTwo256, Hasher};
 /// This is used for displaying CLI updates and also goes to Storage.
 #[derive(Encode, Decode, Debug, Default)]
 pub struct ParachainBlockInfo {
-	/// The candidate information as observed during backing
-	pub candidate: Option<BackedCandidate<H256>>,
 	/// Candidate hash
 	pub candidate_hash: Option<H256>,
-	/// The current state.
-	state: ParachainBlockState,
 	/// The number of signed bitfields.
 	pub bitfield_count: u32,
 	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
@@ -38,19 +34,18 @@ pub struct ParachainBlockInfo {
 	pub assigned_core: Option<u32>,
 	/// Core occupation status.
 	pub core_occupied: bool,
+	/// The current state.
+	pub state: ParachainBlockState,
 }
 
 impl ParachainBlockInfo {
-	pub fn maybe_reset(&mut self) {
-		if self.is_included() {
-			self.state = ParachainBlockState::Idle;
-			self.candidate = None;
-			self.candidate_hash = None;
-		}
+	pub fn new(candidate_hash: Option<H256>) -> Self {
+		Self { candidate_hash, ..Default::default() }
 	}
 
-	pub fn set_idle(&mut self) {
-		self.state = ParachainBlockState::Idle
+	pub fn candidate_hash(candidate: &BackedCandidate<H256>) -> H256 {
+		let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
+		BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash))
 	}
 
 	pub fn set_backed(&mut self) {
@@ -65,13 +60,6 @@ impl ParachainBlockInfo {
 		self.state = ParachainBlockState::Included
 	}
 
-	pub fn set_candidate(&mut self, candidate: BackedCandidate<H256>) {
-		let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
-		let candidate_hash = BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash));
-		self.candidate_hash = Some(candidate_hash);
-		self.candidate = Some(candidate);
-	}
-
 	pub fn is_idle(&self) -> bool {
 		self.state == ParachainBlockState::Idle
 	}
@@ -80,16 +68,8 @@ impl ParachainBlockInfo {
 		self.state == ParachainBlockState::Backed
 	}
 
-	pub fn is_pending(&self) -> bool {
-		self.state == ParachainBlockState::PendingAvailability
-	}
-
 	pub fn is_included(&self) -> bool {
 		self.state == ParachainBlockState::Included
-	}
-
-	pub fn is_data_available(&self) -> bool {
-		self.current_availability_bits > (self.max_availability_bits / 3) * 2
 	}
 
 	pub fn is_bitfield_propagation_slow(&self) -> bool {
@@ -99,7 +79,7 @@ impl ParachainBlockInfo {
 
 /// The state of parachain block.
 #[derive(Encode, Decode, Debug, Default, Clone, PartialEq, Eq)]
-enum ParachainBlockState {
+pub enum ParachainBlockState {
 	// Parachain block pipeline is idle.
 	#[default]
 	Idle,
@@ -116,50 +96,8 @@ mod tests {
 	use crate::test_utils::create_para_block_info;
 
 	#[test]
-	fn test_does_not_reset_state_if_not_included() {
-		let mut info = create_para_block_info();
-		info.set_backed();
-
-		assert!(info.is_backed());
-		assert!(info.candidate.is_some());
-		assert!(info.candidate_hash.is_some());
-
-		info.maybe_reset();
-
-		assert!(info.is_backed());
-		assert!(info.candidate.is_some());
-		assert!(info.candidate_hash.is_some());
-	}
-
-	#[test]
-	fn test_resets_state_if_included() {
-		let mut info = create_para_block_info();
-		info.set_included();
-
-		assert!(info.is_included());
-		assert!(info.candidate.is_some());
-		assert!(info.candidate_hash.is_some());
-
-		info.maybe_reset();
-
-		assert!(info.is_idle());
-		assert!(info.candidate.is_none());
-		assert!(info.candidate_hash.is_none());
-	}
-
-	#[test]
-	fn test_is_data_available() {
-		let mut info = create_para_block_info();
-		assert!(!info.is_data_available());
-
-		info.max_availability_bits = 200;
-		info.current_availability_bits = 134;
-		assert!(info.is_data_available());
-	}
-
-	#[test]
 	fn test_is_bitfield_propagation_slow() {
-		let mut info = create_para_block_info();
+		let mut info = create_para_block_info(100);
 		assert!(!info.is_bitfield_propagation_slow());
 
 		info.max_availability_bits = 200;
