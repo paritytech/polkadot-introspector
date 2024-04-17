@@ -40,7 +40,8 @@ pub struct SubxtTracker {
 	/// A new session index.
 	new_session: Option<u32>,
 	/// Information about current parachain block we track.
-	candidates: HashMap<u32, Vec<ParachainBlockInfo>>,
+	/// `None` is for skipped slots.
+	candidates: HashMap<u32, Vec<Option<ParachainBlockInfo>>>,
 	/// Core assignments for current para_id
 	cores: HashMap<u32, Vec<u32>>,
 	/// Current relay chain block.
@@ -155,7 +156,9 @@ impl SubxtTracker {
 				core_occupied: self
 					.candidates
 					.iter()
-					.map(|(core_idx, v)| (*core_idx, v.last().map_or(false, |v| v.core_occupied)))
+					.map(|(core_idx, v)| {
+						(*core_idx, v.last().map_or(false, |v| v.as_ref().map_or(false, |v| v.core_occupied)))
+					})
 					.collect(),
 				..Default::default()
 			};
@@ -190,7 +193,7 @@ impl SubxtTracker {
 		self.disputes.clear();
 		self.candidates
 			.values_mut()
-			.for_each(|v| v.retain(|v| !v.is_included() && !v.is_idle()));
+			.for_each(|v| v.retain(|v| v.is_some() && v.as_ref().map_or(false, |v| !v.is_included())));
 	}
 
 	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
@@ -249,11 +252,10 @@ impl SubxtTracker {
 	async fn set_included_candidates(&mut self, storage: &TrackerStorage) {
 		let mut last_included = None;
 		for candidate in self.all_candidates_mut() {
-			let Some(candidate_hash) = candidate.candidate_hash else { continue };
-			let Some(stored_candidate) = storage.candidate(candidate_hash).await else { continue };
+			let Some(stored_candidate) = storage.candidate(candidate.candidate_hash).await else { continue };
 			if stored_candidate.is_included() {
 				candidate.set_included();
-				last_included = candidate.candidate_hash;
+				last_included = Some(candidate.candidate_hash);
 			}
 		}
 		if last_included.is_some() {
@@ -275,16 +277,12 @@ impl SubxtTracker {
 		let mut used_cores = vec![];
 		for candidate_hash in candidate_hashes {
 			let Some(core) = self.candidate_core(candidate_hash, storage).await else { continue };
-			let mut candidate = ParachainBlockInfo::new(Some(candidate_hash));
-			candidate.assigned_core = Some(core);
-			candidate.bitfield_count = bitfields_count as u32;
-			candidate.set_backed();
-
+			let candidate = ParachainBlockInfo::new(candidate_hash, core, bitfields_count as u32);
 			if let Some(current_fork) = self.relay_forks.last_mut() {
-				current_fork.backed_candidate = candidate.candidate_hash;
+				current_fork.backed_candidate = Some(candidate.candidate_hash);
 			}
 			self.last_backed_at_block_number = Some(block_number);
-			self.candidates.entry(core).or_default().push(candidate);
+			self.candidates.entry(core).or_default().push(Some(candidate));
 
 			used_cores.push(core)
 		}
@@ -292,7 +290,7 @@ impl SubxtTracker {
 		let idle_cores = self.cores.keys().filter(|v| !used_cores.contains(v)).cloned();
 		for core in idle_cores {
 			if !self.has_backed_candidate(core) {
-				self.candidates.entry(core).or_default().push(ParachainBlockInfo::new(None));
+				self.candidates.entry(core).or_default().push(None);
 			}
 		}
 	}
@@ -466,38 +464,38 @@ impl SubxtTracker {
 		metrics: &impl PrometheusMetrics,
 		storage: &TrackerStorage,
 	) {
-		for candidate in self.all_candidates() {
+		for candidate in self.all_candidates_and_skipped_slots() {
+			// Process skipped slots first
+			if candidate.is_none() {
+				progress.events.push(ParachainConsensusEvent::SkippedSlot);
+				stats.on_skipped_slot(progress);
+				metrics.on_skipped_slot(progress);
+			}
+
+			let Some(candidate) = candidate else { continue };
 			match candidate.state {
-				ParachainBlockState::Idle => {
-					progress.events.push(ParachainConsensusEvent::SkippedSlot);
-					stats.on_skipped_slot(progress);
-					metrics.on_skipped_slot(progress);
-				},
 				ParachainBlockState::Backed => {
-					let Some(candidate_hash) = candidate.candidate_hash else { continue };
-					progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
+					progress.events.push(ParachainConsensusEvent::Backed(candidate.candidate_hash));
 					stats.on_backed();
 					metrics.on_backed(self.para_id);
 				},
-				ParachainBlockState::PendingAvailability => {
-					if self.is_slow_availability(candidate.assigned_core.expect("must be assigned")) {
+				ParachainBlockState::PendingAvailability =>
+					if self.is_slow_availability(candidate.assigned_core) {
 						progress.events.push(ParachainConsensusEvent::SlowAvailability(
 							candidate.current_availability_bits,
 							candidate.max_availability_bits,
 						));
 						stats.on_slow_availability();
 						metrics.on_slow_availability(self.para_id);
-					}
-				},
+					},
 				ParachainBlockState::Included => {
-					let Some(candidate_hash) = candidate.candidate_hash else { continue };
 					progress.events.push(ParachainConsensusEvent::Included(
-						candidate_hash,
+						candidate.candidate_hash,
 						candidate.current_availability_bits,
 						candidate.max_availability_bits,
 					));
 
-					let backed_in = self.candidate_backed_in(candidate_hash, storage).await;
+					let backed_in = self.candidate_backed_in(candidate.candidate_hash, storage).await;
 					let relay_block = self.current_relay_block.expect("Checked by caller; qed");
 					stats.on_included(relay_block.num, self.previous_included_at.map(|v| v.num), backed_in);
 					metrics.on_included(
@@ -519,19 +517,22 @@ impl SubxtTracker {
 	}
 
 	fn current_candidate(&self, core: u32) -> Option<&ParachainBlockInfo> {
-		self.candidates.get(&core).and_then(|v| v.last())
+		self.candidates.get(&core).and_then(|v| v.last()).and_then(|v| v.as_ref())
 	}
 
 	fn current_candidate_mut(&mut self, core: u32) -> Option<&mut ParachainBlockInfo> {
-		self.candidates.get_mut(&core).and_then(|v| v.last_mut())
+		self.candidates
+			.get_mut(&core)
+			.and_then(|v| v.last_mut())
+			.and_then(|v| v.as_mut())
 	}
 
-	fn all_candidates(&self) -> impl Iterator<Item = &ParachainBlockInfo> {
-		self.candidates.iter().flat_map(|(_, v)| v.iter())
+	fn all_candidates_and_skipped_slots(&self) -> impl Iterator<Item = Option<&ParachainBlockInfo>> {
+		self.candidates.values().flatten().map(|v| v.as_ref())
 	}
 
 	fn all_candidates_mut(&mut self) -> impl Iterator<Item = &mut ParachainBlockInfo> {
-		self.candidates.iter_mut().flat_map(|(_, v)| v.iter_mut())
+		self.candidates.values_mut().flatten().filter_map(|v| v.as_mut())
 	}
 
 	fn is_fork(&self) -> bool {
@@ -556,7 +557,7 @@ impl SubxtTracker {
 	fn has_backed_candidate(&self, core: u32) -> bool {
 		self.candidates
 			.get(&core)
-			.map_or(false, |v| v.iter().any(|candidate| candidate.candidate_hash.is_some())) ||
+			.map_or(false, |v| v.iter().any(|candidate| candidate.is_some())) ||
 			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
@@ -619,15 +620,16 @@ mod test_inject_new_session {
 
 #[cfg(test)]
 mod test_maybe_reset_state {
+	use crate::test_utils::create_para_block_info;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn test_resets_state_if_not_backed() {
 		let mut tracker = SubxtTracker::new(100);
-		let mut candidate = ParachainBlockInfo::new(None);
+		let mut candidate = create_para_block_info(100);
 		candidate.set_included();
-		candidate.assigned_core = Some(0);
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
@@ -648,10 +650,8 @@ mod test_maybe_reset_state {
 	#[tokio::test]
 	async fn test_resets_state_if_backed() {
 		let mut tracker = SubxtTracker::new(100);
-		let mut candidate = ParachainBlockInfo::new(None);
-		candidate.set_backed();
-		candidate.assigned_core = Some(0);
-		tracker.candidates.entry(0).or_default().push(candidate);
+		let candidate = create_para_block_info(100);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.on_demand_order_at = Some(BlockWithoutHash::default());
@@ -812,8 +812,8 @@ mod test_inject_block {
 
 		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
 
-		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap();
-		assert!(candidate.candidate_hash == Some(candidate_hash));
+		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
+		assert!(candidate.candidate_hash == candidate_hash);
 		assert!(candidate.is_backed());
 	}
 
@@ -824,10 +824,9 @@ mod test_inject_block {
 		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
-		let mut candidate = create_para_block_info(100);
-		let candidate_hash = candidate.candidate_hash.unwrap();
-		candidate.set_backed();
-		tracker.candidates.entry(0).or_default().push(candidate);
+		let candidate = create_para_block_info(100);
+		let candidate_hash = candidate.candidate_hash;
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 
 		// Inject a block
 		storage_write(
@@ -861,7 +860,7 @@ mod test_inject_block {
 
 		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
 
-		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap();
+		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.is_included());
 	}
 }
@@ -872,7 +871,9 @@ mod test_progress {
 	use crate::{
 		prometheus::{Metrics, MockPrometheusMetrics},
 		stats::{MockStats, ParachainStats},
-		test_utils::{create_candidate_record, create_hrmp_channels, create_storage, storage_write},
+		test_utils::{
+			create_candidate_record, create_hrmp_channels, create_para_block_info, create_storage, storage_write,
+		},
 	};
 	use mockall::predicate::eq;
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
@@ -944,12 +945,11 @@ mod test_progress {
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
-		let mut candidate = ParachainBlockInfo::new(None);
+		let mut candidate = create_para_block_info(100);
 
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		candidate.assigned_core = Some(0);
 		candidate.core_occupied = true;
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.cores.entry(0).or_default().push(100);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
@@ -963,8 +963,7 @@ mod test_progress {
 	async fn test_includes_slow_propogation() {
 		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage());
-		let mut candidate = ParachainBlockInfo::new(None);
-		candidate.assigned_core = Some(0);
+		let mut candidate = create_para_block_info(100);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -978,7 +977,7 @@ mod test_progress {
 		// Bitfields propogation isn't slow
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		candidate.bitfield_count = 120;
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.cores.entry(0).or_default().push(100);
 		mock_stats.expect_on_bitfields().with(eq(120), eq(false)).returning(|_, _| ());
 		mock_metrics
@@ -996,7 +995,7 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
 
 		// Bitfields propogation is slow
-		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
 		candidate.set_backed();
 		candidate.max_availability_bits = 200;
 		mock_stats.expect_on_bitfields().with(eq(120), eq(true)).returning(|_, _| ());
@@ -1162,7 +1161,6 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_on_demand_order() {
 		let mut tracker = SubxtTracker::new(100);
-		let mut candidate = ParachainBlockInfo::new(None);
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
@@ -1200,9 +1198,8 @@ mod test_progress {
 		let _progress = tracker.progress(&mut stats, &mock_metrics, &tracker_storage).await.unwrap();
 		tracker.is_on_demand_scheduled_in_current_block = false;
 		// If backed
-		candidate.set_backed();
-		candidate.assigned_core = Some(0);
-		tracker.candidates.entry(0).or_default().push(candidate);
+		let candidate = create_para_block_info(100);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.cores.entry(0).or_default().push(100);
 		mock_metrics
 			.expect_handle_on_demand_delay()
@@ -1222,7 +1219,6 @@ mod test_progress {
 		let candidate_hash = H256::random();
 		let storage = create_storage();
 		let mut tracker = SubxtTracker::new(100);
-		let candidate = ParachainBlockInfo::new(None);
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
@@ -1242,7 +1238,7 @@ mod test_progress {
 
 		// When candidate is idle
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(None);
 		mock_stats.expect_on_skipped_slot().once().returning(|_| ());
 		mock_metrics.expect_on_skipped_slot().once().returning(|_| ());
 		let progress = tracker
@@ -1256,10 +1252,8 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot)));
 
 		// When candidate is backed
-		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
-		candidate.set_backed();
-		candidate.candidate_hash = Some(candidate_hash);
-		candidate.assigned_core = Some(0);
+		let candidate = ParachainBlockInfo::new(candidate_hash, 0, 0);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		mock_stats.expect_on_backed().once().returning(|| ());
 		mock_metrics.expect_on_backed().with(eq(100)).once().returning(|_| ());
 		let progress = tracker
@@ -1271,7 +1265,7 @@ mod test_progress {
 
 		// When candidate is pending
 		// And data is available
-		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
 		candidate.set_pending();
 		candidate.max_availability_bits = 200;
 		candidate.current_availability_bits = 140;
@@ -1285,7 +1279,7 @@ mod test_progress {
 		assert!(progress.events.is_empty());
 
 		// And availability is slow
-		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
 		candidate.max_availability_bits = 200;
 		candidate.current_availability_bits = 120;
 		candidate.bitfield_count = 150;
@@ -1308,7 +1302,7 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
 
 		// When candidate is included and data is available
-		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap();
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
 		candidate.set_included();
 		candidate.max_availability_bits = 200;
 		candidate.current_availability_bits = 140;
@@ -1399,8 +1393,8 @@ mod test_logic {
 		let relay_hash = H256::default();
 		let relay_number = 42;
 		let mut tracker = SubxtTracker::new(100);
-		tracker.candidates.entry(0).or_default().push(create_para_block_info(100));
-		tracker.candidates.entry(1).or_default().push(ParachainBlockInfo::new(None));
+		tracker.candidates.entry(0).or_default().push(Some(create_para_block_info(100)));
+		tracker.candidates.entry(1).or_default().push(None);
 
 		assert!(tracker.has_backed_candidate(0));
 		assert!(!tracker.has_backed_candidate(1));
@@ -1443,14 +1437,12 @@ mod test_logic {
 
 		assert!(!tracker.is_current_candidate_backed(0));
 
-		let candidate = ParachainBlockInfo::new(None);
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(None);
 		assert!(!tracker.is_current_candidate_backed(0));
 
-		let mut candidate = ParachainBlockInfo::new(None);
-		candidate.set_backed();
+		let candidate = create_para_block_info(100);
 		tracker.candidates.clear();
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		assert!(tracker.is_current_candidate_backed(0));
 	}
 
@@ -1477,25 +1469,25 @@ mod test_logic {
 
 		assert!(!tracker.is_slow_availability(0));
 
-		let mut candidate = ParachainBlockInfo::new(None);
+		let mut candidate = create_para_block_info(100);
 		candidate.core_occupied = true;
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.last_backed_at_block_number = Some(42);
 		tracker.current_relay_block = Some(block_with_num(42));
 		assert!(!tracker.is_slow_availability(0));
 
-		let mut candidate = ParachainBlockInfo::new(None);
+		let mut candidate = create_para_block_info(100);
 		candidate.core_occupied = false;
 		tracker.candidates.clear();
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.last_backed_at_block_number = Some(41);
 		tracker.current_relay_block = Some(block_with_num(42));
 		assert!(!tracker.is_slow_availability(0));
 
-		let mut candidate = ParachainBlockInfo::new(None);
+		let mut candidate = create_para_block_info(100);
 		candidate.core_occupied = true;
 		tracker.candidates.clear();
-		tracker.candidates.entry(0).or_default().push(candidate);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.last_backed_at_block_number = Some(41);
 		tracker.current_relay_block = Some(block_with_num(42));
 		assert!(tracker.is_slow_availability(0));

@@ -23,7 +23,7 @@ use subxt::config::{substrate::BlakeTwo256, Hasher};
 #[derive(Encode, Decode, Debug, Default)]
 pub struct ParachainBlockInfo {
 	/// Candidate hash
-	pub candidate_hash: Option<H256>,
+	pub candidate_hash: H256,
 	/// The number of signed bitfields.
 	pub bitfield_count: u32,
 	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
@@ -31,7 +31,7 @@ pub struct ParachainBlockInfo {
 	/// The current number of observed availability bits set to 1.
 	pub current_availability_bits: u32,
 	/// Parachain availability core assignment information.
-	pub assigned_core: Option<u32>,
+	pub assigned_core: u32,
 	/// Core occupation status.
 	pub core_occupied: bool,
 	/// The current state.
@@ -39,8 +39,8 @@ pub struct ParachainBlockInfo {
 }
 
 impl ParachainBlockInfo {
-	pub fn new(candidate_hash: Option<H256>) -> Self {
-		Self { candidate_hash, ..Default::default() }
+	pub fn new(candidate_hash: H256, assigned_core: u32, bitfield_count: u32) -> Self {
+		Self { candidate_hash, assigned_core, bitfield_count, ..Default::default() }
 	}
 
 	pub fn candidate_hash(candidate: &BackedCandidate<H256>) -> H256 {
@@ -48,6 +48,7 @@ impl ParachainBlockInfo {
 		BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash))
 	}
 
+	#[cfg(test)]
 	pub fn set_backed(&mut self) {
 		self.state = ParachainBlockState::Backed
 	}
@@ -60,10 +61,6 @@ impl ParachainBlockInfo {
 		self.state = ParachainBlockState::Included
 	}
 
-	pub fn is_idle(&self) -> bool {
-		self.state == ParachainBlockState::Idle
-	}
-
 	pub fn is_backed(&self) -> bool {
 		self.state == ParachainBlockState::Backed
 	}
@@ -73,17 +70,15 @@ impl ParachainBlockInfo {
 	}
 
 	pub fn is_bitfield_propagation_slow(&self) -> bool {
-		self.max_availability_bits > 0 && !self.is_idle() && self.bitfield_count <= (self.max_availability_bits / 3) * 2
+		self.max_availability_bits > 0 && self.bitfield_count <= (self.max_availability_bits / 3) * 2
 	}
 }
 
 /// The state of parachain block.
 #[derive(Encode, Decode, Debug, Default, Clone, PartialEq, Eq)]
 pub enum ParachainBlockState {
-	// Parachain block pipeline is idle.
-	#[default]
-	Idle,
 	// A candidate is currently backed.
+	#[default]
 	Backed,
 	// A candidate is pending inclusion.
 	PendingAvailability,
