@@ -165,7 +165,7 @@ pub fn create_candidate_record(
 pub fn create_para_block_info(para_id: u32) -> ParachainBlockInfo {
 	let candidate = create_backed_candidate(para_id);
 	let hash = ParachainBlockInfo::candidate_hash(&candidate);
-	ParachainBlockInfo::new(hash, 0, 120)
+	ParachainBlockInfo::new(hash, 0, 0)
 }
 
 pub async fn storage_write<T: Encode>(

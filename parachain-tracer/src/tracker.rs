@@ -996,7 +996,6 @@ mod test_progress {
 
 		// Bitfields propogation is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
-		candidate.set_backed();
 		candidate.max_availability_bits = 200;
 		mock_stats.expect_on_bitfields().with(eq(120), eq(true)).returning(|_, _| ());
 		mock_metrics
@@ -1167,6 +1166,7 @@ mod test_progress {
 		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
+		mock_metrics.expect_on_backed().returning(|_| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
 
 		// With on-demand order
@@ -1253,6 +1253,7 @@ mod test_progress {
 
 		// When candidate is backed
 		let candidate = ParachainBlockInfo::new(candidate_hash, 0, 0);
+		tracker.candidates.clear();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		mock_stats.expect_on_backed().once().returning(|| ());
 		mock_metrics.expect_on_backed().with(eq(100)).once().returning(|_| ());

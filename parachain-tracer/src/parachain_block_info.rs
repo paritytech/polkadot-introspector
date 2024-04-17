@@ -48,11 +48,6 @@ impl ParachainBlockInfo {
 		BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash))
 	}
 
-	#[cfg(test)]
-	pub fn set_backed(&mut self) {
-		self.state = ParachainBlockState::Backed
-	}
-
 	pub fn set_pending(&mut self) {
 		self.state = ParachainBlockState::PendingAvailability
 	}
@@ -96,12 +91,9 @@ mod tests {
 		assert!(!info.is_bitfield_propagation_slow());
 
 		info.max_availability_bits = 200;
-		assert!(!info.is_bitfield_propagation_slow());
+		assert!(info.is_bitfield_propagation_slow());
 
-		info.bitfield_count = 100;
-		assert!(!info.is_bitfield_propagation_slow());
-
-		info.set_backed();
+		info.bitfield_count = 120;
 		assert!(info.is_bitfield_propagation_slow());
 	}
 }
