@@ -249,13 +249,11 @@ impl SubxtTracker {
 	async fn set_included_candidates(&mut self, storage: &TrackerStorage) {
 		let mut last_included = None;
 		for candidate in self.all_candidates_mut() {
-			if let Some(candidate_hash) = candidate.candidate_hash {
-				if let Some(stored_candidate) = storage.candidate(candidate_hash).await {
-					if stored_candidate.is_included() {
-						candidate.set_included();
-						last_included = candidate.candidate_hash;
-					}
-				}
+			let Some(candidate_hash) = candidate.candidate_hash else { continue };
+			let Some(stored_candidate) = storage.candidate(candidate_hash).await else { continue };
+			if stored_candidate.is_included() {
+				candidate.set_included();
+				last_included = candidate.candidate_hash;
 			}
 		}
 		if last_included.is_some() {
@@ -276,20 +274,19 @@ impl SubxtTracker {
 			.map(|v| ParachainBlockInfo::candidate_hash(&v));
 		let mut used_cores = vec![];
 		for candidate_hash in candidate_hashes {
-			if let Some(core) = self.candidate_core(candidate_hash, storage).await {
-				let mut candidate = ParachainBlockInfo::new(Some(candidate_hash));
-				candidate.assigned_core = Some(core);
-				candidate.bitfield_count = bitfields_count as u32;
-				candidate.set_backed();
+			let Some(core) = self.candidate_core(candidate_hash, storage).await else { continue };
+			let mut candidate = ParachainBlockInfo::new(Some(candidate_hash));
+			candidate.assigned_core = Some(core);
+			candidate.bitfield_count = bitfields_count as u32;
+			candidate.set_backed();
 
-				if let Some(current_fork) = self.relay_forks.last_mut() {
-					current_fork.backed_candidate = candidate.candidate_hash;
-				}
-				self.last_backed_at_block_number = Some(block_number);
-				self.candidates.entry(core).or_default().push(candidate);
-
-				used_cores.push(core)
+			if let Some(current_fork) = self.relay_forks.last_mut() {
+				current_fork.backed_candidate = candidate.candidate_hash;
 			}
+			self.last_backed_at_block_number = Some(block_number);
+			self.candidates.entry(core).or_default().push(candidate);
+
+			used_cores.push(core)
 		}
 
 		let idle_cores = self.cores.keys().filter(|v| !used_cores.contains(v)).cloned();
@@ -302,17 +299,16 @@ impl SubxtTracker {
 
 	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) {
 		for (core, scheduled_ids) in self.cores.clone() {
-			if let Some(candidate) = self.current_candidate_mut(core) {
-				if candidate.is_backed() {
-					candidate.core_occupied = matches!(
-						storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
-						CoreOccupied::Paras
-					);
-				}
-			}
-
 			self.is_on_demand_scheduled_in_current_block =
 				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
+
+			let Some(candidate) = self.current_candidate_mut(core) else { continue };
+			if candidate.is_backed() {
+				candidate.core_occupied = matches!(
+					storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
+					CoreOccupied::Paras
+				);
+			}
 		}
 	}
 
@@ -451,16 +447,15 @@ impl SubxtTracker {
 		metrics: &impl PrometheusMetrics,
 	) {
 		for &core in self.cores.keys() {
-			if let Some(candidate) = self.current_candidate(core) {
-				if candidate.is_bitfield_propagation_slow() {
-					progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
-						candidate.bitfield_count,
-						candidate.max_availability_bits,
-					))
-				}
-				stats.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow());
-				metrics.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow(), self.para_id);
+			let Some(candidate) = self.current_candidate(core) else { continue };
+			if candidate.is_bitfield_propagation_slow() {
+				progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
+					candidate.bitfield_count,
+					candidate.max_availability_bits,
+				))
 			}
+			stats.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow());
+			metrics.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow(), self.para_id);
 		}
 	}
 
@@ -478,12 +473,12 @@ impl SubxtTracker {
 					stats.on_skipped_slot(progress);
 					metrics.on_skipped_slot(progress);
 				},
-				ParachainBlockState::Backed =>
-					if let Some(candidate_hash) = candidate.candidate_hash {
-						progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
-						stats.on_backed();
-						metrics.on_backed(self.para_id);
-					},
+				ParachainBlockState::Backed => {
+					let Some(candidate_hash) = candidate.candidate_hash else { continue };
+					progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
+					stats.on_backed();
+					metrics.on_backed(self.para_id);
+				},
 				ParachainBlockState::PendingAvailability => {
 					if self.is_slow_availability(candidate.assigned_core.expect("must be assigned")) {
 						progress.events.push(ParachainConsensusEvent::SlowAvailability(
@@ -494,25 +489,25 @@ impl SubxtTracker {
 						metrics.on_slow_availability(self.para_id);
 					}
 				},
-				ParachainBlockState::Included =>
-					if let Some(candidate_hash) = candidate.candidate_hash {
-						progress.events.push(ParachainConsensusEvent::Included(
-							candidate_hash,
-							candidate.current_availability_bits,
-							candidate.max_availability_bits,
-						));
+				ParachainBlockState::Included => {
+					let Some(candidate_hash) = candidate.candidate_hash else { continue };
+					progress.events.push(ParachainConsensusEvent::Included(
+						candidate_hash,
+						candidate.current_availability_bits,
+						candidate.max_availability_bits,
+					));
 
-						let backed_in = self.candidate_backed_in(candidate_hash, storage).await;
-						let relay_block = self.current_relay_block.expect("Checked by caller; qed");
-						stats.on_included(relay_block.num, self.previous_included_at.map(|v| v.num), backed_in);
-						metrics.on_included(
-							relay_block.num,
-							self.previous_included_at.map(|v| v.num),
-							backed_in,
-							time_diff(Some(relay_block.ts), self.previous_included_at.map(|v| v.ts)),
-							self.para_id,
-						);
-					},
+					let backed_in = self.candidate_backed_in(candidate_hash, storage).await;
+					let relay_block = self.current_relay_block.expect("Checked by caller; qed");
+					stats.on_included(relay_block.num, self.previous_included_at.map(|v| v.num), backed_in);
+					metrics.on_included(
+						relay_block.num,
+						self.previous_included_at.map(|v| v.num),
+						backed_in,
+						time_diff(Some(relay_block.ts), self.previous_included_at.map(|v| v.ts)),
+						self.para_id,
+					);
+				},
 			}
 		}
 	}
