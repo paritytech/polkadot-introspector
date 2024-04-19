@@ -16,7 +16,7 @@
 
 use crate::{
 	api::{
-		api_client::{build_light_client, build_online_client, ApiClientMode, ApiClientT, HeaderStream},
+		api_client::{build_online_client, ApiClient, ApiClientMode, HeaderStream},
 		dynamic::{
 			self, decode_availability_cores, decode_claim_queue, decode_validator_groups, fetch_dynamic_storage,
 			DynamicHostConfiguration,
@@ -35,7 +35,7 @@ use polkadot_introspector_priority_channel::{
 	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
-use subxt::PolkadotConfig;
+use subxt::{OnlineClient, PolkadotConfig};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError as OneshotRecvError, Sender as OneshotSender};
 
@@ -148,7 +148,7 @@ impl RequestExecutorBackend {
 				Ok(message) => match message {
 					ExecutorMessage::Close => return,
 					ExecutorMessage::Rpc(tx, request) => {
-						match self.execute_request(&request, &*client).await {
+						match self.execute_request(&request, &client).await {
 							Ok(response) => {
 								// Not critical, skip it and process next request
 								if let Err(e) = tx.send(response) {
@@ -169,7 +169,7 @@ impl RequestExecutorBackend {
 	async fn execute_request(
 		&mut self,
 		request: &Request,
-		client: &dyn ApiClientT,
+		client: &ApiClient<OnlineClient<PolkadotConfig>>,
 	) -> color_eyre::Result<Response, RequestExecutorError> {
 		let mut retry = Retry::new(&self.retry);
 		loop {
@@ -190,7 +190,7 @@ impl RequestExecutorBackend {
 	async fn match_request(
 		&mut self,
 		request: Request,
-		client: &dyn ApiClientT,
+		client: &ApiClient<OnlineClient<PolkadotConfig>>,
 	) -> color_eyre::Result<Response, RequestExecutorError> {
 		use Request::*;
 		use Response::*;
@@ -460,27 +460,20 @@ impl RequestExecutor {
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn build_client(url: &str, api_client_mode: ApiClientMode, retry: &RetryOptions) -> Option<Box<dyn ApiClientT>> {
+async fn build_client(
+	url: &str,
+	api_client_mode: ApiClientMode,
+	retry: &RetryOptions,
+) -> Option<ApiClient<OnlineClient<PolkadotConfig>>> {
 	let mut retry = Retry::new(retry);
 	loop {
-		match api_client_mode {
-			ApiClientMode::RPC => match build_online_client(url).await {
-				Ok(client) => return Some(Box::new(client)),
-				Err(err) => {
-					error!("[{}] RpcClient error: {:?}", url, err);
-					if (retry.sleep().await).is_err() {
-						return None
-					}
-				},
-			},
-			ApiClientMode::Light => match build_light_client(url).await {
-				Ok(client) => return Some(Box::new(client)),
-				Err(err) => {
-					error!("[{}] LightClient error: {:?}", url, err);
-					if (retry.sleep().await).is_err() {
-						return None
-					}
-				},
+		match build_online_client(url, api_client_mode).await {
+			Ok(client) => return Some(client),
+			Err(err) => {
+				error!("[{}] RpcClient error: {:?}", url, err);
+				if (retry.sleep().await).is_err() {
+					return None
+				}
 			},
 		}
 	}

@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::{
-	api::api_client::ApiClientT,
+	api::api_client::ApiClient,
 	metadata::polkadot_primitives::ValidatorIndex,
 	types::{Assignment, BlockNumber, ClaimQueue, CoreOccupied, OnDemandOrder, ParasEntry, H256},
 };
@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, VecDeque};
 use subxt::{
 	dynamic::{At, Value},
 	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
+	OnlineClient, PolkadotConfig,
 };
 use thiserror::Error;
 
@@ -216,7 +217,7 @@ fn decode_u128_value(value: &Value<u32>) -> Result<u128, DynamicError> {
 }
 
 pub async fn fetch_dynamic_storage(
-	client: &dyn ApiClientT,
+	client: &ApiClient<OnlineClient<PolkadotConfig>>,
 	maybe_hash: Option<H256>,
 	pallet_name: &str,
 	entry_name: &str,
