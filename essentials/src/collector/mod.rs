@@ -799,7 +799,7 @@ impl Collector {
 							relay_parent_number: relay_parent.number,
 							parachain_id: change_event.parachain_id,
 							backed: relay_block_number,
-							core_idx: None,
+							core_idx: change_event.core_idx,
 							timedout: None,
 							included: None,
 						};

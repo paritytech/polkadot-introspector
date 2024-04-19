@@ -17,12 +17,12 @@
 //! This module tracks parachain blocks.
 use crate::{
 	message_queues_tracker::MessageQueuesTracker,
-	parachain_block_info::ParachainBlockInfo,
+	parachain_block_info::{ParachainBlockInfo, ParachainBlockState},
 	prometheus::PrometheusMetrics,
 	stats::Stats,
 	tracker_storage::TrackerStorage,
 	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
-	utils::{backed_candidate, extract_availability_bits_count, extract_inherent_fields, time_diff},
+	utils::{backed_candidates_by_para_id, extract_availability_bits_count, extract_inherent_fields, time_diff},
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
@@ -30,7 +30,7 @@ use polkadot_introspector_essentials::{
 	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatementSet, ValidatorIndex},
 	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
-use std::{default::Default, time::Duration};
+use std::{collections::HashMap, default::Default, time::Duration};
 
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
@@ -40,7 +40,10 @@ pub struct SubxtTracker {
 	/// A new session index.
 	new_session: Option<u32>,
 	/// Information about current parachain block we track.
-	current_candidate: ParachainBlockInfo,
+	/// `None` is for skipped slots.
+	candidates: HashMap<u32, Vec<Option<ParachainBlockInfo>>>,
+	/// Core assignments for current para_id
+	cores: HashMap<u32, Vec<u32>>,
 	/// Current relay chain block.
 	current_relay_block: Option<Block>,
 	/// Previous relay chain block.
@@ -80,7 +83,8 @@ impl SubxtTracker {
 	pub fn new(para_id: u32) -> Self {
 		Self {
 			para_id,
-			current_candidate: Default::default(),
+			candidates: HashMap::new(),
+			cores: HashMap::new(),
 			new_session: None,
 			current_relay_block: None,
 			previous_relay_block: None,
@@ -116,17 +120,15 @@ impl SubxtTracker {
 
 			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
-
-			self.set_current_candidate(backed_candidates, bitfields.len(), block_number);
-			self.set_core_assignment(block_hash, storage).await?;
+			self.set_cores(block_hash, storage).await;
+			self.set_included_candidates(storage).await;
+			self.set_backed_candidates(backed_candidates, bitfields.len(), block_number, storage)
+				.await;
+			self.set_core_assignment(block_hash, storage).await;
 			self.set_disputes(&disputes[..], storage).await;
-
 			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
-
-			if self.has_backed_candidate() {
-				self.set_availability(block_hash, bitfields, storage).await?;
-			}
+			self.set_pending_availability(block_hash, bitfields, storage).await?;
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
@@ -151,7 +153,13 @@ impl SubxtTracker {
 				para_id: self.para_id,
 				is_fork: self.is_fork(),
 				finality_lag: self.finality_lag,
-				core_occupied: self.current_candidate.core_occupied,
+				core_occupied: self
+					.candidates
+					.iter()
+					.map(|(core_idx, v)| {
+						(*core_idx, v.last().map_or(false, |v| v.as_ref().map_or(false, |v| v.core_occupied)))
+					})
+					.collect(),
 				..Default::default()
 			};
 
@@ -174,14 +182,18 @@ impl SubxtTracker {
 	/// Resets state
 	pub fn maybe_reset_state(&mut self) {
 		self.first_run = false;
-		if self.current_candidate.is_backed() {
-			self.on_demand_order_at = None;
+		for &core in self.cores.keys() {
+			if self.is_current_candidate_backed(core) {
+				self.on_demand_order_at = None;
+			}
 		}
 		self.new_session = None;
 		self.on_demand_order = None;
 		self.is_on_demand_scheduled_in_current_block = false;
 		self.disputes.clear();
-		self.current_candidate.maybe_reset();
+		self.candidates
+			.values_mut()
+			.for_each(|v| v.retain(|v| v.is_some() && v.as_ref().map_or(false, |v| !v.is_included())));
 	}
 
 	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
@@ -232,38 +244,70 @@ impl SubxtTracker {
 		});
 	}
 
-	fn set_current_candidate(
+	async fn set_cores(&mut self, block_hash: H256, storage: &TrackerStorage) {
+		let assignments = storage.core_assignments(block_hash).await.expect("saved in the collector");
+		self.cores = assignments.into_iter().filter(|(_, ids)| ids.contains(&self.para_id)).collect();
+	}
+
+	async fn set_included_candidates(&mut self, storage: &TrackerStorage) {
+		let mut last_included = None;
+		for candidate in self.all_candidates_mut() {
+			let Some(stored_candidate) = storage.candidate(candidate.candidate_hash).await else { continue };
+			if stored_candidate.is_included() {
+				candidate.set_included();
+				last_included = Some(candidate.candidate_hash);
+			}
+		}
+		if last_included.is_some() {
+			self.relay_forks.last_mut().expect("must have relay fork").included_candidate = last_included;
+			self.previous_included_at = self.last_included_at;
+			self.last_included_at = self.current_relay_block.map(|v| v.into());
+		}
+	}
+
+	async fn set_backed_candidates(
 		&mut self,
 		backed_candidates: Vec<BackedCandidate<H256>>,
 		bitfields_count: usize,
 		block_number: BlockNumber,
+		storage: &TrackerStorage,
 	) {
-		self.current_candidate.bitfield_count = bitfields_count as u32;
-		if let Some(candidate) = backed_candidate(backed_candidates, self.para_id) {
-			self.current_candidate.set_backed();
-			self.current_candidate.set_candidate(candidate);
-			self.last_backed_at_block_number = Some(block_number);
-
+		let candidate_hashes = backed_candidates_by_para_id(backed_candidates, self.para_id)
+			.map(|v| ParachainBlockInfo::candidate_hash(&v));
+		let mut used_cores = vec![];
+		for candidate_hash in candidate_hashes {
+			let Some(core) = self.candidate_core(candidate_hash, storage).await else { continue };
+			let candidate = ParachainBlockInfo::new(candidate_hash, core, bitfields_count as u32);
 			if let Some(current_fork) = self.relay_forks.last_mut() {
-				current_fork.backed_candidate = self.current_candidate.candidate_hash;
+				current_fork.backed_candidate = Some(candidate.candidate_hash);
 			}
-		} else if !self.has_backed_candidate() {
-			self.current_candidate.set_idle();
+			self.last_backed_at_block_number = Some(block_number);
+			self.candidates.entry(core).or_default().push(Some(candidate));
+
+			used_cores.push(core)
+		}
+
+		let idle_cores = self.cores.keys().filter(|v| !used_cores.contains(v)).cloned();
+		for core in idle_cores {
+			if !self.has_backed_candidate(core) {
+				self.candidates.entry(core).or_default().push(None);
+			}
 		}
 	}
 
-	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
-		let assignments = storage.core_assignments(block_hash).await.expect("saved in the collector");
-		if let Some((&core, scheduled_ids)) = assignments.iter().find(|(_, ids)| ids.contains(&self.para_id)) {
-			self.current_candidate.assigned_core = Some(core);
-			self.current_candidate.core_occupied = matches!(
-				storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
-				CoreOccupied::Paras
-			);
+	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) {
+		for (core, scheduled_ids) in self.cores.clone() {
 			self.is_on_demand_scheduled_in_current_block =
 				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
+
+			let Some(candidate) = self.current_candidate_mut(core) else { continue };
+			if candidate.is_backed() {
+				candidate.core_occupied = matches!(
+					storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
+					CoreOccupied::Paras
+				);
+			}
 		}
-		Ok(())
 	}
 
 	async fn set_disputes(&mut self, disputes: &[DisputeStatementSet], storage: &TrackerStorage) {
@@ -293,28 +337,21 @@ impl SubxtTracker {
 		}
 	}
 
-	async fn set_availability(
+	async fn set_pending_availability(
 		&mut self,
 		block_hash: H256,
 		bitfields: Vec<AvailabilityBitfield>,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
-		if self.current_candidate.is_backed() {
-			// We only process availability if our parachain is assigned to an availability core.
-			if let Some(core) = self.current_candidate.assigned_core {
-				self.current_candidate.current_availability_bits = extract_availability_bits_count(bitfields, core);
-				self.current_candidate.max_availability_bits =
-					self.validators_indices(block_hash, storage).await?.len() as u32;
+		let core_ids: Vec<u32> = self.cores.keys().cloned().collect();
+		for core in core_ids {
+			if self.is_current_candidate_backed(core) && !self.is_just_backed() {
+				let max_bits = self.validators_indices(block_hash, storage).await?.len() as u32;
+				let candidate = self.current_candidate_mut(core).expect("Checked above");
 
-				if self.current_candidate.is_data_available() {
-					self.current_candidate.set_included();
-					self.relay_forks.last_mut().expect("must have relay fork").included_candidate =
-						self.current_candidate.candidate_hash;
-					self.previous_included_at = self.last_included_at;
-					self.last_included_at = self.current_relay_block.map(|v| v.into());
-				} else if !self.is_just_backed() {
-					self.current_candidate.set_pending();
-				}
+				candidate.current_availability_bits = extract_availability_bits_count(&bitfields, core);
+				candidate.max_availability_bits = max_bits;
+				candidate.set_pending();
 			}
 		}
 
@@ -369,16 +406,20 @@ impl SubxtTracker {
 			if self.is_on_demand_scheduled_in_current_block {
 				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
 			}
-			if self.current_candidate.is_backed() {
-				metrics.handle_on_demand_delay(delay, self.para_id, "backed");
+			for &core in self.cores.keys() {
+				if self.is_current_candidate_backed(core) {
+					metrics.handle_on_demand_delay(delay, self.para_id, "backed");
+				}
 			}
 		}
 		if let Some(delay_sec) = self.on_demand_delay_sec() {
 			if self.is_on_demand_scheduled_in_current_block {
 				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
 			}
-			if self.current_candidate.is_backed() {
-				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
+			for &core in self.cores.keys() {
+				if self.is_current_candidate_backed(core) {
+					metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
+				}
 			}
 		}
 	}
@@ -390,8 +431,10 @@ impl SubxtTracker {
 	}
 
 	fn notify_core_assignment(&self, progress: &mut ParachainProgressUpdate) {
-		if let Some(assigned_core) = self.current_candidate.assigned_core {
-			progress.events.push(ParachainConsensusEvent::CoreAssigned(assigned_core));
+		for &core in self.cores.keys() {
+			if self.current_candidate(core).is_some() {
+				progress.events.push(ParachainConsensusEvent::CoreAssigned(core));
+			}
 		}
 	}
 
@@ -401,19 +444,17 @@ impl SubxtTracker {
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
-		if self.current_candidate.is_bitfield_propagation_slow() {
-			progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
-				self.current_candidate.bitfield_count,
-				self.current_candidate.max_availability_bits,
-			))
+		for &core in self.cores.keys() {
+			let Some(candidate) = self.current_candidate(core) else { continue };
+			if candidate.is_bitfield_propagation_slow() {
+				progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
+					candidate.bitfield_count,
+					candidate.max_availability_bits,
+				))
+			}
+			stats.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow());
+			metrics.on_bitfields(candidate.bitfield_count, candidate.is_bitfield_propagation_slow(), self.para_id);
 		}
-		stats
-			.on_bitfields(self.current_candidate.bitfield_count, self.current_candidate.is_bitfield_propagation_slow());
-		metrics.on_bitfields(
-			self.current_candidate.bitfield_count,
-			self.current_candidate.is_bitfield_propagation_slow(),
-			self.para_id,
-		);
 	}
 
 	async fn notify_candidate_state(
@@ -423,34 +464,38 @@ impl SubxtTracker {
 		metrics: &impl PrometheusMetrics,
 		storage: &TrackerStorage,
 	) {
-		if self.current_candidate.is_idle() {
-			progress.events.push(ParachainConsensusEvent::SkippedSlot);
-			stats.on_skipped_slot(progress);
-			metrics.on_skipped_slot(progress);
-		}
-
-		if self.current_candidate.is_backed() {
-			if let Some(candidate_hash) = self.current_candidate.candidate_hash {
-				progress.events.push(ParachainConsensusEvent::Backed(candidate_hash));
-				stats.on_backed();
-				metrics.on_backed(self.para_id);
+		for candidate in self.all_candidates_and_skipped_slots() {
+			// Process skipped slots first
+			if candidate.is_none() {
+				progress.events.push(ParachainConsensusEvent::SkippedSlot);
+				stats.on_skipped_slot(progress);
+				metrics.on_skipped_slot(progress);
 			}
-		}
 
-		if self.current_candidate.is_pending() || self.current_candidate.is_included() {
-			progress.bitfield_health.max_bitfield_count = self.current_candidate.max_availability_bits;
-			progress.bitfield_health.available_count = self.current_candidate.current_availability_bits;
-			progress.bitfield_health.bitfield_count = self.current_candidate.bitfield_count;
-
-			if self.current_candidate.is_data_available() {
-				if let Some(candidate_hash) = self.current_candidate.candidate_hash {
+			let Some(candidate) = candidate else { continue };
+			match candidate.state {
+				ParachainBlockState::Backed => {
+					progress.events.push(ParachainConsensusEvent::Backed(candidate.candidate_hash));
+					stats.on_backed();
+					metrics.on_backed(self.para_id);
+				},
+				ParachainBlockState::PendingAvailability =>
+					if self.is_slow_availability(candidate.assigned_core) {
+						progress.events.push(ParachainConsensusEvent::SlowAvailability(
+							candidate.current_availability_bits,
+							candidate.max_availability_bits,
+						));
+						stats.on_slow_availability();
+						metrics.on_slow_availability(self.para_id);
+					},
+				ParachainBlockState::Included => {
 					progress.events.push(ParachainConsensusEvent::Included(
-						candidate_hash,
-						self.current_candidate.current_availability_bits,
-						self.current_candidate.max_availability_bits,
+						candidate.candidate_hash,
+						candidate.current_availability_bits,
+						candidate.max_availability_bits,
 					));
 
-					let backed_in = self.candidate_backed_in(candidate_hash, storage).await;
+					let backed_in = self.candidate_backed_in(candidate.candidate_hash, storage).await;
 					let relay_block = self.current_relay_block.expect("Checked by caller; qed");
 					stats.on_included(relay_block.num, self.previous_included_at.map(|v| v.num), backed_in);
 					metrics.on_included(
@@ -460,14 +505,7 @@ impl SubxtTracker {
 						time_diff(Some(relay_block.ts), self.previous_included_at.map(|v| v.ts)),
 						self.para_id,
 					);
-				}
-			} else if self.is_slow_availability() {
-				progress.events.push(ParachainConsensusEvent::SlowAvailability(
-					self.current_candidate.current_availability_bits,
-					self.current_candidate.max_availability_bits,
-				));
-				stats.on_slow_availability();
-				metrics.on_slow_availability(self.para_id);
+				},
 			}
 		}
 	}
@@ -476,6 +514,25 @@ impl SubxtTracker {
 		let cur_ts = self.current_relay_block.map(|v| v.ts).unwrap_or_default();
 		let base_ts = self.last_non_fork_relay_block_ts.unwrap_or(cur_ts);
 		Duration::from_millis(cur_ts).saturating_sub(Duration::from_millis(base_ts))
+	}
+
+	fn current_candidate(&self, core: u32) -> Option<&ParachainBlockInfo> {
+		self.candidates.get(&core).and_then(|v| v.last()).and_then(|v| v.as_ref())
+	}
+
+	fn current_candidate_mut(&mut self, core: u32) -> Option<&mut ParachainBlockInfo> {
+		self.candidates
+			.get_mut(&core)
+			.and_then(|v| v.last_mut())
+			.and_then(|v| v.as_mut())
+	}
+
+	fn all_candidates_and_skipped_slots(&self) -> impl Iterator<Item = Option<&ParachainBlockInfo>> {
+		self.candidates.values().flatten().map(|v| v.as_ref())
+	}
+
+	fn all_candidates_mut(&mut self) -> impl Iterator<Item = &mut ParachainBlockInfo> {
+		self.candidates.values_mut().flatten().filter_map(|v| v.as_mut())
 	}
 
 	fn is_fork(&self) -> bool {
@@ -497,11 +554,17 @@ impl SubxtTracker {
 		time_diff(self.current_relay_block.map(|v| v.ts), self.on_demand_order_at.map(|v| v.ts))
 	}
 
-	fn has_backed_candidate(&self) -> bool {
-		self.current_candidate.candidate.is_some() ||
+	fn has_backed_candidate(&self, core: u32) -> bool {
+		self.candidates
+			.get(&core)
+			.map_or(false, |v| v.iter().any(|candidate| candidate.is_some())) ||
 			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
+	}
+
+	fn is_current_candidate_backed(&self, core: u32) -> bool {
+		self.current_candidate(core).map_or(false, |v| v.is_backed())
 	}
 
 	fn is_just_backed(&self) -> bool {
@@ -509,13 +572,12 @@ impl SubxtTracker {
 			self.last_backed_at_block_number == self.current_relay_block.map(|v| v.num)
 	}
 
-	fn is_slow_availability(&self) -> bool {
-		self.current_candidate.core_occupied &&
-			self.last_backed_at_block_number != self.current_relay_block.map(|v| v.num)
+	fn is_slow_availability(&self, core: u32) -> bool {
+		self.current_candidate(core).map_or(false, |v| v.core_occupied) && !self.is_just_backed()
 	}
 
 	async fn validators_indices(
-		&mut self,
+		&self,
 		block_hash: H256,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<Vec<ValidatorIndex>> {
@@ -534,6 +596,10 @@ impl SubxtTracker {
 				.backed
 				.saturating_sub(v.candidate_inclusion.relay_parent_number)
 		})
+	}
+
+	async fn candidate_core(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {
+		storage.candidate(candidate_hash).await.map(|v| v.core_idx())
 	}
 }
 
@@ -554,16 +620,21 @@ mod test_inject_new_session {
 
 #[cfg(test)]
 mod test_maybe_reset_state {
+	use crate::test_utils::create_para_block_info;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn test_resets_state_if_not_backed() {
 		let mut tracker = SubxtTracker::new(100);
-		tracker.current_candidate.set_included();
+		let mut candidate = create_para_block_info(100);
+		candidate.set_included();
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
+		tracker.cores.entry(0).or_default().push(100);
 
 		tracker.maybe_reset_state();
 
@@ -571,19 +642,24 @@ mod test_maybe_reset_state {
 		assert!(tracker.on_demand_order.is_none());
 		assert!(!tracker.is_on_demand_scheduled_in_current_block);
 		assert!(tracker.disputes.is_empty());
-		assert!(tracker.current_candidate.is_idle());
+		for (_, candidates) in tracker.candidates {
+			assert!(candidates.is_empty());
+		}
 	}
 
 	#[tokio::test]
 	async fn test_resets_state_if_backed() {
 		let mut tracker = SubxtTracker::new(100);
-		tracker.current_candidate.set_backed();
+		let candidate = create_para_block_info(100);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
 		tracker.on_demand_order_at = Some(BlockWithoutHash::default());
 		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
+		tracker.cores.entry(0).or_default().push(100);
 
+		assert!(tracker.is_current_candidate_backed(0));
 		tracker.maybe_reset_state();
 
 		assert!(tracker.on_demand_order_at.is_none());
@@ -596,11 +672,12 @@ mod test_maybe_reset_state {
 
 #[cfg(test)]
 mod test_inject_block {
-	use std::collections::BTreeMap;
-
 	use super::*;
-	use crate::test_utils::{create_inherent_data, create_storage, storage_write};
+	use crate::test_utils::{
+		create_candidate_record, create_inherent_data, create_para_block_info, create_storage, storage_write,
+	};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
+	use std::collections::BTreeMap;
 
 	#[tokio::test]
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
@@ -611,7 +688,7 @@ mod test_inject_block {
 		tracker.inject_block(hash, 0, &tracker_storage).await.unwrap();
 
 		assert!(tracker.new_session.is_none());
-		assert!(tracker.current_candidate.candidate.is_none());
+		assert!(tracker.candidates.is_empty());
 		assert!(tracker.current_relay_block.is_none());
 		assert!(tracker.previous_relay_block.is_none());
 		assert!(tracker.last_non_fork_relay_block_ts.is_none());
@@ -636,7 +713,15 @@ mod test_inject_block {
 		let tracker_storage = TrackerStorage::new(100, storage.clone());
 
 		// Inject a block
-		storage_write(CollectorPrefixType::CoreAssignments, first_hash, BTreeMap::<u32, Vec<u32>>::default(), &storage)
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			first_hash,
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
+			&storage,
+		)
+		.await
+		.unwrap();
+		storage_write(CollectorPrefixType::BackingGroups, first_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &storage)
@@ -657,11 +742,14 @@ mod test_inject_block {
 		storage_write(
 			CollectorPrefixType::CoreAssignments,
 			second_hash,
-			BTreeMap::<u32, Vec<u32>>::default(),
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
 			&storage,
 		)
 		.await
 		.unwrap();
+		storage_write(CollectorPrefixType::BackingGroups, second_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
+			.await
+			.unwrap();
 		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(100), &storage)
 			.await
 			.unwrap();
@@ -680,6 +768,101 @@ mod test_inject_block {
 		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1));
 		assert_eq!(tracker.finality_lag, Some(2));
 	}
+
+	#[tokio::test]
+	async fn test_sets_backed_candidates() {
+		let storage = create_storage();
+		let tracker_storage = TrackerStorage::new(100, storage.clone());
+		let mut tracker = SubxtTracker::new(100);
+
+		let block_hash = H256::random();
+		let inherent_data = create_inherent_data(100);
+		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
+		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate);
+
+		// Inject a block
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			block_hash,
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
+			&storage,
+		)
+		.await
+		.unwrap();
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Paras], &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::InherentData, block_hash, inherent_data, &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
+			.await
+			.unwrap();
+		storage_write(
+			CollectorPrefixType::Candidate(100),
+			candidate_hash,
+			create_candidate_record(100, 42, None, H256::random(), 40),
+			&storage,
+		)
+		.await
+		.unwrap();
+
+		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
+
+		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
+		assert!(candidate.candidate_hash == candidate_hash);
+		assert!(candidate.is_backed());
+	}
+
+	#[tokio::test]
+	async fn test_sets_included_candidates() {
+		let storage = create_storage();
+		let tracker_storage = TrackerStorage::new(100, storage.clone());
+		let mut tracker = SubxtTracker::new(100);
+
+		let block_hash = H256::random();
+		let candidate = create_para_block_info(100);
+		let candidate_hash = candidate.candidate_hash;
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+
+		// Inject a block
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			block_hash,
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
+			&storage,
+		)
+		.await
+		.unwrap();
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Free], &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::InherentData, block_hash, create_inherent_data(100), &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
+			.await
+			.unwrap();
+		storage_write(
+			CollectorPrefixType::Candidate(100),
+			candidate_hash,
+			create_candidate_record(100, 41, Some(42), H256::random(), 40),
+			&storage,
+		)
+		.await
+		.unwrap();
+
+		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
+
+		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
+		assert!(candidate.is_included());
+	}
 }
 
 #[cfg(test)]
@@ -688,7 +871,9 @@ mod test_progress {
 	use crate::{
 		prometheus::{Metrics, MockPrometheusMetrics},
 		stats::{MockStats, ParachainStats},
-		test_utils::{create_candidate_record, create_hrmp_channels, create_storage, storage_write},
+		test_utils::{
+			create_candidate_record, create_hrmp_channels, create_para_block_info, create_storage, storage_write,
+		},
 	};
 	use mockall::predicate::eq;
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
@@ -723,7 +908,9 @@ mod test_progress {
 		assert_eq!(progress.para_id, 100);
 		assert!(!progress.is_fork);
 		assert!(progress.finality_lag.is_none());
-		assert!(!progress.core_occupied);
+		for (_, core_occupied) in progress.core_occupied {
+			assert!(!core_occupied);
+		}
 	}
 
 	#[tokio::test]
@@ -758,10 +945,12 @@ mod test_progress {
 		let tracker_storage = TrackerStorage::new(100, create_storage());
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
+		let mut candidate = create_para_block_info(100);
 
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		tracker.current_candidate.assigned_core = Some(0);
-		tracker.current_candidate.core_occupied = true;
+		candidate.core_occupied = true;
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+		tracker.cores.entry(0).or_default().push(100);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
 		assert!(progress
@@ -774,6 +963,7 @@ mod test_progress {
 	async fn test_includes_slow_propogation() {
 		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let mut candidate = create_para_block_info(100);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -786,7 +976,9 @@ mod test_progress {
 
 		// Bitfields propogation isn't slow
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		tracker.current_candidate.bitfield_count = 120;
+		candidate.bitfield_count = 120;
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+		tracker.cores.entry(0).or_default().push(100);
 		mock_stats.expect_on_bitfields().with(eq(120), eq(false)).returning(|_, _| ());
 		mock_metrics
 			.expect_on_bitfields()
@@ -803,8 +995,8 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
 
 		// Bitfields propogation is slow
-		tracker.current_candidate.set_backed();
-		tracker.current_candidate.max_availability_bits = 200;
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
+		candidate.max_availability_bits = 200;
 		mock_stats.expect_on_bitfields().with(eq(120), eq(true)).returning(|_, _| ());
 		mock_metrics
 			.expect_on_bitfields()
@@ -974,6 +1166,7 @@ mod test_progress {
 		mock_metrics.expect_init_disputes().returning(|_| ());
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
+		mock_metrics.expect_on_backed().returning(|_| ());
 		mock_metrics.expect_on_block().returning(|_, _| ());
 
 		// With on-demand order
@@ -1005,7 +1198,9 @@ mod test_progress {
 		let _progress = tracker.progress(&mut stats, &mock_metrics, &tracker_storage).await.unwrap();
 		tracker.is_on_demand_scheduled_in_current_block = false;
 		// If backed
-		tracker.current_candidate.set_backed();
+		let candidate = create_para_block_info(100);
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+		tracker.cores.entry(0).or_default().push(100);
 		mock_metrics
 			.expect_handle_on_demand_delay()
 			.with(eq(1), eq(100), eq("backed"))
@@ -1035,7 +1230,7 @@ mod test_progress {
 		storage_write(
 			CollectorPrefixType::Candidate(100),
 			candidate_hash,
-			create_candidate_record(100, 41, H256::random(), 40),
+			create_candidate_record(100, 41, None, H256::random(), 40),
 			&storage,
 		)
 		.await
@@ -1043,7 +1238,7 @@ mod test_progress {
 
 		// When candidate is idle
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		tracker.current_candidate.set_idle();
+		tracker.candidates.entry(0).or_default().push(None);
 		mock_stats.expect_on_skipped_slot().once().returning(|_| ());
 		mock_metrics.expect_on_skipped_slot().once().returning(|_| ());
 		let progress = tracker
@@ -1057,8 +1252,9 @@ mod test_progress {
 			.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot)));
 
 		// When candidate is backed
-		tracker.current_candidate.set_backed();
-		tracker.current_candidate.candidate_hash = Some(candidate_hash);
+		let candidate = ParachainBlockInfo::new(candidate_hash, 0, 0);
+		tracker.candidates.clear();
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		mock_stats.expect_on_backed().once().returning(|| ());
 		mock_metrics.expect_on_backed().with(eq(100)).once().returning(|_| ());
 		let progress = tracker
@@ -1070,11 +1266,49 @@ mod test_progress {
 
 		// When candidate is pending
 		// And data is available
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
+		candidate.set_pending();
+		candidate.max_availability_bits = 200;
+		candidate.current_availability_bits = 140;
+		candidate.bitfield_count = 150;
+		// tracker.previous_included_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
+		let progress = tracker
+			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
+			.await
+			.unwrap();
+
+		assert!(progress.events.is_empty());
+
+		// And availability is slow
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
+		candidate.max_availability_bits = 200;
+		candidate.current_availability_bits = 120;
+		candidate.bitfield_count = 150;
+		candidate.core_occupied = true;
+		tracker.last_backed_at_block_number = Some(41);
+		mock_stats.expect_on_slow_availability().once().returning(|| ());
+		mock_metrics
+			.expect_on_slow_availability()
+			.with(eq(100))
+			.once()
+			.returning(|_| ());
+		let progress = tracker
+			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
+			.await
+			.unwrap();
+
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
+
+		// When candidate is included and data is available
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
+		candidate.set_included();
+		candidate.max_availability_bits = 200;
+		candidate.current_availability_bits = 140;
+		candidate.bitfield_count = 150;
 		tracker.previous_included_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
-		tracker.current_candidate.set_pending();
-		tracker.current_candidate.max_availability_bits = 200;
-		tracker.current_candidate.current_availability_bits = 140;
-		tracker.current_candidate.bitfield_count = 150;
 		mock_stats
 			.expect_on_included()
 			.with(eq(42), eq(Some(41)), eq(None))
@@ -1090,93 +1324,10 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
-		assert_eq!(progress.bitfield_health.available_count, 140);
-		assert_eq!(progress.bitfield_health.bitfield_count, 150);
 		assert!(progress
 			.events
 			.iter()
 			.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _))));
-
-		// And availability is slow
-		tracker.current_candidate.max_availability_bits = 200;
-		tracker.current_candidate.current_availability_bits = 120;
-		tracker.current_candidate.bitfield_count = 150;
-		tracker.current_candidate.core_occupied = true;
-		tracker.last_backed_at_block_number = Some(41);
-		mock_stats.expect_on_slow_availability().once().returning(|| ());
-		mock_metrics
-			.expect_on_slow_availability()
-			.with(eq(100))
-			.once()
-			.returning(|_| ());
-		let progress = tracker
-			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
-			.await
-			.unwrap();
-
-		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
-		assert_eq!(progress.bitfield_health.available_count, 120);
-		assert_eq!(progress.bitfield_health.bitfield_count, 150);
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
-
-		// When candidate is included (all checks are same as for pending)
-		// And data is available
-		tracker.previous_included_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
-		tracker.current_candidate.set_included();
-		tracker.current_candidate.max_availability_bits = 200;
-		tracker.current_candidate.current_availability_bits = 140;
-		tracker.current_candidate.bitfield_count = 150;
-		mock_stats
-			.expect_on_included()
-			.with(eq(42), eq(Some(41)), eq(None))
-			.once()
-			.returning(|_, _, _| ());
-		mock_metrics
-			.expect_on_included()
-			.with(eq(42), eq(Some(41)), eq(None), eq(Some(Duration::from_secs(6))), eq(100))
-			.once()
-			.returning(|_, _, _, _, _| ());
-		let progress = tracker
-			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
-			.await
-			.unwrap();
-
-		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
-		assert_eq!(progress.bitfield_health.available_count, 140);
-		assert_eq!(progress.bitfield_health.bitfield_count, 150);
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _))));
-
-		// And availability is slow
-		tracker.current_candidate.max_availability_bits = 200;
-		tracker.current_candidate.current_availability_bits = 120;
-		tracker.current_candidate.bitfield_count = 150;
-		tracker.current_candidate.core_occupied = true;
-		tracker.last_backed_at_block_number = Some(41);
-		mock_stats.expect_on_slow_availability().once().returning(|| ());
-		mock_metrics
-			.expect_on_slow_availability()
-			.with(eq(100))
-			.once()
-			.returning(|_| ());
-		let progress = tracker
-			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
-			.await
-			.unwrap();
-
-		assert_eq!(progress.bitfield_health.max_bitfield_count, 200);
-		assert_eq!(progress.bitfield_health.available_count, 120);
-		assert_eq!(progress.bitfield_health.bitfield_count, 150);
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
 	}
 
 	#[tokio::test]
@@ -1200,5 +1351,146 @@ mod test_progress {
 			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
 			.await
 			.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod test_logic {
+	use crate::test_utils::create_para_block_info;
+
+	use super::*;
+
+	fn block_with_num(num: u32) -> Block {
+		Block { num, hash: Default::default(), ts: Default::default() }
+	}
+
+	#[test]
+	fn test_is_fork() {
+		let mut tracker = SubxtTracker::new(100);
+
+		tracker.previous_relay_block = None;
+		tracker.current_relay_block = None;
+		assert!(!tracker.is_fork());
+
+		tracker.previous_relay_block = None;
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(!tracker.is_fork());
+
+		tracker.previous_relay_block = Some(block_with_num(41));
+		tracker.current_relay_block = None;
+		assert!(!tracker.is_fork());
+
+		tracker.previous_relay_block = Some(block_with_num(41));
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(!tracker.is_fork());
+
+		tracker.previous_relay_block = Some(block_with_num(42));
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(tracker.is_fork());
+	}
+
+	#[test]
+	fn test_has_backed_candidate() {
+		let relay_hash = H256::default();
+		let relay_number = 42;
+		let mut tracker = SubxtTracker::new(100);
+		tracker.candidates.entry(0).or_default().push(Some(create_para_block_info(100)));
+		tracker.candidates.entry(1).or_default().push(None);
+
+		assert!(tracker.has_backed_candidate(0));
+		assert!(!tracker.has_backed_candidate(1));
+		assert!(!tracker.has_backed_candidate(2));
+
+		tracker.candidates.clear();
+		assert!(!tracker.has_backed_candidate(0));
+
+		tracker.relay_forks.clear();
+		tracker.relay_forks.push(ForkTracker {
+			relay_hash,
+			relay_number,
+			backed_candidate: None,
+			included_candidate: None,
+		});
+		assert!(!tracker.has_backed_candidate(0));
+
+		tracker.relay_forks.clear();
+		tracker.relay_forks.push(ForkTracker {
+			relay_hash,
+			relay_number,
+			backed_candidate: Some(H256::default()),
+			included_candidate: None,
+		});
+		assert!(tracker.has_backed_candidate(0));
+
+		tracker.relay_forks.clear();
+		tracker.relay_forks.push(ForkTracker {
+			relay_hash,
+			relay_number,
+			backed_candidate: None,
+			included_candidate: Some(H256::default()),
+		});
+		assert!(tracker.has_backed_candidate(0));
+	}
+
+	#[test]
+	fn test_is_current_candidate_backed() {
+		let mut tracker = SubxtTracker::new(100);
+
+		assert!(!tracker.is_current_candidate_backed(0));
+
+		tracker.candidates.entry(0).or_default().push(None);
+		assert!(!tracker.is_current_candidate_backed(0));
+
+		let candidate = create_para_block_info(100);
+		tracker.candidates.clear();
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+		assert!(tracker.is_current_candidate_backed(0));
+	}
+
+	#[test]
+	fn test_is_just_backed() {
+		let mut tracker = SubxtTracker::new(100);
+
+		tracker.last_backed_at_block_number = None;
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(!tracker.is_just_backed());
+
+		tracker.last_backed_at_block_number = Some(41);
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(!tracker.is_just_backed());
+
+		tracker.last_backed_at_block_number = Some(42);
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(tracker.is_just_backed());
+	}
+
+	#[test]
+	fn test_is_slow_availability() {
+		let mut tracker = SubxtTracker::new(100);
+
+		assert!(!tracker.is_slow_availability(0));
+
+		let mut candidate = create_para_block_info(100);
+		candidate.core_occupied = true;
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+		tracker.last_backed_at_block_number = Some(42);
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(!tracker.is_slow_availability(0));
+
+		let mut candidate = create_para_block_info(100);
+		candidate.core_occupied = false;
+		tracker.candidates.clear();
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+		tracker.last_backed_at_block_number = Some(41);
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(!tracker.is_slow_availability(0));
+
+		let mut candidate = create_para_block_info(100);
+		candidate.core_occupied = true;
+		tracker.candidates.clear();
+		tracker.candidates.entry(0).or_default().push(Some(candidate));
+		tracker.last_backed_at_block_number = Some(41);
+		tracker.current_relay_block = Some(block_with_num(42));
+		assert!(tracker.is_slow_availability(0));
 	}
 }
