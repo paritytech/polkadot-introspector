@@ -26,7 +26,6 @@ use crate::{
 	types::{AccountId32, BlockNumber, Header, InherentData, SessionKeys, SubxtHrmpChannel, Timestamp, H256},
 };
 use clap::ValueEnum;
-use dyn_clone::DynClone;
 use std::collections::BTreeMap;
 use subxt::{
 	backend::{
@@ -35,10 +34,12 @@ use subxt::{
 		StreamOf,
 	},
 	blocks::{Block, BlockRef, BlocksClient},
-	client::{LightClient, OnlineClientT},
+	client::OnlineClientT,
 	dynamic::Value,
 	events::{Events, EventsClient},
+	lightclient::LightClient,
 	storage::StorageClient,
+	utils::fetch_chainspec_from_rpc_node,
 	OnlineClient, PolkadotConfig,
 };
 
@@ -50,36 +51,6 @@ pub enum ApiClientMode {
 	#[default]
 	RPC,
 	Light,
-}
-
-#[async_trait::async_trait]
-pub trait ApiClientT: DynClone + Send + Sync {
-	async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error>;
-	async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error>;
-	async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error>;
-	async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error>;
-	async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error>;
-	async fn get_session_account_keys(&self, session_index: u32) -> Result<Option<Vec<AccountId32>>, subxt::Error>;
-	async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error>;
-	async fn get_inbound_outbound_hrmp_channels(
-		&self,
-		block_hash: H256,
-		para_ids: Vec<u32>,
-	) -> Result<Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>, subxt::Error>;
-	async fn fetch_dynamic_storage(
-		&self,
-		maybe_hash: Option<H256>,
-		pallet_name: &str,
-		entry_name: &str,
-	) -> Result<Option<Value<u32>>, subxt::Error>;
-	async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error>;
-	// We need it only for the historical mode to convert block numbers into their hashes
-	async fn legacy_get_block_hash(
-		&self,
-		maybe_block_number: Option<BlockNumber>,
-	) -> Result<Option<H256>, subxt::Error>;
-	async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error>;
-	async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error>;
 }
 
 #[derive(Clone)]
@@ -193,41 +164,40 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 }
 
-#[async_trait::async_trait]
-impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
-	async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error> {
+impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
+	pub async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error> {
 		Ok(self.block_at(maybe_hash).await?.header().clone())
 	}
 
-	async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error> {
+	pub async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error> {
 		Ok(self.block_at(maybe_hash).await?.number())
 	}
 
-	async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
+	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
 		let timestamp = polkadot::storage().timestamp().now();
 		self.storage().at(hash).fetch(&timestamp).await
 	}
 
-	async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
+	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
 		self.events().at(hash).await
 	}
 
-	async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {
+	pub async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {
 		let addr = polkadot::storage().session().current_index();
 		self.storage().at(hash).fetch(&addr).await
 	}
 
-	async fn get_session_account_keys(&self, session_index: u32) -> Result<Option<Vec<AccountId32>>, subxt::Error> {
+	pub async fn get_session_account_keys(&self, session_index: u32) -> Result<Option<Vec<AccountId32>>, subxt::Error> {
 		let addr = polkadot::storage().para_session_info().account_keys(session_index);
 		self.storage().at_latest().await?.fetch(&addr).await
 	}
 
-	async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
+	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
 		let addr = polkadot::storage().session().next_keys(account);
 		self.storage().at_latest().await?.fetch(&addr).await
 	}
 
-	async fn get_inbound_outbound_hrmp_channels(
+	pub async fn get_inbound_outbound_hrmp_channels(
 		&self,
 		block_hash: H256,
 		para_ids: Vec<u32>,
@@ -269,7 +239,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 			.collect())
 	}
 
-	async fn fetch_dynamic_storage(
+	pub async fn fetch_dynamic_storage(
 		&self,
 		maybe_hash: Option<H256>,
 		pallet_name: &str,
@@ -279,16 +249,13 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 			Some(hash) => self.storage().at(hash),
 			None => self.storage().at_latest().await?,
 		};
-		match storage
-			.fetch(&subxt::dynamic::storage(pallet_name, entry_name, Vec::<u8>::new()))
-			.await?
-		{
+		match storage.fetch(&subxt::dynamic::storage(pallet_name, entry_name, vec![])).await? {
 			Some(v) => Ok(Some(v.to_value()?)),
 			None => Ok(None),
 		}
 	}
 
-	async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error> {
+	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error> {
 		let block = self.block_at(maybe_hash).await?;
 		let ex = block
 			.extrinsics()
@@ -306,7 +273,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		Ok(enter.data)
 	}
 
-	async fn legacy_get_block_hash(
+	// We need it only for the historical mode to convert block numbers into their hashes
+	pub async fn legacy_get_block_hash(
 		&self,
 		maybe_block_number: Option<BlockNumber>,
 	) -> Result<Option<H256>, subxt::Error> {
@@ -314,35 +282,41 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClientT for ApiClient<T> {
 		self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await
 	}
 
-	async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
+	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
 		self.client.backend().stream_best_block_headers().await
 	}
 
-	async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
+	pub async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
 		self.client.backend().stream_finalized_block_headers().await
 	}
 }
 
-pub async fn build_online_client(url: &str) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, String> {
-	let rpc_client = RpcClient::from_url(url)
-		.await
-		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
-	let client = OnlineClient::from_rpc_client(rpc_client.clone())
-		.await
-		.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
-	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
-
-	Ok(ApiClient { client, legacy_rpc_methods })
-}
-
-pub async fn build_light_client(url: &str) -> Result<ApiClient<LightClient<PolkadotConfig>>, String> {
-	let rpc_client = RpcClient::from_url(url)
-		.await
-		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
-	let client = LightClient::builder()
-		.build_from_url(url)
-		.await
-		.map_err(|e| format!("Cannot construct LightClient from url: {e}"))?;
+pub async fn build_online_client(
+	url: &str,
+	mode: ApiClientMode,
+) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, String> {
+	let (client, rpc_client) = match mode {
+		ApiClientMode::RPC => {
+			let rpc_client = RpcClient::from_url(url)
+				.await
+				.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+			let client = OnlineClient::from_rpc_client(rpc_client.clone())
+				.await
+				.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
+			(client, rpc_client)
+		},
+		ApiClientMode::Light => {
+			let chainspec = fetch_chainspec_from_rpc_node(url)
+				.await
+				.map_err(|e| format!("Cannot fetch chainspec: {e}"))?;
+			let (_client, rpc_client) =
+				LightClient::relay_chain(chainspec.get()).map_err(|e| format!("Cannot construct LightClient: {e}"))?;
+			let client = OnlineClient::from_rpc_client(rpc_client.clone())
+				.await
+				.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
+			(client, rpc_client.into())
+		},
+	};
 	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
 
 	Ok(ApiClient { client, legacy_rpc_methods })
