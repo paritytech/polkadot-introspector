@@ -14,7 +14,7 @@ on:
 
 env:
   DOCKERFILE: scripts/ci/dockerfiles/polkadot-introspector_injected.Dockerfile
-  CI_IMAGE: paritytech/ci-unified:bullseye-1.74.0
+  CI_IMAGE: paritytech/ci-unified:bullseye-1.77.0
   IMAGE_NAME: paritytech/polkadot-introspector
   IMAGE_TAG: STUB_TAG
   PUSH_IMAGE: false # decision whether to push image will be taken at a later step
