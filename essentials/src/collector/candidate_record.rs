@@ -71,11 +71,11 @@ where
 		let mut state = serializer.serialize_struct("CandidateDescriptor", 9)?;
 		state.serialize_field("para_id", &self.para_id.0)?;
 		state.serialize_field("relay_parent", &self.relay_parent)?;
-		state.serialize_field("collator", &self.collator.0 .0)?;
+		state.serialize_field("collator", &self.collator.0)?;
 		state.serialize_field("persisted_validation_data_hash", &self.persisted_validation_data_hash)?;
 		state.serialize_field("pov_hash", &self.pov_hash)?;
 		state.serialize_field("erasure_root", &self.erasure_root)?;
-		state.serialize_field("signature", Bytes::new(&self.signature.0 .0))?;
+		state.serialize_field("signature", Bytes::new(&self.signature.0))?;
 		state.serialize_field("para_head", &self.para_head)?;
 		state.serialize_field("validation_code_hash", &self.validation_code_hash.0)?;
 		state.end()
