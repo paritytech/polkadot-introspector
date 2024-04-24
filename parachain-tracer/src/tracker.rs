@@ -129,6 +129,7 @@ impl SubxtTracker {
 			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
 			self.set_pending_availability(block_hash, bitfields, storage).await?;
+			self.set_dropped_candidates();
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
 		}
@@ -191,9 +192,13 @@ impl SubxtTracker {
 		self.on_demand_order = None;
 		self.is_on_demand_scheduled_in_current_block = false;
 		self.disputes.clear();
-		self.candidates
-			.values_mut()
-			.for_each(|v| v.retain(|v| v.is_some() && v.as_ref().map_or(false, |v| !v.is_included())));
+		self.candidates.values_mut().for_each(|v| {
+			v.retain(|v| {
+				v.is_some() &&
+					v.as_ref()
+						.map_or(false, |candidate| !candidate.is_included() && !candidate.is_dropped())
+			})
+		});
 	}
 
 	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
@@ -291,6 +296,25 @@ impl SubxtTracker {
 		for core in idle_cores {
 			if !self.has_backed_candidate(core) {
 				self.candidates.entry(core).or_default().push(None);
+			}
+		}
+	}
+
+	fn set_dropped_candidates(&mut self) {
+		for candidates in self.candidates.values_mut() {
+			let mut backed_candidates: Vec<_> = candidates
+				.iter_mut()
+				.flatten()
+				.filter(|candidate| !candidate.is_included())
+				.collect();
+			// We have more than one backed candidate
+			// because of session change or availability core timeout
+			if backed_candidates.len() > 1 {
+				// We keep tracking the last backed candidate
+				let _ = backed_candidates.pop();
+				for candidate in backed_candidates {
+					candidate.set_dropped();
+				}
 			}
 		}
 	}
@@ -479,7 +503,10 @@ impl SubxtTracker {
 					stats.on_backed();
 					metrics.on_backed(self.para_id);
 				},
-				ParachainBlockState::PendingAvailability =>
+				ParachainBlockState::PendingAvailability => {
+					progress
+						.events
+						.push(ParachainConsensusEvent::PendingAvailability(candidate.candidate_hash));
 					if self.is_slow_availability(candidate.assigned_core) {
 						progress.events.push(ParachainConsensusEvent::SlowAvailability(
 							candidate.current_availability_bits,
@@ -487,7 +514,8 @@ impl SubxtTracker {
 						));
 						stats.on_slow_availability();
 						metrics.on_slow_availability(self.para_id);
-					},
+					}
+				},
 				ParachainBlockState::Included => {
 					progress.events.push(ParachainConsensusEvent::Included(
 						candidate.candidate_hash,
@@ -506,6 +534,8 @@ impl SubxtTracker {
 						self.para_id,
 					);
 				},
+				ParachainBlockState::Dropped =>
+					progress.events.push(ParachainConsensusEvent::Dropped(candidate.candidate_hash)),
 			}
 		}
 	}
@@ -815,6 +845,57 @@ mod test_inject_block {
 		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.candidate_hash == candidate_hash);
 		assert!(candidate.is_backed());
+	}
+
+	#[tokio::test]
+	async fn test_sets_dropped_candidates() {
+		let storage = create_storage();
+		let tracker_storage = TrackerStorage::new(100, storage.clone());
+		let mut tracker = SubxtTracker::new(100);
+
+		let block_hash = H256::random();
+		let inherent_data = create_inherent_data(100);
+		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
+		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate);
+
+		// Inject a block
+		storage_write(
+			CollectorPrefixType::CoreAssignments,
+			block_hash,
+			BTreeMap::<u32, Vec<u32>>::from([(0, vec![100])]),
+			&storage,
+		)
+		.await
+		.unwrap();
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Paras], &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::InherentData, block_hash, inherent_data, &storage)
+			.await
+			.unwrap();
+		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
+			.await
+			.unwrap();
+		storage_write(
+			CollectorPrefixType::Candidate(100),
+			candidate_hash,
+			create_candidate_record(100, 42, None, H256::random(), 40),
+			&storage,
+		)
+		.await
+		.unwrap();
+
+		// Actually, we inject the same block twice, but for current asserts it is OK
+		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
+		tracker.inject_block(block_hash, 43, &tracker_storage).await.unwrap();
+
+		let candidates = tracker.candidates.get(&0).unwrap();
+		assert!(candidates.len() == 2);
+		assert!(candidates.get(0).unwrap().as_ref().unwrap().is_dropped());
+		assert!(candidates.get(1).unwrap().as_ref().unwrap().is_backed());
 	}
 
 	#[tokio::test]
@@ -1264,6 +1345,16 @@ mod test_progress {
 
 		assert!(progress.events.iter().any(|e| matches!(e, ParachainConsensusEvent::Backed(_))));
 
+		// When candidate is dropped
+		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
+		candidate.set_dropped();
+		let progress = tracker
+			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
+			.await
+			.unwrap();
+
+		assert!(progress.events.iter().any(|e| matches!(e, ParachainConsensusEvent::Dropped(_))));
+
 		// When candidate is pending
 		// And data is available
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
@@ -1271,13 +1362,15 @@ mod test_progress {
 		candidate.max_availability_bits = 200;
 		candidate.current_availability_bits = 140;
 		candidate.bitfield_count = 150;
-		// tracker.previous_included_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
 		let progress = tracker
 			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
 			.await
 			.unwrap();
 
-		assert!(progress.events.is_empty());
+		assert!(progress
+			.events
+			.iter()
+			.any(|e| matches!(e, ParachainConsensusEvent::PendingAvailability(_))));
 
 		// And availability is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
