@@ -894,7 +894,7 @@ mod test_inject_block {
 
 		let candidates = tracker.candidates.get(&0).unwrap();
 		assert!(candidates.len() == 2);
-		assert!(candidates.get(0).unwrap().as_ref().unwrap().is_dropped());
+		assert!(candidates.first().unwrap().as_ref().unwrap().is_dropped());
 		assert!(candidates.get(1).unwrap().as_ref().unwrap().is_backed());
 	}
 
