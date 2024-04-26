@@ -1,12 +1,9 @@
-name: continuous-integration
+name: CI for tags
 
 on:
-  pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "CODEOWNERS"
-      - "LICENSE"
-      - "FILE_TEMPLATE"
+  push:
+    tags:
+      - "v*"
 
 env:
   DOCKERFILE: scripts/ci/dockerfiles/polkadot-introspector_injected.Dockerfile
@@ -23,57 +20,6 @@ jobs:
     steps:
       - id: set_image
         run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
-
-  # lint
-  lint:
-    runs-on: ubuntu-latest
-    needs: [set-image]
-    container:
-      image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: fmt
-        run: |
-          time cargo +nightly fmt --all -- --check
-
-      - name: Clippy
-        run: |
-          time cargo clippy --all-targets -- -D warnings
-
-      - name: Check
-        run: time cargo check --all-targets --workspace
-
-  # test
-  test:
-    runs-on: ubuntu-latest
-    needs: [set-image]
-    container:
-      image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Test
-        run: |
-          rustup show
-          cargo --version
-          rustup +nightly show
-          cargo +nightly --version
-          bash --version
-          ./scripts/ci/zombienet/zombie.sh setup
-          ZOMBIE_WS_PORT=9900 ./scripts/ci/zombienet/zombie.sh run ./scripts/ci/zombienet/network.toml
-          WS_URL=ws://127.0.0.1:9900 time cargo test --all-targets --workspace
-          ./scripts/ci/zombienet/zombie.sh shutdown
 
   # build
   build:
@@ -94,7 +40,7 @@ jobs:
         run: |
           time cargo build --release
 
-      - name: Archive aritfacts
+      - name: Archive artifacts
         uses: actions/upload-artifact@v3
         with:
           name: polkadot-introspector
@@ -106,13 +52,19 @@ jobs:
             target/release/polkadot-whois
           retention-days: 1
 
-  # build docker image
-  build-docker:
+  # build/publish docker image
+  build-publish-docker:
     runs-on: ubuntu-latest
     needs: [set-image, build]
+    environment: tags
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set image tag for Docker image
+        run: |
+          echo "PUSH_IMAGE=true" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
 
       - name: Download artifacts
         uses: actions/download-artifact@v3
@@ -124,17 +76,24 @@ jobs:
         run: |
           chmod +x ./artifacts/*
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build/Push Docker image
         uses: docker/build-push-action@v5
         with:
-          push: false
+          push: true
           context: .
           file: ${{ env.DOCKERFILE }}
           build-args: |
             VCS_REF="${{ github.sha }}"
             build-arg BUILD_DATE="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_NAME }}:latest
