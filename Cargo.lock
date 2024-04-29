@@ -2505,7 +2505,7 @@ checksum = "4503fa043bf02cee09a9582e9554b4c6403b2ef55e4612e96561d294419429f8"
 
 [[package]]
 name = "polkadot-block-time"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "base64 0.21.7",
  "clap",
@@ -2524,7 +2524,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-essentials"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "async-trait",
  "clap",
@@ -2555,7 +2555,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-priority-channel"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "async-channel 2.2.1",
  "futures",
@@ -2567,7 +2567,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-jaeger"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "base64 0.21.7",
  "clap",
@@ -2588,7 +2588,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-kvdb"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "bincode",
  "clap",
@@ -2616,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-parachain-tracer"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "async-trait",
  "clap",
@@ -2649,7 +2649,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-whois"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "clap",
  "color-eyre",
@@ -3397,9 +3397,9 @@ checksum = "ad977052201c6de01a8ef2aa3378c4bd23217a056337d1d6da40468d267a4fb0"
 
 [[package]]
 name = "serde"
-version = "1.0.198"
+version = "1.0.199"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9846a40c979031340571da2545a4e5b7c4163bdae79b301d5f86d03979451fcc"
+checksum = "0c9f6e76df036c77cd94996771fb40db98187f096dd0b9af39c6c6e452ba966a"
 dependencies = [
  "serde_derive",
 ]
@@ -3415,9 +3415,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.198"
+version = "1.0.199"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e88edab869b01783ba905e7d0153f9fc1a6505a96e4ad3018011eedb838566d9"
+checksum = "11bd257a6541e141e42ca6d24ae26f7714887b47e89aa739099104c7e4d3b7fc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4034,9 +4034,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.34"
+version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8248b6521bb14bc45b4067159b9b6ad792e2d6d754d6c41fb50e29fefe38749"
+checksum = "5dfd88e563464686c916c7e46e623e520ddc6d79fa6641390f2e3fa86e83e885"
 dependencies = [
  "deranged",
  "itoa",
@@ -4055,9 +4055,9 @@ checksum = "ef927ca75afb808a4d64dd374f00a2adf8d0fcff8e7b184af886c3c87ec4a3f3"
 
 [[package]]
 name = "time-macros"
-version = "0.2.17"
+version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ba3a3ef41e6672a2f0f001392bb5dcd3ff0a9992d618ca761a11c3121547774"
+checksum = "3f252a68540fde3a3877aeea552b832b40ab9a69e318efd078774a01ddee1ccf"
 dependencies = [
  "num-conv",
  "time-core",

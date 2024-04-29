@@ -109,10 +109,14 @@ pub enum ParachainConsensusEvent {
 	Backed(H256),
 	/// A candidate was included, including availability bits
 	Included(H256, u32, u32),
+	/// A candidate was dropped.
+	Dropped(H256),
 	/// A dispute has concluded.
 	Disputed(DisputesTracker),
 	/// No candidate backed.
 	SkippedSlot,
+	/// Candidate is still not included
+	PendingAvailability(H256),
 	/// Candidate not available yet, including availability bits
 	SlowAvailability(u32, u32),
 	/// Inherent bitfield count is lower than 2/3 of expect.
@@ -195,10 +199,18 @@ impl Display for ParachainConsensusEvent {
 				writeln!(f, "\t- {}", "CANDIDATE BACKED".to_string().bold().green())?;
 				writeln!(f, "\t  💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
 			},
+			ParachainConsensusEvent::PendingAvailability(candidate_hash) => {
+				writeln!(f, "\t- {}", "CANDIDATE PENDING AVAILABILITY".to_string().bold().green())?;
+				writeln!(f, "\t  💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
+			},
 			ParachainConsensusEvent::Included(candidate_hash, bits_available, max_bits) => {
 				writeln!(f, "\t- {}", "CANDIDATE INCLUDED".to_string().bold().green())?;
 				writeln!(f, "\t  💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())?;
 				writeln!(f, "\t  🟢 Availability bits: {}/{}", bits_available, max_bits)
+			},
+			ParachainConsensusEvent::Dropped(candidate_hash) => {
+				writeln!(f, "\t- {}", "CANDIDATE DROPPED".to_string().bold().green())?;
+				writeln!(f, "\t  💜 Candidate hash: {} ", format!("{:?}", candidate_hash).magenta())
 			},
 			ParachainConsensusEvent::Disputed(outcome) => {
 				writeln!(f, "\t- {}", "💔 Dispute tracked:".to_string().bold())?;
