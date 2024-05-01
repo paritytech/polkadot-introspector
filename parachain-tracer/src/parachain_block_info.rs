@@ -56,12 +56,20 @@ impl ParachainBlockInfo {
 		self.state = ParachainBlockState::Included
 	}
 
+	pub fn set_dropped(&mut self) {
+		self.state = ParachainBlockState::Dropped
+	}
+
 	pub fn is_backed(&self) -> bool {
 		self.state == ParachainBlockState::Backed
 	}
 
 	pub fn is_included(&self) -> bool {
 		self.state == ParachainBlockState::Included
+	}
+
+	pub fn is_dropped(&self) -> bool {
+		self.state == ParachainBlockState::Dropped
 	}
 
 	pub fn is_bitfield_propagation_slow(&self) -> bool {
@@ -79,6 +87,8 @@ pub enum ParachainBlockState {
 	PendingAvailability,
 	// A candidate has been included.
 	Included,
+	// A candidate has been dropped after session change or availability timeout
+	Dropped,
 }
 
 #[cfg(test)]
