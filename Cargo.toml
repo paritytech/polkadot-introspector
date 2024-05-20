@@ -50,7 +50,7 @@ snap = "1.1.1"
 strum = { version = "0.25.0", features = ["derive"] }
 subxt = { default-features = false, features = ["jsonrpsee", "native", "unstable-light-client"], version = "0.35.3" }
 base64 = "0.21.7"
-thiserror = "1.0.59"
+thiserror = "1.0.61"
 time = { version = "0.3.36", features = ["formatting"] }
 tokio = { version = "1.37.0", features = ["macros", "rt", "rt-multi-thread", "signal"] }
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
