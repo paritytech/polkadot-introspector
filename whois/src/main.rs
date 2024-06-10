@@ -158,7 +158,7 @@ fn desired_node_id(node: &AddedNode, authority_key: AccountId32) -> bool {
 }
 
 fn get_authority_key(keys: SessionKeys) -> AccountId32 {
-	AccountId32::from(keys.grandpa.0 .0)
+	AccountId32::from(keys.grandpa.0)
 }
 
 fn clear_last_two_lines() {

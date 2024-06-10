@@ -22,7 +22,7 @@ use subxt::{
 	config::substrate::{BlakeTwo256, SubstrateHeader},
 	utils,
 };
-use subxt_runtime_types::polkadot_runtime as runtime;
+use subxt_runtime_types::rococo_runtime as runtime;
 
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;
