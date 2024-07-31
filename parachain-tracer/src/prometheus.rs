@@ -40,9 +40,10 @@ pub struct ParachainTracerPrometheusOptions {
 struct DisputesMetrics {
 	/// Number of candidates disputed.
 	disputed_count: IntCounterVec,
+	/// Average count of validators that voted in favor of supermajority
 	concluded_valid: IntCounterVec,
-	concluded_invalid: IntCounterVec,
 	/// Average count of validators that voted against supermajority
+	concluded_invalid: IntCounterVec,
 	/// Average resolution time in blocks
 	resolution_time: HistogramVec,
 }
@@ -179,10 +180,21 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
+	// Sets metrics to 0 at the beginning to show proper charts in Prometheus
 	fn init_disputes(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			let para_string = para_id.to_string();
 			metrics.disputes_stats.disputed_count.with_label_values(&[&para_string]).reset();
+			metrics
+				.disputes_stats
+				.concluded_valid
+				.with_label_values(&[&para_string])
+				.reset();
+			metrics
+				.disputes_stats
+				.concluded_invalid
+				.with_label_values(&[&para_string])
+				.reset();
 		}
 	}
 
