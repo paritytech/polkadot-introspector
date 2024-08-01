@@ -148,6 +148,10 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) -> Option<ParachainProgressUpdate> {
 		if let Some(block) = self.current_relay_block {
+			if self.first_run {
+				metrics.init_counters(self.para_id);
+			}
+
 			let mut progress = ParachainProgressUpdate {
 				timestamp: block.ts,
 				prev_timestamp: self.last_non_fork_relay_block_ts.unwrap_or(block.ts),
@@ -391,10 +395,6 @@ impl SubxtTracker {
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
-		if self.first_run && self.disputes.is_empty() {
-			metrics.init_disputes(self.para_id);
-		}
-
 		self.disputes.iter().for_each(|outcome| {
 			progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
 			stats.on_disputed(outcome);
