@@ -49,6 +49,8 @@ pub struct SubxtTracker {
 	/// Previous relay chain block.
 	previous_relay_block: Option<Block>,
 
+	/// A timestamp of a current relay chain block which is not a fork.
+	current_non_fork_relay_block_ts: Option<Timestamp>,
 	/// A timestamp of a last relay chain block which is not a fork.
 	last_non_fork_relay_block_ts: Option<Timestamp>,
 	/// The relay chain block number at which the last candidate was backed.
@@ -94,6 +96,7 @@ impl SubxtTracker {
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_backed_at_block_number: None,
+			current_non_fork_relay_block_ts: None,
 			last_non_fork_relay_block_ts: None,
 			last_included_at: None,
 			previous_included_at: None,
@@ -145,10 +148,9 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) -> Option<ParachainProgressUpdate> {
 		if let Some(block) = self.current_relay_block {
-			let prev_timestamp = self.last_non_fork_relay_block_ts.unwrap_or(block.ts);
 			let mut progress = ParachainProgressUpdate {
 				timestamp: block.ts,
-				prev_timestamp,
+				prev_timestamp: self.last_non_fork_relay_block_ts.unwrap_or(block.ts),
 				block_number: block.num,
 				block_hash: block.hash,
 				para_id: self.para_id,
@@ -219,7 +221,8 @@ impl SubxtTracker {
 		self.current_relay_block = Some(Block { num: block_number, ts, hash: block_hash });
 
 		if !self.is_fork() {
-			self.last_non_fork_relay_block_ts = Some(ts);
+			self.last_non_fork_relay_block_ts = self.current_non_fork_relay_block_ts;
+			self.current_non_fork_relay_block_ts = Some(ts);
 		}
 
 		self.finality_lag = storage
