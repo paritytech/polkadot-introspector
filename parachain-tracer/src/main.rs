@@ -92,9 +92,6 @@ pub(crate) struct ParachainTracerOptions {
 	/// The number of last blocks with missing slots to display
 	#[clap(long = "last-skipped-slot-blocks", default_value = "10")]
 	pub last_skipped_slot_blocks: usize,
-	/// Evict a stalled parachain after this amount of skipped blocks
-	#[clap(long, default_value = "256")]
-	max_parachain_stall: u32,
 	/// Defines subscription mode
 	#[clap(flatten)]
 	collector_opts: CollectorOptions,
@@ -275,7 +272,6 @@ impl ParachainTracer {
 		// for the practical reasons we are fine to do a hash map scan on each head.
 		let mut last_blocks: HashMap<u32, u32> = HashMap::new();
 		let mut best_known_block: u32 = 0;
-		let max_stall = self.opts.max_parachain_stall;
 		let mut futures = FuturesUnordered::new();
 		let mut from_collector = Box::pin(from_collector);
 
@@ -304,7 +300,7 @@ impl ParachainTracer {
 
 								if last_known_block > best_known_block {
 									best_known_block = last_known_block;
-									evict_stalled(&mut trackers, &mut last_blocks, max_stall);
+									evict_stalled(&mut trackers, &mut last_blocks);
 								}
 							},
 							CollectorUpdateEvent::NewSession(idx) =>
@@ -340,16 +336,13 @@ impl ParachainTracer {
 	}
 }
 
-fn evict_stalled(
-	trackers: &mut HashMap<u32, Sender<CollectorUpdateEvent>>,
-	last_blocks: &mut HashMap<u32, u32>,
-	max_stall: u32,
-) {
+fn evict_stalled(trackers: &mut HashMap<u32, Sender<CollectorUpdateEvent>>, last_blocks: &mut HashMap<u32, u32>) {
 	let max_block = *last_blocks.values().max().unwrap_or(&0_u32);
+	// Collectors keep sending events to stalled paras for a particular amount of blocks.
+	// So we can remove it immediately after we stopped receiving events.
 	let to_evict: Vec<u32> = last_blocks
 		.iter()
-		.filter(|(_, last_block)| max_block - *last_block > max_stall)
-		.map(|(para_id, _)| *para_id)
+		.filter_map(|(para_id, last_block)| if max_block > *last_block { Some(*para_id) } else { None })
 		.collect();
 	for para_id in to_evict {
 		let last_seen = last_blocks.remove(&para_id).expect("checked previously, qed");

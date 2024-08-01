@@ -74,6 +74,9 @@ pub struct CollectorOptions {
 	pub hrmp_channels: bool,
 	#[clap(short = 's', long = "subscribe-mode", default_value_t, value_enum)]
 	pub subscribe_mode: CollectorSubscribeMode,
+	/// Evict a stalled parachain after this amount of skipped blocks
+	#[clap(long, default_value = "256")]
+	max_parachain_stall: u32,
 }
 
 /// How to subscribe to subxt blocks
@@ -148,6 +151,8 @@ struct CollectorState {
 	current_session_index: u32,
 	/// Last finalized block number
 	last_finalized_block_number: Option<u32>,
+	/// A list of paras for broadcasting
+	paras_seen: BTreeMap<u32, u32>,
 }
 
 /// Provides collector new head events split by parachain
@@ -208,6 +213,7 @@ pub struct Collector {
 	executor: RequestExecutor,
 	subscribe_mode: CollectorSubscribeMode,
 	hrmp_channels: bool,
+	max_parachain_stall: u32,
 }
 
 impl Collector {
@@ -236,6 +242,7 @@ impl Collector {
 			executor,
 			subscribe_mode: opts.subscribe_mode,
 			hrmp_channels: opts.hrmp_channels,
+			max_parachain_stall: opts.max_parachain_stall,
 		}
 	}
 
@@ -419,7 +426,37 @@ impl Collector {
 		}
 
 		for broadcast_channel in self.broadcast_channels.iter_mut() {
-			for (para_id, candidates) in self.state.candidates_seen.iter() {
+			// Update a list of current parachains
+			for para_id in self.state.candidates_seen.keys() {
+				self.state
+					.paras_seen
+					.insert(*para_id, self.state.current_relay_chain_block_number);
+			}
+			let to_evict: Vec<_> = self
+				.state
+				.paras_seen
+				.iter()
+				.filter_map(|(para_id, last_block)| {
+					let is_active =
+						self.state.current_relay_chain_block_number - *last_block > self.max_parachain_stall;
+					if is_active {
+						Some(*para_id)
+					} else {
+						None
+					}
+				})
+				.collect();
+			for para_id in to_evict {
+				let last_seen = self.state.paras_seen.remove(&para_id).expect("checked previously, qed");
+				info!(
+					"evicting tracker for parachain {}, stalled for {} blocks",
+					para_id,
+					self.state.current_relay_chain_block_number - last_seen
+				);
+			}
+
+			for para_id in self.state.paras_seen.keys() {
+				let candidates = self.state.candidates_seen.get(para_id);
 				let disputes_concluded = self.state.disputes_seen.get(para_id).map(|disputes_seen| {
 					disputes_seen
 						.iter()
@@ -431,7 +468,7 @@ impl Collector {
 					.send(CollectorUpdateEvent::NewHead(NewHeadEvent {
 						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
 						relay_parent_number: self.state.current_relay_chain_block_number,
-						candidates_seen: candidates.clone(),
+						candidates_seen: candidates.cloned().unwrap_or_default(),
 						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 						para_id: *para_id,
 					}))
