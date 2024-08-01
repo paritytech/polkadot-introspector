@@ -88,8 +88,8 @@ struct MetricsInner {
 #[automock]
 /// Common methods for parachain metrics tracker
 pub trait PrometheusMetrics {
-	/// Set disputed count to zero for continuous charts
-	fn init_disputes(&self, para_id: u32);
+	/// Set counters to zero for continuous charts
+	fn init_counters(&self, para_id: u32);
 	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
 	/// Update metrics on new block
@@ -180,10 +180,17 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	// Sets metrics to 0 at the beginning to show proper charts in Prometheus
-	fn init_disputes(&self, para_id: u32) {
+	// Resets IntCounterVec metrics at the beginning to show proper charts in Prometheus
+	fn init_counters(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			let para_string = para_id.to_string();
+
+			metrics.backed_count.with_label_values(&[&para_string]).reset();
+			metrics.included_count.with_label_values(&[&para_string]).reset();
+			metrics.low_bitfields_count.with_label_values(&[&para_string]).reset();
+			metrics.slow_avail_count.with_label_values(&[&para_string]).reset();
+			metrics.skipped_slots.with_label_values(&[&para_string]).reset();
+			metrics.relay_skipped_slots.with_label_values(&[&para_string]).reset();
 			metrics.disputes_stats.disputed_count.with_label_values(&[&para_string]).reset();
 			metrics
 				.disputes_stats
