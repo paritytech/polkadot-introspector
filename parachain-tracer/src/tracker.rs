@@ -768,7 +768,8 @@ mod test_inject_block {
 		let current = tracker.current_relay_block.unwrap();
 		assert!(tracker.previous_relay_block.is_none());
 		assert_eq!(current.hash, first_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1_u64));
+		assert_eq!(tracker.current_non_fork_relay_block_ts, Some(1_u64));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, None);
 		assert!(tracker.finality_lag.is_none());
 
 		// Inject a fork and relevant finalized block number
@@ -798,7 +799,8 @@ mod test_inject_block {
 		let current = tracker.current_relay_block.unwrap();
 		assert_eq!(previous.hash, first_hash);
 		assert_eq!(current.hash, second_hash);
-		assert_eq!(tracker.last_non_fork_relay_block_ts, Some(1));
+		assert_eq!(tracker.current_non_fork_relay_block_ts, Some(1));
+		assert_eq!(tracker.last_non_fork_relay_block_ts, None);
 		assert_eq!(tracker.finality_lag, Some(2));
 	}
 
