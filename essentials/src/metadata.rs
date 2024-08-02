@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
+#[subxt::subxt(runtime_metadata_path = "assets/rococo_metadata.scale")]
 pub mod polkadot {}
 
-pub use polkadot::runtime_types::polkadot_primitives::v6 as polkadot_primitives;
+pub use polkadot::runtime_types::polkadot_primitives::v7 as polkadot_primitives;
