@@ -337,12 +337,13 @@ impl ParachainTracer {
 }
 
 fn evict_stalled(trackers: &mut HashMap<u32, Sender<CollectorUpdateEvent>>, last_blocks: &mut HashMap<u32, u32>) {
-	let max_block = *last_blocks.values().max().unwrap_or(&0_u32);
 	// Collectors keep sending events to stalled paras for a particular amount of blocks.
-	// So we can remove it immediately after we stopped receiving events.
+	// So we can remove it almost immediately after we stopped receiving events.
+	let max_block = *last_blocks.values().max().unwrap_or(&0_u32);
+	let threshold = max_block.saturating_sub(10);
 	let to_evict: Vec<u32> = last_blocks
 		.iter()
-		.filter_map(|(para_id, last_block)| if max_block > *last_block { Some(*para_id) } else { None })
+		.filter_map(|(para_id, last_block)| if threshold > *last_block { Some(*para_id) } else { None })
 		.collect();
 	for para_id in to_evict {
 		let last_seen = last_blocks.remove(&para_id).expect("checked previously, qed");
