@@ -30,6 +30,7 @@ use crate::{
 	},
 	utils::{Retry, RetryOptions},
 };
+use color_eyre::eyre::eyre;
 use log::{error, info};
 use polkadot_introspector_priority_channel::{
 	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
@@ -137,16 +138,16 @@ impl RequestExecutorBackend {
 		from_frontend: PriorityReceiver<ExecutorMessage>,
 		url: String,
 		api_client_mode: ApiClientMode,
-	) {
+	) -> color_eyre::Result<()> {
 		let client = match build_client(&url, api_client_mode, &self.retry).await {
 			Some(v) => v,
-			None => return error!("Cannot build a RPC client for {}", url),
+			None => return Err(eyre!("Cannot build a RPC client for {}", url)),
 		};
 
 		loop {
 			match from_frontend.recv().await {
 				Ok(message) => match message {
-					ExecutorMessage::Close => return,
+					ExecutorMessage::Close => return Ok(()),
 					ExecutorMessage::Rpc(tx, request) => {
 						match self.execute_request(&request, &client).await {
 							Ok(response) => {
@@ -156,7 +157,7 @@ impl RequestExecutorBackend {
 								}
 							},
 							// Critical, after a few retries RPC client was not able to process the request
-							Err(e) => return error!("Cannot process the request {:?}: {:?}", request, e),
+							Err(e) => return Err(eyre!("Cannot process the request {:?}: {:?}", request, e)),
 						};
 					},
 				},
@@ -317,7 +318,10 @@ impl RequestExecutor {
 			let retry = retry.clone();
 			tokio::spawn(async move {
 				let mut backend = RequestExecutorBackend { retry };
-				backend.run(from_frontend, node, api_client_mode).await;
+				if let Err(e) = backend.run(from_frontend, node.clone(), api_client_mode).await {
+					error!("Request Executor Backend failed to run, closing the application: {:?}", e);
+					std::process::exit(1)
+				}
 			});
 		}
 
