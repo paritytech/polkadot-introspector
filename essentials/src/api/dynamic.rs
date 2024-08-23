@@ -148,10 +148,10 @@ fn decode_paras_entry(raw: &Value<u32>) -> Result<ParasEntry, DynamicError> {
 	let para_id = match &raw_assignment.value {
 		// v5
 		ValueDef::Composite(_) => decode_composite_u128_value(value_at("para_id", raw_assignment)?),
-		// v7
+		// v7+
 		ValueDef::Variant(_) => match decode_variant(raw_assignment)?.name.as_str() {
-			"Bulk" => decode_u128_value(
-				raw_assignment
+			"Bulk" => {
+				let raw_para_id = raw_assignment
 					.at(0)
 					.ok_or(DynamicError::DecodeDynamicError(
 						"v7 bulk assignment".to_string(),
@@ -161,8 +161,13 @@ fn decode_paras_entry(raw: &Value<u32>) -> Result<ParasEntry, DynamicError> {
 					.ok_or(DynamicError::DecodeDynamicError(
 						"v7 bulk assignment".to_string(),
 						raw_assignment.value.clone(),
-					))?,
-			),
+					))?;
+				decode_u128_value(raw_para_id)
+			},
+			"Pool" => {
+				let raw_para_id = value_at("para_id", raw_assignment)?;
+				decode_composite_u128_value(raw_para_id)
+			},
 			_ => Err(DynamicError::DecodeDynamicError("v7 assignment".to_string(), raw_assignment.value.clone())),
 		},
 		_ => Err(DynamicError::DecodeDynamicError("assignment".to_string(), raw_assignment.value.clone())),
