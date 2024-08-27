@@ -26,6 +26,7 @@ use crate::{
 		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 	},
 	chain_subscription::ChainSubscriptionEvent,
+	init::Shutdown,
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{Header, InherentData, OnDemandOrder, Timestamp, H256},
@@ -186,8 +187,8 @@ pub enum CollectorUpdateEvent {
 pub enum TerminationReason {
 	/// Indicates a normal termination
 	Normal,
-	/// Indicates an abnormal termination with error code and additional information
-	Abnormal(i32, String),
+	/// Indicates an abnormal termination with additional information
+	Abnormal(String),
 }
 
 #[derive(Debug, Error)]
@@ -247,7 +248,7 @@ impl Collector {
 	}
 
 	/// Spawns a collector futures (e.g. websocket server)
-	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<()> {
+	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<Shutdown>) -> color_eyre::Result<()> {
 		if let Some(ws_listener) = &self.ws_listener {
 			let (to_websocket, from_collector) = priority_channel(32);
 			ws_listener
@@ -291,10 +292,10 @@ impl Collector {
 									match error {
 										CollectorError::ExecutorFatal(e) => {
 											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
-												TerminationReason::Abnormal(
-													1,
-													format!("Collector's executor error: {}", e),
-												),
+												TerminationReason::Abnormal(format!(
+													"Collector's executor error: {}",
+													e
+												)),
 											))
 											.await
 											.unwrap();
@@ -302,10 +303,10 @@ impl Collector {
 										},
 										CollectorError::SendFatal(e) => {
 											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
-												TerminationReason::Abnormal(
-													1,
-													format!("Collector's channel error: {}", e),
-												),
+												TerminationReason::Abnormal(format!(
+													"Collector's channel error: {}",
+													e
+												)),
 											))
 											.await
 											.unwrap();
@@ -318,7 +319,7 @@ impl Collector {
 						Err(e) => {
 							error!("collector service could not process events: {:?}", e);
 							self.broadcast_event_priority(CollectorUpdateEvent::Termination(
-								TerminationReason::Abnormal(1, format!("Collector's service error: {}", e)),
+								TerminationReason::Abnormal(format!("Collector's service error: {}", e)),
 							))
 							.await
 							.unwrap();

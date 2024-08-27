@@ -20,6 +20,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
+	init::Shutdown,
 	types::BlockNumber,
 };
 use async_trait::async_trait;
@@ -60,7 +61,10 @@ impl EventStream for HistoricalSubscription {
 		EventConsumerInit::new(update_channels)
 	}
 
-	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	async fn run(
+		&self,
+		shutdown_tx: &BroadcastSender<Shutdown>,
+	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let futures = self.consumers.clone().into_iter().map(|update_channels| {
 			Self::run_per_consumer(
 				update_channels,
@@ -92,7 +96,7 @@ impl HistoricalSubscription {
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
-		shutdown_tx: BroadcastSender<()>,
+		shutdown_tx: BroadcastSender<Shutdown>,
 		mut executor: RequestExecutor,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
@@ -119,22 +123,26 @@ impl HistoricalSubscription {
 				Ok(Some(v)) => v,
 				Ok(None) => {
 					error!("Subscription to {} failed, block hash for block #{} not found", url, block_number);
-					std::process::exit(1);
+					let _ = shutdown_tx.send(Shutdown::Restart);
+					return
 				},
 				Err(e) => {
 					error!("Subscription to {} failed: {:?}", url, e);
-					std::process::exit(1)
+					let _ = shutdown_tx.send(Shutdown::Restart);
+					return
 				},
 			};
 			let header = match executor.get_block_head(&url, Some(block_hash)).await {
 				Ok(Some(v)) => v,
 				Ok(None) => {
 					error!("Subscription to {} failed, header for block #{} not found", url, block_number);
-					std::process::exit(1);
+					let _ = shutdown_tx.send(Shutdown::Restart);
+					return
 				},
 				Err(e) => {
 					error!("Subscription to {} failed: {:?}", url, e);
-					std::process::exit(1)
+					let _ = shutdown_tx.send(Shutdown::Restart);
+					return
 				},
 			};
 
@@ -189,7 +197,7 @@ impl HistoricalSubscription {
 		urls: Vec<String>,
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
-		shutdown_tx: BroadcastSender<()>,
+		shutdown_tx: BroadcastSender<Shutdown>,
 		executor: &RequestExecutor,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels

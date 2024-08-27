@@ -21,6 +21,7 @@ use polkadot_introspector_essentials::{
 		candidate_record::{CandidateInclusionRecord, CandidateRecord},
 		CollectorPrefixType,
 	},
+	init,
 	metadata::{
 		polkadot::runtime_types::{
 			bounded_collections::bounded_vec::BoundedVec,
@@ -124,12 +125,15 @@ pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
 	}
 }
 
-pub fn create_executor() -> executor::RequestExecutor {
-	executor::RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
+pub async fn create_executor() -> executor::RequestExecutor {
+	let shutdown_tx = init::init_shutdown();
+	executor::RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx)
+		.await
+		.unwrap()
 }
 
-pub fn create_storage() -> storage::RequestExecutor<H256, CollectorPrefixType> {
-	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor()).storage()
+pub async fn create_storage() -> storage::RequestExecutor<H256, CollectorPrefixType> {
+	ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor().await).storage()
 }
 
 pub fn create_hrmp_channels() -> BTreeMap<u32, SubxtHrmpChannel> {

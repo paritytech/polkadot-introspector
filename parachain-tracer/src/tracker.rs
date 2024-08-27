@@ -716,7 +716,7 @@ mod test_inject_block {
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
 		let hash = H256::random();
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 
 		tracker.inject_block(hash, 0, &tracker_storage).await.unwrap();
 
@@ -741,7 +741,7 @@ mod test_inject_block {
 	async fn test_sets_relay_block() {
 		let first_hash = H256::random();
 		let second_hash = H256::random();
-		let storage = create_storage();
+		let storage = create_storage().await;
 		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, storage.clone());
 
@@ -806,7 +806,7 @@ mod test_inject_block {
 
 	#[tokio::test]
 	async fn test_sets_backed_candidates() {
-		let storage = create_storage();
+		let storage = create_storage().await;
 		let tracker_storage = TrackerStorage::new(100, storage.clone());
 		let mut tracker = SubxtTracker::new(100);
 
@@ -854,7 +854,7 @@ mod test_inject_block {
 
 	#[tokio::test]
 	async fn test_sets_dropped_candidates() {
-		let storage = create_storage();
+		let storage = create_storage().await;
 		let tracker_storage = TrackerStorage::new(100, storage.clone());
 		let mut tracker = SubxtTracker::new(100);
 
@@ -905,7 +905,7 @@ mod test_inject_block {
 
 	#[tokio::test]
 	async fn test_sets_included_candidates() {
-		let storage = create_storage();
+		let storage = create_storage().await;
 		let tracker_storage = TrackerStorage::new(100, storage.clone());
 		let mut tracker = SubxtTracker::new(100);
 
@@ -967,7 +967,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
 		let tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut stats = MockStats::default();
 		let metrics = Metrics::default();
 
@@ -980,7 +980,7 @@ mod test_progress {
 	async fn test_returns_progress_on_current_block() {
 		let hash = H256::random();
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -1002,7 +1002,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_new_session_if_exist() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -1028,7 +1028,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_core_assignment() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 		let mut candidate = create_para_block_info(100);
@@ -1048,7 +1048,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_slow_propogation() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut candidate = create_para_block_info(100);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
@@ -1102,7 +1102,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_message_queues() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -1130,7 +1130,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_current_block_time() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
@@ -1170,7 +1170,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_finality_lag() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_init_counters().returning(|_| ());
@@ -1193,7 +1193,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_disputes() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
@@ -1246,7 +1246,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_on_demand_order() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_init_counters().returning(|_| ());
@@ -1303,9 +1303,9 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_candidate_state() {
 		let candidate_hash = H256::random();
-		let storage = create_storage();
+		let storage = create_storage().await;
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -1431,7 +1431,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_inits_disputes_metrics() {
 		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage());
+		let tracker_storage = TrackerStorage::new(100, create_storage().await);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_block().returning(|_| ());
