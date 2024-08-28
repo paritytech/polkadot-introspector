@@ -317,7 +317,7 @@ impl ParachainTracer {
 									trackers.len(), futures.len());
 								match reason {
 									TerminationReason::Normal => break,
-									TerminationReason::Abnormal( info) => {
+									TerminationReason::Abnormal(info) => {
 										error!("Shutting down, {}", info);
 										let _ = shutdown_tx.send(Shutdown::Restart);
 										break;
