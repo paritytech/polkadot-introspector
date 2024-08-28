@@ -19,6 +19,7 @@ use super::telemetry_feed::TelemetryFeed;
 use crate::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
+	init::Shutdown,
 	telemetry_feed::AddedChain,
 	types::H256,
 };
@@ -93,7 +94,10 @@ impl EventStream for TelemetrySubscription {
 		EventConsumerInit::new(vec![update_rx])
 	}
 
-	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	async fn run(
+		&self,
+		shutdown_tx: &BroadcastSender<Shutdown>,
+	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		Ok(self
 			.consumers
 			.clone()
@@ -120,7 +124,7 @@ impl TelemetrySubscription {
 		mut update_channel: Sender<TelemetryEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		maybe_chain_name: Option<String>,
-		shutdown_tx: BroadcastSender<()>,
+		shutdown_tx: BroadcastSender<Shutdown>,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut stream = match TelemetryStream::connect(&url).await {
