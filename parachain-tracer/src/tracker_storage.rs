@@ -144,9 +144,9 @@ mod tests {
 	use std::time::Duration;
 	use subxt::utils::AccountId32;
 
-	fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
+	async fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
 		let api: CollectorStorageApi =
-			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor());
+			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor().await);
 		let storage = TrackerStorage::new(100, api.storage());
 
 		(storage, api)
@@ -154,7 +154,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_session_keys() {
-		let (storage, api) = setup_client();
+		let (storage, api) = setup_client().await;
 		let keys = vec![AccountId32([42; 32])];
 		let session_index: u32 = 42;
 		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
@@ -174,7 +174,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_inherent_data() {
-		let (storage, api) = setup_client();
+		let (storage, api) = setup_client().await;
 		let hash = H256::random();
 		assert!(storage.inherent_data(hash).await.is_none());
 
@@ -195,7 +195,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_on_demand_order() {
-		let (storage, api) = setup_client();
+		let (storage, api) = setup_client().await;
 		let hash = H256::random();
 		assert!(storage.on_demand_order(hash).await.is_none());
 
@@ -218,7 +218,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_relevant_finalized_block_number() {
-		let (storage, api) = setup_client();
+		let (storage, api) = setup_client().await;
 		let hash = H256::random();
 		assert!(storage.relevant_finalized_block_number(hash).await.is_none());
 
@@ -236,7 +236,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_dispute() {
-		let (storage, api) = setup_client();
+		let (storage, api) = setup_client().await;
 		let hash = H256::random();
 		assert!(storage.dispute(hash).await.is_none());
 
@@ -269,7 +269,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_candidate() {
-		let (storage, api) = setup_client();
+		let (storage, api) = setup_client().await;
 		let hash = H256::random();
 		assert!(storage.candidate(hash).await.is_none());
 

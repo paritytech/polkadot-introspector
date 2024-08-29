@@ -23,6 +23,7 @@ use crate::{
 		},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
+	init::Shutdown,
 	metadata::polkadot_primitives,
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData,
@@ -30,6 +31,7 @@ use crate::{
 	},
 	utils::{Retry, RetryOptions},
 };
+use color_eyre::eyre::eyre;
 use log::{error, info};
 use polkadot_introspector_priority_channel::{
 	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
@@ -37,7 +39,10 @@ use polkadot_introspector_priority_channel::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 use subxt::{OnlineClient, PolkadotConfig};
 use thiserror::Error;
-use tokio::sync::oneshot::{error::RecvError as OneshotRecvError, Sender as OneshotSender};
+use tokio::sync::{
+	broadcast::Sender as BroadcastSender,
+	oneshot::{error::RecvError as OneshotRecvError, Sender as OneshotSender},
+};
 
 enum ExecutorMessage {
 	Close,
@@ -101,6 +106,8 @@ enum Response {
 
 #[derive(Debug, Error)]
 pub enum RequestExecutorError {
+	#[error("Cannot build a RPC client for {0}")]
+	ClientBuildFailed(String),
 	#[error("Client for url {0} not found")]
 	ClientNotFound(String),
 	#[error("subxt error: {0}")]
@@ -128,52 +135,47 @@ impl RequestExecutorError {
 }
 
 struct RequestExecutorBackend {
+	client: ApiClient<OnlineClient<PolkadotConfig>>,
 	retry: RetryOptions,
 }
 
 impl RequestExecutorBackend {
-	async fn run(
-		&mut self,
-		from_frontend: PriorityReceiver<ExecutorMessage>,
+	async fn build(
+		retry: RetryOptions,
 		url: String,
 		api_client_mode: ApiClientMode,
-	) {
-		let client = match build_client(&url, api_client_mode, &self.retry).await {
-			Some(v) => v,
-			None => return error!("Cannot build a RPC client for {}", url),
-		};
+	) -> color_eyre::Result<Self, RequestExecutorError> {
+		let client = build_client(&url, api_client_mode, &retry)
+			.await
+			.ok_or(RequestExecutorError::ClientBuildFailed(url))?;
 
+		Ok(RequestExecutorBackend { client, retry })
+	}
+
+	async fn run(&mut self, from_frontend: PriorityReceiver<ExecutorMessage>) -> color_eyre::Result<()> {
 		loop {
-			match from_frontend.recv().await {
-				Ok(message) => match message {
-					ExecutorMessage::Close => return,
-					ExecutorMessage::Rpc(tx, request) => {
-						match self.execute_request(&request, &client).await {
-							Ok(response) => {
-								// Not critical, skip it and process next request
-								if let Err(e) = tx.send(response) {
-									error!("Cannot send response back: {:?}", e);
-								}
-							},
-							// Critical, after a few retries RPC client was not able to process the request
-							Err(e) => return error!("Cannot process the request {:?}: {:?}", request, e),
-						};
-					},
+			match from_frontend.recv().await? {
+				ExecutorMessage::Close => return Ok(()),
+				ExecutorMessage::Rpc(tx, request) => {
+					match self.execute_request(&request).await {
+						Ok(response) => {
+							// Not critical, skip it and process next request
+							if let Err(e) = tx.send(response) {
+								error!("Cannot send response back: {:?}", e);
+							}
+						},
+						// Critical, after a few retries RPC client was not able to process the request
+						Err(e) => return Err(eyre!("Cannot process the request {:?}: {:?}", request, e)),
+					};
 				},
-				// Not critical, skip it and process next request
-				Err(e) => error!("Cannot receive a request from the frontend: {:?}", e),
 			}
 		}
 	}
 
-	async fn execute_request(
-		&mut self,
-		request: &Request,
-		client: &ApiClient<OnlineClient<PolkadotConfig>>,
-	) -> color_eyre::Result<Response, RequestExecutorError> {
+	async fn execute_request(&mut self, request: &Request) -> color_eyre::Result<Response, RequestExecutorError> {
 		let mut retry = Retry::new(&self.retry);
 		loop {
-			match self.match_request(request.to_owned(), client).await {
+			match self.match_request(request.to_owned()).await {
 				Ok(v) => return Ok(v),
 				Err(e) => {
 					if !e.should_retry() {
@@ -187,13 +189,10 @@ impl RequestExecutorBackend {
 		}
 	}
 
-	async fn match_request(
-		&mut self,
-		request: Request,
-		client: &ApiClient<OnlineClient<PolkadotConfig>>,
-	) -> color_eyre::Result<Response, RequestExecutorError> {
+	async fn match_request(&self, request: Request) -> color_eyre::Result<Response, RequestExecutorError> {
 		use Request::*;
 		use Response::*;
+		let client = &self.client;
 		let response = match request {
 			GetBlockTimestamp(hash) => Timestamp(client.get_block_ts(hash).await?.unwrap_or_default()),
 			GetHead(maybe_hash) => {
@@ -305,19 +304,23 @@ macro_rules! wrap_backend_call {
 
 impl RequestExecutor {
 	/// Creates new RPC executor
-	pub fn build(
+	pub async fn build(
 		nodes: impl RequestExecutorNodes,
 		api_client_mode: ApiClientMode,
-		retry: RetryOptions,
+		retry: &RetryOptions,
+		shutdown_tx: &BroadcastSender<Shutdown>,
 	) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
 		let mut clients = HashMap::new();
 		for node in nodes.unique_nodes() {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
 			let _ = clients.insert(node.clone(), to_backend);
-			let retry = retry.clone();
+			let mut backend = RequestExecutorBackend::build(retry.clone(), node, api_client_mode).await?;
+			let shutdown_tx = shutdown_tx.clone();
 			tokio::spawn(async move {
-				let mut backend = RequestExecutorBackend { retry };
-				backend.run(from_frontend, node, api_client_mode).await;
+				if let Err(e) = backend.run(from_frontend).await {
+					error!("Request Executor Backend failed to run, closing the application: {:?}", e);
+					let _ = shutdown_tx.send(Shutdown::Restart);
+				}
 			});
 		}
 
@@ -325,12 +328,10 @@ impl RequestExecutor {
 	}
 
 	/// Closes all RPC clients
-	pub async fn close(&mut self) -> color_eyre::Result<()> {
+	pub async fn close(&mut self) {
 		for to_backend in self.0.values_mut() {
-			to_backend.send(ExecutorMessage::Close).await?;
+			let _ = to_backend.send(ExecutorMessage::Close).await;
 		}
-
-		Ok(())
 	}
 
 	pub async fn get_block_timestamp(

@@ -20,6 +20,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
+	init::Shutdown,
 };
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -57,7 +58,10 @@ impl EventStream for ChainHeadSubscription {
 		EventConsumerInit::new(update_channels)
 	}
 
-	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	async fn run(
+		&self,
+		shutdown_tx: &BroadcastSender<Shutdown>,
+	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let futures = self.consumers.clone().into_iter().map(|update_channels| {
 			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), &self.executor)
 		});
@@ -75,7 +79,7 @@ impl ChainHeadSubscription {
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
-		shutdown_tx: BroadcastSender<()>,
+		shutdown_tx: BroadcastSender<Shutdown>,
 		mut executor: RequestExecutor,
 	) {
 		use futures::stream::{select, StreamExt};
@@ -86,14 +90,16 @@ impl ChainHeadSubscription {
 			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewBestHead((v.1.hash(), v.0))),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
-				std::process::exit(1)
+				let _ = shutdown_tx.send(Shutdown::Restart);
+				return
 			},
 		};
 		let finalized_sub = match executor.get_finalized_block_subscription(&url).await {
 			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewFinalizedBlock((v.1.hash(), v.0))),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
-				std::process::exit(1)
+				let _ = shutdown_tx.send(Shutdown::Restart);
+				return
 			},
 		};
 		let mut sub = select(best_sub, finalized_sub);
@@ -108,11 +114,13 @@ impl ChainHeadSubscription {
 						Some(Ok(v)) => v,
 						Some(Err(e)) => {
 							error!("Subscription to {} failed: {:?}", url, e);
-							std::process::exit(1)
+							let _ = shutdown_tx.send(Shutdown::Restart);
+							return
 						},
 						None => {
 							error!("Subscription to {} failed, received None instead of an event", url);
-							std::process::exit(1);
+							let _ = shutdown_tx.send(Shutdown::Restart);
+							return
 						}
 					};
 
@@ -143,7 +151,7 @@ impl ChainHeadSubscription {
 	fn run_per_consumer(
 		update_channels: Vec<Sender<ChainSubscriptionEvent>>,
 		urls: Vec<String>,
-		shutdown_tx: BroadcastSender<()>,
+		shutdown_tx: BroadcastSender<Shutdown>,
 		executor: &RequestExecutor,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels

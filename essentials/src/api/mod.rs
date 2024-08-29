@@ -80,7 +80,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{api::api_client::ApiClientMode, storage::StorageEntry, types::H256, utils::RetryOptions};
+	use crate::{api::api_client::ApiClientMode, init, storage::StorageEntry, types::H256, utils::RetryOptions};
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
 
 	fn rpc_node_url() -> &'static str {
@@ -93,13 +93,16 @@ mod tests {
 		RPC_NODE_URL
 	}
 
-	fn request_executor() -> RequestExecutor {
-		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, RetryOptions::default()).unwrap()
+	async fn request_executor() -> RequestExecutor {
+		let shutdown_tx = init::init_shutdown();
+		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx)
+			.await
+			.unwrap()
 	}
 
 	#[tokio::test]
 	async fn basic_storage_test() {
-		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor());
+		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor().await);
 		let storage = api.storage();
 		let key = BlakeTwo256::hash_of(&100);
 		storage
@@ -112,7 +115,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn basic_subxt_test() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor());
+		let api =
+			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor().await);
 		let mut subxt = api.executor();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
@@ -123,7 +127,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn extract_parainherent_data() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor());
+		let api =
+			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor().await);
 		let mut subxt = api.executor();
 
 		subxt
@@ -134,7 +139,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_occupied_cores() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor());
+		let api =
+			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor().await);
 		let mut subxt = api.executor();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
@@ -145,7 +151,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_backing_groups() {
-		let api = ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor());
+		let api =
+			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor().await);
 		let mut subxt = api.executor();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
