@@ -433,7 +433,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		para_on_demand_delay_sec: prometheus_endpoint::register(
 			GaugeVec::new(
 				Opts::new("pc_para_on_demand_delay_sec", "Latency (in seconds) between when the parachain orders a core and when first candidate is scheduled or backed on that core."),
-				&["parachain_id"],
+				&["parachain_id", "until"],
 			)?,
 			registry,
 		)?,
