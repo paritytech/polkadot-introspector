@@ -338,7 +338,7 @@ impl ParachainTracer {
 
 		// Drop all trackers channels to initiate their termination
 		trackers.clear();
-		future::try_join_all(futures).await.unwrap();
+		let _ = future::try_join_all(futures).await;
 	}
 }
 
