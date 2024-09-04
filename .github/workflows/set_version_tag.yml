@@ -20,7 +20,7 @@ jobs:
           LATEST_TAG=$(git describe --tags --abbrev=0)
           echo "Latest tag is ${LATEST_TAG}"
 
-          CURRENT_TAG=v$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' Cargo.toml)
+          CURRENT_TAG=v$(cat Cargo.toml | grep -A1 workspace.package | grep version | cut -d '=' -f 2 | tr -d '"' | tr -d ' ')
           echo "Current tag is ${CURRENT_TAG}"
 
           if [ "$LATEST_TAG" = "$CURRENT_TAG" ]; then
