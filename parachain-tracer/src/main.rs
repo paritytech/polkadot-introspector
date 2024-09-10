@@ -123,26 +123,22 @@ pub(crate) struct ParachainTracer {
 }
 
 impl ParachainTracer {
-	pub(crate) fn new(mut opts: ParachainTracerOptions) -> color_eyre::Result<Self> {
+	pub(crate) fn new(mut opts: ParachainTracerOptions, metrics: Metrics) -> color_eyre::Result<Self> {
 		// This starts the both the storage and subxt APIs.
 		let node = opts.node.clone();
 		opts.mode = opts.mode.or(Some(ParachainTracerMode::Cli));
 
-		Ok(ParachainTracer { opts, node, metrics: Default::default() })
+		Ok(ParachainTracer { opts, node, metrics })
 	}
 
 	/// Spawn the UI and subxt tasks and return their futures.
 	pub(crate) async fn run(
-		mut self,
+		self,
 		shutdown_tx: &BroadcastSender<Shutdown>,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
 		executor: &mut RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
-
-		if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = self.opts.mode {
-			self.metrics = prometheus::run_prometheus_endpoint(prometheus_opts).await?;
-		}
 
 		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), executor.clone());
 		collector.spawn(shutdown_tx).await?;
@@ -386,8 +382,14 @@ async fn main() -> color_eyre::Result<()> {
 
 	let mut retry = Retry::new(&opts.retry);
 
+	let metrics = if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = opts.mode {
+		prometheus::run_prometheus_endpoint(prometheus_opts).await?
+	} else {
+		Default::default()
+	};
+
 	loop {
-		let tracer = ParachainTracer::new(opts.clone())?;
+		let tracer = ParachainTracer::new(opts.clone(), metrics.clone())?;
 		let shutdown_tx = init::init_shutdown();
 		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut executor =
