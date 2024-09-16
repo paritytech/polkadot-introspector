@@ -39,7 +39,7 @@ use subp2p_explorer_cli::commands::authorities::PeerDetails;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Simple telemetry feed")]
-struct TelemetryOptions {
+struct WhoIsOptions {
 	#[clap(subcommand)]
 	command: WhoisCommand,
 	/// Web-Socket URLs of a relay chain node.
@@ -52,10 +52,15 @@ struct TelemetryOptions {
 	pub verbose: init::VerbosityOptions,
 	#[clap(flatten)]
 	pub retry: utils::RetryOptions,
+	/// The session index used for computing the validator indicies.
 	#[clap(long)]
 	pub session_index: u32,
+	/// An optional block hash to fetch the queued keys at, otherwise we use the queued keys at the current block.
 	#[clap(long)]
 	pub queued_keys_at_block: Option<H256>,
+	/// Tells if we should update the p2p cache.
+	///
+	/// Note building the p2p cache takes around 10 to 15 minutes
 	#[clap(long)]
 	pub update_p2p_cache: bool,
 	/// Hex-encoded genesis hash of the chain.
@@ -77,6 +82,8 @@ struct TelemetryOptions {
 	/// - "polkadot" for Polkadot
 	/// - "substrate" for Substrate
 	/// - "kusama" for Kusama
+	///
+	/// Used to display the SS58 address of the authorities.
 	#[clap(long, short)]
 	address_format: String,
 }
@@ -88,10 +95,15 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 
 #[derive(Clone, Debug, Subcommand)]
 enum WhoisCommand {
+	/// Display information about a validator by its SS58-formated account address.
 	ByAccount(AccountOptions),
+	/// Display information about a validator by its index in the para_session.
 	ByValidatorIndex(SessionOptions),
+	/// Display information about a validator by its authority discovery key.
 	ByAuthorityDiscovery(AuthorithyDiscoveryOptions),
+	/// Display information about a validator by its peer id.
 	ByPeerId(PeerIdOptions),
+	/// Display information about all validators.
 	DumpAll,
 }
 
@@ -115,6 +127,7 @@ struct PeerIdOptions {
 
 #[derive(Clone, Debug, Args)]
 struct SessionOptions {
+	/// Validator index in the para_session
 	pub validator_indices: Vec<usize>,
 }
 
@@ -147,11 +160,11 @@ pub enum WhoisError {
 }
 
 struct Whois {
-	opts: TelemetryOptions,
+	opts: WhoIsOptions,
 }
 
 impl Whois {
-	fn new(opts: TelemetryOptions) -> color_eyre::Result<Self> {
+	fn new(opts: WhoIsOptions) -> color_eyre::Result<Self> {
 		Ok(Self { opts })
 	}
 
@@ -283,24 +296,31 @@ impl Whois {
 	}
 }
 
+const DEFAULT_CACHE_DIR: &str = "whois_p2pcache";
+
+// Information about the p2p network at a given session index.
 #[derive(Serialize, Deserialize)]
-struct NetworkCacheInfo {
+struct PerSessionNetworkCache {
 	pub peer_details: HashMap<Vec<u8>, PeerDetails>,
 	pub peer_versions: HashMap<Vec<u8>, String>,
 	pub authority_to_details: HashMap<sr25519::PublicKey, HashSet<Multiaddr>>,
 }
 
+// A cache of the p2p network information for different sessions.
 #[derive(Serialize, Deserialize, Default)]
 struct NetworkCache {
-	session_to_network_info: HashMap<u32, NetworkCacheInfo>,
+	session_to_network_info: HashMap<u32, PerSessionNetworkCache>,
 }
 
-const DEFAULT_CACHE_DIR: &str = "~/.whois/cache";
-
 impl NetworkCache {
-	async fn build_cache(session_index_now: u32, opts: &TelemetryOptions) -> color_eyre::Result<Self, WhoisError> {
+	// Build the p2p network cache.
+	//
+	// Because build the p2p cache takes around 10 to 15 minutes,
+	// we only build the cache if the update_p2p_cache flag is set
+	// or if the cache does not exist.
+	async fn build_cache(session_index_now: u32, opts: &WhoIsOptions) -> color_eyre::Result<Self, WhoisError> {
 		let mut update_cache = opts.update_p2p_cache;
-		let cache_path = format!("{}/{}/p2p_cache", DEFAULT_CACHE_DIR, opts.chain.clone().unwrap_or("any".to_string()));
+		let cache_path = format!("{}/{}", DEFAULT_CACHE_DIR, opts.chain.clone().unwrap_or("any".to_string()));
 		println!("Using cache path: {}", cache_path);
 		let mut cache: NetworkCache = if let Ok(serialized_cache) = fs::read(cache_path.as_str()) {
 			serde_binary::from_vec(serialized_cache, Endian::Big)
@@ -327,7 +347,7 @@ impl NetworkCache {
 			let peer_info = authorithy_discovery.peer_info().clone();
 			let authority_to_details = authorithy_discovery.authority_to_details().clone();
 
-			let network_cache = NetworkCacheInfo {
+			let network_cache = PerSessionNetworkCache {
 				peer_details: peer_details.into_iter().map(|(key, value)| (key.to_bytes(), value)).collect(),
 				peer_versions: peer_info
 					.into_iter()
@@ -352,7 +372,8 @@ impl NetworkCache {
 		Ok(cache)
 	}
 
-	fn get_closest_to_session(&self, session_index: u32) -> color_eyre::Result<&NetworkCacheInfo, WhoisError> {
+	/// Get the p2p network cache closest to the given session index.
+	fn get_closest_to_session(&self, session_index: u32) -> color_eyre::Result<&PerSessionNetworkCache, WhoisError> {
 		let closest_session_lower = self
 			.session_to_network_info
 			.keys()
@@ -381,7 +402,7 @@ impl NetworkCache {
 	}
 }
 
-impl NetworkCacheInfo {
+impl PerSessionNetworkCache {
 	fn get_details(&self, authority_discovery_key: sr25519::PublicKey) -> (Option<PeerDetails>, String, PeerId) {
 		let Some(details) = self.authority_to_details.get(&authority_discovery_key) else {
 			return (Default::default(), Default::default(), PeerId::random())
@@ -411,7 +432,7 @@ impl NetworkCacheInfo {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-	let opts = TelemetryOptions::parse();
+	let opts = WhoIsOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
 	let whois = Whois::new(opts.clone())?;
