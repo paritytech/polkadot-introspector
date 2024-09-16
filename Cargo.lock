@@ -3777,7 +3777,7 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 
 [[package]]
 name = "polkadot-block-time"
-version = "0.2.29"
+version = "0.2.32"
 dependencies = [
  "base64 0.21.7",
  "clap",
@@ -3796,7 +3796,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-essentials"
-version = "0.2.29"
+version = "0.2.32"
 dependencies = [
  "async-trait",
  "clap",
@@ -3827,7 +3827,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-introspector-priority-channel"
-version = "0.2.29"
+version = "0.2.32"
 dependencies = [
  "async-channel 2.3.1",
  "futures",
@@ -3839,7 +3839,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-jaeger"
-version = "0.2.29"
+version = "0.2.32"
 dependencies = [
  "base64 0.21.7",
  "clap",
@@ -3860,7 +3860,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-kvdb"
-version = "0.2.29"
+version = "0.2.32"
 dependencies = [
  "bincode",
  "clap",
@@ -3888,7 +3888,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-parachain-tracer"
-version = "0.2.29"
+version = "0.2.32"
 dependencies = [
  "async-trait",
  "clap",
@@ -3921,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "polkadot-whois"
-version = "0.2.29"
+version = "0.2.32"
 dependencies = [
  "clap",
  "color-eyre",
@@ -5541,9 +5541,8 @@ dependencies = [
 
 [[package]]
 name = "substrate-prometheus-endpoint"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d8fe06b03b8a291c09507c42f92a2c2c10dd3d62975d02c7f64a92d87bfe09b"
+version = "0.10.0-dev"
+source = "git+https://github.com/paritytech/polkadot-sdk?branch=master#b0b4451f31dcd9da04e2952d7c4cdcc219271b88"
 dependencies = [
  "hyper",
  "log",

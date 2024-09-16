@@ -90,6 +90,7 @@ impl ChainHeadSubscription {
 			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewBestHead((v.1.hash(), v.0))),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
+				let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
 				let _ = shutdown_tx.send(Shutdown::Restart);
 				return
 			},
@@ -98,6 +99,7 @@ impl ChainHeadSubscription {
 			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewFinalizedBlock((v.1.hash(), v.0))),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
+				let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
 				let _ = shutdown_tx.send(Shutdown::Restart);
 				return
 			},
@@ -114,11 +116,13 @@ impl ChainHeadSubscription {
 						Some(Ok(v)) => v,
 						Some(Err(e)) => {
 							error!("Subscription to {} failed: {:?}", url, e);
+							let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
 							let _ = shutdown_tx.send(Shutdown::Restart);
 							return
 						},
 						None => {
 							error!("Subscription to {} failed, received None instead of an event", url);
+							let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
 							let _ = shutdown_tx.send(Shutdown::Restart);
 							return
 						}
