@@ -5473,6 +5473,7 @@ dependencies = [
 [[package]]
 name = "subp2p-explorer"
 version = "0.1.0"
+source = "git+https://github.com/alexggh/subp2p-explorer?branch=alexggh/make-subp2p-usable-as-library#f7fa5d0474ca348f76f3f86e452e342bcaeb2b39"
 dependencies = [
  "async-trait",
  "asynchronous-codec",
@@ -5506,6 +5507,7 @@ dependencies = [
 [[package]]
 name = "subp2p-explorer-cli"
 version = "0.1.0"
+source = "git+https://github.com/alexggh/subp2p-explorer?branch=alexggh/make-subp2p-usable-as-library#f7fa5d0474ca348f76f3f86e452e342bcaeb2b39"
 dependencies = [
  "async-trait",
  "asynchronous-codec",
