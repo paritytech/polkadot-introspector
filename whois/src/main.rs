@@ -276,7 +276,7 @@ impl Whois {
 					"validator_index={:?}, account={:}, peer_id={:}, authorithy_id_discover=0x{:}, addresses={:?}, version={:?}",
 					validator_index.unwrap_or(usize::MAX),
 					validator,
-					peer_id,
+					peer_id.map(|peer_id| peer_id.to_string()).unwrap_or("unknown".to_string()),
 					hex::encode(authorithy_discovery_key),
 					peer_details.map(|details| details.addresses().clone()),
 					info,
@@ -403,17 +403,18 @@ impl NetworkCache {
 }
 
 impl PerSessionNetworkCache {
-	fn get_details(&self, authority_discovery_key: sr25519::PublicKey) -> (Option<PeerDetails>, String, PeerId) {
+	fn get_details(
+		&self,
+		authority_discovery_key: sr25519::PublicKey,
+	) -> (Option<PeerDetails>, String, Option<PeerId>) {
 		let Some(details) = self.authority_to_details.get(&authority_discovery_key) else {
-			return (Default::default(), Default::default(), PeerId::random())
+			return (Default::default(), Default::default(), None)
 		};
 
-		let Some(addr) = details.iter().next() else {
-			return (Default::default(), Default::default(), PeerId::random())
-		};
+		let Some(addr) = details.iter().next() else { return (Default::default(), Default::default(), None) };
 
-		let peer_id = get_peer_id(addr).unwrap_or(PeerId::random());
-		let serialized_key = peer_id.to_bytes();
+		let peer_id = get_peer_id(addr);
+		let serialized_key = peer_id.map(|peer_d| peer_d.to_bytes()).unwrap_or_default();
 		(
 			self.peer_details.get(&serialized_key).cloned(),
 			self.peer_versions
