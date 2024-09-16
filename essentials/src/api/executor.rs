@@ -24,7 +24,7 @@ use crate::{
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
 	init::Shutdown,
-	metadata::polkadot_primitives,
+	metadata::{polkadot::session::storage::types::queued_keys::QueuedKeys, polkadot_primitives},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData,
 		SessionKeys, SubxtHrmpChannel, Timestamp, H256,
@@ -63,7 +63,9 @@ pub enum Request {
 	GetSessionIndex(H256),
 	GetSessionAccountKeys(u32),
 	GetSessionNextKeys(AccountId32),
+	GetSessionQueuedKeys(Option<H256>),
 	GetInboundOutBoundHrmpChannels(H256, Vec<u32>),
+	GetSessionIndexNow,
 	GetHostConfiguration,
 	GetBestBlockSubscription,
 	GetFinalizedBlockSubscription,
@@ -96,6 +98,8 @@ enum Response {
 	SessionAccountKeys(Option<Vec<AccountId32>>),
 	/// Session next keys for a validator
 	SessionNextKeys(Option<SessionKeys>),
+	/// Session queued keys.
+	SessionQueuedKeys(Option<QueuedKeys>),
 	/// HRMP channels for given parachain (e.g. who are sending messages to us)
 	InboundOutBoundHrmpChannels(InboundOutBoundHrmpChannels),
 	/// The current host configuration
@@ -229,6 +233,8 @@ impl RequestExecutorBackend {
 			GetSessionAccountKeys(session_index) =>
 				SessionAccountKeys(client.get_session_account_keys(session_index).await?),
 			GetSessionNextKeys(ref account) => SessionNextKeys(client.get_session_next_keys(account).await?),
+			GetSessionQueuedKeys(at) => SessionQueuedKeys(client.get_session_queued_keys(at).await?),
+			GetSessionIndexNow => SessionIndex(client.get_session_index_now().await?.unwrap_or_default()),
 			GetInboundOutBoundHrmpChannels(hash, para_ids) =>
 				InboundOutBoundHrmpChannels(client.get_inbound_outbound_hrmp_channels(hash, para_ids).await?),
 			GetHostConfiguration => HostConfiguration(DynamicHostConfiguration::new(
@@ -410,6 +416,10 @@ impl RequestExecutor {
 		wrap_backend_call!(self, url, GetSessionIndex, SessionIndex, hash)
 	}
 
+	pub async fn get_session_index_now(&mut self, url: &str) -> color_eyre::Result<u32, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetSessionIndexNow, SessionIndex)
+	}
+
 	pub async fn get_session_account_keys(
 		&mut self,
 		url: &str,
@@ -424,6 +434,14 @@ impl RequestExecutor {
 		account: AccountId32,
 	) -> color_eyre::Result<Option<SessionKeys>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetSessionNextKeys, SessionNextKeys, account)
+	}
+
+	pub async fn get_session_queued_keys(
+		&mut self,
+		url: &str,
+		at: Option<H256>,
+	) -> color_eyre::Result<Option<QueuedKeys>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetSessionQueuedKeys, SessionQueuedKeys, at)
 	}
 
 	pub async fn get_inbound_outbound_hrmp_channels(

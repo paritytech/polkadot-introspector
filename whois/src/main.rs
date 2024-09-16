@@ -15,20 +15,27 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::{Args, Parser, Subcommand};
+use futures::future;
+use itertools::Itertools;
+use libp2p::{Multiaddr, PeerId};
 use polkadot_introspector_essentials::{
 	api::{
 		api_client::ApiClientMode,
 		executor::{RequestExecutor, RequestExecutorError},
 	},
-	consumer::{EventConsumerInit, EventStream},
 	init,
-	telemetry_feed::{AddedNode, TelemetryFeed},
-	telemetry_subscription::{TelemetryEvent, TelemetrySubscription},
-	types::{AccountId32, SessionKeys},
+	types::{AccountId32, H256},
 	utils,
 };
-use polkadot_introspector_priority_channel::Receiver;
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
+use serde_binary::binary_stream::Endian;
+use std::{
+	collections::{HashMap, HashSet},
+	fs::{self, File},
+	io::Write,
+};
+use subp2p_explorer::util::{crypto::sr25519, p2p::get_peer_id};
+use subp2p_explorer_cli::commands::authorities::PeerDetails;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about = "Simple telemetry feed")]
@@ -38,9 +45,6 @@ struct TelemetryOptions {
 	/// Web-Socket URLs of a relay chain node.
 	#[clap(long)]
 	pub ws: String,
-	/// Web-Socket URL of a telemetry backend
-	#[clap(long)]
-	pub feed: String,
 	/// Name of a chain to connect
 	#[clap(long)]
 	pub chain: Option<String>,
@@ -48,38 +52,98 @@ struct TelemetryOptions {
 	pub verbose: init::VerbosityOptions,
 	#[clap(flatten)]
 	pub retry: utils::RetryOptions,
+	#[clap(long)]
+	pub session_index: u32,
+	#[clap(long)]
+	pub queued_keys_at_block: Option<H256>,
+	#[clap(long)]
+	pub update_p2p_cache: bool,
+	/// Hex-encoded genesis hash of the chain.
+	///
+	/// For example, "781e4046b4e8b5e83d33dde04b32e7cb5d43344b1f19b574f6d31cbbd99fe738"
+	#[clap(long, short)]
+	genesis: String,
+	/// Bootnodes of the chain, must contain a multiaddress together with the peer ID.
+	/// For example, "/ip4/127.0.0.1/tcp/30333/ws/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp".
+	#[clap(long, use_value_delimiter = true, value_parser)]
+	bootnodes: Vec<String>,
+	/// The number of seconds the discovery process should run for.
+	#[clap(long, short, value_parser = parse_duration)]
+	timeout: std::time::Duration,
+	/// The address format name of the chain.
+	/// Used to display the SS58 address of the authorities.
+	///
+	/// For example:
+	/// - "polkadot" for Polkadot
+	/// - "substrate" for Substrate
+	/// - "kusama" for Kusama
+	#[clap(long, short)]
+	address_format: String,
+}
+
+fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+	let seconds = arg.parse()?;
+	Ok(std::time::Duration::from_secs(seconds))
 }
 
 #[derive(Clone, Debug, Subcommand)]
 enum WhoisCommand {
-	Account(AccountOptions),
-	Session(SessionOptions),
+	ByAccount(AccountOptions),
+	ByValidatorIndex(SessionOptions),
+	ByAuthorityDiscovery(AuthorithyDiscoveryOptions),
+	ByPeerId(PeerIdOptions),
+	DumpAll,
 }
 
 #[derive(Clone, Debug, Args)]
 struct AccountOptions {
 	/// SS58-formated validator's address
-	pub validator: AccountId32,
+	pub validators: Vec<AccountId32>,
+}
+
+#[derive(Clone, Debug, Args)]
+struct AuthorithyDiscoveryOptions {
+	/// Authorithy Discovery in the hex format
+	pub authority_discovery: Vec<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+struct PeerIdOptions {
+	/// PeerId of the validator
+	pub peer_id: Vec<PeerId>,
 }
 
 #[derive(Clone, Debug, Args)]
 struct SessionOptions {
-	pub session_index: u32,
-	pub validator_index: usize,
+	pub validator_indices: Vec<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum WhoisError {
 	#[error("Validator's next keys not found")]
 	NoNextKeys,
+	#[error("Could not fetch current session index")]
+	NoSessionIndex,
 	#[error("Keys for the session with given index not found")]
 	NoSessionKeys,
 	#[error("Validator with given index not found")]
 	NoValidator,
 	#[error("Can't connect to relay chain")]
 	SubxtError(RequestExecutorError),
-	#[error("Can't connect to telemetry feed")]
-	TelemetryError(color_eyre::Report),
+	#[error("Could not fetch para session account keys")]
+	NoParaSessionAccountKeys,
+	#[error("Could not fetch session queued keys")]
+	NoSessionQueuedKeys,
+	#[error("Validator index {0} is invalid in para session account keys")]
+	InvalidValidatorIndex(usize),
+	#[error("AuthorityDiscovery {0} is invalid in para session account keys")]
+	InvalidAuthorityDiscovery(String),
+	#[error("Could not find PeerId {0} in the p2p network cache, consider updating the cache if not updated")]
+	InvalidPeerId(PeerId),
+	#[error("Could not find authority key for peer id {0}")]
+	InvalidPeerIdNoAuthority(PeerId),
+	#[error("Invalid p2p cache, consider deleting and updating the cache at {0}")]
+	InvalidP2PCache(String),
 }
 
 struct Whois {
@@ -93,77 +157,256 @@ impl Whois {
 
 	async fn run(
 		self,
-		consumer_config: EventConsumerInit<TelemetryEvent>,
 		mut executor: RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
-		let validator = match self.opts.command {
-			WhoisCommand::Account(v) => v.validator,
-			WhoisCommand::Session(v) => match executor.get_session_account_keys(&self.opts.ws, v.session_index).await {
-				Ok(Some(validators)) => match validators.get(v.validator_index) {
-					Some(v) => v.clone(),
-					None => return Err(WhoisError::NoValidator),
-				},
+		let Ok(session_index_now) = executor.get_session_index_now(&self.opts.ws).await else {
+			return Err(WhoisError::NoSessionIndex)
+		};
+
+		let para_session_account_keys =
+			match executor.get_session_account_keys(&self.opts.ws, self.opts.session_index).await {
+				Ok(Some(validators)) => validators,
 				Err(e) => return Err(WhoisError::SubxtError(e)),
-				_ => return Err(WhoisError::NoSessionKeys),
-			},
-		};
-		let next_keys = match executor.get_session_next_keys(&self.opts.ws, validator.clone()).await {
-			Ok(Some(v)) => v,
+				_ => return Err(WhoisError::NoParaSessionAccountKeys),
+			};
+
+		let session_queued_keys = match executor
+			.get_session_queued_keys(&self.opts.ws, self.opts.queued_keys_at_block)
+			.await
+		{
+			Ok(Some(queued_keys)) => queued_keys,
 			Err(e) => return Err(WhoisError::SubxtError(e)),
-			_ => return Err(WhoisError::NoNextKeys),
+			_ => return Err(WhoisError::NoSessionQueuedKeys),
 		};
-		let authority_key = get_authority_key(next_keys);
 
-		let consumer_channels: Vec<Receiver<TelemetryEvent>> = consumer_config.into();
-		let futures = consumer_channels
-			.into_iter()
-			.map(|c: Receiver<TelemetryEvent>| tokio::spawn(Self::watch(c, authority_key.clone(), validator.clone())))
-			.collect();
+		let network_cache = NetworkCache::build_cache(session_index_now, &self.opts).await?;
+		let network_cache_for_session = network_cache.get_closest_to_session(self.opts.session_index)?;
 
-		Ok(futures)
+		// A vector of (validator, validator_index) pairs representing the validator account
+		// and its index in para_session_account_keys.
+		let accounts_to_discover = match self.opts.command {
+			WhoisCommand::ByAccount(v) => v
+				.validators
+				.into_iter()
+				.map(|v| {
+					let index = para_session_account_keys.iter().position(|x| &v == x);
+					(v, index)
+				})
+				.collect_vec(),
+			WhoisCommand::ByValidatorIndex(v) => v
+				.validator_indices
+				.into_iter()
+				.map(|validator_index| {
+					para_session_account_keys
+						.get(validator_index)
+						.cloned()
+						.ok_or(WhoisError::InvalidValidatorIndex(validator_index))
+						.map(|account| (account, Some(validator_index)))
+				})
+				.collect::<Result<Vec<_>, _>>()?,
+			WhoisCommand::ByAuthorityDiscovery(authority_discovery) => authority_discovery
+				.authority_discovery
+				.into_iter()
+				.map(|authority_discovery| {
+					let account = session_queued_keys
+						.iter()
+						.find(|(_, session_keys)| {
+							format!("0x{}", hex::encode(session_keys.authority_discovery.0 .0)) == authority_discovery
+						})
+						.ok_or(WhoisError::InvalidAuthorityDiscovery(authority_discovery));
+					account.map(|(account, _)| {
+						let validator_index = para_session_account_keys.iter().position(|x| account == x);
+						(account.clone(), validator_index)
+					})
+				})
+				.collect::<Result<Vec<_>, _>>()?,
+			WhoisCommand::ByPeerId(opts) => opts
+				.peer_id
+				.into_iter()
+				.map(|peer_id| {
+					let authority_key = network_cache_for_session
+						.get_authority_key_from_peer_id(peer_id)
+						.ok_or(WhoisError::InvalidPeerId(peer_id));
+
+					authority_key.and_then(|authority_key| {
+						let account_for_key = session_queued_keys
+							.iter()
+							.find(|(_, session_keys)| session_keys.authority_discovery.0 .0 == authority_key)
+							.ok_or(WhoisError::InvalidPeerIdNoAuthority(peer_id));
+
+						account_for_key.map(|(account, _)| {
+							let validator_index = para_session_account_keys.iter().position(|x| account == x);
+							(account.clone(), validator_index)
+						})
+					})
+				})
+				.collect::<Result<Vec<_>, _>>()?,
+			WhoisCommand::DumpAll => para_session_account_keys
+				.into_iter()
+				.enumerate()
+				.map(|(validator_index, account)| (account, Some(validator_index)))
+				.collect_vec(),
+		};
+
+		println!(
+			"======================================== List of validators ========================================"
+		);
+
+		for (validator, validator_index) in accounts_to_discover {
+			let session_keys_for_validator = &session_queued_keys.iter().find(|(account, _)| account == &validator);
+
+			if let Some((_, session_keys_for_validator)) = session_keys_for_validator {
+				let authorithy_discovery_key = session_keys_for_validator.authority_discovery.0 .0.clone();
+				let (peer_details, info, peer_id) = network_cache_for_session.get_details(authorithy_discovery_key);
+
+				println!(
+					"validator_index={:?}, account={:}, peer_id={:}, authorithy_id_discover=0x{:}, addresses={:?}, version={:?}",
+					validator_index.unwrap_or(usize::MAX),
+					validator,
+					peer_id,
+					hex::encode(authorithy_discovery_key),
+					peer_details.map(|details| details.addresses().clone()),
+					info,
+				);
+			} else {
+				println!(
+					"validator_index={:?}, account={:}, no information could be found",
+					validator_index.unwrap_or(usize::MAX),
+					validator,
+				);
+			}
+			println!("==============================================================================================");
+		}
+		executor.close().await;
+
+		Ok(vec![])
+	}
+}
+
+#[derive(Serialize, Deserialize)]
+struct NetworkCacheInfo {
+	pub peer_details: HashMap<Vec<u8>, PeerDetails>,
+	pub peer_versions: HashMap<Vec<u8>, String>,
+	pub authority_to_details: HashMap<sr25519::PublicKey, HashSet<Multiaddr>>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct NetworkCache {
+	session_to_network_info: HashMap<u32, NetworkCacheInfo>,
+}
+
+const DEFAULT_CACHE_DIR: &str = "~/.whois/cache";
+
+impl NetworkCache {
+	async fn build_cache(session_index_now: u32, opts: &TelemetryOptions) -> color_eyre::Result<Self, WhoisError> {
+		let mut update_cache = opts.update_p2p_cache;
+		let cache_path = format!("{}/{}/p2p_cache", DEFAULT_CACHE_DIR, opts.chain.clone().unwrap_or("any".to_string()));
+		println!("Using cache path: {}", cache_path);
+		let mut cache: NetworkCache = if let Ok(serialized_cache) = fs::read(cache_path.as_str()) {
+			serde_binary::from_vec(serialized_cache, Endian::Big)
+				.map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?
+		} else {
+			update_cache = true;
+			Default::default()
+		};
+
+		if update_cache {
+			println!("Discovering DHT authorithies, this may take a while...");
+			let (authorithy_discovery, _) = subp2p_explorer_cli::commands::authorities::discover_authorities(
+				opts.ws.clone(),
+				opts.genesis.clone(),
+				opts.bootnodes.clone(),
+				opts.timeout,
+				opts.address_format.clone(),
+				Default::default(),
+			)
+			.await
+			.map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?;
+
+			let peer_details = authorithy_discovery.peer_details().clone();
+			let peer_info = authorithy_discovery.peer_info().clone();
+			let authority_to_details = authorithy_discovery.authority_to_details().clone();
+
+			let network_cache = NetworkCacheInfo {
+				peer_details: peer_details.into_iter().map(|(key, value)| (key.to_bytes(), value)).collect(),
+				peer_versions: peer_info
+					.into_iter()
+					.map(|(key, value)| (key.to_bytes(), value.agent_version))
+					.collect(),
+				authority_to_details,
+			};
+
+			cache.session_to_network_info.insert(session_index_now, network_cache);
+		}
+
+		let serialized_cache = serde_binary::to_vec(&cache, Endian::Big)
+			.map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?;
+		let path = std::path::Path::new(cache_path.as_str());
+		path.parent().map(|prefix| {
+			let _ = std::fs::create_dir_all(prefix).map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()));
+		});
+		let mut file =
+			File::create(cache_path.as_str()).map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?;
+		file.write_all(serialized_cache.as_slice())
+			.map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?;
+		Ok(cache)
 	}
 
-	async fn watch(update: Receiver<TelemetryEvent>, authority_key: AccountId32, validator: AccountId32) {
-		let mut count = 0_u32;
-		while let Ok(TelemetryEvent::NewMessage(message)) = update.recv().await {
-			if count > 0 {
-				clear_last_two_lines();
-			}
-			count += 1;
-			println!("Looking for a validator {}...\n{} telemetry messages parsed, CTRL+C to exit", validator, count);
-			match message {
-				TelemetryFeed::AddedNode(node) =>
-					if desired_node_id(&node, authority_key.clone()) {
-						println!("\n========================================\nValidator Node\n{}", node);
-						std::process::exit(0);
-					},
-				_ => continue,
-			}
+	fn get_closest_to_session(&self, session_index: u32) -> color_eyre::Result<&NetworkCacheInfo, WhoisError> {
+		let closest_session_lower = self
+			.session_to_network_info
+			.keys()
+			.filter(|value| *value <= &session_index)
+			.max();
+
+		let closest_session_larger = self
+			.session_to_network_info
+			.keys()
+			.filter(|value| *value >= &session_index)
+			.min();
+
+		if let Some(closest_session_lower) = closest_session_lower {
+			Ok(self
+				.session_to_network_info
+				.get(closest_session_lower)
+				.expect("closest_session_lower is obtained from session_to_network_info; qed"))
+		} else if let Some(closest_session_larger) = closest_session_larger {
+			Ok(self
+				.session_to_network_info
+				.get(closest_session_larger)
+				.expect("closest_session_larger is obtained from session_to_network_info; qed"))
+		} else {
+			Err(WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))
 		}
 	}
 }
 
-fn desired_node_id(node: &AddedNode, authority_key: AccountId32) -> bool {
-	if node.details.validator.is_none() {
-		return false
+impl NetworkCacheInfo {
+	fn get_details(&self, authority_discovery_key: sr25519::PublicKey) -> (Option<PeerDetails>, String, PeerId) {
+		let Some(details) = self.authority_to_details.get(&authority_discovery_key) else {
+			return (Default::default(), Default::default(), PeerId::random())
+		};
+
+		let Some(addr) = details.iter().next() else {
+			return (Default::default(), Default::default(), PeerId::random())
+		};
+
+		let peer_id = get_peer_id(addr).unwrap_or(PeerId::random());
+		let serialized_key = peer_id.to_bytes();
+		(
+			self.peer_details.get(&serialized_key).cloned(),
+			self.peer_versions
+				.get(&serialized_key)
+				.cloned()
+				.unwrap_or("unknown".to_string()),
+			peer_id,
+		)
 	}
 
-	if let Ok(node_authority_key) = AccountId32::from_str(&node.details.validator.clone().unwrap()) {
-		if node_authority_key == authority_key {
-			return true
-		}
-	};
-
-	false
-}
-
-fn get_authority_key(keys: SessionKeys) -> AccountId32 {
-	AccountId32::from(keys.grandpa.0 .0)
-}
-
-fn clear_last_two_lines() {
-	print!("\x1B[2A");
-	print!("\x1B[0J");
+	fn get_authority_key_from_peer_id(&self, peer_id: PeerId) -> Option<sr25519::PublicKey> {
+		let serialized_key = peer_id.to_bytes();
+		self.peer_details.get(&serialized_key).map(|x| x.authority_id()).cloned()
+	}
 }
 
 #[tokio::main]
@@ -174,14 +417,11 @@ async fn main() -> color_eyre::Result<()> {
 	let whois = Whois::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let executor = RequestExecutor::build(opts.ws.clone(), ApiClientMode::RPC, &opts.retry, &shutdown_tx).await?;
-	let mut sub = TelemetrySubscription::new(opts.ws.clone(), opts.chain.clone());
-	let consumer_init = sub.create_consumer();
 
 	let mut futures = vec![];
-	futures.extend(whois.run(consumer_init, executor).await?);
-	futures.extend(sub.run(&shutdown_tx).await?);
+	futures.extend(whois.run(executor).await?);
 
-	init::run(futures, &shutdown_tx).await?;
+	future::try_join_all(futures).await?;
 
 	Ok(())
 }
