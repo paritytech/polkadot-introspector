@@ -27,7 +27,6 @@ use polkadot_introspector_essentials::{
 			bounded_collections::bounded_vec::BoundedVec,
 			polkadot_core_primitives::CandidateHash,
 			polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
-			sp_core::sr25519::{Public, Signature},
 			sp_runtime::generic::{digest::Digest, header::Header},
 		},
 		polkadot_primitives::{
@@ -59,7 +58,7 @@ pub fn create_backed_candidate(para_id: u32) -> BackedCandidate<H256> {
 			descriptor: CandidateDescriptor {
 				para_id: Id(para_id),
 				relay_parent: H256::random(),
-				collator: collator_app::Public(Public([0; 32])),
+				collator: collator_app::Public([0; 32]),
 				persisted_validation_data_hash: Default::default(),
 				pov_hash: Default::default(),
 				erasure_root: Default::default(),
@@ -188,9 +187,9 @@ pub async fn storage_write<T: Encode>(
 }
 
 fn create_collator_signature() -> collator_app::Signature {
-	collator_app::Signature(Signature([0; 64]))
+	collator_app::Signature([0; 64])
 }
 
 fn create_validator_signature() -> validator_app::Signature {
-	validator_app::Signature(Signature([0; 64]))
+	validator_app::Signature([0; 64])
 }
