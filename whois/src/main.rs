@@ -38,7 +38,7 @@ use subp2p_explorer::util::{crypto::sr25519, p2p::get_peer_id};
 use subp2p_explorer_cli::commands::authorities::PeerDetails;
 
 #[derive(Clone, Debug, Parser)]
-#[clap(author, version, about = "Simple telemetry feed")]
+#[clap(author, version, about = "Simple command to query polkadot validator identities")]
 struct WhoIsOptions {
 	#[clap(subcommand)]
 	command: WhoisCommand,
@@ -63,11 +63,6 @@ struct WhoIsOptions {
 	/// Note building the p2p cache takes around 10 to 15 minutes
 	#[clap(long)]
 	pub update_p2p_cache: bool,
-	/// Hex-encoded genesis hash of the chain.
-	///
-	/// For example, "781e4046b4e8b5e83d33dde04b32e7cb5d43344b1f19b574f6d31cbbd99fe738"
-	#[clap(long, short)]
-	genesis: String,
 	/// Bootnodes of the chain, must contain a multiaddress together with the peer ID.
 	/// For example, "/ip4/127.0.0.1/tcp/30333/ws/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp".
 	#[clap(long, use_value_delimiter = true, value_parser)]
@@ -137,6 +132,8 @@ pub enum WhoisError {
 	NoNextKeys,
 	#[error("Could not fetch current session index")]
 	NoSessionIndex,
+	#[error("Could not determine the genesis hash")]
+	NoGenesisHash,
 	#[error("Invalid session index, session can not be older than {0}")]
 	InvalidSessionIndex(u32),
 	#[error("Keys for the session with given index not found")]
@@ -177,6 +174,10 @@ impl Whois {
 		self,
 		mut executor: RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>, WhoisError> {
+		let Ok(Some(genesis_hash)) = executor.get_block_hash(&self.opts.ws, Some(0)).await else {
+			return Err(WhoisError::NoGenesisHash)
+		};
+
 		let Ok(session_index_now) = executor.get_session_index_now(&self.opts.ws).await else {
 			return Err(WhoisError::NoSessionIndex)
 		};
@@ -203,7 +204,7 @@ impl Whois {
 			_ => return Err(WhoisError::NoSessionQueuedKeys),
 		};
 
-		let network_cache = NetworkCache::build_cache(session_index_now, &self.opts).await?;
+		let network_cache = NetworkCache::build_cache(session_index_now, genesis_hash, &self.opts).await?;
 		let network_cache_for_session = network_cache.get_closest_to_session(self.opts.session_index)?;
 
 		// A vector of (validator, validator_index) pairs representing the validator account
@@ -235,7 +236,7 @@ impl Whois {
 					let account = session_queued_keys
 						.iter()
 						.find(|(_, session_keys)| {
-							format!("0x{}", hex::encode(session_keys.authority_discovery.0 .0)) == authority_discovery
+							format!("0x{}", hex::encode(session_keys.authority_discovery.0)) == authority_discovery
 						})
 						.ok_or(WhoisError::InvalidAuthorityDiscovery(authority_discovery));
 					account.map(|(account, _)| {
@@ -255,7 +256,7 @@ impl Whois {
 					authority_key.and_then(|authority_key| {
 						let account_for_key = session_queued_keys
 							.iter()
-							.find(|(_, session_keys)| session_keys.authority_discovery.0 .0 == authority_key)
+							.find(|(_, session_keys)| session_keys.authority_discovery.0 == authority_key)
 							.ok_or(WhoisError::InvalidPeerIdNoAuthority(peer_id));
 
 						account_for_key.map(|(account, _)| {
@@ -280,7 +281,7 @@ impl Whois {
 			let session_keys_for_validator = &session_queued_keys.iter().find(|(account, _)| account == &validator);
 
 			if let Some((_, session_keys_for_validator)) = session_keys_for_validator {
-				let authorithy_discovery_key = session_keys_for_validator.authority_discovery.0 .0.clone();
+				let authorithy_discovery_key = session_keys_for_validator.authority_discovery.0.clone();
 				let (peer_details, info, peer_id) = network_cache_for_session.get_details(authorithy_discovery_key);
 
 				println!(
@@ -329,7 +330,11 @@ impl NetworkCache {
 	// Because build the p2p cache takes around 10 to 15 minutes,
 	// we only build the cache if the update_p2p_cache flag is set
 	// or if the cache does not exist.
-	async fn build_cache(session_index_now: u32, opts: &WhoIsOptions) -> color_eyre::Result<Self, WhoisError> {
+	async fn build_cache(
+		session_index_now: u32,
+		genesis_hash: H256,
+		opts: &WhoIsOptions,
+	) -> color_eyre::Result<Self, WhoisError> {
 		let mut update_cache = opts.update_p2p_cache;
 		let cache_path = format!("{}/{}", DEFAULT_CACHE_DIR, opts.chain.clone().unwrap_or("any".to_string()));
 		println!("Using cache path: {}", cache_path);
@@ -345,7 +350,7 @@ impl NetworkCache {
 			println!("Discovering DHT authorithies, this may take a while...");
 			let (authorithy_discovery, _) = subp2p_explorer_cli::commands::authorities::discover_authorities(
 				opts.ws.clone(),
-				opts.genesis.clone(),
+				format!("{:?}", genesis_hash),
 				opts.bootnodes.clone(),
 				opts.timeout,
 				opts.address_format.clone(),

@@ -19,10 +19,10 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 serde = {workspace = true }
 serde_json = {workspace = true }
-itertools = "0.13"
-serde-binary = "0.5"
-hex = "0.4.3"
+itertools = {workspace = true }
+serde-binary = {workspace = true }
+hex = {workspace = true }
 subp2p-explorer-cli = { git = "https://github.com/alexggh/subp2p-explorer", branch="alexggh/make-subp2p-usable-as-library"}
 subp2p-explorer = { git = "https://github.com/alexggh/subp2p-explorer", branch="alexggh/make-subp2p-usable-as-library"}
 
-libp2p = { version = "0.52.0", features = ["dns", "identify", "kad", "macros", "mdns", "noise", "ping", "tcp",  "tokio", "yamux", "websocket", "request-response"] }
+libp2p = { version = "0.52.4", features = ["dns", "identify", "kad", "macros", "mdns", "noise", "ping", "tcp",  "tokio", "yamux", "websocket", "request-response"] }
