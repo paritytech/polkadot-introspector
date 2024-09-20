@@ -137,6 +137,8 @@ pub enum WhoisError {
 	NoNextKeys,
 	#[error("Could not fetch current session index")]
 	NoSessionIndex,
+	#[error("Invalid session index, session can not be older than {0}")]
+	InvalidSessionIndex(u32),
 	#[error("Keys for the session with given index not found")]
 	NoSessionKeys,
 	#[error("Validator with given index not found")]
@@ -163,6 +165,9 @@ struct Whois {
 	opts: WhoIsOptions,
 }
 
+// The maximum number of para sessions a node stores before starting to proun
+const NUMBER_OF_STORED_SESSIONS: u32 = 6;
+
 impl Whois {
 	fn new(opts: WhoIsOptions) -> color_eyre::Result<Self> {
 		Ok(Self { opts })
@@ -175,6 +180,12 @@ impl Whois {
 		let Ok(session_index_now) = executor.get_session_index_now(&self.opts.ws).await else {
 			return Err(WhoisError::NoSessionIndex)
 		};
+
+		if session_index_now < self.opts.session_index ||
+			session_index_now - self.opts.session_index > NUMBER_OF_STORED_SESSIONS
+		{
+			return Err(WhoisError::InvalidSessionIndex(session_index_now - NUMBER_OF_STORED_SESSIONS));
+		}
 
 		let para_session_account_keys =
 			match executor.get_session_account_keys(&self.opts.ws, self.opts.session_index).await {
