@@ -463,6 +463,8 @@ impl PerSessionNetworkCache {
 		self.peer_details.get(&serialized_key).map(|x| x.authority_id()).cloned()
 	}
 
+	// Run sanity checks on the p2p cache and print the peers with known problems.
+	// This are things that in the past have caused issues for validators.
 	fn sanity_check(&self, current_discovery_keys: HashSet<[u8; 32]>) {
 		let mut served_authorithies_by_peer = HashMap::new();
 		println!("Running sanity checks on p2p cache for past present and future authorities");
