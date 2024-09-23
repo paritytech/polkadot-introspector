@@ -277,15 +277,15 @@ impl Whois {
 			let session_keys_for_validator = &session_queued_keys.iter().find(|(account, _)| account == &validator);
 
 			if let Some((_, session_keys_for_validator)) = session_keys_for_validator {
-				let authorithy_discovery_key = session_keys_for_validator.authority_discovery.0.clone();
-				let (peer_details, info, peer_id) = network_cache_for_session.get_details(authorithy_discovery_key);
+				let authority_discovery_key = session_keys_for_validator.authority_discovery.0;
+				let (peer_details, info, peer_id) = network_cache_for_session.get_details(authority_discovery_key);
 
 				println!(
-					"validator_index={:?}, account={:}, peer_id={:}, authorithy_id_discover=0x{:}, addresses={:?}, version={:?}",
+					"validator_index={:?}, account={:}, peer_id={:}, authority_id_discover=0x{:}, addresses={:?}, version={:?}",
 					validator_index.unwrap_or(usize::MAX),
 					validator,
 					peer_id.map(|peer_id| peer_id.to_string()).unwrap_or("unknown".to_string()),
-					hex::encode(authorithy_discovery_key),
+					hex::encode(authority_discovery_key),
 					peer_details.map(|details| details.addresses().clone()),
 					info,
 				);
@@ -343,8 +343,8 @@ impl NetworkCache {
 			Default::default()
 		};
 		let address_format = Ss58AddressFormat::all_names()
-			.into_iter()
-			.map(|x| *x)
+			.iter()
+			.copied()
 			.find(|x| chain_name.eq_ignore_ascii_case(x))
 			.unwrap_or("substrate");
 		if update_cache {
@@ -382,9 +382,10 @@ impl NetworkCache {
 		let serialized_cache = serde_binary::to_vec(&cache, Endian::Big)
 			.map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?;
 		let path = std::path::Path::new(cache_path.as_str());
-		path.parent().map(|prefix| {
+		if let Some(prefix) = path.parent() {
 			let _ = std::fs::create_dir_all(prefix).map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()));
-		});
+		};
+
 		let mut file =
 			File::create(cache_path.as_str()).map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?;
 		file.write_all(serialized_cache.as_slice())
