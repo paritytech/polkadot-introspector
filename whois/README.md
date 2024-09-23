@@ -79,7 +79,7 @@ cargo run  --bin polkadot-whois -- \
  --ws=wss://kusama-rpc.polkadot.io:443 \
  --bootnodes /dns/kusama-bootnode-0.polkadot.io/tcp/30333/p2p/12D3Koo
 WSueCPH3puP2PcvqPJdNaDNF3jMZjtJtDiSy35pWrbt5h \
- --address-format kusama --timeout 900  --chain kusama --session-index 42088 \
+ --session-index 42088 \
  by-validator-index 295 293
 ```
 
@@ -108,3 +108,10 @@ cargo run  --bin polkadot-whois -- \
  by-validator-index 11 12
 
 ```
+
+## Limitations
+
+To map the information between authority-discovery keys and the accounts, the tool uses the result
+of  `session.queued_keys` at the session the tool is used. Sometimes, the accounts of interest are not
+in the current `queued_keys` and tool will mark them as `unknown` in that case you can work around this
+problem by  providing an older block with `--queued-keys-at-block` argument.

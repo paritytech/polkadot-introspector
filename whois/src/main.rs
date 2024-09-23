@@ -125,8 +125,8 @@ pub enum WhoisError {
 	NoGenesisHash,
 	#[error("Could not determine the chain name")]
 	NoChainName,
-	#[error("Invalid session index, session can not be older than {0}")]
-	InvalidSessionIndex(u32),
+	#[error("Invalid session index, session needs to be between {0} and {1}")]
+	InvalidSessionIndex(u32, u32),
 	#[error("Keys for the session with given index not found")]
 	NoSessionKeys,
 	#[error("Validator with given index not found")]
@@ -180,7 +180,10 @@ impl Whois {
 		if session_index_now < self.opts.session_index ||
 			session_index_now - self.opts.session_index > NUMBER_OF_STORED_SESSIONS
 		{
-			return Err(WhoisError::InvalidSessionIndex(session_index_now - NUMBER_OF_STORED_SESSIONS));
+			return Err(WhoisError::InvalidSessionIndex(
+				session_index_now - NUMBER_OF_STORED_SESSIONS,
+				session_index_now,
+			));
 		}
 
 		let para_session_account_keys =
@@ -202,6 +205,8 @@ impl Whois {
 		let network_cache =
 			NetworkCache::build_cache(session_index_now, genesis_hash, chain_name.as_str(), &self.opts).await?;
 		let network_cache_for_session = network_cache.get_closest_to_session(self.opts.session_index)?;
+
+		let run_sanity_check = matches!(self.opts.command, WhoisCommand::DumpAll);
 
 		// A vector of (validator, validator_index) pairs representing the validator account
 		// and its index in para_session_account_keys.
@@ -269,17 +274,14 @@ impl Whois {
 				.collect_vec(),
 		};
 
-		println!(
-			"======================================== List of validators ========================================"
-		);
-
+		let mut current_authority_discovery_keys = HashSet::new();
 		for (validator, validator_index) in accounts_to_discover {
 			let session_keys_for_validator = &session_queued_keys.iter().find(|(account, _)| account == &validator);
 
 			if let Some((_, session_keys_for_validator)) = session_keys_for_validator {
 				let authority_discovery_key = session_keys_for_validator.authority_discovery.0;
 				let (peer_details, info, peer_id) = network_cache_for_session.get_details(authority_discovery_key);
-
+				current_authority_discovery_keys.insert(authority_discovery_key);
 				println!(
 					"validator_index={:?}, account={:}, peer_id={:}, authority_id_discover=0x{:}, addresses={:?}, version={:?}",
 					validator_index.unwrap_or(usize::MAX),
@@ -296,8 +298,13 @@ impl Whois {
 					validator,
 				);
 			}
-			println!("==============================================================================================");
+			println!("");
 		}
+
+		if run_sanity_check {
+			network_cache_for_session.sanity_check(current_authority_discovery_keys);
+		}
+
 		executor.close().await;
 
 		Ok(vec![])
@@ -309,8 +316,11 @@ const DEFAULT_CACHE_DIR: &str = "whois_p2pcache";
 // Information about the p2p network at a given session index.
 #[derive(Serialize, Deserialize)]
 struct PerSessionNetworkCache {
+	/// PeerId to PeerDetails mapping.
 	pub peer_details: HashMap<Vec<u8>, PeerDetails>,
+	/// PeerId to version mapping.
 	pub peer_versions: HashMap<Vec<u8>, String>,
+	/// Authority Id to discovered addresses.
 	pub authority_to_details: HashMap<sr25519::PublicKey, HashSet<Multiaddr>>,
 }
 
@@ -408,11 +418,13 @@ impl NetworkCache {
 			.min();
 
 		if let Some(closest_session_lower) = closest_session_lower {
+			println!("Using p2p cache took at session: {}", closest_session_lower);
 			Ok(self
 				.session_to_network_info
 				.get(closest_session_lower)
 				.expect("closest_session_lower is obtained from session_to_network_info; qed"))
 		} else if let Some(closest_session_larger) = closest_session_larger {
+			println!("Using p2p cache took at session: {}", closest_session_larger);
 			Ok(self
 				.session_to_network_info
 				.get(closest_session_larger)
@@ -449,6 +461,58 @@ impl PerSessionNetworkCache {
 	fn get_authority_key_from_peer_id(&self, peer_id: PeerId) -> Option<sr25519::PublicKey> {
 		let serialized_key = peer_id.to_bytes();
 		self.peer_details.get(&serialized_key).map(|x| x.authority_id()).cloned()
+	}
+
+	fn sanity_check(&self, current_discovery_keys: HashSet<[u8; 32]>) {
+		let mut served_authorithies_by_peer = HashMap::new();
+		println!("Running sanity checks on p2p cache for past present and future authorities");
+		for (authority_id, addresses) in self.authority_to_details.iter() {
+			let mut peer_ids = HashSet::new();
+			if !current_discovery_keys.contains(authority_id) {
+				continue;
+			}
+			// https://github.com/paritytech/polkadot-sdk/blob/b9eb68bcb5ab93e58bcba4425975ad00374da2bc/substrate/client/authority-discovery/src/worker.rs#L74
+			const MAX_ADDRESSES_PER_AUTHORITY: usize = 10;
+			if addresses.len() > MAX_ADDRESSES_PER_AUTHORITY {
+				println!(
+					"WARN: Authority 0x{:} has more than the maximum recommended addresses recommended {:} found {:} ",
+					hex::encode(authority_id),
+					MAX_ADDRESSES_PER_AUTHORITY,
+					addresses.len()
+				);
+			}
+			for address in addresses {
+				let peer_id = get_peer_id(address);
+				if let Some(peer_id) = peer_id {
+					peer_ids.insert(peer_id);
+					served_authorithies_by_peer
+						.entry(peer_id)
+						.or_insert(HashSet::new())
+						.insert(authority_id);
+				}
+			}
+
+			if peer_ids.len() > 1 {
+				println!("WARN: Authority 0x{:} has multiple peer ids: {:?}", hex::encode(authority_id), peer_ids);
+			}
+
+			if peer_ids.is_empty() {
+				println!("WARN: Authority 0x{:} has no peer ids", hex::encode(authority_id));
+			}
+		}
+
+		for (peer_id, authorities) in served_authorithies_by_peer.iter() {
+			if authorities.len() > 1 {
+				println!(
+					"WARN: Peer {:} serves multiple authorities: {:}",
+					peer_id,
+					authorities.iter().fold(String::new(), |acc, authority_id| {
+						format!("{:} 0x{:}", acc, hex::encode(authority_id))
+					})
+				);
+			}
+		}
+		println!("Sanity checks on p2p cache completed");
 	}
 }
 
