@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 serde = {workspace = true }
 serde_json = {workspace = true }
+ss58-registry = {workspace = true }
 itertools = {workspace = true }
 serde-binary = {workspace = true }
 hex = {workspace = true }

@@ -3927,6 +3927,7 @@ dependencies = [
  "serde",
  "serde-binary",
  "serde_json",
+ "ss58-registry",
  "subp2p-explorer",
  "subp2p-explorer-cli",
  "thiserror",

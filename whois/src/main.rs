@@ -29,6 +29,7 @@ use polkadot_introspector_essentials::{
 };
 use serde::{Deserialize, Serialize};
 use serde_binary::binary_stream::Endian;
+use ss58_registry::Ss58AddressFormat;
 use std::{
 	collections::{HashMap, HashSet},
 	fs::{self, File},
@@ -45,14 +46,11 @@ struct WhoIsOptions {
 	/// Web-Socket URLs of a relay chain node.
 	#[clap(long)]
 	pub ws: String,
-	/// Name of a chain to connect
-	#[clap(long)]
-	pub chain: Option<String>,
 	#[clap(flatten)]
 	pub verbose: init::VerbosityOptions,
 	#[clap(flatten)]
 	pub retry: utils::RetryOptions,
-	/// The session index used for computing the validator indicies.
+	/// The session index used for computing the validator indices.
 	#[clap(long)]
 	pub session_index: u32,
 	/// An optional block hash to fetch the queued keys at, otherwise we use the queued keys at the current block.
@@ -67,20 +65,11 @@ struct WhoIsOptions {
 	/// For example, "/ip4/127.0.0.1/tcp/30333/ws/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp".
 	#[clap(long, use_value_delimiter = true, value_parser)]
 	bootnodes: Vec<String>,
-	/// The number of seconds the discovery process should run for.
-	#[clap(long, short, value_parser = parse_duration)]
+	/// The number of seconds the discovery process should run for, default value
+	/// is empirically values found for the polkadot and kusama network, smaller
+	/// networks may require a smaller values.
+	#[clap(long, short, value_parser = parse_duration, default_value = "900")]
 	timeout: std::time::Duration,
-	/// The address format name of the chain.
-	/// Used to display the SS58 address of the authorities.
-	///
-	/// For example:
-	/// - "polkadot" for Polkadot
-	/// - "substrate" for Substrate
-	/// - "kusama" for Kusama
-	///
-	/// Used to display the SS58 address of the authorities.
-	#[clap(long, short)]
-	address_format: String,
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
@@ -134,6 +123,8 @@ pub enum WhoisError {
 	NoSessionIndex,
 	#[error("Could not determine the genesis hash")]
 	NoGenesisHash,
+	#[error("Could not determine the chain name")]
+	NoChainName,
 	#[error("Invalid session index, session can not be older than {0}")]
 	InvalidSessionIndex(u32),
 	#[error("Keys for the session with given index not found")]
@@ -178,6 +169,10 @@ impl Whois {
 			return Err(WhoisError::NoGenesisHash)
 		};
 
+		let Ok(chain_name) = executor.get_chain_name(&self.opts.ws).await else { return Err(WhoisError::NoChainName) };
+
+		println!("Using chain name: {} genesis_hash: {:?}", chain_name, genesis_hash);
+
 		let Ok(session_index_now) = executor.get_session_index_now(&self.opts.ws).await else {
 			return Err(WhoisError::NoSessionIndex)
 		};
@@ -204,7 +199,8 @@ impl Whois {
 			_ => return Err(WhoisError::NoSessionQueuedKeys),
 		};
 
-		let network_cache = NetworkCache::build_cache(session_index_now, genesis_hash, &self.opts).await?;
+		let network_cache =
+			NetworkCache::build_cache(session_index_now, genesis_hash, chain_name.as_str(), &self.opts).await?;
 		let network_cache_for_session = network_cache.get_closest_to_session(self.opts.session_index)?;
 
 		// A vector of (validator, validator_index) pairs representing the validator account
@@ -333,10 +329,11 @@ impl NetworkCache {
 	async fn build_cache(
 		session_index_now: u32,
 		genesis_hash: H256,
+		chain_name: &str,
 		opts: &WhoIsOptions,
 	) -> color_eyre::Result<Self, WhoisError> {
 		let mut update_cache = opts.update_p2p_cache;
-		let cache_path = format!("{}/{}", DEFAULT_CACHE_DIR, opts.chain.clone().unwrap_or("any".to_string()));
+		let cache_path = format!("{}/{}", DEFAULT_CACHE_DIR, chain_name.to_ascii_lowercase());
 		println!("Using cache path: {}", cache_path);
 		let mut cache: NetworkCache = if let Ok(serialized_cache) = fs::read(cache_path.as_str()) {
 			serde_binary::from_vec(serialized_cache, Endian::Big)
@@ -345,7 +342,11 @@ impl NetworkCache {
 			update_cache = true;
 			Default::default()
 		};
-
+		let address_format = Ss58AddressFormat::all_names()
+			.into_iter()
+			.map(|x| *x)
+			.find(|x| chain_name.eq_ignore_ascii_case(x))
+			.unwrap_or("substrate");
 		if update_cache {
 			println!("Discovering DHT authorithies, this may take a while...");
 			let (authorithy_discovery, _) = subp2p_explorer_cli::commands::authorities::discover_authorities(
@@ -353,11 +354,14 @@ impl NetworkCache {
 				format!("{:?}", genesis_hash),
 				opts.bootnodes.clone(),
 				opts.timeout,
-				opts.address_format.clone(),
+				address_format.into(),
 				Default::default(),
 			)
 			.await
-			.map_err(|_| WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into()))?;
+			.map_err(|err| {
+				println!("Error: {:?}", err);
+				WhoisError::InvalidP2PCache(DEFAULT_CACHE_DIR.into())
+			})?;
 
 			let peer_details = authorithy_discovery.peer_details().clone();
 			let peer_info = authorithy_discovery.peer_info().clone();

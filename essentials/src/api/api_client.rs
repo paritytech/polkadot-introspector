@@ -298,6 +298,10 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await
 	}
 
+	pub async fn legacy_get_chain_name(&self) -> Result<String, subxt::Error> {
+		self.legacy_rpc_methods.system_chain().await
+	}
+
 	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
 		self.client.backend().stream_best_block_headers().await
 	}

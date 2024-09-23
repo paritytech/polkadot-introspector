@@ -69,6 +69,7 @@ pub enum Request {
 	GetHostConfiguration,
 	GetBestBlockSubscription,
 	GetFinalizedBlockSubscription,
+	GetChainName,
 }
 
 /// Response types for APIs.
@@ -106,6 +107,8 @@ enum Response {
 	HostConfiguration(DynamicHostConfiguration),
 	/// Chain subscription
 	ChainSubscription(HeaderStream),
+	/// Chain name
+	ChainName(String),
 }
 
 #[derive(Debug, Error)]
@@ -209,6 +212,7 @@ impl RequestExecutorBackend {
 			},
 			GetBlockNumber(maybe_hash) => BlockNumber(client.get_block_number(maybe_hash).await?),
 			GetBlockHash(maybe_block_number) => MaybeBlockHash(client.legacy_get_block_hash(maybe_block_number).await?),
+			GetChainName => ChainName(client.legacy_get_chain_name().await?),
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => {
@@ -370,6 +374,10 @@ impl RequestExecutor {
 		maybe_block_number: Option<BlockNumber>,
 	) -> color_eyre::Result<Option<H256>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBlockHash, MaybeBlockHash, maybe_block_number)
+	}
+
+	pub async fn get_chain_name(&mut self, url: &str) -> color_eyre::Result<String, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetChainName, ChainName)
 	}
 
 	pub async fn get_events(
