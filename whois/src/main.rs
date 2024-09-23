@@ -298,7 +298,7 @@ impl Whois {
 					validator,
 				);
 			}
-			println!("");
+			println!();
 		}
 
 		if run_sanity_check {
