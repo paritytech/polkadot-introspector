@@ -30,6 +30,7 @@ pub type AccountId32 = utils::AccountId32;
 pub type Header = SubstrateHeader<u32, BlakeTwo256>;
 pub type Timestamp = u64;
 pub type SessionKeys = runtime::SessionKeys;
+pub type QueuedKeys = crate::metadata::polkadot::session::storage::types::queued_keys::QueuedKeys;
 pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = BTreeMap<u32, VecDeque<Option<ParasEntry>>>;
 

@@ -23,7 +23,9 @@ use crate::{
 			polkadot_runtime_parachains::hrmp::HrmpChannel,
 		},
 	},
-	types::{AccountId32, BlockNumber, Header, InherentData, SessionKeys, SubxtHrmpChannel, Timestamp, H256},
+	types::{
+		AccountId32, BlockNumber, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel, Timestamp, H256,
+	},
 };
 use clap::ValueEnum;
 use std::collections::BTreeMap;
@@ -187,6 +189,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.storage().at(hash).fetch(&addr).await
 	}
 
+	pub async fn get_session_index_now(&self) -> Result<Option<u32>, subxt::Error> {
+		let addr = polkadot::storage().session().current_index();
+		self.storage().at_latest().await?.fetch(&addr).await
+	}
+
 	pub async fn get_session_account_keys(&self, session_index: u32) -> Result<Option<Vec<AccountId32>>, subxt::Error> {
 		let addr = polkadot::storage().para_session_info().account_keys(session_index);
 		self.storage().at_latest().await?.fetch(&addr).await
@@ -195,6 +202,15 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
 		let addr = polkadot::storage().session().next_keys(account);
 		self.storage().at_latest().await?.fetch(&addr).await
+	}
+
+	pub async fn get_session_queued_keys(&self, hash: Option<H256>) -> Result<Option<QueuedKeys>, subxt::Error> {
+		let addr = polkadot::storage().session().queued_keys();
+		if let Some(hash) = hash {
+			self.storage().at(hash).fetch(&addr).await
+		} else {
+			self.storage().at_latest().await?.fetch(&addr).await
+		}
 	}
 
 	pub async fn get_inbound_outbound_hrmp_channels(
@@ -280,6 +296,10 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	) -> Result<Option<H256>, subxt::Error> {
 		let maybe_block_number = maybe_block_number.map(|v| NumberOrHex::Number(v.into()));
 		self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await
+	}
+
+	pub async fn legacy_get_chain_name(&self) -> Result<String, subxt::Error> {
+		self.legacy_rpc_methods.system_chain().await
 	}
 
 	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
