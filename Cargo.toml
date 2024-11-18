@@ -58,8 +58,7 @@ subxt = { default-features = false, features = [
     "jsonrpsee",
     "native",
     "unstable-light-client",
-    "unstable-reconnecting-rpc-client",
-], version = "0.37.0" }
+], version = "0.38.0" }
 base64 = "0.22.1"
 thiserror = "1.0.69"
 time = { version = "0.3.36", features = ["formatting"] }
