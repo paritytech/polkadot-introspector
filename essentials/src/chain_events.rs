@@ -22,7 +22,7 @@ use crate::{
 			para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
 			paras_disputes::events::{DisputeConcluded, DisputeInitiated},
 		},
-		polkadot_primitives::CandidateDescriptor,
+		polkadot_primitives_staging::CandidateDescriptorV2,
 	},
 	types::{Header, OnDemandOrder, H256},
 };
@@ -68,7 +68,7 @@ pub struct SubxtCandidateEvent {
 	/// Result of candidate receipt hashing
 	pub candidate_hash: <PolkadotConfig as subxt::Config>::Hash,
 	/// Full candidate receipt if needed
-	pub candidate_descriptor: CandidateDescriptor<<PolkadotConfig as subxt::Config>::Hash>,
+	pub candidate_descriptor: CandidateDescriptorV2<<PolkadotConfig as subxt::Config>::Hash>,
 	/// The parachain id
 	pub parachain_id: u32,
 	/// The event type
@@ -194,7 +194,7 @@ fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
 
 fn create_candidate_event(
 	commitments_hash: <PolkadotConfig as subxt::Config>::Hash,
-	candidate_descriptor: CandidateDescriptor<<PolkadotConfig as subxt::Config>::Hash>,
+	candidate_descriptor: CandidateDescriptorV2<<PolkadotConfig as subxt::Config>::Hash>,
 	core_idx: u32,
 	event_type: SubxtCandidateEventType,
 ) -> SubxtCandidateEvent {
