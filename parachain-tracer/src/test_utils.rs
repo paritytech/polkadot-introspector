@@ -11,8 +11,6 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-#![cfg(test)]
-
 use crate::parachain_block_info::ParachainBlockInfo;
 use parity_scale_codec::Encode;
 use polkadot_introspector_essentials::{
