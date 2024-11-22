@@ -27,7 +27,10 @@ use crate::{
 use log::{error, info};
 use polkadot_introspector_essentials::{
 	collector::DisputeInfo,
-	metadata::polkadot_primitives::{AvailabilityBitfield, BackedCandidate, DisputeStatementSet, ValidatorIndex},
+	metadata::{
+		polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
+		polkadot_primitives_staging::BackedCandidate,
+	},
 	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
