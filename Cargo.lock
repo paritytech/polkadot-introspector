@@ -2284,15 +2284,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
@@ -4302,7 +4293,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hex",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "parity-scale-codec",
  "polkadot-introspector-priority-channel",
@@ -4366,7 +4357,7 @@ dependencies = [
  "erased-serde",
  "futures",
  "hex",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "parity-db",
  "polkadot-introspector-essentials",
@@ -4394,7 +4385,7 @@ dependencies = [
  "crossterm",
  "env_logger",
  "futures",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "mockall",
  "parity-scale-codec",
@@ -4434,7 +4425,7 @@ dependencies = [
  "env_logger",
  "futures",
  "hex",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "libp2p 0.53.2",
  "log",
  "polkadot-introspector-essentials",
@@ -4785,7 +4776,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
