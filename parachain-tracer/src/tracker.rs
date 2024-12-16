@@ -830,7 +830,7 @@ mod test_inject_block {
 		)
 		.await
 		.unwrap();
-		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Paras], &storage)
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Scheduled], &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
@@ -878,7 +878,7 @@ mod test_inject_block {
 		)
 		.await
 		.unwrap();
-		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Paras], &storage)
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Scheduled], &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
