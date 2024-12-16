@@ -84,7 +84,7 @@ mod tests {
 	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
 
 	fn rpc_node_url() -> &'static str {
-		const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
+		const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
 
 		if let Ok(url) = std::env::var("WS_URL") {
 			return Box::leak(url.into_boxed_str())
