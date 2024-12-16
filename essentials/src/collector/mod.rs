@@ -29,7 +29,7 @@ use crate::{
 	init::Shutdown,
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{Header, InherentData, OnDemandOrder, Timestamp, H256},
+	types::{ClaimQueue, Header, InherentData, OnDemandOrder, Timestamp, H256},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -774,18 +774,9 @@ impl Collector {
 	async fn core_assignments_via_claim_queue(
 		&mut self,
 		block_hash: H256,
-	) -> color_eyre::Result<BTreeMap<u32, Vec<u32>>, RequestExecutorError> {
+	) -> color_eyre::Result<ClaimQueue, RequestExecutorError> {
 		let assignments = self.executor.get_claim_queue(self.endpoint.as_str(), block_hash).await?;
-		Ok(assignments
-			.iter()
-			.map(|(core, queue)| {
-				let ids = queue
-					.iter()
-					.filter_map(|v| v.as_ref().map(|v| v.assignment.para_id))
-					.collect::<Vec<_>>();
-				(*core, ids)
-			})
-			.collect())
+		Ok(assignments)
 	}
 
 	async fn process_candidate_change(
