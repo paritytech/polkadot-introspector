@@ -16,15 +16,19 @@
 //
 
 use crate::{
-	metadata::polkadot::{
-		self,
-		runtime_types::{
-			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-			polkadot_runtime_parachains::hrmp::HrmpChannel,
+	metadata::{
+		polkadot::{
+			self,
+			runtime_types::{
+				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+				polkadot_runtime_parachains::hrmp::HrmpChannel,
+			},
 		},
+		polkadot_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel, Timestamp, H256,
+		AccountId32, BlockNumber, ClaimQueue, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel,
+		Timestamp, H256,
 	},
 };
 use clap::ValueEnum;
@@ -40,6 +44,7 @@ use subxt::{
 	dynamic::Value,
 	events::{Events, EventsClient},
 	lightclient::LightClient,
+	runtime_api::{RuntimeApi, RuntimeApiClient},
 	storage::StorageClient,
 	utils::fetch_chainspec_from_rpc_node,
 	OnlineClient, PolkadotConfig,
@@ -77,10 +82,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.client.events()
 	}
 
+	fn runtime_api(&self) -> RuntimeApiClient<PolkadotConfig, T> {
+		self.client.runtime_api()
+	}
+
 	async fn block_at(&self, maybe_hash: Option<H256>) -> Result<Block<PolkadotConfig, T>, subxt::Error> {
 		match maybe_hash {
 			Some(hash) => self.blocks().at(hash).await,
 			None => self.blocks().at_latest().await,
+		}
+	}
+
+	async fn runtime_api_at(&self, maybe_hash: Option<H256>) -> Result<RuntimeApi<PolkadotConfig, T>, subxt::Error> {
+		match maybe_hash {
+			Some(hash) => Ok(self.runtime_api().at(hash)),
+			None => self.runtime_api().at_latest().await,
 		}
 	}
 
@@ -182,6 +198,25 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
 		self.events().at(hash).await
+	}
+
+	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreState<H256, u32>>, subxt::Error> {
+		let addr = polkadot::apis().parachain_host().availability_cores();
+		self.runtime_api_at(Some(hash)).await?.call(addr).await
+	}
+
+	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
+		let addr = polkadot::apis().parachain_host().claim_queue();
+		self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
+			queue
+				.iter()
+				.map(|(core, ids)| {
+					let core = core.0;
+					let ids = ids.iter().map(|id| id.0).collect::<Vec<_>>();
+					(core, ids)
+				})
+				.collect::<Vec<_>>()
+		})
 	}
 
 	pub async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {

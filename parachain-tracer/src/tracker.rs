@@ -261,7 +261,13 @@ impl SubxtTracker {
 
 	async fn set_cores(&mut self, block_hash: H256, storage: &TrackerStorage) {
 		let assignments = storage.core_assignments(block_hash).await.expect("saved in the collector");
-		self.cores = assignments.into_iter().filter(|(_, ids)| ids.contains(&self.para_id)).collect();
+		self.cores = assignments
+			.iter()
+			.filter_map(|(core, ids)| {
+				let ids = ids.iter().map(|v| v.0).collect::<Vec<_>>();
+				ids.contains(&self.para_id).then_some((core.0, ids))
+			})
+			.collect();
 	}
 
 	async fn set_included_candidates(&mut self, storage: &TrackerStorage) {
@@ -338,7 +344,7 @@ impl SubxtTracker {
 			if candidate.is_backed() {
 				candidate.core_occupied = matches!(
 					storage.occupied_cores(block_hash).await.expect("saved in the collector")[core as usize],
-					CoreOccupied::Paras
+					CoreOccupied::Occupied
 				);
 			}
 		}
@@ -827,7 +833,7 @@ mod test_inject_block {
 		)
 		.await
 		.unwrap();
-		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Paras], &storage)
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Scheduled], &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
@@ -875,7 +881,7 @@ mod test_inject_block {
 		)
 		.await
 		.unwrap();
-		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Paras], &storage)
+		storage_write(CollectorPrefixType::OccupiedCores, block_hash, vec![CoreOccupied::Scheduled], &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)

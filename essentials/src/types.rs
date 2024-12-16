@@ -17,7 +17,7 @@
 
 use crate::metadata::{polkadot::runtime_types as subxt_runtime_types, polkadot_primitives_staging};
 use parity_scale_codec::{Decode, Encode};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use subxt::{
 	config::substrate::{BlakeTwo256, SubstrateHeader},
 	utils,
@@ -32,7 +32,7 @@ pub type Timestamp = u64;
 pub type SessionKeys = runtime::SessionKeys;
 pub type QueuedKeys = crate::metadata::polkadot::session::storage::types::queued_keys::QueuedKeys;
 pub type SubxtCall = runtime::RuntimeCall;
-pub type ClaimQueue = BTreeMap<u32, VecDeque<Option<ParasEntry>>>;
+pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
 
 /// The `InherentData` constructed with the subxt API.
 pub type InherentData = polkadot_primitives_staging::InherentData<
@@ -87,14 +87,15 @@ pub struct Assignment {
 	pub para_id: u32,
 }
 
-// TODO: Take it from runtime types v5
-/// Temporary abstraction to cover core state until v5 types are released
+/// Abstraction to cover core states
 #[derive(Debug, Decode, Encode)]
 pub enum CoreOccupied {
 	/// The core is not occupied.
 	Free,
-	/// A paras.
-	Paras,
+	/// The core is currently free, with a para scheduled
+	Scheduled,
+	/// The core is occupied by a para
+	Occupied,
 }
 
 // TODO: Take it from runtime types v5
