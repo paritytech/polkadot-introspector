@@ -15,6 +15,7 @@ futures = { workspace = true }
 log = { workspace = true }
 polkadot-introspector-essentials = { workspace = true }
 polkadot-introspector-priority-channel = { workspace = true }
+chrono = "0.4"
 thiserror = { workspace = true }
 tokio = { workspace = true }
 serde = {workspace = true }

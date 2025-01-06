@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
+use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand};
 use futures::future;
 use itertools::Itertools;
@@ -24,16 +25,21 @@ use polkadot_introspector_essentials::{
 		executor::{RequestExecutor, RequestExecutorError},
 	},
 	init,
-	types::{AccountId32, H256},
+	metadata::{
+		polkadot::session::events::new_session::SessionIndex,
+		polkadot_primitives::{AvailabilityBitfield, ValidatorIndex},
+	},
+	types::{AccountId32, SessionKeys, H256},
 	utils,
 };
 use serde::{Deserialize, Serialize};
 use serde_binary::binary_stream::Endian;
 use ss58_registry::Ss58AddressFormat;
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeMap, HashMap, HashSet},
 	fs::{self, File},
 	io::Write,
+	time::{Duration, UNIX_EPOCH},
 };
 use subp2p_explorer::util::{crypto::sr25519, p2p::get_peer_id};
 use subp2p_explorer_cli::commands::authorities::PeerDetails;
@@ -89,6 +95,35 @@ enum WhoisCommand {
 	ByPeerId(PeerIdOptions),
 	/// Display information about all validators.
 	DumpAll,
+	/// Display performance statistics for bitfields for each validator.
+	BitFieldsPerformance(BitFieldsPerformance),
+}
+#[derive(Copy, Clone, Debug, Args)]
+struct BitFieldsPerformance {
+	/// The block number to start from.
+	start_block: u32,
+	/// The step to go back in blocks.
+	num_to_skip: u32,
+	/// The number of blocks to check.
+	num_blocks: u32,
+	/// Print only validators that have at least this number of sessions with poor performance.
+	num_sessions_bellow_threshold: u32,
+	/// The threshold for poor performance.
+	poor_performance_threshold: f64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+struct BitfieldsStats {
+	// Number of blocks with poor performance.
+	num_poor_performance: usize,
+	// Number of blocks with the bitfield of the validator being present.
+	num_present: usize,
+}
+
+impl BitfieldsStats {
+	fn percentage_poor(&self) -> f64 {
+		(self.num_poor_performance as f64 * 100.0) / self.num_present as f64
+	}
 }
 
 #[derive(Clone, Debug, Args)]
@@ -186,12 +221,14 @@ impl Whois {
 			));
 		}
 
-		let para_session_account_keys =
-			match executor.get_session_account_keys(&self.opts.ws, self.opts.session_index).await {
-				Ok(Some(validators)) => validators,
-				Err(e) => return Err(WhoisError::SubxtError(e)),
-				_ => return Err(WhoisError::NoParaSessionAccountKeys),
-			};
+		let para_session_account_keys = match executor
+			.get_session_account_keys(&self.opts.ws, self.opts.session_index, None)
+			.await
+		{
+			Ok(Some(validators)) => validators,
+			Err(e) => return Err(WhoisError::SubxtError(e)),
+			_ => return Err(WhoisError::NoParaSessionAccountKeys),
+		};
 
 		let session_queued_keys = match executor
 			.get_session_queued_keys(&self.opts.ws, self.opts.queued_keys_at_block)
@@ -272,6 +309,17 @@ impl Whois {
 				.enumerate()
 				.map(|(validator_index, account)| (account, Some(validator_index)))
 				.collect_vec(),
+			WhoisCommand::BitFieldsPerformance(opts) => {
+				self.run_bitfields_performance_analysis(
+					opts,
+					&mut executor,
+					session_queued_keys,
+					network_cache_for_session,
+				)
+				.await;
+				executor.close().await;
+				return Ok(vec![]);
+			},
 		};
 
 		let mut current_authority_discovery_keys = HashSet::new();
@@ -308,6 +356,215 @@ impl Whois {
 		executor.close().await;
 
 		Ok(vec![])
+	}
+
+	async fn run_bitfields_performance_analysis(
+		&self,
+		opts: BitFieldsPerformance,
+		executor: &mut RequestExecutor,
+		session_queued_keys: Vec<(AccountId32, SessionKeys)>,
+		network_cache_for_session: &PerSessionNetworkCache,
+	) {
+		println!("Running bitfields performance analysis");
+		let mut per_session_by_validatory_stats: BTreeMap<SessionIndex, BTreeMap<u32, BitfieldsStats>> =
+			BTreeMap::new();
+		let mut accounts_by_session = BTreeMap::new();
+		let mut per_account_by_session_stats: BTreeMap<AccountId32, BTreeMap<SessionIndex, BitfieldsStats>> =
+			BTreeMap::new();
+		let mut session_timestamps = BTreeMap::new();
+		let mut start = opts.start_block;
+		let mut num_blocks_poor_perf_more_than_a_third = BTreeMap::new();
+
+		for _ in 0..opts.num_blocks {
+			let Ok(Some(block_hash)) = executor.get_block_hash(&self.opts.ws, Some(start)).await else {
+				break;
+			};
+
+			let Ok(session_index_now) = executor.get_session_index(&self.opts.ws, block_hash).await else {
+				break;
+			};
+
+			if !accounts_by_session.contains_key(&session_index_now) {
+				let Ok(timestamp) = executor.get_block_timestamp(&self.opts.ws, block_hash).await else {
+					break;
+				};
+
+				let timestamp_date = UNIX_EPOCH + Duration::from_millis(timestamp);
+				let timestamp_date: DateTime<Utc> = DateTime::from(timestamp_date);
+				let timestamp_str = timestamp_date.format("%Y-%m-%d %H:%M").to_string();
+				session_timestamps.insert(session_index_now, timestamp_str.clone());
+				println!("session: {} timestamp: {}", session_index_now, timestamp_str);
+				let para_session_account_keys = match executor
+					.get_session_account_keys(&self.opts.ws, session_index_now, Some(block_hash))
+					.await
+				{
+					Ok(Some(validators)) => validators,
+					Err(_e) => break,
+					_ => break,
+				};
+
+				let para_session_account_keys = para_session_account_keys
+					.into_iter()
+					.enumerate()
+					.map(|(validator_index, account)| (account, validator_index))
+					.collect_vec();
+				accounts_by_session.insert(session_index_now, para_session_account_keys);
+			}
+
+			let Ok(para_inherent) = executor.extract_parainherent_data(&self.opts.ws, Some(block_hash)).await else {
+				break;
+			};
+
+			let bitfields = para_inherent
+				.bitfields
+				.into_iter()
+				.map(|b| (b.payload, b.validator_index))
+				.collect::<Vec<(AvailabilityBitfield, ValidatorIndex)>>();
+
+			let mut num_poor_performance_per_block = 0;
+
+			let Some(max) = bitfields
+				.iter()
+				.map(|(bitfield, _)| bitfield.0.as_bits().iter().filter(|bit| *bit).count())
+				.max()
+			else {
+				break;
+			};
+
+			let Some(session_accounts) = accounts_by_session.get(&session_index_now) else {
+				break;
+			};
+			let session_stats = per_session_by_validatory_stats.entry(session_index_now).or_default();
+
+			for bitfield in bitfields {
+				let num_bits_set = bitfield.0 .0.as_bits().iter().filter(|bit| *bit).count();
+
+				let Some(validator) = session_accounts
+					.iter()
+					.find(|(_, validator)| *validator as u32 == bitfield.1 .0)
+					.map(|val| val.0.clone())
+				else {
+					break;
+				};
+
+				let per_account_stats = per_account_by_session_stats
+					.entry(validator)
+					.or_default()
+					.entry(session_index_now)
+					.or_default();
+
+				let per_session_stats = session_stats.entry(bitfield.1 .0).or_insert(Default::default());
+
+				// The validator has poor performance if it has less than 2 bits set.
+				if num_bits_set < std::cmp::min(max, 2) {
+					num_poor_performance_per_block += 1;
+					(*per_session_stats).num_poor_performance += 1;
+					per_account_stats.num_poor_performance += 1;
+				}
+				(*per_session_stats).num_present += 1;
+				per_account_stats.num_present += 1;
+			}
+
+			if num_poor_performance_per_block > session_accounts.len() / 3 {
+				*(num_blocks_poor_perf_more_than_a_third.entry(session_index_now).or_insert(0)) += 1;
+			}
+			start -= opts.num_to_skip;
+		}
+
+		print_per_session_performance(opts, per_session_by_validatory_stats, &session_timestamps);
+
+		print_per_account_performance(
+			opts,
+			session_queued_keys,
+			network_cache_for_session,
+			per_account_by_session_stats,
+			&session_timestamps,
+		);
+
+		for (session, more_than_a_third) in num_blocks_poor_perf_more_than_a_third.iter() {
+			println!(
+				"block_start: {}, session: {}: {}, Count blocks with unincluded {:}",
+				opts.start_block,
+				session,
+				session_timestamps.get(session).cloned().unwrap_or_default(),
+				more_than_a_third,
+			);
+		}
+	}
+}
+
+fn print_per_account_performance(
+	opts: BitFieldsPerformance,
+	session_queued_keys: Vec<(AccountId32, SessionKeys)>,
+	network_cache_for_session: &PerSessionNetworkCache,
+	per_account_by_session_stats: BTreeMap<AccountId32, BTreeMap<SessionIndex, BitfieldsStats>>,
+	session_timestamps: &BTreeMap<u32, String>,
+) {
+	for (account, account_stats) in per_account_by_session_stats.iter() {
+		let count_past_30 = account_stats
+			.iter()
+			.map(|(_, stats)| (stats.num_poor_performance as f64 * 100.0) / stats.num_present as f64)
+			.filter(|x| *x > opts.poor_performance_threshold)
+			.count();
+
+		if count_past_30 < opts.num_sessions_bellow_threshold as usize {
+			continue;
+		}
+
+		let session_keys_for_validator = &session_queued_keys.iter().find(|(this_account, _)| this_account == account);
+
+		let name = if let Some((_, session_keys_for_validator)) = session_keys_for_validator {
+			let authority_discovery_key = session_keys_for_validator.authority_discovery.0;
+			let (_, info, _) = network_cache_for_session.get_details(authority_discovery_key);
+			info
+		} else {
+			"unknown".to_string()
+		};
+
+		println!("block_start: {}, account: {} name: {}", opts.start_block, account, name);
+		for (session, stats) in account_stats.iter() {
+			let percentage = stats.percentage_poor();
+
+			println!(
+				"     at {} session: {}, has {:?} with zero bits, {:.2}% percent",
+				session_timestamps.get(session).cloned().unwrap_or_default(),
+				session,
+				stats.num_poor_performance,
+				percentage
+			);
+		}
+	}
+}
+
+fn print_per_session_performance(
+	opts: BitFieldsPerformance,
+	per_session_by_validatory_stats: BTreeMap<u32, BTreeMap<u32, BitfieldsStats>>,
+	session_timestamps: &BTreeMap<u32, String>,
+) {
+	let mut count_per_session_poor_performance = BTreeMap::new();
+	for (session, stats_by_validator) in per_session_by_validatory_stats.iter() {
+		for (validator, stats) in stats_by_validator.iter() {
+			let percentage = stats.percentage_poor();
+			if percentage > opts.poor_performance_threshold {
+				*(count_per_session_poor_performance.entry(session).or_insert(0)) += 1;
+			}
+
+			println!(
+				"block_start: {}, session: {}: validator: {:?} has {:?} zero bits {:.3}%",
+				opts.start_block, session, validator, stats.num_poor_performance, percentage
+			);
+		}
+	}
+
+	for (session, count) in count_per_session_poor_performance.iter() {
+		println!(
+			"block_start: {}, session: {}: {} Number of validators with 10% missing {:} count_all_with_0 {:}",
+			opts.start_block,
+			session,
+			session_timestamps.get(session).cloned().unwrap_or_default(),
+			count,
+			per_session_by_validatory_stats.len()
+		);
 	}
 }
 
