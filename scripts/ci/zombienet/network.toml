@@ -1,6 +1,6 @@
 [relaychain]
 default_command = "polkadot"
-chain = "rococo-local"
+chain = "polkadot-local"
 
   [[relaychain.nodes]]
   name = "alice"

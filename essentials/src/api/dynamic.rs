@@ -17,13 +17,12 @@
 use crate::{
 	api::api_client::ApiClient,
 	metadata::polkadot_primitives::ValidatorIndex,
-	types::{Assignment, BlockNumber, ClaimQueue, CoreOccupied, OnDemandOrder, ParasEntry, H256},
+	types::{OnDemandOrder, H256},
 };
 use log::error;
-use std::collections::{BTreeMap, VecDeque};
 use subxt::{
 	dynamic::{At, Value},
-	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
+	ext::scale_value::{Composite, Primitive, ValueDef},
 	OnlineClient, PolkadotConfig,
 };
 use thiserror::Error;
@@ -53,62 +52,6 @@ pub(crate) fn decode_validator_groups(raw_groups: &Value<u32>) -> Result<Vec<Vec
 	Ok(groups)
 }
 
-pub(crate) fn decode_availability_cores(raw_cores: &Value<u32>) -> Result<Vec<CoreOccupied>, DynamicError> {
-	let decoded_cores = decode_unnamed_composite(raw_cores)?;
-	let mut cores = Vec::with_capacity(decoded_cores.len());
-	for raw_core in decoded_cores.iter() {
-		let core_variant = match decode_option(raw_core) {
-			Ok(v) => v,
-			// In v5 types it is not more an option
-			Err(_) => Some(raw_core),
-		};
-		let core = match core_variant.map(decode_variant) {
-			Some(Ok(variant)) => match variant.name.as_str() {
-				"Parachain" => CoreOccupied::Paras, // v4
-				"Paras" => CoreOccupied::Paras,     // v5
-				"Free" => CoreOccupied::Free,       // v5
-				name => todo!("Add support for {name}"),
-			},
-			Some(Err(e)) => {
-				error!("Can't decode a dynamic value: {:?}", e);
-				return Err(DynamicError::DecodeDynamicError("core".to_string(), raw_core.value.clone()))
-			},
-			None => CoreOccupied::Free,
-		};
-		cores.push(core);
-	}
-
-	Ok(cores)
-}
-
-pub(crate) fn decode_claim_queue(raw: &Value<u32>) -> Result<ClaimQueue, DynamicError> {
-	let decoded_btree_map = decode_unnamed_composite(raw)?;
-	let decoded_btree_map_inner = decoded_btree_map
-		.first()
-		.ok_or(DynamicError::DecodeDynamicError("ClaimQueue".to_string(), raw.value.clone()))?;
-	let mut claim_queue: ClaimQueue = BTreeMap::new();
-	for value in decode_unnamed_composite(decoded_btree_map_inner)? {
-		let (raw_core, raw_para_entries) = match decode_unnamed_composite(value)?[..] {
-			[ref first, ref second, ..] => (first, second),
-			_ =>
-				return Err(DynamicError::DecodeDynamicError("core and paras_entries".to_string(), value.value.clone())),
-		};
-		let decoded_core = decode_composite_u128_value(raw_core)? as u32;
-		let mut paras_entries = VecDeque::new();
-		for composite in decode_unnamed_composite(raw_para_entries)? {
-			match &composite.value {
-				// v5
-				ValueDef::Variant(_) => paras_entries.push_back(decode_paras_entry_option(composite)?),
-				// v7
-				ValueDef::Composite(_) => paras_entries.push_back(Some(decode_paras_entry(composite)?)),
-				_ => panic!("No more"),
-			};
-		}
-		let _ = claim_queue.insert(decoded_core, paras_entries);
-	}
-	Ok(claim_queue)
-}
-
 pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrder, DynamicError> {
 	match raw {
 		Composite::Named(v) => {
@@ -133,70 +76,6 @@ pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrd
 			})
 		},
 		_ => Err(DynamicError::DecodeDynamicError("named composite".to_string(), ValueDef::Composite(raw.clone()))),
-	}
-}
-
-fn decode_paras_entry_option(raw: &Value<u32>) -> Result<Option<ParasEntry>, DynamicError> {
-	match decode_option(raw)? {
-		Some(v) => Ok(Some(decode_paras_entry(v)?)),
-		None => Ok(None),
-	}
-}
-
-fn decode_paras_entry(raw: &Value<u32>) -> Result<ParasEntry, DynamicError> {
-	let raw_assignment = value_at("assignment", raw)?;
-	let para_id = match &raw_assignment.value {
-		// v5
-		ValueDef::Composite(_) => decode_composite_u128_value(value_at("para_id", raw_assignment)?),
-		// v7+
-		ValueDef::Variant(_) => match decode_variant(raw_assignment)?.name.as_str() {
-			"Bulk" => {
-				let raw_para_id = raw_assignment
-					.at(0)
-					.ok_or(DynamicError::DecodeDynamicError(
-						"v7 bulk assignment".to_string(),
-						raw_assignment.value.clone(),
-					))?
-					.at(0)
-					.ok_or(DynamicError::DecodeDynamicError(
-						"v7 bulk assignment".to_string(),
-						raw_assignment.value.clone(),
-					))?;
-				decode_u128_value(raw_para_id)
-			},
-			"Pool" => {
-				let raw_para_id = value_at("para_id", raw_assignment)?;
-				decode_composite_u128_value(raw_para_id)
-			},
-			_ => Err(DynamicError::DecodeDynamicError("v7 assignment".to_string(), raw_assignment.value.clone())),
-		},
-		_ => Err(DynamicError::DecodeDynamicError("assignment".to_string(), raw_assignment.value.clone())),
-	}? as u32;
-	let assignment = Assignment { para_id };
-	let availability_timeouts = decode_u128_value(value_at("availability_timeouts", raw)?)? as u32;
-	let ttl = decode_u128_value(value_at("ttl", raw)?)? as BlockNumber;
-
-	Ok(ParasEntry { assignment, availability_timeouts, ttl })
-}
-
-fn value_at<'a>(field: &'a str, value: &'a Value<u32>) -> Result<&'a Value<u32>, DynamicError> {
-	value
-		.at(field)
-		.ok_or(DynamicError::DecodeDynamicError(format!(".{field}"), value.value.clone()))
-}
-
-fn decode_variant(value: &Value<u32>) -> Result<&Variant<u32>, DynamicError> {
-	match &value.value {
-		ValueDef::Variant(variant) => Ok(variant),
-		other => Err(DynamicError::DecodeDynamicError("variant".to_string(), other.clone())),
-	}
-}
-
-fn decode_option(value: &Value<u32>) -> Result<Option<&Value<u32>>, DynamicError> {
-	match decode_variant(value)?.name.as_str() {
-		"Some" => Ok(value.at(0)),
-		"None" => Ok(None),
-		_ => Err(DynamicError::DecodeDynamicError("option".to_string(), value.value.clone())),
 	}
 }
 

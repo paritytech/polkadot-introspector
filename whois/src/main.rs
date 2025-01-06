@@ -25,10 +25,7 @@ use polkadot_introspector_essentials::{
 		executor::{RequestExecutor, RequestExecutorError},
 	},
 	init,
-	metadata::{
-		polkadot::session::events::new_session::SessionIndex,
-		polkadot_primitives::{AvailabilityBitfield, ValidatorIndex},
-	},
+	metadata::{polkadot::session::events::new_session::SessionIndex, polkadot_primitives::{AvailabilityBitfield, ValidatorIndex}},
 	types::{AccountId32, SessionKeys, H256},
 	utils,
 };

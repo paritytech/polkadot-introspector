@@ -27,4 +27,4 @@ hex = {workspace = true }
 subp2p-explorer-cli = { git = "https://github.com/lexnv/subp2p-explorer", branch="main"}
 subp2p-explorer = { git = "https://github.com/lexnv/subp2p-explorer", branch="main"}
 
-libp2p = { version = "0.52.4", features = ["dns", "identify", "kad", "macros", "mdns", "noise", "ping", "tcp",  "tokio", "yamux", "websocket", "request-response"] }
+libp2p = { version = "0.53.2", features = ["dns", "identify", "kad", "macros", "mdns", "noise", "ping", "tcp",  "tokio", "yamux", "websocket", "request-response"] }
