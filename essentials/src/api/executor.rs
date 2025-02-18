@@ -17,14 +17,13 @@
 use crate::{
 	api::{
 		api_client::{build_online_client, ApiClient, ApiClientMode, HeaderStream},
-		dynamic::{
-			self, decode_availability_cores, decode_claim_queue, decode_validator_groups, fetch_dynamic_storage,
-			DynamicHostConfiguration,
-		},
+		dynamic::{self, decode_validator_groups, fetch_dynamic_storage, DynamicHostConfiguration},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
 	init::Shutdown,
-	metadata::{polkadot::session::storage::types::queued_keys::QueuedKeys, polkadot_primitives},
+	metadata::{
+		polkadot::session::storage::types::queued_keys::QueuedKeys, polkadot_primitives, polkadot_primitives::CoreState,
+	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData,
 		SessionKeys, SubxtHrmpChannel, Timestamp, H256,
@@ -32,7 +31,7 @@ use crate::{
 	utils::{Retry, RetryOptions},
 };
 use color_eyre::eyre::eyre;
-use log::{error, info};
+use log::error;
 use polkadot_introspector_priority_channel::{
 	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
 };
@@ -215,19 +214,19 @@ impl RequestExecutorBackend {
 			GetChainName => ChainName(client.legacy_get_chain_name().await?),
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
-			GetClaimQueue(hash) => {
-				match fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ClaimQueue").await {
-					Ok(value) => ClaimQueue(decode_claim_queue(&value)?),
-					Err(dynamic::DynamicError::EmptyResponseFromDynamicStorage(reason)) => {
-						info!("{}. Received an empty claim queue", reason);
-						ClaimQueue(BTreeMap::default())
-					},
-					Err(e) => Err(e)?,
-				}
-			},
+			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
 			GetOccupiedCores(hash) => {
-				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "AvailabilityCores").await?;
-				OccupiedCores(decode_availability_cores(&value)?)
+				let value = client
+					.get_occupied_cores(hash)
+					.await?
+					.iter()
+					.map(|core_state| match core_state {
+						CoreState::Free => CoreOccupied::Free,
+						CoreState::Scheduled(_) => CoreOccupied::Scheduled,
+						CoreState::Occupied(_) => CoreOccupied::Occupied,
+					})
+					.collect();
+				OccupiedCores(value)
 			},
 			GetBackingGroups(hash) => {
 				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ValidatorGroups").await?;

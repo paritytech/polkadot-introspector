@@ -100,12 +100,12 @@ pub enum TagValue<'a> {
 	Number(usize),
 }
 
-impl<'a> ToString for TagValue<'a> {
-	fn to_string(&self) -> String {
+impl<'a> std::fmt::Display for TagValue<'a> {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			TagValue::String(s) => s.to_string(),
-			TagValue::Boolean(b) => b.to_string(),
-			TagValue::Number(n) => n.to_string(),
+			TagValue::String(s) => write!(f, "{}", s),
+			TagValue::Boolean(b) => write!(f, "{}", b),
+			TagValue::Number(n) => write!(f, "{}", n),
 		}
 	}
 }

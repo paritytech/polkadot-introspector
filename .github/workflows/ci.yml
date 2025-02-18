@@ -10,7 +10,7 @@ on:
 
 env:
   DOCKERFILE: scripts/ci/dockerfiles/polkadot-introspector_injected.Dockerfile
-  CI_IMAGE: paritytech/ci-unified:bullseye-1.77.0
+  CI_IMAGE: paritytech/ci-unified:bullseye-1.81.0
   IMAGE_NAME: paritytech/polkadot-introspector
 
 jobs:
