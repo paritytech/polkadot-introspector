@@ -24,7 +24,7 @@ use crate::{
 				polkadot_runtime_parachains::hrmp::HrmpChannel,
 			},
 		},
-		polkadot_primitives::CoreState,
+		polkadot_primitives_staging::CoreState,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel,
