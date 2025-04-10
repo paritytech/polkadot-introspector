@@ -22,7 +22,8 @@ use crate::{
 			para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
 			paras_disputes::events::{DisputeConcluded, DisputeInitiated},
 		},
-		polkadot_primitives::CandidateDescriptor,
+		// polkadot_primitives::CandidateDescriptor,
+		polkadot_staging_primitives::CandidateDescriptorV2 as CandidateDescriptor,
 	},
 	types::{Header, OnDemandOrder, H256},
 };
