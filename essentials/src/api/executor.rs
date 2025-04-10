@@ -22,7 +22,8 @@ use crate::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	init::Shutdown,
 	metadata::{
-		polkadot::session::storage::types::queued_keys::QueuedKeys, polkadot_primitives, polkadot_primitives::CoreState,
+		polkadot::session::storage::types::queued_keys::QueuedKeys, polkadot_primitives,
+		polkadot_staging_primitives::CoreState,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData,

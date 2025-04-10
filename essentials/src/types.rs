@@ -15,14 +15,14 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::{polkadot::runtime_types as subxt_runtime_types, polkadot_primitives};
+use crate::metadata::polkadot::runtime_types as subxt_runtime_types;
 use parity_scale_codec::{Decode, Encode};
 use std::collections::BTreeMap;
 use subxt::{
 	config::substrate::{BlakeTwo256, SubstrateHeader},
 	utils,
 };
-use subxt_runtime_types::polkadot_runtime as runtime;
+use subxt_runtime_types::westend_runtime as runtime;
 
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;
@@ -35,8 +35,9 @@ pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
 
 /// The `InherentData` constructed with the subxt API.
-pub type InherentData =
-	polkadot_primitives::InherentData<subxt_runtime_types::sp_runtime::generic::header::Header<::core::primitive::u32>>;
+pub type InherentData = crate::metadata::polkadot_staging_primitives::InherentData<
+	subxt_runtime_types::sp_runtime::generic::header::Header<::core::primitive::u32>,
+>;
 
 /// A wrapper over subxt HRMP channel configuration
 #[derive(Debug, Clone, Default, Encode, Decode)]
