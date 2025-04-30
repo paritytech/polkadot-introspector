@@ -27,6 +27,7 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
+use crate::prometheus::PrometheusMetrics;
 use clap::{error::ErrorKind, CommandFactory, Parser};
 use colored::Colorize;
 use crossterm::style::Stylize;
@@ -165,16 +166,12 @@ impl ParachainTracer {
 				.bold()
 		);
 
-		{
+		output_futures.push(ParachainTracer::watch_node_for_relay_chain(
+			self.clone(),
+			shutdown_tx.clone(),
 			// HACK: We use a fake para id to receive only relay chain events
-			let from_collector = collector.subscribe_parachain_updates(0).await?;
-			output_futures.push(ParachainTracer::watch_node_for_relay_chain(
-				self.clone(),
-				shutdown_tx.clone(),
-				from_collector,
-				collector.api(),
-			));
-		}
+			collector.subscribe_parachain_updates(0).await?,
+		));
 
 		if self.opts.all {
 			let from_collector = collector.subscribe_broadcast_updates().await?;
@@ -211,24 +208,29 @@ impl ParachainTracer {
 		self,
 		shutdown_tx: BroadcastSender<Shutdown>,
 		from_collector: Receiver<CollectorUpdateEvent>,
-		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
 		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
+		let metrics = self.metrics.clone();
 
 		tokio::spawn(async move {
 			loop {
 				match from_collector.recv().await {
 					Ok(update_event) => match update_event {
-						CollectorUpdateEvent::NewHead(new_head) =>
+						CollectorUpdateEvent::NewHead(new_head) => {
+							let backed = new_head.candidates_backed.len();
+							let included = new_head.candidates_included.len();
+							let timed_out = new_head.candidates_timed_out.len();
+							metrics.on_new_relay_block(backed, included, timed_out);
 							if is_cli {
 								println!(
 									"{}\n\tbacked {}\n\tincluded {}\n\ttimed out {}",
 									format!("RELAY CHAIN BLOCK #{}", new_head.relay_parent_number).bold(),
-									new_head.candidates_backed.len(),
-									new_head.candidates_included.len(),
-									new_head.candidates_timed_out.len()
+									backed,
+									included,
+									timed_out
 								);
-							},
+							}
+						},
 						CollectorUpdateEvent::NewSession(_) => {},
 						CollectorUpdateEvent::Termination(reason) => {
 							info!("collector is terminating");

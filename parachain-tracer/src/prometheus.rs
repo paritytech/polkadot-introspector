@@ -20,7 +20,7 @@ use color_eyre::Result;
 use mockall::automock;
 use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
 use prometheus_endpoint::{
-	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
+	prometheus::{Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
 };
 use std::{net::ToSocketAddrs, time::Duration};
@@ -63,6 +63,12 @@ struct MetricsInner {
 	relay_block_times: HistogramVec,
 	/// Relative time measurements (in standard blocks) for relay parent blocks
 	relay_skipped_slots: IntCounterVec,
+	/// Backed candidates for a relay chain block
+	relay_backed_candidates: Histogram,
+	/// Included candidates for a relay chain block
+	relay_included_candidates: Histogram,
+	/// Timed out candidates for a relay chain block
+	relay_timed_out_candidates: Histogram,
 	/// Number of slow availability events.
 	slow_avail_count: IntCounterVec,
 	/// Number of low bitfield propagation events.
@@ -92,6 +98,8 @@ pub trait PrometheusMetrics {
 	fn init_counters(&self, para_id: u32);
 	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
+	/// Update relay chain specific metrics on new relay block
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize);
 	/// Update metrics on new block
 	fn on_block(&self, time: f64, para_id: u32);
 	/// Update metrics on slow availability
@@ -128,11 +136,23 @@ pub struct Metrics(Option<MetricsInner>);
 const HISTOGRAM_TIME_BUCKETS_BLOCKS: &[f64] =
 	&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0, 25.0, 35.0, 50.0];
 const HISTOGRAM_TIME_BUCKETS_SECONDS: &[f64] = &[3.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 48.0, 60.0, 90.0, 120.0];
+const HISTOGRAM_CANDIDATES_BUCKETS: &[f64] = &[
+	0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0,
+	180.0, 190.0, 200.0,
+];
 
 impl PrometheusMetrics for Metrics {
 	fn on_backed(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.backed_count.with_label_values(&[&para_id.to_string()[..]]).inc();
+		}
+	}
+
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize) {
+		if let Some(metrics) = &self.0 {
+			metrics.relay_backed_candidates.observe(backed as f64);
+			metrics.relay_included_candidates.observe(included as f64);
+			metrics.relay_timed_out_candidates.observe(timed_out as f64);
 		}
 	}
 
@@ -371,6 +391,24 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			IntCounterVec::new(
 				Opts::new("pc_relay_skipped_slots", "Relay chain block time measured in standard blocks") ,
 				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		relay_backed_candidates: prometheus_endpoint::register(
+			Histogram::with_opts(
+				HistogramOpts::new("pc_relay_backed_candidates", "Backed candidates for a relay chain block").buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
+			)?,
+			registry,
+		)?,
+		relay_included_candidates: prometheus_endpoint::register(
+			Histogram::with_opts(
+				HistogramOpts::new("pc_relay_included_candidates", "Included candidates for a relay chain block").buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
+			)?,
+			registry,
+		)?,
+		relay_timed_out_candidates: prometheus_endpoint::register(
+			Histogram::with_opts(
+				HistogramOpts::new("pc_relay_timed_out_candidates", "Timed out candidates for a relay chain block").buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
 			)?,
 			registry,
 		)?,
