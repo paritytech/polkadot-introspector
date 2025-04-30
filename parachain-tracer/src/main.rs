@@ -165,6 +165,17 @@ impl ParachainTracer {
 				.bold()
 		);
 
+		{
+			// HACK: We use a fake para id to receive only relay chain events
+			let from_collector = collector.subscribe_parachain_updates(0).await?;
+			output_futures.push(ParachainTracer::watch_node_for_relay_chain(
+				self.clone(),
+				shutdown_tx.clone(),
+				from_collector,
+				collector.api(),
+			));
+		}
+
 		if self.opts.all {
 			let from_collector = collector.subscribe_broadcast_updates().await?;
 			output_futures.push(tokio::spawn(ParachainTracer::watch_node_broadcast(
@@ -194,6 +205,50 @@ impl ParachainTracer {
 		output_futures.push(collector_fut);
 
 		Ok(output_futures)
+	}
+
+	fn watch_node_for_relay_chain(
+		self,
+		shutdown_tx: BroadcastSender<Shutdown>,
+		from_collector: Receiver<CollectorUpdateEvent>,
+		api_service: CollectorStorageApi,
+	) -> tokio::task::JoinHandle<()> {
+		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
+
+		tokio::spawn(async move {
+			loop {
+				match from_collector.recv().await {
+					Ok(update_event) => match update_event {
+						CollectorUpdateEvent::NewHead(new_head) =>
+							if is_cli {
+								println!(
+									"{}\n\tbacked {}\n\tincluded {}\n\ttimed out {}",
+									format!("RELAY CHAIN BLOCK #{}", new_head.relay_parent_number).bold(),
+									new_head.candidates_backed.len(),
+									new_head.candidates_included.len(),
+									new_head.candidates_timed_out.len()
+								);
+							},
+						CollectorUpdateEvent::NewSession(_) => {},
+						CollectorUpdateEvent::Termination(reason) => {
+							info!("collector is terminating");
+							match reason {
+								TerminationReason::Normal => break,
+								TerminationReason::Abnormal(info) => {
+									error!("Shutting down, {}", info);
+									let _ = shutdown_tx.send(Shutdown::Restart);
+									break;
+								},
+							}
+						},
+					},
+					Err(_) => {
+						info!("Input channel has been closed");
+						break
+					},
+				}
+			}
+		})
 	}
 
 	// This is the main loop for our subxt subscription.
