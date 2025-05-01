@@ -148,6 +148,12 @@ struct CollectorState {
 	candidates_seen: BTreeMap<u32, Vec<H256>>,
 	/// A list of disputes seen, indexed by parachain id
 	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
+	/// A list of candidate hashes that have been backed in the current block
+	candidates_backed: Vec<H256>,
+	/// A list of candidate hashes that have been included in the current block
+	candidates_included: Vec<H256>,
+	/// A list of candidate hashes that have timed out in the current block
+	candidates_timed_out: Vec<H256>,
 	/// A current session index
 	current_session_index: u32,
 	/// Last finalized block number
@@ -167,6 +173,12 @@ pub struct NewHeadEvent {
 	pub para_id: u32,
 	/// Candidates seen for this relay chain block that belong to the specific `para_id`
 	pub candidates_seen: Vec<H256>,
+	/// A list of candidate hashes that have been backed in the current block
+	pub candidates_backed: Vec<H256>,
+	/// A list of candidate hashes that have been included in the current block
+	pub candidates_included: Vec<H256>,
+	/// A list of candidate hashes that have timed out in the current block
+	pub candidates_timed_out: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
 }
@@ -419,6 +431,9 @@ impl Collector {
 						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
 						relay_parent_number: self.state.current_relay_chain_block_number,
 						candidates_seen: candidates.cloned().unwrap_or_default(),
+						candidates_backed: self.state.candidates_backed.clone(),
+						candidates_included: self.state.candidates_included.clone(),
+						candidates_timed_out: self.state.candidates_timed_out.clone(),
 						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 						para_id: *para_id,
 					}))
@@ -470,6 +485,9 @@ impl Collector {
 						relay_parent_hashes: self.state.current_relay_chain_block_hashes.clone(),
 						relay_parent_number: self.state.current_relay_chain_block_number,
 						candidates_seen: candidates.cloned().unwrap_or_default(),
+						candidates_backed: self.state.candidates_backed.clone(),
+						candidates_included: self.state.candidates_included.clone(),
+						candidates_timed_out: self.state.candidates_timed_out.clone(),
 						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 						para_id: *para_id,
 					}))
@@ -478,6 +496,9 @@ impl Collector {
 		}
 
 		self.state.candidates_seen.clear();
+		self.state.candidates_backed.clear();
+		self.state.candidates_included.clear();
+		self.state.candidates_timed_out.clear();
 		self.state.current_relay_chain_block_hashes.clear();
 		self.state.current_relay_chain_block_number = block_number;
 		self.state.current_relay_chain_block_hashes.push(block_hash);
@@ -848,6 +869,7 @@ impl Collector {
 							.entry(change_event.parachain_id)
 							.or_default()
 							.push(change_event.candidate_hash);
+						self.state.candidates_backed.push(change_event.candidate_hash);
 						if let Some(to_websocket) = self.to_websocket.as_mut() {
 							to_websocket
 								.send(WebSocketUpdateEvent {
@@ -898,6 +920,7 @@ impl Collector {
 						.entry(change_event.parachain_id)
 						.or_default()
 						.push(change_event.candidate_hash);
+					self.state.candidates_included.push(change_event.candidate_hash);
 					self.storage_replace_prefixed(
 						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
@@ -941,6 +964,7 @@ impl Collector {
 						.entry(change_event.parachain_id)
 						.or_default()
 						.push(change_event.candidate_hash);
+					self.state.candidates_timed_out.push(change_event.candidate_hash);
 					self.storage_replace_prefixed(
 						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
