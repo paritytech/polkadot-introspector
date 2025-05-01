@@ -63,12 +63,8 @@ struct MetricsInner {
 	relay_block_times: HistogramVec,
 	/// Relative time measurements (in standard blocks) for relay parent blocks
 	relay_skipped_slots: IntCounterVec,
-	/// Backed candidates for a relay chain block
-	relay_backed_candidates: Histogram,
-	/// Included candidates for a relay chain block
-	relay_included_candidates: Histogram,
-	/// Timed out candidates for a relay chain block
-	relay_timed_out_candidates: Histogram,
+	/// Relay chain candidate metrics (backed, included, timed out)
+	relay_candidate_statuses: HistogramVec,
 	/// Number of slow availability events.
 	slow_avail_count: IntCounterVec,
 	/// Number of low bitfield propagation events.
@@ -150,9 +146,18 @@ impl PrometheusMetrics for Metrics {
 
 	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize) {
 		if let Some(metrics) = &self.0 {
-			metrics.relay_backed_candidates.observe(backed as f64);
-			metrics.relay_included_candidates.observe(included as f64);
-			metrics.relay_timed_out_candidates.observe(timed_out as f64);
+			metrics
+				.relay_candidate_statuses
+				.with_label_values(&["backed"])
+				.observe(backed as f64);
+			metrics
+				.relay_candidate_statuses
+				.with_label_values(&["included"])
+				.observe(included as f64);
+			metrics
+				.relay_candidate_statuses
+				.with_label_values(&["timed_out"])
+				.observe(timed_out as f64);
 		}
 	}
 
@@ -394,21 +399,11 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			)?,
 			registry,
 		)?,
-		relay_backed_candidates: prometheus_endpoint::register(
-			Histogram::with_opts(
-				HistogramOpts::new("pc_relay_backed_candidates", "Backed candidates for a relay chain block").buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
-			)?,
-			registry,
-		)?,
-		relay_included_candidates: prometheus_endpoint::register(
-			Histogram::with_opts(
-				HistogramOpts::new("pc_relay_included_candidates", "Included candidates for a relay chain block").buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
-			)?,
-			registry,
-		)?,
-		relay_timed_out_candidates: prometheus_endpoint::register(
-			Histogram::with_opts(
-				HistogramOpts::new("pc_relay_timed_out_candidates", "Timed out candidates for a relay chain block").buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
+		relay_candidate_statuses: prometheus_endpoint::register(
+			HistogramVec::new(
+				HistogramOpts::new("pc_relay_candidates", "Candidate's statuses per relay chain block (backed, included, timed out)")
+					.buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
+				&["status"],
 			)?,
 			registry,
 		)?,
