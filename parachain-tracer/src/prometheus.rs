@@ -20,7 +20,7 @@ use color_eyre::Result;
 use mockall::automock;
 use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
 use prometheus_endpoint::{
-	prometheus::{Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
+	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
 };
 use std::{net::ToSocketAddrs, time::Duration};
