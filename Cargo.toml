@@ -37,7 +37,7 @@ futures = "0.3.31"
 futures-util = "0.3.27"
 hex = "0.4.3"
 itertools = "0.13.0"
-log = "0.4.22"
+log = "0.4.27"
 mockall = "0.11.4"
 parity-db = "0.4.13"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/paritytech/polkadot-sdk", branch = "master" }
