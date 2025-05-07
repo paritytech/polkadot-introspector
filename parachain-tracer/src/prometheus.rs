@@ -85,6 +85,8 @@ struct MetricsInner {
 	para_on_demand_delay_sec: GaugeVec,
 	/// Finality lag
 	finality_lag: Gauge,
+	/// Session number
+	session: Gauge,
 }
 
 #[automock]
@@ -123,6 +125,8 @@ pub trait PrometheusMetrics {
 	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str);
 	/// Update finality lag
 	fn on_finality_lag(&self, lag: u32);
+	/// Update session number
+	fn on_new_session(&self, session: u32);
 }
 
 /// Parachain tracer prometheus metrics
@@ -321,6 +325,12 @@ impl PrometheusMetrics for Metrics {
 			metrics.finality_lag.set(lag.into());
 		}
 	}
+
+	fn on_new_session(&self, session: u32) {
+		if let Some(metrics) = &self.0 {
+			metrics.session.set(session.into());
+		}
+	}
 }
 
 pub async fn run_prometheus_endpoint(prometheus_opts: &ParachainTracerPrometheusOptions) -> Result<Metrics> {
@@ -472,6 +482,10 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		finality_lag: prometheus_endpoint::register(
 			Gauge::new("pc_finality_lag", "Finality lag")?,
+			registry,
+		)?,
+		session: prometheus_endpoint::register(
+			Gauge::new("pc_session", "Session number")?,
 			registry,
 		)?,
 	})))
