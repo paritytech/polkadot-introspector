@@ -62,7 +62,7 @@ subxt = { default-features = false, features = [
 base64 = "0.22.1"
 thiserror = "1.0.69"
 time = { version = "0.3.36", features = ["formatting"] }
-tokio = { version = "1.38.0", features = [
+tokio = { version = "1.45.0", features = [
     "macros",
     "rt",
     "rt-multi-thread",
