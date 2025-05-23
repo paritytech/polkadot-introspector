@@ -337,11 +337,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
-		self.client.backend().stream_best_block_headers().await
+		self.client.backend().stream_best_block_headers(self.client.hasher()).await
 	}
 
 	pub async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
-		self.client.backend().stream_finalized_block_headers().await
+		self.client.backend().stream_finalized_block_headers(self.client.hasher()).await
 	}
 }
 
