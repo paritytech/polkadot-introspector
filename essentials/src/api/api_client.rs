@@ -67,9 +67,14 @@ where
 {
 	client: T,
 	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
+	hasher: <PolkadotConfig as subxt::Config>::Hasher,
 }
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
+	pub fn hasher(&self) -> <PolkadotConfig as subxt::Config>::Hasher {
+		self.hasher
+	}
+
 	fn storage(&self) -> StorageClient<PolkadotConfig, T> {
 		self.client.storage()
 	}
@@ -337,11 +342,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
-		self.client.backend().stream_best_block_headers(self.client.hasher()).await
+		self.client.backend().stream_best_block_headers(self.hasher()).await
 	}
 
 	pub async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
-		self.client.backend().stream_finalized_block_headers(self.client.hasher()).await
+		self.client.backend().stream_finalized_block_headers(self.hasher()).await
 	}
 }
 
@@ -372,8 +377,9 @@ pub async fn build_online_client(
 		},
 	};
 	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
+	let hasher = client.hasher();
 
-	Ok(ApiClient { client, legacy_rpc_methods })
+	Ok(ApiClient { client, legacy_rpc_methods, hasher })
 }
 
 async fn join_requests<I, T>(fut: I) -> Result<Vec<T>, subxt::Error>

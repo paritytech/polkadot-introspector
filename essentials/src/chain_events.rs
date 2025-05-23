@@ -29,7 +29,7 @@ use crate::{
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Decode, Encode};
 use serde::Serialize;
-use subxt::config::{Hasher, substrate::BlakeTwo256};
+use subxt::{PolkadotConfig, config::Hasher};
 
 #[derive(Debug)]
 pub enum ChainEvent<T: subxt::Config> {
@@ -95,21 +95,22 @@ pub enum SubxtDisputeResult {
 	TimedOut,
 }
 
-pub async fn decode_chain_event<T: subxt::Config>(
+pub async fn decode_chain_event(
 	block_hash: Hash,
-	event: subxt::events::EventDetails<T>,
-) -> Result<ChainEvent<T>> {
-	if is_specific_event::<DisputeInitiated, T>(&event) {
-		let decoded = decode_to_specific_event::<DisputeInitiated, T>(&event)?;
+	event: subxt::events::EventDetails<PolkadotConfig>,
+	hasher: <PolkadotConfig as subxt::Config>::Hasher,
+) -> Result<ChainEvent<PolkadotConfig>> {
+	if is_specific_event::<DisputeInitiated, PolkadotConfig>(&event) {
+		let decoded = decode_to_specific_event::<DisputeInitiated, PolkadotConfig>(&event)?;
 		return Ok(ChainEvent::DisputeInitiated(SubxtDispute {
 			relay_parent_block: block_hash,
 			candidate_hash: decoded.0.0,
 		}))
 	}
 
-	if is_specific_event::<DisputeConcluded, T>(&event) {
+	if is_specific_event::<DisputeConcluded, PolkadotConfig>(&event) {
 		use crate::metadata::polkadot::runtime_types::polkadot_runtime_parachains::disputes;
-		let decoded = decode_to_specific_event::<DisputeConcluded, T>(&event)?;
+		let decoded = decode_to_specific_event::<DisputeConcluded, PolkadotConfig>(&event)?;
 		let outcome = match decoded.1 {
 			disputes::DisputeResult::Valid => SubxtDisputeResult::Valid,
 			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
@@ -120,33 +121,36 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		))
 	}
 
-	if is_specific_event::<CandidateBacked, T>(&event) {
-		let decoded = decode_to_specific_event::<CandidateBacked, T>(&event)?;
+	if is_specific_event::<CandidateBacked, PolkadotConfig>(&event) {
+		let decoded = decode_to_specific_event::<CandidateBacked, PolkadotConfig>(&event)?;
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			decoded.2.0,
 			SubxtCandidateEventType::Backed,
+			hasher,
 		))))
 	}
 
-	if is_specific_event::<CandidateIncluded, T>(&event) {
-		let decoded = decode_to_specific_event::<CandidateIncluded, T>(&event)?;
+	if is_specific_event::<CandidateIncluded, PolkadotConfig>(&event) {
+		let decoded = decode_to_specific_event::<CandidateIncluded, PolkadotConfig>(&event)?;
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			decoded.2.0,
 			SubxtCandidateEventType::Included,
+			hasher,
 		))))
 	}
 
-	if is_specific_event::<CandidateTimedOut, T>(&event) {
-		let decoded = decode_to_specific_event::<CandidateTimedOut, T>(&event)?;
+	if is_specific_event::<CandidateTimedOut, PolkadotConfig>(&event) {
+		let decoded = decode_to_specific_event::<CandidateTimedOut, PolkadotConfig>(&event)?;
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
 			decoded.2.0,
 			SubxtCandidateEventType::TimedOut,
+			hasher,
 		))))
 	}
 
@@ -194,8 +198,9 @@ fn create_candidate_event(
 	candidate_descriptor: CandidateDescriptorV2<<Hash>,
 	core_idx: u32,
 	event_type: SubxtCandidateEventType,
+	hasher: <PolkadotConfig as subxt::Config>::Hasher,
 ) -> SubxtCandidateEvent {
-	let candidate_hash = BlakeTwo256::hash_of(&(&candidate_descriptor, commitments_hash));
+	let candidate_hash = hasher.hash_of(&(&candidate_descriptor, commitments_hash)).into();
 	let parachain_id = candidate_descriptor.para_id.0;
 	SubxtCandidateEvent { event_type, candidate_descriptor, parachain_id, candidate_hash, core_idx }
 }

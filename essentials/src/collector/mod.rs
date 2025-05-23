@@ -19,17 +19,17 @@ mod ws;
 
 use crate::{
 	api::{
-		executor::{RequestExecutor, RequestExecutorError},
 		ApiService,
+		executor::{RequestExecutor, RequestExecutorError},
 	},
 	chain_events::{
-		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
+		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
 	init::Shutdown,
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{ClaimQueue, Header, InherentData, OnDemandOrder, Timestamp, H256},
+	types::{ClaimQueue, H256, Header, InherentData, OnDemandOrder, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -38,7 +38,7 @@ use futures_util::StreamExt;
 use log::{debug, error, info, warn};
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_priority_channel::{
-	channel as priority_channel, channel_with_capacities as priority_channel_with_capacities, Receiver, Sender,
+	Receiver, Sender, channel as priority_channel, channel_with_capacities as priority_channel_with_capacities,
 };
 use std::{
 	cmp::Ordering,
@@ -48,10 +48,7 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::{
-	config::{substrate::BlakeTwo256, Hasher},
-	PolkadotConfig,
-};
+use subxt::{PolkadotConfig, config::Hasher};
 use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
@@ -227,6 +224,7 @@ pub struct Collector {
 	subscribe_mode: CollectorSubscribeMode,
 	hrmp_channels: bool,
 	max_parachain_stall: u32,
+	hasher: <PolkadotConfig as subxt::Config>::Hasher,
 }
 
 impl Collector {
@@ -244,6 +242,7 @@ impl Collector {
 			None
 		};
 		let executor = api.executor();
+		let hasher = executor.hasher(endpoint).expect("hasher should be available");
 		Self {
 			api,
 			ws_listener,
@@ -256,6 +255,7 @@ impl Collector {
 			subscribe_mode: opts.subscribe_mode,
 			hrmp_channels: opts.hrmp_channels,
 			max_parachain_stall: opts.max_parachain_stall,
+			hasher,
 		}
 	}
 
@@ -359,7 +359,7 @@ impl Collector {
 		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
 			if let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await? {
 				for block_event in block_events.iter() {
-					chain_events.push(decode_chain_event(*hash, block_event.unwrap()).await?);
+					chain_events.push(decode_chain_event(*hash, block_event.unwrap(), self.hasher).await?);
 				}
 			}
 		};
@@ -455,11 +455,7 @@ impl Collector {
 				.filter_map(|(para_id, last_block)| {
 					let is_active =
 						self.state.current_relay_chain_block_number - *last_block > self.max_parachain_stall;
-					if is_active {
-						Some(*para_id)
-					} else {
-						None
-					}
+					if is_active { Some(*para_id) } else { None }
 				})
 				.collect();
 			for para_id in to_evict {
@@ -620,7 +616,7 @@ impl Collector {
 		)
 		.await?;
 		let cur_session = self.executor.get_session_index(self.endpoint.as_str(), block_hash).await?;
-		let cur_session_hash = BlakeTwo256::hash(&cur_session.to_be_bytes()[..]);
+		let cur_session_hash = self.hasher.hash(&cur_session.to_be_bytes()[..]);
 		let maybe_existing_session = self
 			.storage_read_prefixed(CollectorPrefixType::AccountKeys, cur_session_hash)
 			.await;
@@ -641,7 +637,7 @@ impl Collector {
 			// Remove old session with the index `cur_session - 2` ignoring possible errors
 			if cur_session > 1 {
 				let prev_session = cur_session.saturating_sub(2);
-				let prev_session_hash = BlakeTwo256::hash(&prev_session.to_be_bytes()[..]);
+				let prev_session_hash = self.hasher.hash(&prev_session.to_be_bytes()[..]);
 
 				let _ = self
 					.storage_delete_prefixed(CollectorPrefixType::AccountKeys, prev_session_hash)
