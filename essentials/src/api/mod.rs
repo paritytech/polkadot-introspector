@@ -120,10 +120,14 @@ mod tests {
 		let api =
 			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor().await);
 		let mut subxt = api.executor();
+		let hasher = subxt.hasher(rpc_node_url()).unwrap();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
-		let timestamp = subxt.get_block_timestamp(rpc_node_url(), head.hash()).await.unwrap();
-		let _block = subxt.get_block_number(rpc_node_url(), Some(head.hash())).await.unwrap();
+		let timestamp = subxt.get_block_timestamp(rpc_node_url(), hasher.hash_of(&head)).await.unwrap();
+		let _block = subxt
+			.get_block_number(rpc_node_url(), Some(hasher.hash_of(&head)))
+			.await
+			.unwrap();
 		assert!(timestamp > 0);
 	}
 
@@ -144,9 +148,10 @@ mod tests {
 		let api =
 			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor().await);
 		let mut subxt = api.executor();
+		let hasher = subxt.hasher(rpc_node_url()).unwrap();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
-		let cores = subxt.get_occupied_cores(rpc_node_url(), head.hash()).await;
+		let cores = subxt.get_occupied_cores(rpc_node_url(), hasher.hash_of(&head)).await;
 
 		// TODO: fix zombie net instance to return valid cores
 		assert!(cores.is_err());
@@ -157,9 +162,10 @@ mod tests {
 		let api =
 			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor().await);
 		let mut subxt = api.executor();
+		let hasher = subxt.hasher(rpc_node_url()).unwrap();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
-		let groups = subxt.get_backing_groups(rpc_node_url(), head.hash()).await;
+		let groups = subxt.get_backing_groups(rpc_node_url(), hasher.hash_of(&head)).await;
 
 		assert!(groups.is_ok());
 	}
