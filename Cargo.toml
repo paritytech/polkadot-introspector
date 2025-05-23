@@ -13,7 +13,7 @@ members = [
 [workspace.package]
 version = "0.2.38"
 authors = ["Parity Technologies <admin@parity.io>"]
-edition = "2021"
+edition = "2024"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paritytech/polkadot-introspector"
@@ -58,7 +58,7 @@ subxt = { default-features = false, features = [
     "jsonrpsee",
     "native",
     "unstable-light-client",
-], version = "0.38.0" }
+], version = "0.42.1" }
 base64 = "0.22.1"
 thiserror = "1.0.69"
 time = { version = "0.3.36", features = ["formatting"] }
