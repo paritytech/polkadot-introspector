@@ -29,10 +29,7 @@ use crate::{
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Decode, Encode};
 use serde::Serialize;
-use subxt::{
-	PolkadotConfig,
-	config::{Hasher, substrate::BlakeTwo256},
-};
+use subxt::config::{Hasher, substrate::BlakeTwo256};
 
 #[derive(Debug)]
 pub enum ChainEvent<T: subxt::Config> {
