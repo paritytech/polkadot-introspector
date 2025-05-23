@@ -16,7 +16,7 @@
 
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{metadata::polkadot_staging_primitives::BackedCandidate, types::H256};
-use subxt::config::{substrate::BlakeTwo256, Hasher};
+use subxt::{PolkadotConfig, config::Hasher};
 
 /// The parachain block tracking information.
 /// This is used for displaying CLI updates and also goes to Storage.
@@ -43,9 +43,12 @@ impl ParachainBlockInfo {
 		Self { candidate_hash, assigned_core, bitfield_count, ..Default::default() }
 	}
 
-	pub fn candidate_hash(candidate: &BackedCandidate<H256>) -> H256 {
-		let commitments_hash = BlakeTwo256::hash_of(&candidate.candidate.commitments);
-		BlakeTwo256::hash_of(&(&candidate.candidate.descriptor, commitments_hash))
+	pub fn candidate_hash(
+		candidate: &BackedCandidate<H256>,
+		hasher: <PolkadotConfig as subxt::Config>::Hasher,
+	) -> H256 {
+		let commitments_hash = hasher.hash_of(&candidate.candidate.commitments);
+		hasher.hash_of(&(&candidate.candidate.descriptor, commitments_hash))
 	}
 
 	pub fn set_pending(&mut self) {
@@ -93,11 +96,12 @@ pub enum ParachainBlockState {
 
 #[cfg(test)]
 mod tests {
-	use crate::test_utils::create_para_block_info;
+	use crate::test_utils::{create_hasher, create_para_block_info};
 
-	#[test]
-	fn test_is_bitfield_propagation_slow() {
-		let mut info = create_para_block_info(100);
+	#[tokio::test]
+	async fn test_is_bitfield_propagation_slow() {
+		let hasher = create_hasher().await;
+		let mut info = create_para_block_info(100, hasher);
 		assert!(!info.is_bitfield_propagation_slow());
 
 		info.max_availability_bits = 200;

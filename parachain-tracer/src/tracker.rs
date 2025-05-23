@@ -40,6 +40,9 @@ pub struct SubxtTracker {
 	/// Parachain ID to track.
 	para_id: u32,
 
+	/// Hasher for the chain.
+	hasher: <subxt::PolkadotConfig as subxt::Config>::Hasher,
+
 	/// A new session index.
 	new_session: Option<u32>,
 	/// Information about current parachain block we track.
@@ -85,9 +88,10 @@ pub struct SubxtTracker {
 }
 
 impl SubxtTracker {
-	pub fn new(para_id: u32) -> Self {
+	pub fn new(para_id: u32, hasher: <subxt::PolkadotConfig as subxt::Config>::Hasher) -> Self {
 		Self {
 			para_id,
+			hasher,
 			candidates: HashMap::new(),
 			cores: HashMap::new(),
 			new_session: None,
@@ -294,7 +298,7 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) {
 		let candidate_hashes = backed_candidates_by_para_id(backed_candidates, self.para_id)
-			.map(|v| ParachainBlockInfo::candidate_hash(&v));
+			.map(|v| ParachainBlockInfo::candidate_hash(&v, self.hasher));
 		let mut used_cores = vec![];
 		for candidate_hash in candidate_hashes {
 			let Some(core) = self.candidate_core(candidate_hash, storage).await else { continue };
@@ -369,8 +373,7 @@ impl SubxtTracker {
 				} else {
 					info!(
 						"parachain {}: dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
-						self.para_id,
-						dispute_info.candidate_hash.0
+						self.para_id, dispute_info.candidate_hash.0
 					);
 				}
 			}
@@ -648,10 +651,12 @@ impl SubxtTracker {
 #[cfg(test)]
 mod test_inject_new_session {
 	use super::*;
+	use crate::test_utils::create_hasher;
 
 	#[tokio::test]
 	async fn test_sets_new_session() {
-		let mut tracker = SubxtTracker::new(100);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
 		assert!(tracker.new_session.is_none());
 
 		tracker.inject_new_session(42);
@@ -662,14 +667,14 @@ mod test_inject_new_session {
 
 #[cfg(test)]
 mod test_maybe_reset_state {
-	use crate::test_utils::create_para_block_info;
-
 	use super::*;
+	use crate::test_utils::{create_hasher, create_para_block_info};
 
 	#[tokio::test]
 	async fn test_resets_state_if_not_backed() {
-		let mut tracker = SubxtTracker::new(100);
-		let mut candidate = create_para_block_info(100);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut candidate = create_para_block_info(100, hasher);
 		candidate.set_included();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
@@ -691,8 +696,9 @@ mod test_maybe_reset_state {
 
 	#[tokio::test]
 	async fn test_resets_state_if_backed() {
-		let mut tracker = SubxtTracker::new(100);
-		let candidate = create_para_block_info(100);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let candidate = create_para_block_info(100, hasher);
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
 		tracker.on_demand_order = Some(OnDemandOrder::default());
@@ -716,7 +722,8 @@ mod test_maybe_reset_state {
 mod test_inject_block {
 	use super::*;
 	use crate::test_utils::{
-		create_candidate_record, create_inherent_data, create_para_block_info, create_storage, storage_write,
+		create_candidate_record, create_hasher, create_inherent_data, create_para_block_info, create_storage,
+		storage_write,
 	};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 	use std::collections::BTreeMap;
@@ -724,8 +731,9 @@ mod test_inject_block {
 	#[tokio::test]
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
 		let hash = H256::random();
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 
 		tracker.inject_block(hash, 0, &tracker_storage).await.unwrap();
 
@@ -751,8 +759,9 @@ mod test_inject_block {
 		let first_hash = H256::random();
 		let second_hash = H256::random();
 		let storage = create_storage().await;
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, storage.clone());
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
 
 		// Inject a block
 		storage_write(
@@ -816,13 +825,14 @@ mod test_inject_block {
 	#[tokio::test]
 	async fn test_sets_backed_candidates() {
 		let storage = create_storage().await;
-		let tracker_storage = TrackerStorage::new(100, storage.clone());
-		let mut tracker = SubxtTracker::new(100);
+		let hasher = create_hasher().await;
+		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
+		let mut tracker = SubxtTracker::new(100, hasher);
 
 		let block_hash = H256::random();
 		let inherent_data = create_inherent_data(100);
 		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate);
+		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
@@ -864,13 +874,14 @@ mod test_inject_block {
 	#[tokio::test]
 	async fn test_sets_dropped_candidates() {
 		let storage = create_storage().await;
-		let tracker_storage = TrackerStorage::new(100, storage.clone());
-		let mut tracker = SubxtTracker::new(100);
+		let hasher = create_hasher().await;
+		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
+		let mut tracker = SubxtTracker::new(100, hasher);
 
 		let block_hash = H256::random();
 		let inherent_data = create_inherent_data(100);
 		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate);
+		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
@@ -915,11 +926,12 @@ mod test_inject_block {
 	#[tokio::test]
 	async fn test_sets_included_candidates() {
 		let storage = create_storage().await;
-		let tracker_storage = TrackerStorage::new(100, storage.clone());
-		let mut tracker = SubxtTracker::new(100);
+		let hasher = create_hasher().await;
+		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
+		let mut tracker = SubxtTracker::new(100, hasher);
 
 		let block_hash = H256::random();
-		let candidate = create_para_block_info(100);
+		let candidate = create_para_block_info(100, hasher);
 		let candidate_hash = candidate.candidate_hash;
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 
@@ -967,7 +979,8 @@ mod test_progress {
 		prometheus::{Metrics, MockPrometheusMetrics},
 		stats::{MockStats, ParachainStats},
 		test_utils::{
-			create_candidate_record, create_hrmp_channels, create_para_block_info, create_storage, storage_write,
+			create_candidate_record, create_hasher, create_hrmp_channels, create_para_block_info, create_storage,
+			storage_write,
 		},
 	};
 	use mockall::predicate::eq;
@@ -975,8 +988,9 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
-		let tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = MockStats::default();
 		let metrics = Metrics::default();
 
@@ -988,8 +1002,9 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_returns_progress_on_current_block() {
 		let hash = H256::random();
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -1010,8 +1025,9 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_new_session_if_exist() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -1019,28 +1035,33 @@ mod test_progress {
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_)))
+		);
 
 		// With new session
 		tracker.inject_new_session(12);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_)))
+		);
 	}
 
 	#[tokio::test]
 	async fn test_includes_core_assignment() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
-		let mut candidate = create_para_block_info(100);
+		let mut candidate = create_para_block_info(100, hasher);
 
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		candidate.core_occupied = true;
@@ -1048,17 +1069,20 @@ mod test_progress {
 		tracker.cores.entry(0).or_default().push(100);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::CoreAssigned(0))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::CoreAssigned(0)))
+		);
 	}
 
 	#[tokio::test]
 	async fn test_includes_slow_propogation() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
-		let mut candidate = create_para_block_info(100);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
+		let mut candidate = create_para_block_info(100, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -1084,10 +1108,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _)))
+		);
 
 		// Bitfields propogation is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
@@ -1102,16 +1128,19 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _)))
+		);
 	}
 
 	#[tokio::test]
 	async fn test_includes_message_queues() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
 
@@ -1119,10 +1148,12 @@ mod test_progress {
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _)))
+		);
 
 		// With active channels
 		tracker
@@ -1130,16 +1161,19 @@ mod test_progress {
 			.set_hrmp_channels(create_hrmp_channels(), Default::default());
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _)))
+		);
 	}
 
 	#[tokio::test]
 	async fn test_includes_current_block_time() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
@@ -1178,8 +1212,9 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_finality_lag() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_init_counters().returning(|_| ());
@@ -1201,8 +1236,9 @@ mod test_progress {
 
 	#[tokio::test]
 	async fn test_includes_disputes() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
@@ -1223,10 +1259,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_)))
+		);
 
 		// With disputes
 		let dispute = DisputesTracker { candidate: H256::random(), ..Default::default() };
@@ -1246,16 +1284,19 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_)))
+		);
 	}
 
 	#[tokio::test]
 	async fn test_includes_on_demand_order() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_init_counters().returning(|_| ());
@@ -1293,7 +1334,7 @@ mod test_progress {
 		let _progress = tracker.progress(&mut stats, &mock_metrics, &tracker_storage).await.unwrap();
 		tracker.is_on_demand_scheduled_in_current_block = false;
 		// If backed
-		let candidate = create_para_block_info(100);
+		let candidate = create_para_block_info(100, hasher);
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.cores.entry(0).or_default().push(100);
 		mock_metrics
@@ -1313,8 +1354,9 @@ mod test_progress {
 	async fn test_includes_candidate_state() {
 		let candidate_hash = H256::random();
 		let storage = create_storage().await;
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -1341,10 +1383,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot)));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot))
+		);
 
 		// When candidate is backed
 		let candidate = ParachainBlockInfo::new(candidate_hash, 0, 0);
@@ -1381,10 +1425,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::PendingAvailability(_))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::PendingAvailability(_)))
+		);
 
 		// And availability is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
@@ -1404,10 +1450,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _)))
+		);
 
 		// When candidate is included and data is available
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
@@ -1431,16 +1479,19 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _)))
+		);
 	}
 
 	#[tokio::test]
 	async fn test_inits_disputes_metrics() {
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await);
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
+		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -1463,7 +1514,7 @@ mod test_progress {
 
 #[cfg(test)]
 mod test_logic {
-	use crate::test_utils::create_para_block_info;
+	use crate::test_utils::{create_hasher, create_para_block_info};
 
 	use super::*;
 
@@ -1471,9 +1522,10 @@ mod test_logic {
 		Block { num, hash: Default::default(), ts: Default::default() }
 	}
 
-	#[test]
-	fn test_is_fork() {
-		let mut tracker = SubxtTracker::new(100);
+	#[tokio::test]
+	async fn test_is_fork() {
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
 
 		tracker.previous_relay_block = None;
 		tracker.current_relay_block = None;
@@ -1496,12 +1548,17 @@ mod test_logic {
 		assert!(tracker.is_fork());
 	}
 
-	#[test]
-	fn test_has_backed_candidate() {
+	#[tokio::test]
+	async fn test_has_backed_candidate() {
+		let hasher = create_hasher().await;
 		let relay_hash = H256::default();
 		let relay_number = 42;
-		let mut tracker = SubxtTracker::new(100);
-		tracker.candidates.entry(0).or_default().push(Some(create_para_block_info(100)));
+		let mut tracker = SubxtTracker::new(100, hasher);
+		tracker
+			.candidates
+			.entry(0)
+			.or_default()
+			.push(Some(create_para_block_info(100, hasher)));
 		tracker.candidates.entry(1).or_default().push(None);
 
 		assert!(tracker.has_backed_candidate(0));
@@ -1539,24 +1596,26 @@ mod test_logic {
 		assert!(tracker.has_backed_candidate(0));
 	}
 
-	#[test]
-	fn test_is_current_candidate_backed() {
-		let mut tracker = SubxtTracker::new(100);
+	#[tokio::test]
+	async fn test_is_current_candidate_backed() {
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
 
 		assert!(!tracker.is_current_candidate_backed(0));
 
 		tracker.candidates.entry(0).or_default().push(None);
 		assert!(!tracker.is_current_candidate_backed(0));
 
-		let candidate = create_para_block_info(100);
+		let candidate = create_para_block_info(100, hasher);
 		tracker.candidates.clear();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		assert!(tracker.is_current_candidate_backed(0));
 	}
 
-	#[test]
-	fn test_is_just_backed() {
-		let mut tracker = SubxtTracker::new(100);
+	#[tokio::test]
+	async fn test_is_just_backed() {
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
 
 		tracker.last_backed_at_block_number = None;
 		tracker.current_relay_block = Some(block_with_num(42));
@@ -1571,20 +1630,21 @@ mod test_logic {
 		assert!(tracker.is_just_backed());
 	}
 
-	#[test]
-	fn test_is_slow_availability() {
-		let mut tracker = SubxtTracker::new(100);
+	#[tokio::test]
+	async fn test_is_slow_availability() {
+		let hasher = create_hasher().await;
+		let mut tracker = SubxtTracker::new(100, hasher);
 
 		assert!(!tracker.is_slow_availability(0));
 
-		let mut candidate = create_para_block_info(100);
+		let mut candidate = create_para_block_info(100, hasher);
 		candidate.core_occupied = true;
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.last_backed_at_block_number = Some(42);
 		tracker.current_relay_block = Some(block_with_num(42));
 		assert!(!tracker.is_slow_availability(0));
 
-		let mut candidate = create_para_block_info(100);
+		let mut candidate = create_para_block_info(100, hasher);
 		candidate.core_occupied = false;
 		tracker.candidates.clear();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
@@ -1592,7 +1652,7 @@ mod test_logic {
 		tracker.current_relay_block = Some(block_with_num(42));
 		assert!(!tracker.is_slow_availability(0));
 
-		let mut candidate = create_para_block_info(100);
+		let mut candidate = create_para_block_info(100, hasher);
 		candidate.core_occupied = true;
 		tracker.candidates.clear();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));

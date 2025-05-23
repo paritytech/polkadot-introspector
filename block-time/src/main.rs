@@ -17,9 +17,8 @@
 use clap::Parser;
 use colored::Colorize;
 use crossterm::{
-	cursor,
+	QueueableCommand, cursor,
 	terminal::{Clear, ClearType},
-	QueueableCommand,
 };
 use log::{debug, info, warn};
 use polkadot_introspector_essentials::{
@@ -30,14 +29,14 @@ use polkadot_introspector_essentials::{
 	consumer::{EventConsumerInit, EventStream},
 	init, utils,
 };
-use polkadot_introspector_priority_channel::{channel, Receiver, Sender};
+use polkadot_introspector_priority_channel::{Receiver, Sender, channel};
 use prometheus_endpoint::{HistogramVec, Registry};
 use std::{
 	collections::{HashMap, VecDeque},
-	io::{stdout, Write},
+	io::{Write, stdout},
 	net::ToSocketAddrs,
 };
-use subxt::config::Header;
+use subxt::config::Hasher;
 use tokio::select;
 
 #[derive(Clone, Debug, Parser)]
@@ -206,7 +205,7 @@ impl BlockTimeMonitor {
 	}
 
 	fn display_chart(uri: &str, row: u32, values: Option<&VecDeque<u64>>, opts: BlockTimeCliOptions) {
-		use rasciigraph::{plot, Config};
+		use rasciigraph::{Config, plot};
 
 		let _ = stdout().queue(cursor::MoveTo(0, row as u16));
 		if values.is_none() {
@@ -332,7 +331,8 @@ async fn populate_view(
 
 	for _ in 0..blocks_to_fetch {
 		if let Ok(Some(header)) = executor.get_block_head(url, parent_hash).await {
-			let ts = executor.get_block_timestamp(url, header.hash()).await.unwrap();
+			let hasher = executor.hasher(url).unwrap();
+			let ts = executor.get_block_timestamp(url, hasher.hash_of(&header)).await.unwrap();
 
 			if prev_ts != 0 {
 				block_times.push(prev_ts.saturating_sub(ts));

@@ -28,10 +28,10 @@
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
 use crate::prometheus::PrometheusMetrics;
-use clap::{error::ErrorKind, CommandFactory, Parser};
+use clap::{CommandFactory, Parser, error::ErrorKind};
 use colored::Colorize;
 use crossterm::style::Stylize;
-use futures::{future, stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, future, stream::FuturesUnordered};
 use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
@@ -45,7 +45,7 @@ use polkadot_introspector_essentials::{
 	types::BlockNumber,
 	utils::{Retry, RetryOptions},
 };
-use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
+use polkadot_introspector_priority_channel::{Receiver, Sender, channel_with_capacities};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use stats::ParachainStats;
 use std::{collections::HashMap, default::Default, ops::DerefMut};
@@ -268,8 +268,9 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		let mut tracker = SubxtTracker::new(para_id);
-		let storage = TrackerStorage::new(para_id, api_service.storage());
+		let hasher = api_service.executor().hasher(&self.node).expect("Hasher must be available");
+		let mut tracker = SubxtTracker::new(para_id, hasher);
+		let storage = TrackerStorage::new(para_id, api_service.storage(), hasher);
 
 		let metrics = self.metrics.clone();
 		let mut stats = ParachainStats::new(para_id, self.opts.last_skipped_slot_blocks);
