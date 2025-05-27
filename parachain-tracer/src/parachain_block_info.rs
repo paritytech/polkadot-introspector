@@ -16,7 +16,7 @@
 
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{metadata::polkadot_staging_primitives::BackedCandidate, types::H256};
-use subxt::{PolkadotConfig, config::Hasher};
+use subxt::{config::Hasher, PolkadotConfig};
 
 /// The parachain block tracking information.
 /// This is used for displaying CLI updates and also goes to Storage.

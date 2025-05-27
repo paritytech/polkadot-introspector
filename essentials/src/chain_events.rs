@@ -24,12 +24,12 @@ use crate::{
 		},
 		polkadot_staging_primitives::CandidateDescriptorV2,
 	},
-	types::{H256, Hash, Header, OnDemandOrder},
+	types::{Hash, Header, OnDemandOrder, H256},
 };
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::{eyre::eyre, Result};
 use parity_scale_codec::{Decode, Encode};
 use serde::Serialize;
-use subxt::{PolkadotConfig, config::Hasher};
+use subxt::{config::Hasher, PolkadotConfig};
 
 #[derive(Debug)]
 pub enum ChainEvent<T: subxt::Config> {
@@ -104,7 +104,7 @@ pub async fn decode_chain_event(
 		let decoded = decode_to_specific_event::<DisputeInitiated, PolkadotConfig>(&event)?;
 		return Ok(ChainEvent::DisputeInitiated(SubxtDispute {
 			relay_parent_block: block_hash,
-			candidate_hash: decoded.0.0,
+			candidate_hash: decoded.0 .0,
 		}))
 	}
 
@@ -116,7 +116,7 @@ pub async fn decode_chain_event(
 			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
 		};
 		return Ok(ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0.0 },
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
 			outcome,
 		))
 	}
@@ -126,7 +126,7 @@ pub async fn decode_chain_event(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2.0,
+			decoded.2 .0,
 			SubxtCandidateEventType::Backed,
 			hasher,
 		))))
@@ -137,7 +137,7 @@ pub async fn decode_chain_event(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2.0,
+			decoded.2 .0,
 			SubxtCandidateEventType::Included,
 			hasher,
 		))))
@@ -148,7 +148,7 @@ pub async fn decode_chain_event(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2.0,
+			decoded.2 .0,
 			SubxtCandidateEventType::TimedOut,
 			hasher,
 		))))

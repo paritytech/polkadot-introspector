@@ -31,8 +31,9 @@ use polkadot_introspector_essentials::{
 			},
 		},
 		polkadot_primitives::{
-			signed::UncheckedSigned, validator_app, AvailabilityBitfield, CandidateCommitments, DisputeStatement,
-			DisputeStatementSet, InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
+			AvailabilityBitfield, CandidateCommitments, DisputeStatement, DisputeStatementSet,
+			InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex, signed::UncheckedSigned,
+			validator_app,
 		},
 		polkadot_staging_primitives::{
 			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InherentData, InternalVersion,

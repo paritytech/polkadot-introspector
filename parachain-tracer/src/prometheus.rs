@@ -20,8 +20,8 @@ use color_eyre::Result;
 use mockall::automock;
 use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
 use prometheus_endpoint::{
-	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 	Registry,
+	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 };
 use std::{net::ToSocketAddrs, time::Duration};
 
@@ -404,29 +404,38 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		relay_skipped_slots: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new("pc_relay_skipped_slots", "Relay chain block time measured in standard blocks") ,
+				Opts::new("pc_relay_skipped_slots", "Relay chain block time measured in standard blocks"),
 				&["parachain_id"],
 			)?,
 			registry,
 		)?,
 		relay_candidate_statuses: prometheus_endpoint::register(
 			HistogramVec::new(
-				HistogramOpts::new("pc_relay_candidates", "Candidate's statuses per relay chain block (backed, included, timed out)")
-					.buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
+				HistogramOpts::new(
+					"pc_relay_candidates",
+					"Candidate's statuses per relay chain block (backed, included, timed out)",
+				)
+				.buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
 				&["status"],
 			)?,
 			registry,
 		)?,
 		slow_avail_count: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new("pc_slow_available_count", "Number of slow availability events. We consider it slow when the relay chain block bitfield entries amounts to less than 2/3 one bits for the availability core to which the parachain is assigned"),
+				Opts::new(
+					"pc_slow_available_count",
+					"Number of slow availability events. We consider it slow when the relay chain block bitfield entries amounts to less than 2/3 one bits for the availability core to which the parachain is assigned",
+				),
 				&["parachain_id"],
 			)?,
 			registry,
 		)?,
 		low_bitfields_count: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new("pc_low_bitfields_count", "Number of low bitfields count events. This happens when a block author received the signed bitfields from less than 2/3 of the para validators"),
+				Opts::new(
+					"pc_low_bitfields_count",
+					"Number of low bitfields count events. This happens when a block author received the signed bitfields from less than 2/3 of the para validators",
+				),
 				&["parachain_id"],
 			)?,
 			registry,
@@ -460,33 +469,30 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			registry,
 		)?,
 		para_on_demand_orders: prometheus_endpoint::register(
-			GaugeVec::new(
-				Opts::new("pc_para_on_demand_orders", "Parachain's on demand orders"),
-				&["parachain_id"],
-			)?,
+			GaugeVec::new(Opts::new("pc_para_on_demand_orders", "Parachain's on demand orders"), &["parachain_id"])?,
 			registry,
 		)?,
 		para_on_demand_delay: prometheus_endpoint::register(
 			GaugeVec::new(
-				Opts::new("pc_para_on_demand_delay", "Latency (in relay chain blocks) between when the parachain orders a core and when first candidate is scheduled or backed on that core."),
+				Opts::new(
+					"pc_para_on_demand_delay",
+					"Latency (in relay chain blocks) between when the parachain orders a core and when first candidate is scheduled or backed on that core.",
+				),
 				&["parachain_id", "until"],
 			)?,
 			registry,
 		)?,
 		para_on_demand_delay_sec: prometheus_endpoint::register(
 			GaugeVec::new(
-				Opts::new("pc_para_on_demand_delay_sec", "Latency (in seconds) between when the parachain orders a core and when first candidate is scheduled or backed on that core."),
+				Opts::new(
+					"pc_para_on_demand_delay_sec",
+					"Latency (in seconds) between when the parachain orders a core and when first candidate is scheduled or backed on that core.",
+				),
 				&["parachain_id", "until"],
 			)?,
 			registry,
 		)?,
-		finality_lag: prometheus_endpoint::register(
-			Gauge::new("pc_finality_lag", "Finality lag")?,
-			registry,
-		)?,
-		session: prometheus_endpoint::register(
-			Gauge::new("pc_session", "Session number")?,
-			registry,
-		)?,
+		finality_lag: prometheus_endpoint::register(Gauge::new("pc_finality_lag", "Finality lag")?, registry)?,
+		session: prometheus_endpoint::register(Gauge::new("pc_session", "Session number")?, registry)?,
 	})))
 }

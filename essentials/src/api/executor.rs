@@ -118,7 +118,9 @@ pub enum RequestExecutorError {
 	#[error("Client for url {0} not found")]
 	ClientNotFound(String),
 	#[error("subxt error: {0}")]
-	SubxtError(#[from] subxt::error::Error),
+	SubxtError(String),
+	#[error("subxt retriable error: {0}")]
+	SubxtRetriableError(String),
 	#[error("dynamic error: {0}")]
 	DynamicError(#[from] dynamic::DynamicError),
 	#[error("subxt connection timeout")]
@@ -131,13 +133,18 @@ pub enum RequestExecutorError {
 	UnexpectedResponse(Request),
 }
 
+impl From<subxt::error::Error> for RequestExecutorError {
+	fn from(err: subxt::error::Error) -> Self {
+		match err {
+			subxt::Error::Io(_) | subxt::Error::Rpc(_) => Self::SubxtRetriableError(err.to_string()),
+			_ => Self::SubxtError(err.to_string()),
+		}
+	}
+}
+
 impl RequestExecutorError {
 	pub fn should_retry(&self) -> bool {
-		matches!(
-			self,
-			RequestExecutorError::SubxtError(subxt::Error::Io(_)) |
-				RequestExecutorError::SubxtError(subxt::Error::Rpc(_))
-		)
+		matches!(self, Self::SubxtRetriableError(_))
 	}
 }
 

@@ -22,7 +22,7 @@ pub mod storage;
 
 use crate::{api::executor::RequestExecutor, constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
 use std::{fmt::Debug, hash::Hash};
-use tokio::sync::mpsc::{Sender, channel};
+use tokio::sync::mpsc::{channel, Sender};
 
 // Provides access to subxt and storage APIs, more to come.
 #[derive(Clone)]

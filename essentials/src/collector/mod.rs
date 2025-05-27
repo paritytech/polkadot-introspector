@@ -19,17 +19,17 @@ mod ws;
 
 use crate::{
 	api::{
-		ApiService,
 		executor::{RequestExecutor, RequestExecutorError},
+		ApiService,
 	},
 	chain_events::{
-		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
+		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult,
 	},
 	chain_subscription::ChainSubscriptionEvent,
 	init::Shutdown,
 	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{ClaimQueue, H256, Header, InherentData, OnDemandOrder, Timestamp},
+	types::{ClaimQueue, Header, InherentData, OnDemandOrder, Timestamp, H256},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -38,7 +38,7 @@ use futures_util::StreamExt;
 use log::{debug, error, info, warn};
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_priority_channel::{
-	Receiver, Sender, channel as priority_channel, channel_with_capacities as priority_channel_with_capacities,
+	channel as priority_channel, channel_with_capacities as priority_channel_with_capacities, Receiver, Sender,
 };
 use std::{
 	cmp::Ordering,
@@ -48,7 +48,7 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::{PolkadotConfig, config::Hasher};
+use subxt::{config::Hasher, PolkadotConfig};
 use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
@@ -455,7 +455,11 @@ impl Collector {
 				.filter_map(|(para_id, last_block)| {
 					let is_active =
 						self.state.current_relay_chain_block_number - *last_block > self.max_parachain_stall;
-					if is_active { Some(*para_id) } else { None }
+					if is_active {
+						Some(*para_id)
+					} else {
+						None
+					}
 				})
 				.collect();
 			for para_id in to_evict {

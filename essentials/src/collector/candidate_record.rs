@@ -17,8 +17,8 @@
 use crate::{chain_events::SubxtDisputeResult, metadata::polkadot_staging_primitives, types::H256};
 use parity_scale_codec::{Decode, Encode};
 use serde::{
-	ser::{SerializeStruct, Serializer},
 	Deserialize, Serialize,
+	ser::{SerializeStruct, Serializer},
 };
 use std::{hash::Hash, time::Duration};
 
