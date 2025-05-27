@@ -15,8 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 use crate::{
 	chain_events::SubxtDisputeResult,
-	collector::{candidate_record::CandidateRecord, CollectorPrefixType, CollectorStorageApi},
-	types::{Timestamp, H256},
+	collector::{CollectorPrefixType, CollectorStorageApi, candidate_record::CandidateRecord},
+	types::{H256, Timestamp},
 };
 use futures::{SinkExt, StreamExt};
 use log::{debug, warn};
@@ -36,9 +36,9 @@ use std::{
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 use typed_builder::TypedBuilder;
 use warp::{
+	Filter, Rejection, Reply,
 	http::StatusCode,
 	ws::{Message, WebSocket},
-	Filter, Rejection, Reply,
 };
 
 /// Structure for a Web-Socket builder

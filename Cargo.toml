@@ -13,7 +13,7 @@ members = [
 [workspace.package]
 version = "0.2.38"
 authors = ["Parity Technologies <admin@parity.io>"]
-edition = "2021"
+edition = "2024"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paritytech/polkadot-introspector"

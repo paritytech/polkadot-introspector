@@ -28,10 +28,10 @@
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
 use crate::prometheus::PrometheusMetrics;
-use clap::{error::ErrorKind, CommandFactory, Parser};
+use clap::{CommandFactory, Parser, error::ErrorKind};
 use colored::Colorize;
 use crossterm::style::Stylize;
-use futures::{future, stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, future, stream::FuturesUnordered};
 use itertools::Itertools;
 use log::{error, info, warn};
 use polkadot_introspector_essentials::{
@@ -45,7 +45,7 @@ use polkadot_introspector_essentials::{
 	types::BlockNumber,
 	utils::{Retry, RetryOptions},
 };
-use polkadot_introspector_priority_channel::{channel_with_capacities, Receiver, Sender};
+use polkadot_introspector_priority_channel::{Receiver, Sender, channel_with_capacities};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use stats::ParachainStats;
 use std::{collections::HashMap, default::Default, ops::DerefMut};

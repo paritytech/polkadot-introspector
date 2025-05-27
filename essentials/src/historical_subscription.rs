@@ -25,10 +25,10 @@ use crate::{
 };
 use async_trait::async_trait;
 use log::{debug, error, info};
-use polkadot_introspector_priority_channel::{channel, Sender};
+use polkadot_introspector_priority_channel::{Sender, channel};
 use tokio::{
-	sync::broadcast::{error::TryRecvError, Sender as BroadcastSender},
-	time::{interval_at, Duration},
+	sync::broadcast::{Sender as BroadcastSender, error::TryRecvError},
+	time::{Duration, interval_at},
 };
 
 pub struct HistoricalSubscription {

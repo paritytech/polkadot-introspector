@@ -24,10 +24,10 @@ use crate::{
 };
 use async_trait::async_trait;
 use log::{debug, error, info};
-use polkadot_introspector_priority_channel::{channel, Sender};
+use polkadot_introspector_priority_channel::{Sender, channel};
 use tokio::{
 	sync::broadcast::Sender as BroadcastSender,
-	time::{interval_at, Duration},
+	time::{Duration, interval_at},
 };
 
 pub struct ChainHeadSubscription {
@@ -82,7 +82,7 @@ impl ChainHeadSubscription {
 		shutdown_tx: BroadcastSender<Shutdown>,
 		mut executor: RequestExecutor,
 	) {
-		use futures::stream::{select, StreamExt};
+		use futures::stream::{StreamExt, select};
 		use futures_util::TryStreamExt;
 
 		let mut shutdown_rx = shutdown_tx.subscribe();

@@ -17,13 +17,13 @@
 use crate::{
 	api::api_client::ApiClient,
 	metadata::polkadot_primitives::ValidatorIndex,
-	types::{OnDemandOrder, H256},
+	types::{H256, OnDemandOrder},
 };
 use log::error;
 use subxt::{
+	OnlineClient, PolkadotConfig,
 	dynamic::{At, Value},
 	ext::scale_value::{Composite, Primitive, ValueDef},
-	OnlineClient, PolkadotConfig,
 };
 use thiserror::Error;
 
@@ -34,7 +34,13 @@ pub enum DynamicError {
 	#[error("{0} not found in dynamic storage")]
 	EmptyResponseFromDynamicStorage(String),
 	#[error("subxt error: {0}")]
-	SubxtError(#[from] subxt::error::Error),
+	SubxtError(String),
+}
+
+impl From<subxt::error::Error> for DynamicError {
+	fn from(err: subxt::error::Error) -> Self {
+		Self::SubxtError(err.to_string())
+	}
 }
 
 pub(crate) fn decode_validator_groups(raw_groups: &Value<u32>) -> Result<Vec<Vec<ValidatorIndex>>, DynamicError> {

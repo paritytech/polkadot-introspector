@@ -16,7 +16,7 @@
 
 #[cfg(test)]
 use crate::IntrospectorKvdb;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{Rng, distributions::Alphanumeric, thread_rng};
 use std::path::PathBuf;
 
 const TEST_KEY: [u8; 3] = [0u8, 1u8, 2u8];

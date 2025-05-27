@@ -18,8 +18,8 @@ use crate::IntrospectorKvdb;
 use clap::Parser;
 use color_eyre::Result;
 use log::{error, info, trace};
-use prometheus_endpoint::{prometheus::IntGaugeVec, Opts, Registry};
-use rand::{thread_rng, Rng};
+use prometheus_endpoint::{Opts, Registry, prometheus::IntGaugeVec};
+use rand::{Rng, thread_rng};
 use std::net::ToSocketAddrs;
 
 #[derive(Clone, Debug, Parser, Default)]

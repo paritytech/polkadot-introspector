@@ -15,7 +15,7 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::types::{Header, H256};
+use crate::types::{H256, Header};
 
 #[derive(Debug)]
 pub enum ChainSubscriptionEvent {

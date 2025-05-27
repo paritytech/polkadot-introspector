@@ -16,8 +16,8 @@
 
 use crate::{
 	api::{
-		api_client::{build_online_client, ApiClient, ApiClientMode, HeaderStream},
-		dynamic::{self, decode_validator_groups, fetch_dynamic_storage, DynamicHostConfiguration},
+		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
+		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
 	init::Shutdown,
@@ -26,22 +26,22 @@ use crate::{
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData,
-		SessionKeys, SubxtHrmpChannel, Timestamp, H256,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
+		SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
 use color_eyre::eyre::eyre;
 use log::error;
 use polkadot_introspector_priority_channel::{
-	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
+	Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender, channel,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use subxt::{OnlineClient, PolkadotConfig};
 use thiserror::Error;
 use tokio::sync::{
 	broadcast::Sender as BroadcastSender,
-	oneshot::{error::RecvError as OneshotRecvError, Sender as OneshotSender},
+	oneshot::{Sender as OneshotSender, error::RecvError as OneshotRecvError},
 };
 
 enum ExecutorMessage {
@@ -118,7 +118,9 @@ pub enum RequestExecutorError {
 	#[error("Client for url {0} not found")]
 	ClientNotFound(String),
 	#[error("subxt error: {0}")]
-	SubxtError(#[from] subxt::error::Error),
+	SubxtError(String),
+	#[error("subxt retriable error: {0}")]
+	SubxtRetriableError(String),
 	#[error("dynamic error: {0}")]
 	DynamicError(#[from] dynamic::DynamicError),
 	#[error("subxt connection timeout")]
@@ -131,13 +133,18 @@ pub enum RequestExecutorError {
 	UnexpectedResponse(Request),
 }
 
+impl From<subxt::error::Error> for RequestExecutorError {
+	fn from(err: subxt::error::Error) -> Self {
+		match err {
+			subxt::Error::Io(_) | subxt::Error::Rpc(_) => Self::SubxtRetriableError(err.to_string()),
+			_ => Self::SubxtError(err.to_string()),
+		}
+	}
+}
+
 impl RequestExecutorError {
 	pub fn should_retry(&self) -> bool {
-		matches!(
-			self,
-			RequestExecutorError::SubxtError(subxt::Error::Io(_)) |
-				RequestExecutorError::SubxtError(subxt::Error::Rpc(_))
-		)
+		matches!(self, Self::SubxtRetriableError(_))
 	}
 }
 

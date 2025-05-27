@@ -28,17 +28,16 @@ use color_eyre::Report;
 use futures::{SinkExt, Stream, StreamExt};
 use itertools::Itertools;
 use log::{debug, info, warn};
-use polkadot_introspector_priority_channel::{channel, SendError, Sender};
+use polkadot_introspector_priority_channel::{SendError, Sender, channel};
 use std::{
-	cmp::{min, Reverse},
+	cmp::{Reverse, min},
 	collections::HashMap,
-	io::{stdin, BufRead},
+	io::{BufRead, stdin},
 };
 use tokio::{net::TcpStream, sync::broadcast::Sender as BroadcastSender};
 use tokio_tungstenite::{
-	connect_async,
+	MaybeTlsStream, WebSocketStream, connect_async,
 	tungstenite::{Error as WsError, Message},
-	MaybeTlsStream, WebSocketStream,
 };
 
 struct TelemetryStream(WebSocketStream<MaybeTlsStream<TcpStream>>);

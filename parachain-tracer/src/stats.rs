@@ -86,11 +86,7 @@ impl<T: UsableNumber> AvgBucket<T> {
 
 	/// Returns counter value
 	pub fn value(&self) -> f64 {
-		if self.num_samples > 0 {
-			self.avg
-		} else {
-			f64::NAN
-		}
+		if self.num_samples > 0 { self.avg } else { f64::NAN }
 	}
 
 	/// Number of samples
@@ -131,11 +127,7 @@ impl Display for SkippedSlotBlock {
 }
 
 fn join_skipped_slot_blocks_to_string(blocks: &VecDeque<SkippedSlotBlock>) -> String {
-	if blocks.is_empty() {
-		String::from("none")
-	} else {
-		blocks.iter().map(|b| b.to_string()).collect()
-	}
+	if blocks.is_empty() { String::from("none") } else { blocks.iter().map(|b| b.to_string()).collect() }
 }
 
 #[automock]

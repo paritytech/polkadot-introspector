@@ -17,7 +17,7 @@
 
 //! Jaeger tracing primitives
 
-use serde::{de::Deserializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Deserializer};
 use std::collections::HashMap;
 
 /// RPC Primitives
@@ -100,7 +100,7 @@ pub enum TagValue<'a> {
 	Number(usize),
 }
 
-impl<'a> std::fmt::Display for TagValue<'a> {
+impl std::fmt::Display for TagValue<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
 			TagValue::String(s) => write!(f, "{}", s),
