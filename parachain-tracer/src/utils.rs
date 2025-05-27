@@ -117,10 +117,10 @@ mod test_extract_validator_addresses {
 	#[test]
 	fn test_returns_identities() {
 		let keys = vec![AccountId32([0; 32])];
-		assert_eq!(
-			extract_validator_addresses(Some(&keys), vec![0]),
-			vec![(0, "5C4hrfjw9DjXZTzV3MwzrrAr9P1MJhSrvWGWqi1eSuyUpnhM".to_string())]
-		);
+		assert_eq!(extract_validator_addresses(Some(&keys), vec![0]), vec![(
+			0,
+			"5C4hrfjw9DjXZTzV3MwzrrAr9P1MJhSrvWGWqi1eSuyUpnhM".to_string()
+		)]);
 	}
 }
 
@@ -203,10 +203,10 @@ mod test_extract_misbehaving_validators {
 
 	#[test]
 	fn test_returns_misbehaving_validators() {
-		assert_eq!(
-			extract_misbehaving_validators(None, &create_dispute_statement_set(), true),
-			vec![(2, "??? (no session keys)".to_string()), (3, "??? (no session keys)".to_string())]
-		)
+		assert_eq!(extract_misbehaving_validators(None, &create_dispute_statement_set(), true), vec![
+			(2, "??? (no session keys)".to_string()),
+			(3, "??? (no session keys)".to_string())
+		])
 	}
 }
 
