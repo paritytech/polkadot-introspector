@@ -19,7 +19,7 @@ use crate::metadata::{polkadot::runtime_types as subxt_runtime_types, polkadot_s
 use parity_scale_codec::{Decode, Encode};
 use std::collections::BTreeMap;
 use subxt::{
-	config::substrate::{BlakeTwo256, SubstrateHeader},
+	config::substrate::{DynamicHasher256, SubstrateHeader},
 	utils,
 };
 use subxt_runtime_types::polkadot_runtime as runtime;
@@ -27,7 +27,9 @@ use subxt_runtime_types::polkadot_runtime as runtime;
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;
 pub type AccountId32 = utils::AccountId32;
-pub type Header = SubstrateHeader<u32, BlakeTwo256>;
+pub type Header = SubstrateHeader<u32, DynamicHasher256>;
+pub type PolkadotHash = subxt::config::HashFor<subxt::PolkadotConfig>;
+pub type PolkadotHasher = <subxt::PolkadotConfig as subxt::Config>::Hasher;
 pub type Timestamp = u64;
 pub type SessionKeys = runtime::SessionKeys;
 pub type QueuedKeys = crate::metadata::polkadot::session::storage::types::queued_keys::QueuedKeys;

@@ -268,8 +268,9 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		let mut tracker = SubxtTracker::new(para_id);
-		let storage = TrackerStorage::new(para_id, api_service.storage());
+		let hasher = api_service.executor().hasher(&self.node).expect("Hasher must be available");
+		let mut tracker = SubxtTracker::new(para_id, hasher);
+		let storage = TrackerStorage::new(para_id, api_service.storage(), hasher);
 
 		let metrics = self.metrics.clone();
 		let mut stats = ParachainStats::new(para_id, self.opts.last_skipped_slot_blocks);

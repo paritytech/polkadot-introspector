@@ -40,7 +40,7 @@ use polkadot_introspector_essentials::{
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{H256, SubxtHrmpChannel},
+	types::{H256, PolkadotHasher, SubxtHrmpChannel},
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
@@ -172,9 +172,9 @@ pub fn create_candidate_record(
 	}
 }
 
-pub fn create_para_block_info(para_id: u32) -> ParachainBlockInfo {
+pub fn create_para_block_info(para_id: u32, hasher: PolkadotHasher) -> ParachainBlockInfo {
 	let candidate = create_backed_candidate(para_id);
-	let hash = ParachainBlockInfo::candidate_hash(&candidate);
+	let hash = ParachainBlockInfo::candidate_hash(&candidate, hasher);
 	ParachainBlockInfo::new(hash, 0, 0)
 }
 
@@ -195,4 +195,9 @@ pub async fn storage_write<T: Encode>(
 
 fn create_validator_signature() -> validator_app::Signature {
 	validator_app::Signature([0; 64])
+}
+
+pub async fn create_hasher() -> PolkadotHasher {
+	let executor = create_executor().await;
+	executor.hasher(rpc_node_url()).unwrap()
 }
