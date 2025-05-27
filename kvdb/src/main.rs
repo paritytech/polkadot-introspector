@@ -194,7 +194,7 @@ struct UsageResults<'a> {
 	values_size: usize,
 }
 
-impl<'a> Display for UsageResults<'a> {
+impl Display for UsageResults<'_> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		if self.keys_count > 0 {
 			write!(
