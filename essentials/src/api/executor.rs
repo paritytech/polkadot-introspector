@@ -27,7 +27,7 @@ use crate::{
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		SessionKeys, SubxtHrmpChannel, Timestamp,
+		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -258,7 +258,7 @@ impl RequestExecutorBackend {
 		Ok(response)
 	}
 
-	pub fn hasher(&self) -> <PolkadotConfig as subxt::Config>::Hasher {
+	pub fn hasher(&self) -> PolkadotHasher {
 		self.client.hasher()
 	}
 }
@@ -288,7 +288,7 @@ impl RequestExecutorNodes for &str {
 #[derive(Clone)]
 pub struct RequestExecutor {
 	clients: HashMap<String, PrioritySender<ExecutorMessage>>,
-	hashers: HashMap<String, <PolkadotConfig as subxt::Config>::Hasher>,
+	hashers: HashMap<String, PolkadotHasher>,
 }
 
 macro_rules! wrap_backend_call {
@@ -353,7 +353,7 @@ impl RequestExecutor {
 		Ok(RequestExecutor { clients, hashers })
 	}
 
-	pub fn hasher(&self, url: &str) -> Option<<PolkadotConfig as subxt::Config>::Hasher> {
+	pub fn hasher(&self, url: &str) -> Option<PolkadotHasher> {
 		self.hashers.get(url).cloned()
 	}
 

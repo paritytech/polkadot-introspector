@@ -27,8 +27,8 @@ use crate::{
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel,
-		Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys,
+		SubxtHrmpChannel, Timestamp,
 	},
 };
 use clap::ValueEnum;
@@ -67,11 +67,11 @@ where
 {
 	client: T,
 	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
-	hasher: <PolkadotConfig as subxt::Config>::Hasher,
+	hasher: PolkadotHasher,
 }
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
-	pub fn hasher(&self) -> <PolkadotConfig as subxt::Config>::Hasher {
+	pub fn hasher(&self) -> PolkadotHasher {
 		self.hasher
 	}
 

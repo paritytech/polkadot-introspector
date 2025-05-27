@@ -24,12 +24,12 @@ use crate::{
 		},
 		polkadot_staging_primitives::CandidateDescriptorV2,
 	},
-	types::{Hash, Header, OnDemandOrder, H256},
+	types::{H256, Header, OnDemandOrder, PolkadotHash, PolkadotHasher},
 };
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Decode, Encode};
 use serde::Serialize;
-use subxt::{config::Hasher, PolkadotConfig};
+use subxt::{PolkadotConfig, config::Hasher};
 
 #[derive(Debug)]
 pub enum ChainEvent<T: subxt::Config> {
@@ -44,9 +44,9 @@ pub enum ChainEvent<T: subxt::Config> {
 	/// Backing, inclusion, time out for a parachain candidate
 	CandidateChanged(Box<SubxtCandidateEvent>),
 	/// On-demand parachain placed its order
-	OnDemandOrderPlaced(Hash, OnDemandOrder),
+	OnDemandOrderPlaced(PolkadotHash, OnDemandOrder),
 	/// Anything undecoded
-	RawEvent(Hash, subxt::events::EventDetails<T>),
+	RawEvent(PolkadotHash, subxt::events::EventDetails<T>),
 }
 
 #[derive(Debug)]
@@ -63,9 +63,9 @@ pub enum SubxtCandidateEventType {
 #[derive(Debug)]
 pub struct SubxtCandidateEvent {
 	/// Result of candidate receipt hashing
-	pub candidate_hash: Hash,
+	pub candidate_hash: PolkadotHash,
 	/// Full candidate receipt if needed
-	pub candidate_descriptor: CandidateDescriptorV2<Hash>,
+	pub candidate_descriptor: CandidateDescriptorV2<PolkadotHash>,
 	/// The parachain id
 	pub parachain_id: u32,
 	/// The event type
@@ -78,9 +78,9 @@ pub struct SubxtCandidateEvent {
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct SubxtDispute {
 	/// Relay chain block where a dispute has taken place
-	pub relay_parent_block: Hash,
+	pub relay_parent_block: PolkadotHash,
 	/// Specific candidate being disputed about
-	pub candidate_hash: Hash,
+	pub candidate_hash: PolkadotHash,
 }
 
 /// Dispute result as seen by subxt event
@@ -96,15 +96,15 @@ pub enum SubxtDisputeResult {
 }
 
 pub async fn decode_chain_event(
-	block_hash: Hash,
+	block_hash: PolkadotHash,
 	event: subxt::events::EventDetails<PolkadotConfig>,
-	hasher: <PolkadotConfig as subxt::Config>::Hasher,
+	hasher: PolkadotHasher,
 ) -> Result<ChainEvent<PolkadotConfig>> {
 	if is_specific_event::<DisputeInitiated, PolkadotConfig>(&event) {
 		let decoded = decode_to_specific_event::<DisputeInitiated, PolkadotConfig>(&event)?;
 		return Ok(ChainEvent::DisputeInitiated(SubxtDispute {
 			relay_parent_block: block_hash,
-			candidate_hash: decoded.0 .0,
+			candidate_hash: decoded.0.0,
 		}))
 	}
 
@@ -116,7 +116,7 @@ pub async fn decode_chain_event(
 			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
 		};
 		return Ok(ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0.0 },
 			outcome,
 		))
 	}
@@ -126,7 +126,7 @@ pub async fn decode_chain_event(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2 .0,
+			decoded.2.0,
 			SubxtCandidateEventType::Backed,
 			hasher,
 		))))
@@ -137,7 +137,7 @@ pub async fn decode_chain_event(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2 .0,
+			decoded.2.0,
 			SubxtCandidateEventType::Included,
 			hasher,
 		))))
@@ -148,7 +148,7 @@ pub async fn decode_chain_event(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2 .0,
+			decoded.2.0,
 			SubxtCandidateEventType::TimedOut,
 			hasher,
 		))))
@@ -194,11 +194,11 @@ fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
 }
 
 fn create_candidate_event(
-	commitments_hash: Hash,
-	candidate_descriptor: CandidateDescriptorV2<Hash>,
+	commitments_hash: PolkadotHash,
+	candidate_descriptor: CandidateDescriptorV2<PolkadotHash>,
 	core_idx: u32,
 	event_type: SubxtCandidateEventType,
-	hasher: <PolkadotConfig as subxt::Config>::Hasher,
+	hasher: PolkadotHasher,
 ) -> SubxtCandidateEvent {
 	let candidate_hash = hasher.hash_of(&(&candidate_descriptor, commitments_hash)).into();
 	let parachain_id = candidate_descriptor.para_id.0;

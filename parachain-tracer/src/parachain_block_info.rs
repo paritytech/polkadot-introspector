@@ -15,8 +15,11 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use parity_scale_codec::{Decode, Encode};
-use polkadot_introspector_essentials::{metadata::polkadot_staging_primitives::BackedCandidate, types::H256};
-use subxt::{config::Hasher, PolkadotConfig};
+use polkadot_introspector_essentials::{
+	metadata::polkadot_staging_primitives::BackedCandidate,
+	types::{H256, PolkadotHasher},
+};
+use subxt::{PolkadotConfig, config::Hasher};
 
 /// The parachain block tracking information.
 /// This is used for displaying CLI updates and also goes to Storage.
@@ -43,10 +46,7 @@ impl ParachainBlockInfo {
 		Self { candidate_hash, assigned_core, bitfield_count, ..Default::default() }
 	}
 
-	pub fn candidate_hash(
-		candidate: &BackedCandidate<H256>,
-		hasher: <PolkadotConfig as subxt::Config>::Hasher,
-	) -> H256 {
+	pub fn candidate_hash(candidate: &BackedCandidate<H256>, hasher: PolkadotHasher) -> H256 {
 		let commitments_hash = hasher.hash_of(&candidate.candidate.commitments);
 		hasher.hash_of(&(&candidate.candidate.descriptor, commitments_hash))
 	}
