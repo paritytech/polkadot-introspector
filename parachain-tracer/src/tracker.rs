@@ -167,7 +167,7 @@ impl SubxtTracker {
 					.candidates
 					.iter()
 					.map(|(core_idx, v)| {
-						(*core_idx, v.last().map_or(false, |v| v.as_ref().map_or(false, |v| v.core_occupied)))
+						(*core_idx, v.last().is_some_and(|v| v.as_ref().is_some_and(|v| v.core_occupied)))
 					})
 					.collect(),
 				..Default::default()
@@ -205,7 +205,7 @@ impl SubxtTracker {
 			v.retain(|v| {
 				v.is_some() &&
 					v.as_ref()
-						.map_or(false, |candidate| !candidate.is_included() && !candidate.is_dropped())
+						.is_some_and(|candidate| !candidate.is_included() && !candidate.is_dropped())
 			})
 		});
 	}
@@ -598,14 +598,14 @@ impl SubxtTracker {
 	fn has_backed_candidate(&self, core: u32) -> bool {
 		self.candidates
 			.get(&core)
-			.map_or(false, |v| v.iter().any(|candidate| candidate.is_some())) ||
+			.is_some_and(|v| v.iter().any(|candidate| candidate.is_some())) ||
 			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
 	}
 
 	fn is_current_candidate_backed(&self, core: u32) -> bool {
-		self.current_candidate(core).map_or(false, |v| v.is_backed())
+		self.current_candidate(core).is_some_and(|v| v.is_backed())
 	}
 
 	fn is_just_backed(&self) -> bool {
@@ -614,7 +614,7 @@ impl SubxtTracker {
 	}
 
 	fn is_slow_availability(&self, core: u32) -> bool {
-		self.current_candidate(core).map_or(false, |v| v.core_occupied) && !self.is_just_backed()
+		self.current_candidate(core).is_some_and(|v| v.core_occupied) && !self.is_just_backed()
 	}
 
 	async fn validators_indices(
