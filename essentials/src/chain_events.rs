@@ -65,7 +65,7 @@ pub struct SubxtCandidateEvent {
 	/// Result of candidate receipt hashing
 	pub candidate_hash: Hash,
 	/// Full candidate receipt if needed
-	pub candidate_descriptor: CandidateDescriptorV2<<PolkadotConfig as subxt::Config>::Hash>,
+	pub candidate_descriptor: CandidateDescriptorV2<Hash>,
 	/// The parachain id
 	pub parachain_id: u32,
 	/// The event type
@@ -195,7 +195,7 @@ fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
 
 fn create_candidate_event(
 	commitments_hash: Hash,
-	candidate_descriptor: CandidateDescriptorV2<<Hash>,
+	candidate_descriptor: CandidateDescriptorV2<Hash>,
 	core_idx: u32,
 	event_type: SubxtCandidateEventType,
 	hasher: <PolkadotConfig as subxt::Config>::Hasher,
