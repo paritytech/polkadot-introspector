@@ -15,17 +15,13 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::types::{BlockNumber, Timestamp, H256};
+use crate::types::{BlockNumber, H256, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 macro_rules! display_or {
 	($option:expr, $none:expr) => {
-		if let Some(value) = &$option {
-			format!("{}", value)
-		} else {
-			$none.to_string()
-		}
+		if let Some(value) = &$option { format!("{}", value) } else { $none.to_string() }
 	};
 }
 

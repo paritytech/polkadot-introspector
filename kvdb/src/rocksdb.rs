@@ -17,8 +17,8 @@
 //! Implementation of the introspection using RocksDB
 
 use super::{DBIter, IntrospectorKvdb};
-use color_eyre::{eyre::eyre, Result};
-use rocksdb::{Options as RocksdbOptions, DB};
+use color_eyre::{Result, eyre::eyre};
+use rocksdb::{DB, Options as RocksdbOptions};
 use std::path::{Path, PathBuf};
 
 pub struct IntrospectorRocksDB {
@@ -88,11 +88,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		// TODO: rocksdb does not support iterators with prefixes and options?
 		let mut iter = self.inner.prefix_iterator_cf(cf_handle, prefix);
 		Ok(Box::new(std::iter::from_fn(move || {
-			if let Some(Ok((key, value))) = iter.next() {
-				Some((key, value))
-			} else {
-				None
-			}
+			if let Some(Ok((key, value))) = iter.next() { Some((key, value)) } else { None }
 		})))
 	}
 

@@ -17,13 +17,13 @@
 use crate::{
 	api::api_client::ApiClient,
 	metadata::polkadot_primitives::ValidatorIndex,
-	types::{OnDemandOrder, H256},
+	types::{H256, OnDemandOrder},
 };
 use log::error;
 use subxt::{
+	OnlineClient, PolkadotConfig,
 	dynamic::{At, Value},
 	ext::scale_value::{Composite, Primitive, ValueDef},
-	OnlineClient, PolkadotConfig,
 };
 use thiserror::Error;
 

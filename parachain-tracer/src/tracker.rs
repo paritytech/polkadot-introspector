@@ -31,7 +31,7 @@ use polkadot_introspector_essentials::{
 		polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
 		polkadot_staging_primitives::BackedCandidate,
 	},
-	types::{BlockNumber, CoreOccupied, OnDemandOrder, Timestamp, H256},
+	types::{BlockNumber, CoreOccupied, H256, OnDemandOrder, Timestamp},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
 
@@ -369,8 +369,7 @@ impl SubxtTracker {
 				} else {
 					info!(
 						"parachain {}: dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
-						self.para_id,
-						dispute_info.candidate_hash.0
+						self.para_id, dispute_info.candidate_hash.0
 					);
 				}
 			}
@@ -1019,19 +1018,23 @@ mod test_progress {
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_)))
+		);
 
 		// With new session
 		tracker.inject_new_session(12);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::NewSession(_)))
+		);
 	}
 
 	#[tokio::test]
@@ -1048,10 +1051,12 @@ mod test_progress {
 		tracker.cores.entry(0).or_default().push(100);
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::CoreAssigned(0))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::CoreAssigned(0)))
+		);
 	}
 
 	#[tokio::test]
@@ -1084,10 +1089,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _)))
+		);
 
 		// Bitfields propogation is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
@@ -1102,10 +1109,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SlowBitfieldPropagation(_, _)))
+		);
 	}
 
 	#[tokio::test]
@@ -1119,10 +1128,12 @@ mod test_progress {
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _)))
+		);
 
 		// With active channels
 		tracker
@@ -1130,10 +1141,12 @@ mod test_progress {
 			.set_hrmp_channels(create_hrmp_channels(), Default::default());
 		let progress = tracker.progress(&mut stats, &metrics, &tracker_storage).await.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::MessageQueues(_, _)))
+		);
 	}
 
 	#[tokio::test]
@@ -1223,10 +1236,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(!progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_))));
+		assert!(
+			!progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_)))
+		);
 
 		// With disputes
 		let dispute = DisputesTracker { candidate: H256::random(), ..Default::default() };
@@ -1246,10 +1261,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_)))
+		);
 	}
 
 	#[tokio::test]
@@ -1341,10 +1358,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot)));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SkippedSlot))
+		);
 
 		// When candidate is backed
 		let candidate = ParachainBlockInfo::new(candidate_hash, 0, 0);
@@ -1381,10 +1400,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::PendingAvailability(_))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::PendingAvailability(_)))
+		);
 
 		// And availability is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
@@ -1404,10 +1425,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::SlowAvailability(_, _)))
+		);
 
 		// When candidate is included and data is available
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
@@ -1431,10 +1454,12 @@ mod test_progress {
 			.await
 			.unwrap();
 
-		assert!(progress
-			.events
-			.iter()
-			.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _))));
+		assert!(
+			progress
+				.events
+				.iter()
+				.any(|e| matches!(e, ParachainConsensusEvent::Included(_, _, _)))
+		);
 	}
 
 	#[tokio::test]

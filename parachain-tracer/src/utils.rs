@@ -19,7 +19,7 @@ use polkadot_introspector_essentials::{
 		polkadot_primitives::{AvailabilityBitfield, DisputeStatement, DisputeStatementSet},
 		polkadot_staging_primitives::BackedCandidate,
 	},
-	types::{AccountId32, InherentData, Timestamp, H256},
+	types::{AccountId32, H256, InherentData, Timestamp},
 };
 use std::time::Duration;
 

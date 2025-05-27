@@ -24,8 +24,8 @@
 //! - `%s<d>` - string of length `d` (for example `%s10` represents a string of size 10)
 
 use crate::IntrospectorKvdb;
-use color_eyre::{eyre::eyre, Result};
-use erased_serde::{serialize_trait_object, Serialize};
+use color_eyre::{Result, eyre::eyre};
+use erased_serde::{Serialize, serialize_trait_object};
 use itertools::Itertools;
 use polkadot_introspector_essentials::types::H256;
 use std::fmt::{Debug, Display, Formatter};

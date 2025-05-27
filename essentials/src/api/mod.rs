@@ -22,7 +22,7 @@ pub mod storage;
 
 use crate::{api::executor::RequestExecutor, constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
 use std::{fmt::Debug, hash::Hash};
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{Sender, channel};
 
 // Provides access to subxt and storage APIs, more to come.
 #[derive(Clone)]
@@ -81,7 +81,7 @@ where
 mod tests {
 	use super::*;
 	use crate::{api::api_client::ApiClientMode, init, storage::StorageEntry, types::H256, utils::RetryOptions};
-	use subxt::config::{substrate::BlakeTwo256, Hasher, Header};
+	use subxt::config::{Hasher, Header, substrate::BlakeTwo256};
 
 	fn rpc_node_url() -> &'static str {
 		const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";

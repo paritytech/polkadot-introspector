@@ -16,8 +16,8 @@
 
 use crate::{
 	api::{
-		api_client::{build_online_client, ApiClient, ApiClientMode, HeaderStream},
-		dynamic::{self, decode_validator_groups, fetch_dynamic_storage, DynamicHostConfiguration},
+		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
+		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
 	init::Shutdown,
@@ -26,22 +26,22 @@ use crate::{
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData,
-		SessionKeys, SubxtHrmpChannel, Timestamp, H256,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
+		SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
 use color_eyre::eyre::eyre;
 use log::error;
 use polkadot_introspector_priority_channel::{
-	channel, Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender,
+	Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender, channel,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use subxt::{OnlineClient, PolkadotConfig};
 use thiserror::Error;
 use tokio::sync::{
 	broadcast::Sender as BroadcastSender,
-	oneshot::{error::RecvError as OneshotRecvError, Sender as OneshotSender},
+	oneshot::{Sender as OneshotSender, error::RecvError as OneshotRecvError},
 };
 
 enum ExecutorMessage {

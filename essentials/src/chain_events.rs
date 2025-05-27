@@ -24,14 +24,14 @@ use crate::{
 		},
 		polkadot_staging_primitives::CandidateDescriptorV2,
 	},
-	types::{Header, OnDemandOrder, H256},
+	types::{H256, Header, OnDemandOrder},
 };
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Decode, Encode};
 use serde::Serialize;
 use subxt::{
-	config::{substrate::BlakeTwo256, Hasher},
 	PolkadotConfig,
+	config::{Hasher, substrate::BlakeTwo256},
 };
 
 #[derive(Debug)]
@@ -106,7 +106,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		let decoded = decode_to_specific_event::<DisputeInitiated, T>(&event)?;
 		return Ok(ChainEvent::DisputeInitiated(SubxtDispute {
 			relay_parent_block: block_hash,
-			candidate_hash: decoded.0 .0,
+			candidate_hash: decoded.0.0,
 		}))
 	}
 
@@ -118,7 +118,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
 		};
 		return Ok(ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0 .0 },
+			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0.0 },
 			outcome,
 		))
 	}
@@ -128,7 +128,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2 .0,
+			decoded.2.0,
 			SubxtCandidateEventType::Backed,
 		))))
 	}
@@ -138,7 +138,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2 .0,
+			decoded.2.0,
 			SubxtCandidateEventType::Included,
 		))))
 	}
@@ -148,7 +148,7 @@ pub async fn decode_chain_event<T: subxt::Config>(
 		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
 			decoded.0.commitments_hash,
 			decoded.0.descriptor,
-			decoded.2 .0,
+			decoded.2.0,
 			SubxtCandidateEventType::TimedOut,
 		))))
 	}

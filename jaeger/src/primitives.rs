@@ -17,7 +17,7 @@
 
 //! Jaeger tracing primitives
 
-use serde::{de::Deserializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Deserializer};
 use std::collections::HashMap;
 
 /// RPC Primitives

@@ -27,17 +27,18 @@ use crate::{
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel,
-		Timestamp, H256,
+		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel,
+		Timestamp,
 	},
 };
 use clap::ValueEnum;
 use std::collections::BTreeMap;
 use subxt::{
+	OnlineClient, PolkadotConfig,
 	backend::{
-		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
-		rpc::RpcClient,
 		StreamOf,
+		legacy::{LegacyRpcMethods, rpc_methods::NumberOrHex},
+		rpc::RpcClient,
 	},
 	blocks::{Block, BlockRef, BlocksClient},
 	client::OnlineClientT,
@@ -47,7 +48,6 @@ use subxt::{
 	runtime_api::{RuntimeApi, RuntimeApiClient},
 	storage::StorageClient,
 	utils::fetch_chainspec_from_rpc_node,
-	OnlineClient, PolkadotConfig,
 };
 
 pub type HeaderStream = StreamOf<Result<(Header, BlockRef<H256>), subxt::Error>>;

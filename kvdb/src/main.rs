@@ -25,7 +25,7 @@ mod tests;
 
 use crate::{paritydb::IntrospectorParityDB, prometheus::KvdbPrometheusOptions, rocksdb::IntrospectorRocksDB};
 use clap::{ArgAction, Parser};
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{Result, eyre::eyre};
 use futures::future;
 use log::{error, info};
 use polkadot_introspector_essentials::init;

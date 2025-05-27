@@ -17,7 +17,7 @@
 //! Implementation of the introspection using ParityDB
 
 use super::{DBIter, IntrospectorKvdb};
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{Result, eyre::eyre};
 use parity_db::{Db, Options as ParityDBOptions};
 use std::path::{Path, PathBuf};
 

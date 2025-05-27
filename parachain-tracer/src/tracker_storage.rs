@@ -16,15 +16,15 @@
 
 use polkadot_introspector_essentials::{
 	api::storage::RequestExecutor,
-	collector::{candidate_record::CandidateRecord, CollectorPrefixType, DisputeInfo},
+	collector::{CollectorPrefixType, DisputeInfo, candidate_record::CandidateRecord},
 	metadata::{
 		polkadot::runtime_types::polkadot_parachain_primitives::primitives,
 		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},
-	types::{AccountId32, CoreOccupied, InherentData, OnDemandOrder, SubxtHrmpChannel, Timestamp, H256},
+	types::{AccountId32, CoreOccupied, H256, InherentData, OnDemandOrder, SubxtHrmpChannel, Timestamp},
 };
 use std::collections::BTreeMap;
-use subxt::config::{substrate::BlakeTwo256, Hasher};
+use subxt::config::{Hasher, substrate::BlakeTwo256};
 
 pub struct TrackerStorage {
 	/// Parachain ID to track.
