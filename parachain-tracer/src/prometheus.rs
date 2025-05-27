@@ -63,6 +63,8 @@ struct MetricsInner {
 	relay_block_times: HistogramVec,
 	/// Relative time measurements (in standard blocks) for relay parent blocks
 	relay_skipped_slots: IntCounterVec,
+	/// Relay chain candidate metrics (backed, included, timed out)
+	relay_candidate_statuses: HistogramVec,
 	/// Number of slow availability events.
 	slow_avail_count: IntCounterVec,
 	/// Number of low bitfield propagation events.
@@ -83,6 +85,8 @@ struct MetricsInner {
 	para_on_demand_delay_sec: GaugeVec,
 	/// Finality lag
 	finality_lag: Gauge,
+	/// Session number
+	session: Gauge,
 }
 
 #[automock]
@@ -92,6 +96,8 @@ pub trait PrometheusMetrics {
 	fn init_counters(&self, para_id: u32);
 	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
+	/// Update relay chain specific metrics on new relay block
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize);
 	/// Update metrics on new block
 	fn on_block(&self, time: f64, para_id: u32);
 	/// Update metrics on slow availability
@@ -119,6 +125,8 @@ pub trait PrometheusMetrics {
 	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str);
 	/// Update finality lag
 	fn on_finality_lag(&self, lag: u32);
+	/// Update session number
+	fn on_new_session(&self, session: u32);
 }
 
 /// Parachain tracer prometheus metrics
@@ -128,11 +136,32 @@ pub struct Metrics(Option<MetricsInner>);
 const HISTOGRAM_TIME_BUCKETS_BLOCKS: &[f64] =
 	&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0, 25.0, 35.0, 50.0];
 const HISTOGRAM_TIME_BUCKETS_SECONDS: &[f64] = &[3.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 48.0, 60.0, 90.0, 120.0];
+const HISTOGRAM_CANDIDATES_BUCKETS: &[f64] = &[
+	0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0,
+	180.0, 190.0, 200.0,
+];
 
 impl PrometheusMetrics for Metrics {
 	fn on_backed(&self, para_id: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.backed_count.with_label_values(&[&para_id.to_string()[..]]).inc();
+		}
+	}
+
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize) {
+		if let Some(metrics) = &self.0 {
+			metrics
+				.relay_candidate_statuses
+				.with_label_values(&["backed"])
+				.observe(backed as f64);
+			metrics
+				.relay_candidate_statuses
+				.with_label_values(&["included"])
+				.observe(included as f64);
+			metrics
+				.relay_candidate_statuses
+				.with_label_values(&["timed_out"])
+				.observe(timed_out as f64);
 		}
 	}
 
@@ -296,6 +325,12 @@ impl PrometheusMetrics for Metrics {
 			metrics.finality_lag.set(lag.into());
 		}
 	}
+
+	fn on_new_session(&self, session: u32) {
+		if let Some(metrics) = &self.0 {
+			metrics.session.set(session.into());
+		}
+	}
 }
 
 pub async fn run_prometheus_endpoint(prometheus_opts: &ParachainTracerPrometheusOptions) -> Result<Metrics> {
@@ -374,6 +409,14 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			)?,
 			registry,
 		)?,
+		relay_candidate_statuses: prometheus_endpoint::register(
+			HistogramVec::new(
+				HistogramOpts::new("pc_relay_candidates", "Candidate's statuses per relay chain block (backed, included, timed out)")
+					.buckets(HISTOGRAM_CANDIDATES_BUCKETS.into()),
+				&["status"],
+			)?,
+			registry,
+		)?,
 		slow_avail_count: prometheus_endpoint::register(
 			IntCounterVec::new(
 				Opts::new("pc_slow_available_count", "Number of slow availability events. We consider it slow when the relay chain block bitfield entries amounts to less than 2/3 one bits for the availability core to which the parachain is assigned"),
@@ -439,6 +482,10 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		finality_lag: prometheus_endpoint::register(
 			Gauge::new("pc_finality_lag", "Finality lag")?,
+			registry,
+		)?,
+		session: prometheus_endpoint::register(
+			Gauge::new("pc_session", "Session number")?,
 			registry,
 		)?,
 	})))

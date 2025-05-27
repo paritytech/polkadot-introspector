@@ -27,6 +27,7 @@
 //! The CLI interface is useful for debugging/diagnosing issues with the parachain block pipeline.
 //! Soon: CI integration also supported via Prometheus metrics exporting.
 
+use crate::prometheus::PrometheusMetrics;
 use clap::{error::ErrorKind, CommandFactory, Parser};
 use colored::Colorize;
 use crossterm::style::Stylize;
@@ -165,6 +166,13 @@ impl ParachainTracer {
 				.bold()
 		);
 
+		output_futures.push(ParachainTracer::watch_node_for_relay_chain(
+			self.clone(),
+			shutdown_tx.clone(),
+			// HACK: We use a fake para id to receive only relay chain events
+			collector.subscribe_parachain_updates(0).await?,
+		));
+
 		if self.opts.all {
 			let from_collector = collector.subscribe_broadcast_updates().await?;
 			output_futures.push(tokio::spawn(ParachainTracer::watch_node_broadcast(
@@ -194,6 +202,61 @@ impl ParachainTracer {
 		output_futures.push(collector_fut);
 
 		Ok(output_futures)
+	}
+
+	fn watch_node_for_relay_chain(
+		self,
+		shutdown_tx: BroadcastSender<Shutdown>,
+		from_collector: Receiver<CollectorUpdateEvent>,
+	) -> tokio::task::JoinHandle<()> {
+		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
+		let metrics = self.metrics.clone();
+
+		tokio::spawn(async move {
+			loop {
+				match from_collector.recv().await {
+					Ok(update_event) => match update_event {
+						CollectorUpdateEvent::NewHead(new_head) => {
+							// Happens on startup
+							if new_head.relay_parent_number == 0 {
+								continue
+							}
+							let backed = new_head.candidates_backed.len();
+							let included = new_head.candidates_included.len();
+							let timed_out = new_head.candidates_timed_out.len();
+							metrics.on_new_relay_block(backed, included, timed_out);
+							if is_cli {
+								println!(
+									"Block {}: backed {}, included {}, timed-out {}",
+									new_head.relay_parent_number, backed, included, timed_out
+								);
+							}
+						},
+						CollectorUpdateEvent::NewSession(session_id) => {
+							metrics.on_new_session(session_id);
+							if is_cli {
+								println!("Session {}", session_id);
+							}
+						},
+						CollectorUpdateEvent::Termination(reason) => {
+							info!("collector is terminating");
+							match reason {
+								TerminationReason::Normal => break,
+								TerminationReason::Abnormal(info) => {
+									error!("Shutting down, {}", info);
+									let _ = shutdown_tx.send(Shutdown::Restart);
+									break;
+								},
+							}
+						},
+					},
+					Err(_) => {
+						info!("Input channel has been closed");
+						break
+					},
+				}
+			}
+		})
 	}
 
 	// This is the main loop for our subxt subscription.

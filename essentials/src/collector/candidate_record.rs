@@ -14,13 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{chain_events::SubxtDisputeResult, metadata::polkadot_primitives, types::H256};
+use crate::{chain_events::SubxtDisputeResult, metadata::polkadot_staging_primitives, types::H256};
 use parity_scale_codec::{Decode, Encode};
 use serde::{
 	ser::{SerializeStruct, Serializer},
 	Deserialize, Serialize,
 };
-use serde_bytes::Bytes;
 use std::{hash::Hash, time::Duration};
 
 /// Tracks candidate inclusion as seen by a node(s)
@@ -60,7 +59,7 @@ pub struct CandidateDisputed {
 	pub concluded: Option<DisputeResult>,
 }
 
-impl<T> Serialize for polkadot_primitives::CandidateDescriptor<T>
+impl<T> Serialize for polkadot_staging_primitives::CandidateDescriptorV2<T>
 where
 	T: Hash + Serialize + Decode + Encode,
 {
@@ -68,21 +67,19 @@ where
 	where
 		S: Serializer,
 	{
-		let mut state = serializer.serialize_struct("CandidateDescriptor", 9)?;
+		let mut state = serializer.serialize_struct("CandidateDescriptorV2", 9)?;
 		state.serialize_field("para_id", &self.para_id.0)?;
 		state.serialize_field("relay_parent", &self.relay_parent)?;
-		state.serialize_field("collator", &self.collator.0)?;
 		state.serialize_field("persisted_validation_data_hash", &self.persisted_validation_data_hash)?;
 		state.serialize_field("pov_hash", &self.pov_hash)?;
 		state.serialize_field("erasure_root", &self.erasure_root)?;
-		state.serialize_field("signature", Bytes::new(&self.signature.0))?;
 		state.serialize_field("para_head", &self.para_head)?;
 		state.serialize_field("validation_code_hash", &self.validation_code_hash.0)?;
 		state.end()
 	}
 }
 
-impl<T> Serialize for polkadot_primitives::CandidateReceipt<T>
+impl<T> Serialize for polkadot_staging_primitives::CandidateReceiptV2<T>
 where
 	T: Hash + Serialize + Decode + Encode,
 {
