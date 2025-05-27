@@ -21,16 +21,21 @@ use polkadot_introspector_essentials::{
 	},
 	init,
 	metadata::{
-		polkadot::runtime_types::{
-			bounded_collections::bounded_vec::BoundedVec,
-			polkadot_core_primitives::CandidateHash,
-			polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
-			sp_runtime::generic::{digest::Digest, header::Header},
+		polkadot::{
+			preimage::calls::types::request_preimage::Hash,
+			runtime_types::{
+				bounded_collections::bounded_vec::BoundedVec,
+				polkadot_core_primitives::CandidateHash,
+				polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
+				sp_runtime::generic::{digest::Digest, header::Header},
+			},
 		},
 		polkadot_primitives::{
-			collator_app, signed::UncheckedSigned, validator_app, AvailabilityBitfield, BackedCandidate,
-			CandidateCommitments, CandidateDescriptor, CommittedCandidateReceipt, DisputeStatement,
-			DisputeStatementSet, InherentData, InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
+			signed::UncheckedSigned, validator_app, AvailabilityBitfield, CandidateCommitments, DisputeStatement,
+			DisputeStatementSet, InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
+		},
+		polkadot_staging_primitives::{
+			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InherentData, InternalVersion,
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
@@ -52,16 +57,19 @@ pub fn rpc_node_url() -> &'static str {
 
 pub fn create_backed_candidate(para_id: u32) -> BackedCandidate<H256> {
 	BackedCandidate {
-		candidate: CommittedCandidateReceipt {
-			descriptor: CandidateDescriptor {
+		candidate: CommittedCandidateReceiptV2 {
+			descriptor: CandidateDescriptorV2 {
 				para_id: Id(para_id),
 				relay_parent: H256::random(),
-				collator: collator_app::Public([0; 32]),
-				persisted_validation_data_hash: Default::default(),
-				pov_hash: Default::default(),
-				erasure_root: Default::default(),
-				signature: create_collator_signature(),
-				para_head: Default::default(),
+				version: InternalVersion(0),
+				core_index: 0,
+				session_index: 1,
+				reserved1: Default::default(),
+				persisted_validation_data_hash: Hash::zero(),
+				pov_hash: Hash::zero(),
+				erasure_root: Hash::zero(),
+				reserved2: [0; 64],
+				para_head: Hash::zero(),
 				validation_code_hash: ValidationCodeHash(Default::default()),
 			},
 			commitments: CandidateCommitments {
@@ -182,10 +190,6 @@ pub async fn storage_write<T: Encode>(
 			StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), entry),
 		)
 		.await
-}
-
-fn create_collator_signature() -> collator_app::Signature {
-	collator_app::Signature([0; 64])
 }
 
 fn create_validator_signature() -> validator_app::Signature {
