@@ -26,7 +26,7 @@ use polkadot_introspector_essentials::{
 	},
 };
 use std::collections::BTreeMap;
-use subxt::{PolkadotConfig, config::Hasher};
+use subxt::config::Hasher;
 
 pub struct TrackerStorage {
 	/// Parachain ID to track.

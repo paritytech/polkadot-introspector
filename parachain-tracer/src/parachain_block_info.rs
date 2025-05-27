@@ -19,7 +19,7 @@ use polkadot_introspector_essentials::{
 	metadata::polkadot_staging_primitives::BackedCandidate,
 	types::{H256, PolkadotHasher},
 };
-use subxt::{PolkadotConfig, config::Hasher};
+use subxt::config::Hasher;
 
 /// The parachain block tracking information.
 /// This is used for displaying CLI updates and also goes to Storage.
