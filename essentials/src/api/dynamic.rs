@@ -34,7 +34,13 @@ pub enum DynamicError {
 	#[error("{0} not found in dynamic storage")]
 	EmptyResponseFromDynamicStorage(String),
 	#[error("subxt error: {0}")]
-	SubxtError(#[from] subxt::error::Error),
+	SubxtError(String),
+}
+
+impl From<subxt::error::Error> for DynamicError {
+	fn from(err: subxt::error::Error) -> Self {
+		Self::SubxtError(err.to_string())
+	}
 }
 
 pub(crate) fn decode_validator_groups(raw_groups: &Value<u32>) -> Result<Vec<Vec<ValidatorIndex>>, DynamicError> {
