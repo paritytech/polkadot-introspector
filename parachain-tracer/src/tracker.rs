@@ -31,7 +31,7 @@ use polkadot_introspector_essentials::{
 		polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
 		polkadot_staging_primitives::BackedCandidate,
 	},
-	types::{BlockNumber, CoreOccupied, H256, OnDemandOrder, Timestamp},
+	types::{BlockNumber, CoreOccupied, H256, OnDemandOrder, PolkadotHasher, Timestamp},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
 
@@ -41,7 +41,7 @@ pub struct SubxtTracker {
 	para_id: u32,
 
 	/// Hasher for the chain.
-	hasher: <subxt::PolkadotConfig as subxt::Config>::Hasher,
+	hasher: PolkadotHasher,
 
 	/// A new session index.
 	new_session: Option<u32>,
@@ -88,7 +88,7 @@ pub struct SubxtTracker {
 }
 
 impl SubxtTracker {
-	pub fn new(para_id: u32, hasher: <subxt::PolkadotConfig as subxt::Config>::Hasher) -> Self {
+	pub fn new(para_id: u32, hasher: PolkadotHasher) -> Self {
 		Self {
 			para_id,
 			hasher,
