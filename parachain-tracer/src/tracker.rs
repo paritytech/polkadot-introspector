@@ -367,14 +367,14 @@ impl SubxtTracker {
 		concluded_disputes: &[DisputeInfo],
 		storage: &TrackerStorage,
 	) {
-		self.disputes = Vec::with_capacity(inherent_disputes.len());
+		self.disputes = Vec::with_capacity(concluded_disputes.len());
 		for concluded_dispute in concluded_disputes {
 			let Some(dispute_info) = inherent_disputes
 				.iter()
 				.find(|&v| v.candidate_hash.0 == concluded_dispute.dispute.candidate_hash)
 			else {
 				log::warn!(
-					"Concluded dispute appeared in events but doesn't present in inherend data: {:?}",
+					"Concluded dispute appeared in events but is not present in inherent data: {:?}",
 					concluded_dispute.dispute.candidate_hash
 				);
 				continue;
@@ -807,7 +807,7 @@ mod test_inject_block {
 			.await
 			.unwrap();
 		tracker
-			.inject_block(first_hash, NewHeadEvent::with_relay_parent_number(0), &tracker_storage)
+			.inject_block(first_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
 			.await
 			.unwrap();
 
@@ -840,7 +840,7 @@ mod test_inject_block {
 			.await
 			.unwrap();
 		tracker
-			.inject_block(second_hash, NewHeadEvent::with_relay_parent_number(0), &tracker_storage)
+			.inject_block(second_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
 			.await
 			.unwrap();
 
@@ -896,7 +896,7 @@ mod test_inject_block {
 		.unwrap();
 
 		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(0), &tracker_storage)
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
 			.await
 			.unwrap();
 
@@ -949,11 +949,11 @@ mod test_inject_block {
 
 		// Actually, we inject the same block twice, but for current asserts it is OK
 		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(0), &tracker_storage)
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
 			.await
 			.unwrap();
 		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(0), &tracker_storage)
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(43), &tracker_storage)
 			.await
 			.unwrap();
 
@@ -1006,7 +1006,7 @@ mod test_inject_block {
 		.unwrap();
 
 		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(0), &tracker_storage)
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
 			.await
 			.unwrap();
 
