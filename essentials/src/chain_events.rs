@@ -200,7 +200,7 @@ fn create_candidate_event(
 	event_type: SubxtCandidateEventType,
 	hasher: PolkadotHasher,
 ) -> SubxtCandidateEvent {
-	let candidate_hash = hasher.hash_of(&(&candidate_descriptor, commitments_hash)).into();
+	let candidate_hash = hasher.hash_of(&(&candidate_descriptor, commitments_hash));
 	let parachain_id = candidate_descriptor.para_id.0;
 	SubxtCandidateEvent { event_type, candidate_descriptor, parachain_id, candidate_hash, core_idx }
 }

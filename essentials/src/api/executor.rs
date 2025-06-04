@@ -349,7 +349,7 @@ impl RequestExecutor {
 	}
 
 	pub fn hasher(&self, url: &str) -> Option<PolkadotHasher> {
-		self.0.get(url).map(|(_, hasher)| hasher.clone())
+		self.0.get(url).map(|(_, hasher)| *hasher)
 	}
 
 	/// Closes all RPC clients
