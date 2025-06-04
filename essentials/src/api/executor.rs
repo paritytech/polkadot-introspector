@@ -27,7 +27,7 @@ use crate::{
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		SessionKeys, SubxtHrmpChannel, Timestamp,
+		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -257,6 +257,10 @@ impl RequestExecutorBackend {
 
 		Ok(response)
 	}
+
+	pub fn hasher(&self) -> PolkadotHasher {
+		self.client.hasher()
+	}
 }
 
 pub trait RequestExecutorNodes {
@@ -282,11 +286,11 @@ impl RequestExecutorNodes for &str {
 }
 
 #[derive(Clone)]
-pub struct RequestExecutor(HashMap<String, PrioritySender<ExecutorMessage>>);
+pub struct RequestExecutor(HashMap<String, (PrioritySender<ExecutorMessage>, PolkadotHasher)>);
 
 macro_rules! wrap_backend_call {
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
-		if let Some(to_backend) = $self.0.get_mut($url) {
+		if let Some((to_backend, _)) = $self.0.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty;
 			to_backend.send(ExecutorMessage::Rpc(tx, Request::$request_ty)).await?;
@@ -302,7 +306,7 @@ macro_rules! wrap_backend_call {
 		}
 	};
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
-		if let Some(to_backend) = $self.0.get_mut($url) {
+		if let Some((to_backend, _)) = $self.0.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty($($arg),*);
 			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
@@ -330,8 +334,8 @@ impl RequestExecutor {
 		let mut clients = HashMap::new();
 		for node in nodes.unique_nodes() {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-			let _ = clients.insert(node.clone(), to_backend);
-			let mut backend = RequestExecutorBackend::build(retry.clone(), node, api_client_mode).await?;
+			let mut backend = RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode).await?;
+			let _ = clients.insert(node, (to_backend, backend.hasher()));
 			let shutdown_tx = shutdown_tx.clone();
 			tokio::spawn(async move {
 				if let Err(e) = backend.run(from_frontend).await {
@@ -344,9 +348,13 @@ impl RequestExecutor {
 		Ok(RequestExecutor(clients))
 	}
 
+	pub fn hasher(&self, url: &str) -> Option<PolkadotHasher> {
+		self.0.get(url).map(|(_, hasher)| *hasher)
+	}
+
 	/// Closes all RPC clients
 	pub async fn close(&mut self) {
-		for to_backend in self.0.values_mut() {
+		for (to_backend, _) in self.0.values_mut() {
 			let _ = to_backend.send(ExecutorMessage::Close).await;
 		}
 	}

@@ -27,8 +27,8 @@ use crate::{
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, QueuedKeys, SessionKeys, SubxtHrmpChannel,
-		Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys,
+		SubxtHrmpChannel, Timestamp,
 	},
 };
 use clap::ValueEnum;
@@ -67,9 +67,14 @@ where
 {
 	client: T,
 	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
+	hasher: PolkadotHasher,
 }
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
+	pub fn hasher(&self) -> PolkadotHasher {
+		self.hasher
+	}
+
 	fn storage(&self) -> StorageClient<PolkadotConfig, T> {
 		self.client.storage()
 	}
@@ -329,19 +334,19 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		maybe_block_number: Option<BlockNumber>,
 	) -> Result<Option<H256>, subxt::Error> {
 		let maybe_block_number = maybe_block_number.map(|v| NumberOrHex::Number(v.into()));
-		self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await
+		Ok(self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await?)
 	}
 
 	pub async fn legacy_get_chain_name(&self) -> Result<String, subxt::Error> {
-		self.legacy_rpc_methods.system_chain().await
+		Ok(self.legacy_rpc_methods.system_chain().await?)
 	}
 
 	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
-		self.client.backend().stream_best_block_headers().await
+		self.client.backend().stream_best_block_headers(self.hasher()).await
 	}
 
 	pub async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, subxt::Error> {
-		self.client.backend().stream_finalized_block_headers().await
+		self.client.backend().stream_finalized_block_headers(self.hasher()).await
 	}
 }
 
@@ -372,8 +377,9 @@ pub async fn build_online_client(
 		},
 	};
 	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
+	let hasher = client.hasher();
 
-	Ok(ApiClient { client, legacy_rpc_methods })
+	Ok(ApiClient { client, legacy_rpc_methods, hasher })
 }
 
 async fn join_requests<I, T>(fut: I) -> Result<Vec<T>, subxt::Error>

@@ -21,30 +21,30 @@ use polkadot_introspector_essentials::{
 		polkadot::runtime_types::polkadot_parachain_primitives::primitives,
 		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},
-	types::{AccountId32, CoreOccupied, H256, InherentData, OnDemandOrder, SubxtHrmpChannel, Timestamp},
+	types::{
+		AccountId32, CoreOccupied, H256, InherentData, OnDemandOrder, PolkadotHasher, SubxtHrmpChannel, Timestamp,
+	},
 };
 use std::collections::BTreeMap;
-use subxt::config::{Hasher, substrate::BlakeTwo256};
+use subxt::config::Hasher;
 
 pub struct TrackerStorage {
 	/// Parachain ID to track.
 	para_id: u32,
 	/// API to access collector's storage
 	storage: RequestExecutor<H256, CollectorPrefixType>,
+	hasher: PolkadotHasher,
 }
 
 impl TrackerStorage {
-	pub fn new(para_id: u32, storage: RequestExecutor<H256, CollectorPrefixType>) -> Self {
-		Self { para_id, storage }
+	pub fn new(para_id: u32, storage: RequestExecutor<H256, CollectorPrefixType>, hasher: PolkadotHasher) -> Self {
+		Self { para_id, storage, hasher }
 	}
 
 	/// Reads validators account keys for the given session index
 	pub async fn session_keys(&self, session_index: u32) -> Option<Vec<AccountId32>> {
 		self.storage
-			.storage_read_prefixed(
-				CollectorPrefixType::AccountKeys,
-				BlakeTwo256::hash(&session_index.to_be_bytes()[..]),
-			)
+			.storage_read_prefixed(CollectorPrefixType::AccountKeys, self.hasher.hash(&session_index.to_be_bytes()[..]))
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
@@ -135,7 +135,7 @@ impl TrackerStorage {
 
 #[cfg(test)]
 mod tests {
-	use crate::test_utils::{create_candidate_record, create_executor, create_inherent_data};
+	use crate::test_utils::{create_candidate_record, create_executor, create_inherent_data, rpc_node_url};
 
 	use super::*;
 	use polkadot_introspector_essentials::{
@@ -150,7 +150,8 @@ mod tests {
 	async fn setup_client() -> (TrackerStorage, CollectorStorageApi) {
 		let api: CollectorStorageApi =
 			ApiService::new_with_prefixed_storage(RecordsStorageConfig { max_blocks: 4 }, create_executor().await);
-		let storage = TrackerStorage::new(100, api.storage());
+		let hasher = api.executor().hasher(rpc_node_url()).unwrap();
+		let storage = TrackerStorage::new(100, api.storage(), hasher);
 
 		(storage, api)
 	}
@@ -160,7 +161,7 @@ mod tests {
 		let (storage, api) = setup_client().await;
 		let keys = vec![AccountId32([42; 32])];
 		let session_index: u32 = 42;
-		let session_hash = BlakeTwo256::hash(&session_index.to_be_bytes()[..]);
+		let session_hash = storage.hasher.hash(&session_index.to_be_bytes()[..]);
 		assert!(storage.session_keys(session_index).await.is_none());
 
 		api.storage()
