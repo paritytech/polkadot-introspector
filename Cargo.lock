@@ -6185,7 +6185,7 @@ dependencies = [
 [[package]]
 name = "subp2p-explorer"
 version = "0.1.0"
-source = "git+https://github.com/lexnv/subp2p-explorer?branch=main#b318ea5fe7d5db04d4c6c48c5e8bde5b0ebb3f30"
+source = "git+https://github.com/lexnv/subp2p-explorer?branch=main#5175b362bb29faaac64b7dca0657676ecb943a7f"
 dependencies = [
  "async-trait",
  "asynchronous-codec 0.6.2",
@@ -6219,7 +6219,7 @@ dependencies = [
 [[package]]
 name = "subp2p-explorer-cli"
 version = "0.1.0"
-source = "git+https://github.com/lexnv/subp2p-explorer?branch=main#b318ea5fe7d5db04d4c6c48c5e8bde5b0ebb3f30"
+source = "git+https://github.com/lexnv/subp2p-explorer?branch=main#5175b362bb29faaac64b7dca0657676ecb943a7f"
 dependencies = [
  "async-trait",
  "asynchronous-codec 0.6.2",
