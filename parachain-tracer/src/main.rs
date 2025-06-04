@@ -282,8 +282,7 @@ impl ParachainTracer {
 					Ok(update_event) => match update_event {
 						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
-								let parent_number = new_head.relay_parent_number;
-								if let Err(e) = tracker.inject_block(*relay_fork, parent_number, &storage).await {
+								if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
 									let _ = shutdown_tx.send(Shutdown::Restart);
 									break;
