@@ -26,7 +26,7 @@ use crate::{
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	collector::DisputeInfo,
+	collector::{DisputeInfo, NewHeadEvent},
 	metadata::{
 		polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
 		polkadot_staging_primitives::BackedCandidate,
@@ -122,11 +122,12 @@ impl SubxtTracker {
 	pub async fn inject_block(
 		&mut self,
 		block_hash: H256,
-		block_number: BlockNumber,
+		new_head: NewHeadEvent,
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
 		if let Some(inherent) = storage.inherent_data(block_hash).await {
 			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
+			let block_number = new_head.relay_parent_number;
 
 			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
@@ -135,7 +136,8 @@ impl SubxtTracker {
 			self.set_backed_candidates(backed_candidates, bitfields.len(), block_number, storage)
 				.await;
 			self.set_core_assignment(block_hash, storage).await;
-			self.set_disputes(&disputes[..], storage).await;
+			self.set_disputes(disputes.as_slice(), new_head.disputes_concluded.as_slice(), storage)
+				.await;
 			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
 			self.set_pending_availability(block_hash, bitfields, storage).await?;
@@ -354,9 +356,29 @@ impl SubxtTracker {
 		}
 	}
 
-	async fn set_disputes(&mut self, disputes: &[DisputeStatementSet], storage: &TrackerStorage) {
-		self.disputes = Vec::with_capacity(disputes.len());
-		for dispute_info in disputes {
+	/// Set disputes
+	///
+	/// We track disputes based on the DisputeConcluded event
+	/// because disputes in inherent data can persist even after they are concluded,
+	/// leading to inaccurate metrics.
+	async fn set_disputes(
+		&mut self,
+		inherent_disputes: &[DisputeStatementSet],
+		concluded_disputes: &[DisputeInfo],
+		storage: &TrackerStorage,
+	) {
+		self.disputes = Vec::with_capacity(concluded_disputes.len());
+		for concluded_dispute in concluded_disputes {
+			let Some(dispute_info) = inherent_disputes
+				.iter()
+				.find(|&v| v.candidate_hash.0 == concluded_dispute.dispute.candidate_hash)
+			else {
+				log::warn!(
+					"Concluded dispute appeared in events but is not present in inherent data: {:?}",
+					concluded_dispute.dispute.candidate_hash
+				);
+				continue;
+			};
 			if let Some(DisputeInfo { outcome, session_index, initiated, initiator_indices, concluded, .. }) =
 				storage.dispute(dispute_info.candidate_hash.0).await
 			{
@@ -735,7 +757,10 @@ mod test_inject_block {
 		let mut tracker = SubxtTracker::new(100, hasher);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 
-		tracker.inject_block(hash, 0, &tracker_storage).await.unwrap();
+		tracker
+			.inject_block(hash, NewHeadEvent::with_relay_parent_number(0), &tracker_storage)
+			.await
+			.unwrap();
 
 		assert!(tracker.new_session.is_none());
 		assert!(tracker.candidates.is_empty());
@@ -781,7 +806,10 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, first_hash, 1_u64, &storage)
 			.await
 			.unwrap();
-		tracker.inject_block(first_hash, 42, &tracker_storage).await.unwrap();
+		tracker
+			.inject_block(first_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
+			.await
+			.unwrap();
 
 		let current = tracker.current_relay_block.unwrap();
 		assert!(tracker.previous_relay_block.is_none());
@@ -811,7 +839,10 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, second_hash, 2_u64, &storage)
 			.await
 			.unwrap();
-		tracker.inject_block(second_hash, 42, &tracker_storage).await.unwrap();
+		tracker
+			.inject_block(second_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
+			.await
+			.unwrap();
 
 		let previous = tracker.previous_relay_block.unwrap();
 		let current = tracker.current_relay_block.unwrap();
@@ -864,7 +895,10 @@ mod test_inject_block {
 		.await
 		.unwrap();
 
-		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
+		tracker
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
+			.await
+			.unwrap();
 
 		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.candidate_hash == candidate_hash);
@@ -914,8 +948,14 @@ mod test_inject_block {
 		.unwrap();
 
 		// Actually, we inject the same block twice, but for current asserts it is OK
-		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
-		tracker.inject_block(block_hash, 43, &tracker_storage).await.unwrap();
+		tracker
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
+			.await
+			.unwrap();
+		tracker
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(43), &tracker_storage)
+			.await
+			.unwrap();
 
 		let candidates = tracker.candidates.get(&0).unwrap();
 		assert!(candidates.len() == 2);
@@ -965,7 +1005,10 @@ mod test_inject_block {
 		.await
 		.unwrap();
 
-		tracker.inject_block(block_hash, 42, &tracker_storage).await.unwrap();
+		tracker
+			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
+			.await
+			.unwrap();
 
 		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.is_included());

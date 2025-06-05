@@ -160,7 +160,7 @@ struct CollectorState {
 }
 
 /// Provides collector new head events split by parachain
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NewHeadEvent {
 	/// Relay parent block number
 	pub relay_parent_number: u32,
@@ -178,6 +178,12 @@ pub struct NewHeadEvent {
 	pub candidates_timed_out: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
+}
+
+impl NewHeadEvent {
+	pub fn with_relay_parent_number(relay_parent_number: u32) -> Self {
+		Self { relay_parent_number, ..Default::default() }
+	}
 }
 
 /// Handles collector updates
