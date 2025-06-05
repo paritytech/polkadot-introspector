@@ -28,7 +28,7 @@ parity-scale-codec = { version = "3.7.4", default-features = false, features = [
     "full",
     "bit-vec",
 ] }
-color-eyre = "0.6.3"
+color-eyre = "0.6.5"
 colored = "2.2.0"
 crossterm = "0.26.1"
 env_logger = "0.10.2"
