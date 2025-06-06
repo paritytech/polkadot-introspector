@@ -145,8 +145,8 @@ struct CollectorState {
 	candidates_seen: BTreeMap<u32, Vec<H256>>,
 	/// A list of disputes seen, indexed by parachain id
 	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
-	/// A list of candidate hashes that have been backed in the current block
-	candidates_backed: Vec<H256>,
+	/// A list of candidates that have been backed in the current block
+	candidates_backed: Vec<BackedCandidateInfo>,
 	/// A list of candidate hashes that have been included in the current block
 	candidates_included: Vec<H256>,
 	/// A list of candidate hashes that have timed out in the current block
@@ -171,13 +171,21 @@ pub struct NewHeadEvent {
 	/// Candidates seen for this relay chain block that belong to the specific `para_id`
 	pub candidates_seen: Vec<H256>,
 	/// A list of candidate hashes that have been backed in the current block
-	pub candidates_backed: Vec<H256>,
+	pub candidates_backed: Vec<BackedCandidateInfo>,
 	/// A list of candidate hashes that have been included in the current block
 	pub candidates_included: Vec<H256>,
 	/// A list of candidate hashes that have timed out in the current block
 	pub candidates_timed_out: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
+}
+
+/// Basic information about a backed candidate
+#[derive(Clone, Debug, Default)]
+pub struct BackedCandidateInfo {
+	pub candidate_hash: H256,
+	pub core_idx: u32,
+	pub para_id: u32,
 }
 
 impl NewHeadEvent {
@@ -879,7 +887,11 @@ impl Collector {
 					.entry(change_event.parachain_id)
 					.or_default()
 					.push(change_event.candidate_hash);
-				self.state.candidates_backed.push(change_event.candidate_hash);
+				self.state.candidates_backed.push(BackedCandidateInfo {
+					candidate_hash: change_event.candidate_hash,
+					core_idx: change_event.core_idx,
+					para_id: change_event.parachain_id,
+				});
 				if let Some(to_websocket) = self.to_websocket.as_mut() {
 					to_websocket
 						.send(WebSocketUpdateEvent {

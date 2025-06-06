@@ -26,7 +26,7 @@ use crate::{
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	collector::{DisputeInfo, NewHeadEvent},
+	collector::{BackedCandidateInfo, DisputeInfo, NewHeadEvent},
 	metadata::{
 		polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
 		polkadot_staging_primitives::BackedCandidate,
@@ -133,7 +133,7 @@ impl SubxtTracker {
 			self.set_forks(block_hash, block_number);
 			self.set_cores(block_hash, storage).await;
 			self.set_included_candidates(new_head.candidates_included.as_slice()).await;
-			self.set_backed_candidates(backed_candidates, bitfields.len(), block_number, storage)
+			self.set_backed_candidates(new_head.candidates_backed.as_slice(), bitfields.len(), block_number)
 				.await;
 			self.set_core_assignment(block_hash, storage).await;
 			self.set_disputes(disputes.as_slice(), new_head.disputes_concluded.as_slice(), storage)
@@ -293,17 +293,14 @@ impl SubxtTracker {
 
 	async fn set_backed_candidates(
 		&mut self,
-		backed_candidates: Vec<BackedCandidate<H256>>,
+		backed_candidates: &[BackedCandidateInfo],
 		bitfields_count: usize,
 		block_number: BlockNumber,
-		storage: &TrackerStorage,
 	) {
-		let candidate_hashes = backed_candidates_by_para_id(backed_candidates, self.para_id)
-			.map(|v| ParachainBlockInfo::candidate_hash(&v, self.hasher));
 		let mut used_cores = vec![];
-		for candidate_hash in candidate_hashes {
-			let Some(core) = self.candidate_core(candidate_hash, storage).await else { continue };
-			let candidate = ParachainBlockInfo::new(candidate_hash, core, bitfields_count as u32);
+		for candidate in backed_candidates.iter().filter(|v| v.para_id == self.para_id) {
+			let core = candidate.core_idx;
+			let candidate = ParachainBlockInfo::new(candidate.candidate_hash, core, bitfields_count as u32);
 			if let Some(current_fork) = self.relay_forks.last_mut() {
 				current_fork.backed_candidate = Some(candidate.candidate_hash);
 			}
