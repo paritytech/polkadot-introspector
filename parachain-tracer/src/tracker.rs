@@ -123,7 +123,7 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
 		if let Some(inherent) = storage.inherent_data(block_hash).await {
-			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
+			let (bitfields, disputes) = extract_inherent_fields(inherent);
 			let block_number = new_head.relay_parent_number;
 
 			self.set_relay_block(block_hash, block_number, storage).await?;

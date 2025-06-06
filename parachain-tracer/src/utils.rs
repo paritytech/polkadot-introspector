@@ -15,11 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use polkadot_introspector_essentials::{
-	metadata::{
-		polkadot_primitives::{AvailabilityBitfield, DisputeStatement, DisputeStatementSet},
-		polkadot_staging_primitives::BackedCandidate,
-	},
-	types::{AccountId32, H256, InherentData, Timestamp},
+	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement, DisputeStatementSet},
+	types::{AccountId32, InherentData, Timestamp},
 };
 use std::time::Duration;
 
@@ -124,16 +121,14 @@ mod test_extract_validator_addresses {
 	}
 }
 
-pub(crate) fn extract_inherent_fields(
-	data: InherentData,
-) -> (Vec<AvailabilityBitfield>, Vec<BackedCandidate<H256>>, Vec<DisputeStatementSet>) {
+pub(crate) fn extract_inherent_fields(data: InherentData) -> (Vec<AvailabilityBitfield>, Vec<DisputeStatementSet>) {
 	let bitfields = data
 		.bitfields
 		.into_iter()
 		.map(|b| b.payload)
 		.collect::<Vec<AvailabilityBitfield>>();
 
-	(bitfields, data.backed_candidates, data.disputes)
+	(bitfields, data.disputes)
 }
 
 #[cfg(test)]
@@ -143,12 +138,11 @@ mod test_extract_inherent_fields {
 
 	#[test]
 	fn test_returns_fields() {
-		let (bitfields, backed_candidates, disputes) = extract_inherent_fields(create_inherent_data(100));
+		let (bitfields, disputes) = extract_inherent_fields(create_inherent_data(100));
 
 		println!("{:?}", matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
 
 		assert!(matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
-		assert!(matches!(backed_candidates.first().unwrap(), BackedCandidate { .. }));
 		assert!(matches!(disputes.first().unwrap(), DisputeStatementSet { .. }));
 	}
 }
