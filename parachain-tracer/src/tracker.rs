@@ -22,16 +22,13 @@ use crate::{
 	stats::Stats,
 	tracker_storage::TrackerStorage,
 	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
-	utils::{backed_candidates_by_para_id, extract_availability_bits_count, extract_inherent_fields, time_diff},
+	utils::{extract_availability_bits_count, extract_inherent_fields, time_diff},
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	collector::{DisputeInfo, NewHeadEvent},
-	metadata::{
-		polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
-		polkadot_staging_primitives::BackedCandidate,
-	},
-	types::{BlockNumber, CoreOccupied, H256, OnDemandOrder, PolkadotHasher, Timestamp},
+	collector::{BackedCandidateInfo, DisputeInfo, NewHeadEvent},
+	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
+	types::{BlockNumber, CoreOccupied, H256, OnDemandOrder, Timestamp},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
 
@@ -39,9 +36,6 @@ use std::{collections::HashMap, default::Default, time::Duration};
 pub struct SubxtTracker {
 	/// Parachain ID to track.
 	para_id: u32,
-
-	/// Hasher for the chain.
-	hasher: PolkadotHasher,
 
 	/// A new session index.
 	new_session: Option<u32>,
@@ -88,10 +82,9 @@ pub struct SubxtTracker {
 }
 
 impl SubxtTracker {
-	pub fn new(para_id: u32, hasher: PolkadotHasher) -> Self {
+	pub fn new(para_id: u32) -> Self {
 		Self {
 			para_id,
-			hasher,
 			candidates: HashMap::new(),
 			cores: HashMap::new(),
 			new_session: None,
@@ -126,14 +119,14 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
 		if let Some(inherent) = storage.inherent_data(block_hash).await {
-			let (bitfields, backed_candidates, disputes) = extract_inherent_fields(inherent);
+			let (bitfields, disputes) = extract_inherent_fields(inherent);
 			let block_number = new_head.relay_parent_number;
 
 			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
 			self.set_cores(block_hash, storage).await;
-			self.set_included_candidates(storage).await;
-			self.set_backed_candidates(backed_candidates, bitfields.len(), block_number, storage)
+			self.set_included_candidates(new_head.candidates_included.as_slice()).await;
+			self.set_backed_candidates(new_head.candidates_backed.as_slice(), bitfields.len(), block_number)
 				.await;
 			self.set_core_assignment(block_hash, storage).await;
 			self.set_disputes(disputes.as_slice(), new_head.disputes_concluded.as_slice(), storage)
@@ -276,11 +269,10 @@ impl SubxtTracker {
 			.collect();
 	}
 
-	async fn set_included_candidates(&mut self, storage: &TrackerStorage) {
+	async fn set_included_candidates(&mut self, candidates_included: &[H256]) {
 		let mut last_included = None;
 		for candidate in self.all_candidates_mut() {
-			let Some(stored_candidate) = storage.candidate(candidate.candidate_hash).await else { continue };
-			if stored_candidate.is_included() {
+			if candidates_included.contains(&candidate.candidate_hash) {
 				candidate.set_included();
 				last_included = Some(candidate.candidate_hash);
 			}
@@ -294,17 +286,14 @@ impl SubxtTracker {
 
 	async fn set_backed_candidates(
 		&mut self,
-		backed_candidates: Vec<BackedCandidate<H256>>,
+		backed_candidates: &[BackedCandidateInfo],
 		bitfields_count: usize,
 		block_number: BlockNumber,
-		storage: &TrackerStorage,
 	) {
-		let candidate_hashes = backed_candidates_by_para_id(backed_candidates, self.para_id)
-			.map(|v| ParachainBlockInfo::candidate_hash(&v, self.hasher));
 		let mut used_cores = vec![];
-		for candidate_hash in candidate_hashes {
-			let Some(core) = self.candidate_core(candidate_hash, storage).await else { continue };
-			let candidate = ParachainBlockInfo::new(candidate_hash, core, bitfields_count as u32);
+		for candidate in backed_candidates.iter().filter(|v| v.para_id == self.para_id) {
+			let core = candidate.core_idx;
+			let candidate = ParachainBlockInfo::new(candidate.candidate_hash, core, bitfields_count as u32);
 			if let Some(current_fork) = self.relay_forks.last_mut() {
 				current_fork.backed_candidate = Some(candidate.candidate_hash);
 			}
@@ -664,21 +653,15 @@ impl SubxtTracker {
 				.saturating_sub(v.candidate_inclusion.relay_parent_number)
 		})
 	}
-
-	async fn candidate_core(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {
-		storage.candidate(candidate_hash).await.map(|v| v.core_idx())
-	}
 }
 
 #[cfg(test)]
 mod test_inject_new_session {
 	use super::*;
-	use crate::test_utils::create_hasher;
 
 	#[tokio::test]
 	async fn test_sets_new_session() {
-		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		assert!(tracker.new_session.is_none());
 
 		tracker.inject_new_session(42);
@@ -695,7 +678,7 @@ mod test_maybe_reset_state {
 	#[tokio::test]
 	async fn test_resets_state_if_not_backed() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let mut candidate = create_para_block_info(100, hasher);
 		candidate.set_included();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
@@ -719,7 +702,7 @@ mod test_maybe_reset_state {
 	#[tokio::test]
 	async fn test_resets_state_if_backed() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let candidate = create_para_block_info(100, hasher);
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
@@ -744,8 +727,8 @@ mod test_maybe_reset_state {
 mod test_inject_block {
 	use super::*;
 	use crate::test_utils::{
-		create_candidate_record, create_hasher, create_inherent_data, create_para_block_info, create_storage,
-		storage_write,
+		candidate_hash, create_candidate_record, create_hasher, create_inherent_data, create_para_block_info,
+		create_storage, storage_write,
 	};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 	use std::collections::BTreeMap;
@@ -754,7 +737,7 @@ mod test_inject_block {
 	async fn test_changes_nothing_if_there_is_no_inherent_data() {
 		let hash = H256::random();
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 
 		tracker
@@ -785,7 +768,7 @@ mod test_inject_block {
 		let second_hash = H256::random();
 		let storage = create_storage().await;
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
 
 		// Inject a block
@@ -858,12 +841,12 @@ mod test_inject_block {
 		let storage = create_storage().await;
 		let hasher = create_hasher().await;
 		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
 		let inherent_data = create_inherent_data(100);
 		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate, hasher);
+		let candidate_hash = candidate_hash(backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
@@ -886,19 +869,12 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
 			.await
 			.unwrap();
-		storage_write(
-			CollectorPrefixType::Candidate(100),
-			candidate_hash,
-			create_candidate_record(100, 42, None, H256::random(), 40),
-			&storage,
-		)
-		.await
-		.unwrap();
 
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
-			.await
-			.unwrap();
+		let mut head_event = NewHeadEvent::with_relay_parent_number(42);
+		head_event
+			.candidates_backed
+			.push(BackedCandidateInfo { candidate_hash, core_idx: 0, para_id: 100 });
+		tracker.inject_block(block_hash, head_event, &tracker_storage).await.unwrap();
 
 		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.candidate_hash == candidate_hash);
@@ -910,12 +886,12 @@ mod test_inject_block {
 		let storage = create_storage().await;
 		let hasher = create_hasher().await;
 		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
 		let inherent_data = create_inherent_data(100);
 		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate, hasher);
+		let candidate_hash = candidate_hash(backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
@@ -948,14 +924,16 @@ mod test_inject_block {
 		.unwrap();
 
 		// Actually, we inject the same block twice, but for current asserts it is OK
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
-			.await
-			.unwrap();
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(43), &tracker_storage)
-			.await
-			.unwrap();
+		let mut head_event_42 = NewHeadEvent::with_relay_parent_number(42);
+		head_event_42
+			.candidates_backed
+			.push(BackedCandidateInfo { candidate_hash, core_idx: 0, para_id: 100 });
+		tracker.inject_block(block_hash, head_event_42, &tracker_storage).await.unwrap();
+		let mut head_event_43 = NewHeadEvent::with_relay_parent_number(42);
+		head_event_43
+			.candidates_backed
+			.push(BackedCandidateInfo { candidate_hash, core_idx: 0, para_id: 100 });
+		tracker.inject_block(block_hash, head_event_43, &tracker_storage).await.unwrap();
 
 		let candidates = tracker.candidates.get(&0).unwrap();
 		assert!(candidates.len() == 2);
@@ -968,7 +946,7 @@ mod test_inject_block {
 		let storage = create_storage().await;
 		let hasher = create_hasher().await;
 		let tracker_storage = TrackerStorage::new(100, storage.clone(), hasher);
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
 		let candidate = create_para_block_info(100, hasher);
@@ -996,19 +974,10 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
 			.await
 			.unwrap();
-		storage_write(
-			CollectorPrefixType::Candidate(100),
-			candidate_hash,
-			create_candidate_record(100, 41, Some(42), H256::random(), 40),
-			&storage,
-		)
-		.await
-		.unwrap();
 
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
-			.await
-			.unwrap();
+		let mut head_event = NewHeadEvent::with_relay_parent_number(42);
+		head_event.candidates_included.push(candidate_hash);
+		tracker.inject_block(block_hash, head_event, &tracker_storage).await.unwrap();
 
 		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.is_included());
@@ -1032,7 +1001,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_returns_none_if_no_current_block() {
 		let hasher = create_hasher().await;
-		let tracker = SubxtTracker::new(100, hasher);
+		let tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = MockStats::default();
 		let metrics = Metrics::default();
@@ -1046,7 +1015,7 @@ mod test_progress {
 	async fn test_returns_progress_on_current_block() {
 		let hash = H256::random();
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
@@ -1069,7 +1038,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_new_session_if_exist() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
@@ -1100,7 +1069,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_core_assignment() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
@@ -1123,7 +1092,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_slow_propogation() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut candidate = create_para_block_info(100, hasher);
 		let mut mock_stats = MockStats::default();
@@ -1182,7 +1151,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_message_queues() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let metrics = Metrics::default();
@@ -1215,7 +1184,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_current_block_time() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
@@ -1256,7 +1225,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_finality_lag() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
@@ -1280,7 +1249,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_disputes() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
@@ -1338,7 +1307,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_includes_on_demand_order() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut stats = ParachainStats::default();
 		let mut mock_metrics = MockPrometheusMetrics::default();
@@ -1398,7 +1367,7 @@ mod test_progress {
 		let candidate_hash = H256::random();
 		let storage = create_storage().await;
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
@@ -1533,7 +1502,7 @@ mod test_progress {
 	#[tokio::test]
 	async fn test_inits_disputes_metrics() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_bitfields().returning(|_, _| ());
@@ -1567,8 +1536,7 @@ mod test_logic {
 
 	#[tokio::test]
 	async fn test_is_fork() {
-		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 
 		tracker.previous_relay_block = None;
 		tracker.current_relay_block = None;
@@ -1596,7 +1564,7 @@ mod test_logic {
 		let hasher = create_hasher().await;
 		let relay_hash = H256::default();
 		let relay_number = 42;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 		tracker
 			.candidates
 			.entry(0)
@@ -1642,7 +1610,7 @@ mod test_logic {
 	#[tokio::test]
 	async fn test_is_current_candidate_backed() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 
 		assert!(!tracker.is_current_candidate_backed(0));
 
@@ -1657,8 +1625,7 @@ mod test_logic {
 
 	#[tokio::test]
 	async fn test_is_just_backed() {
-		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 
 		tracker.last_backed_at_block_number = None;
 		tracker.current_relay_block = Some(block_with_num(42));
@@ -1676,7 +1643,7 @@ mod test_logic {
 	#[tokio::test]
 	async fn test_is_slow_availability() {
 		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100, hasher);
+		let mut tracker = SubxtTracker::new(100);
 
 		assert!(!tracker.is_slow_availability(0));
 

@@ -145,8 +145,8 @@ struct CollectorState {
 	candidates_seen: BTreeMap<u32, Vec<H256>>,
 	/// A list of disputes seen, indexed by parachain id
 	disputes_seen: BTreeMap<u32, Vec<DisputeInfo>>,
-	/// A list of candidate hashes that have been backed in the current block
-	candidates_backed: Vec<H256>,
+	/// A list of candidates that have been backed in the current block
+	candidates_backed: Vec<BackedCandidateInfo>,
 	/// A list of candidate hashes that have been included in the current block
 	candidates_included: Vec<H256>,
 	/// A list of candidate hashes that have timed out in the current block
@@ -171,13 +171,21 @@ pub struct NewHeadEvent {
 	/// Candidates seen for this relay chain block that belong to the specific `para_id`
 	pub candidates_seen: Vec<H256>,
 	/// A list of candidate hashes that have been backed in the current block
-	pub candidates_backed: Vec<H256>,
+	pub candidates_backed: Vec<BackedCandidateInfo>,
 	/// A list of candidate hashes that have been included in the current block
 	pub candidates_included: Vec<H256>,
 	/// A list of candidate hashes that have timed out in the current block
 	pub candidates_timed_out: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
+}
+
+/// Basic information about a backed candidate
+#[derive(Clone, Debug, Default)]
+pub struct BackedCandidateInfo {
+	pub candidate_hash: H256,
+	pub core_idx: u32,
+	pub para_id: u32,
 }
 
 impl NewHeadEvent {
@@ -809,13 +817,13 @@ impl Collector {
 		match change_event.event_type {
 			SubxtCandidateEventType::Backed => {
 				// Candidate should not exist in our storage
-				let maybe_existing = self
+				if let Some(existing) = self
 					.storage_read_prefixed(
 						CollectorPrefixType::Candidate(change_event.parachain_id),
 						change_event.candidate_hash,
 					)
-					.await;
-				if let Some(existing) = maybe_existing {
+					.await
+				{
 					// This can happen on forks easily
 					let candidate_record: CandidateRecord = existing.into_inner()?;
 					info!(
@@ -824,72 +832,75 @@ impl Collector {
 						candidate_record.candidate_inclusion.relay_parent,
 						candidate_record.parachain_id()
 					);
-				} else {
-					let now = get_unix_time_unwrap();
-					// Append to the all candidates
-					info!(
-						"stored candidate backed: {:?}, parachain: {}",
-						change_event.candidate_hash, change_event.parachain_id
-					);
-					self.storage_write_prefixed(
-						CollectorPrefixType::CandidatesParachains,
-						change_event.candidate_hash,
-						StorageEntry::new_onchain(
-							RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
-							change_event.parachain_id,
-						),
-					)
-					.await?;
+					return Ok(());
+				}
 
-					if let Some(relay_parent) = self
-						.read_or_fetch_header(change_event.candidate_descriptor.relay_parent)
-						.await?
-					{
-						let relay_block_number = self.state.current_relay_chain_block_number;
-						let candidate_inclusion = CandidateInclusionRecord {
-							relay_parent: change_event.candidate_descriptor.relay_parent,
-							relay_parent_number: relay_parent.number,
+				let now = get_unix_time_unwrap();
+				// Append to the all candidates
+				info!(
+					"stored candidate backed: {:?}, parachain: {}",
+					change_event.candidate_hash, change_event.parachain_id
+				);
+				self.storage_write_prefixed(
+					CollectorPrefixType::CandidatesParachains,
+					change_event.candidate_hash,
+					StorageEntry::new_onchain(
+						RecordTime::with_ts(self.state.current_relay_chain_block_number, now),
+						change_event.parachain_id,
+					),
+				)
+				.await?;
+
+				let Some(relay_parent) = self
+					.read_or_fetch_header(change_event.candidate_descriptor.relay_parent)
+					.await?
+				else {
+					return Err(eyre!(
+						"no stored relay parent {:?} for candidate {:?}, parachain id: {}",
+						change_event.candidate_descriptor.relay_parent,
+						change_event.candidate_hash,
+						change_event.parachain_id
+					)
+					.into());
+				};
+
+				let relay_block_number = self.state.current_relay_chain_block_number;
+				let candidate_inclusion = CandidateInclusionRecord {
+					relay_parent: change_event.candidate_descriptor.relay_parent,
+					relay_parent_number: relay_parent.number,
+					parachain_id: change_event.parachain_id,
+					backed: relay_block_number,
+					core_idx: change_event.core_idx,
+					timedout: None,
+					included: None,
+				};
+				let new_record =
+					CandidateRecord { candidate_inclusion, candidate_first_seen: now, candidate_disputed: None };
+				self.storage_write_prefixed(
+					CollectorPrefixType::Candidate(change_event.parachain_id),
+					change_event.candidate_hash,
+					StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), new_record),
+				)
+				.await?;
+				self.state
+					.candidates_seen
+					.entry(change_event.parachain_id)
+					.or_default()
+					.push(change_event.candidate_hash);
+				self.state.candidates_backed.push(BackedCandidateInfo {
+					candidate_hash: change_event.candidate_hash,
+					core_idx: change_event.core_idx,
+					para_id: change_event.parachain_id,
+				});
+				if let Some(to_websocket) = self.to_websocket.as_mut() {
+					to_websocket
+						.send(WebSocketUpdateEvent {
+							candidate_hash: change_event.candidate_hash,
+							ts: now,
 							parachain_id: change_event.parachain_id,
-							backed: relay_block_number,
-							core_idx: change_event.core_idx,
-							timedout: None,
-							included: None,
-						};
-						let new_record = CandidateRecord {
-							candidate_inclusion,
-							candidate_first_seen: now,
-							candidate_disputed: None,
-						};
-						self.storage_write_prefixed(
-							CollectorPrefixType::Candidate(change_event.parachain_id),
-							change_event.candidate_hash,
-							StorageEntry::new_onchain(RecordTime::with_ts(relay_block_number, now), new_record),
-						)
+							event: WebSocketEventType::Backed,
+						})
 						.await?;
-						self.state
-							.candidates_seen
-							.entry(change_event.parachain_id)
-							.or_default()
-							.push(change_event.candidate_hash);
-						self.state.candidates_backed.push(change_event.candidate_hash);
-						if let Some(to_websocket) = self.to_websocket.as_mut() {
-							to_websocket
-								.send(WebSocketUpdateEvent {
-									candidate_hash: change_event.candidate_hash,
-									ts: now,
-									parachain_id: change_event.parachain_id,
-									event: WebSocketEventType::Backed,
-								})
-								.await?;
-						}
-					} else {
-						Err(eyre!(
-							"no stored relay parent {:?} for candidate {:?}, parachain id: {}",
-							change_event.candidate_descriptor.relay_parent,
-							change_event.candidate_hash,
-							change_event.parachain_id
-						))?
-					}
 				}
 			},
 			SubxtCandidateEventType::Included => {
