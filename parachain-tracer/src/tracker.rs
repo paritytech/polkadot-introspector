@@ -27,10 +27,7 @@ use crate::{
 use log::{error, info};
 use polkadot_introspector_essentials::{
 	collector::{BackedCandidateInfo, DisputeInfo, NewHeadEvent},
-	metadata::{
-		polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
-		polkadot_staging_primitives::BackedCandidate,
-	},
+	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
 	types::{BlockNumber, CoreOccupied, H256, OnDemandOrder, PolkadotHasher, Timestamp},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
@@ -659,10 +656,6 @@ impl SubxtTracker {
 				.backed
 				.saturating_sub(v.candidate_inclusion.relay_parent_number)
 		})
-	}
-
-	async fn candidate_core(&self, candidate_hash: H256, storage: &TrackerStorage) -> Option<u32> {
-		storage.candidate(candidate_hash).await.map(|v| v.core_idx())
 	}
 }
 
