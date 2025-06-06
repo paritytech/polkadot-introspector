@@ -869,19 +869,12 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
 			.await
 			.unwrap();
-		storage_write(
-			CollectorPrefixType::Candidate(100),
-			candidate_hash,
-			create_candidate_record(100, 42, None, H256::random(), 40),
-			&storage,
-		)
-		.await
-		.unwrap();
 
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
-			.await
-			.unwrap();
+		let mut head_event = NewHeadEvent::with_relay_parent_number(42);
+		head_event
+			.candidates_backed
+			.push(BackedCandidateInfo { candidate_hash, core_idx: 0, para_id: 100 });
+		tracker.inject_block(block_hash, head_event, &tracker_storage).await.unwrap();
 
 		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.candidate_hash == candidate_hash);
@@ -931,14 +924,16 @@ mod test_inject_block {
 		.unwrap();
 
 		// Actually, we inject the same block twice, but for current asserts it is OK
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
-			.await
-			.unwrap();
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(43), &tracker_storage)
-			.await
-			.unwrap();
+		let mut head_event_42 = NewHeadEvent::with_relay_parent_number(42);
+		head_event_42
+			.candidates_backed
+			.push(BackedCandidateInfo { candidate_hash, core_idx: 0, para_id: 100 });
+		tracker.inject_block(block_hash, head_event_42, &tracker_storage).await.unwrap();
+		let mut head_event_43 = NewHeadEvent::with_relay_parent_number(42);
+		head_event_43
+			.candidates_backed
+			.push(BackedCandidateInfo { candidate_hash, core_idx: 0, para_id: 100 });
+		tracker.inject_block(block_hash, head_event_43, &tracker_storage).await.unwrap();
 
 		let candidates = tracker.candidates.get(&0).unwrap();
 		assert!(candidates.len() == 2);
@@ -979,19 +974,10 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)
 			.await
 			.unwrap();
-		storage_write(
-			CollectorPrefixType::Candidate(100),
-			candidate_hash,
-			create_candidate_record(100, 41, Some(42), H256::random(), 40),
-			&storage,
-		)
-		.await
-		.unwrap();
 
-		tracker
-			.inject_block(block_hash, NewHeadEvent::with_relay_parent_number(42), &tracker_storage)
-			.await
-			.unwrap();
+		let mut head_event = NewHeadEvent::with_relay_parent_number(42);
+		head_event.candidates_included.push(candidate_hash);
+		tracker.inject_block(block_hash, head_event, &tracker_storage).await.unwrap();
 
 		let candidate = tracker.candidates.get(&0).unwrap().first().unwrap().as_ref().unwrap();
 		assert!(candidate.is_included());
