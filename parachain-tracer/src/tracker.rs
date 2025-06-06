@@ -132,7 +132,7 @@ impl SubxtTracker {
 			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
 			self.set_cores(block_hash, storage).await;
-			self.set_included_candidates(storage).await;
+			self.set_included_candidates(new_head.candidates_included.as_slice()).await;
 			self.set_backed_candidates(backed_candidates, bitfields.len(), block_number, storage)
 				.await;
 			self.set_core_assignment(block_hash, storage).await;
@@ -276,11 +276,10 @@ impl SubxtTracker {
 			.collect();
 	}
 
-	async fn set_included_candidates(&mut self, storage: &TrackerStorage) {
+	async fn set_included_candidates(&mut self, candidates_included: &[H256]) {
 		let mut last_included = None;
 		for candidate in self.all_candidates_mut() {
-			let Some(stored_candidate) = storage.candidate(candidate.candidate_hash).await else { continue };
-			if stored_candidate.is_included() {
+			if candidates_included.contains(&candidate.candidate_hash) {
 				candidate.set_included();
 				last_included = Some(candidate.candidate_hash);
 			}
