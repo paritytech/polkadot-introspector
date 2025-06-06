@@ -61,7 +61,7 @@ pub enum Request {
 	GetOccupiedCores(H256),
 	GetBackingGroups(H256),
 	GetSessionIndex(H256),
-	GetSessionAccountKeys(u32),
+	GetSessionAccountKeys(u32, Option<H256>),
 	GetSessionNextKeys(AccountId32),
 	GetSessionQueuedKeys(Option<H256>),
 	GetInboundOutBoundHrmpChannels(H256, Vec<u32>),
@@ -241,8 +241,8 @@ impl RequestExecutorBackend {
 				BackingGroups(decode_validator_groups(&value)?)
 			},
 			GetSessionIndex(hash) => SessionIndex(client.get_session_index(hash).await?.unwrap_or_default()),
-			GetSessionAccountKeys(session_index) =>
-				SessionAccountKeys(client.get_session_account_keys(session_index).await?),
+			GetSessionAccountKeys(session_index, maybe_hash) =>
+				SessionAccountKeys(client.get_session_account_keys(session_index, maybe_hash).await?),
 			GetSessionNextKeys(ref account) => SessionNextKeys(client.get_session_next_keys(account).await?),
 			GetSessionQueuedKeys(at) => SessionQueuedKeys(client.get_session_queued_keys(at).await?),
 			GetSessionIndexNow => SessionIndex(client.get_session_index_now().await?.unwrap_or_default()),
@@ -447,8 +447,9 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		session_index: u32,
+		maybe_hash: Option<H256>,
 	) -> color_eyre::Result<Option<Vec<AccountId32>>, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetSessionAccountKeys, SessionAccountKeys, session_index)
+		wrap_backend_call!(self, url, GetSessionAccountKeys, SessionAccountKeys, session_index, maybe_hash)
 	}
 
 	pub async fn get_session_next_keys(

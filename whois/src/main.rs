@@ -53,9 +53,9 @@ struct WhoIsOptions {
 	/// The session index used for computing the validator indices.
 	#[clap(long)]
 	pub session_index: u32,
-	/// An optional block hash to fetch the queued keys at, otherwise we use the queued keys at the current block.
+	/// An optional block hash at which we fetch storage items, otherwise use the best block.
 	#[clap(long)]
-	pub queued_keys_at_block: Option<H256>,
+	pub at_block: Option<H256>,
 	/// Tells if we should update the p2p cache.
 	///
 	/// Note building the p2p cache takes around 10 to 15 minutes
@@ -177,8 +177,9 @@ impl Whois {
 			return Err(WhoisError::NoSessionIndex)
 		};
 
-		if session_index_now < self.opts.session_index ||
-			session_index_now - self.opts.session_index > NUMBER_OF_STORED_SESSIONS
+		if self.opts.at_block.is_none() &&
+			(session_index_now < self.opts.session_index ||
+				session_index_now - self.opts.session_index > NUMBER_OF_STORED_SESSIONS)
 		{
 			return Err(WhoisError::InvalidSessionIndex(
 				session_index_now - NUMBER_OF_STORED_SESSIONS,
@@ -186,17 +187,16 @@ impl Whois {
 			));
 		}
 
-		let para_session_account_keys =
-			match executor.get_session_account_keys(&self.opts.ws, self.opts.session_index).await {
-				Ok(Some(validators)) => validators,
-				Err(e) => return Err(WhoisError::SubxtError(e)),
-				_ => return Err(WhoisError::NoParaSessionAccountKeys),
-			};
-
-		let session_queued_keys = match executor
-			.get_session_queued_keys(&self.opts.ws, self.opts.queued_keys_at_block)
+		let para_session_account_keys = match executor
+			.get_session_account_keys(&self.opts.ws, self.opts.session_index, self.opts.at_block)
 			.await
 		{
+			Ok(Some(validators)) => validators,
+			Err(e) => return Err(WhoisError::SubxtError(e)),
+			_ => return Err(WhoisError::NoParaSessionAccountKeys),
+		};
+
+		let session_queued_keys = match executor.get_session_queued_keys(&self.opts.ws, self.opts.at_block).await {
 			Ok(Some(queued_keys)) => queued_keys,
 			Err(e) => return Err(WhoisError::SubxtError(e)),
 			_ => return Err(WhoisError::NoSessionQueuedKeys),
