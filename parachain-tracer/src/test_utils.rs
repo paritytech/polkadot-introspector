@@ -44,7 +44,7 @@ use polkadot_introspector_essentials::{
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
-use subxt::utils::bits::DecodedBits;
+use subxt::{config::Hasher, utils::bits::DecodedBits};
 
 pub fn rpc_node_url() -> &'static str {
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
@@ -172,9 +172,14 @@ pub fn create_candidate_record(
 	}
 }
 
+pub fn candidate_hash(candidate: &BackedCandidate<H256>, hasher: PolkadotHasher) -> H256 {
+	let commitments_hash = hasher.hash_of(&candidate.candidate.commitments);
+	hasher.hash_of(&(&candidate.candidate.descriptor, commitments_hash))
+}
+
 pub fn create_para_block_info(para_id: u32, hasher: PolkadotHasher) -> ParachainBlockInfo {
 	let candidate = create_backed_candidate(para_id);
-	let hash = ParachainBlockInfo::candidate_hash(&candidate, hasher);
+	let hash = candidate_hash(&candidate, hasher);
 	ParachainBlockInfo::new(hash, 0, 0)
 }
 

@@ -727,8 +727,8 @@ mod test_maybe_reset_state {
 mod test_inject_block {
 	use super::*;
 	use crate::test_utils::{
-		create_candidate_record, create_hasher, create_inherent_data, create_para_block_info, create_storage,
-		storage_write,
+		candidate_hash, create_candidate_record, create_hasher, create_inherent_data, create_para_block_info,
+		create_storage, storage_write,
 	};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 	use std::collections::BTreeMap;
@@ -846,7 +846,7 @@ mod test_inject_block {
 		let block_hash = H256::random();
 		let inherent_data = create_inherent_data(100);
 		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate, hasher);
+		let candidate_hash = candidate_hash(backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
@@ -898,7 +898,7 @@ mod test_inject_block {
 		let block_hash = H256::random();
 		let inherent_data = create_inherent_data(100);
 		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = ParachainBlockInfo::candidate_hash(backed_candidate, hasher);
+		let candidate_hash = candidate_hash(backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
