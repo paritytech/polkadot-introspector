@@ -22,7 +22,7 @@ use crate::{
 	stats::Stats,
 	tracker_storage::TrackerStorage,
 	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
-	utils::{backed_candidates_by_para_id, extract_availability_bits_count, extract_inherent_fields, time_diff},
+	utils::{extract_availability_bits_count, extract_inherent_fields, time_diff},
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{

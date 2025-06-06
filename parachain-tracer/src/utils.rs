@@ -153,31 +153,6 @@ mod test_extract_inherent_fields {
 	}
 }
 
-pub(crate) fn backed_candidates_by_para_id(
-	backed_candidates: Vec<BackedCandidate<H256>>,
-	para_id: u32,
-) -> impl Iterator<Item = BackedCandidate<H256>> {
-	backed_candidates
-		.into_iter()
-		.filter(move |candidate| candidate.candidate.descriptor.para_id.0 == para_id)
-}
-
-#[cfg(test)]
-mod test_backed_candidate {
-	use super::*;
-	use crate::test_utils::create_backed_candidate;
-
-	#[test]
-	fn test_returns_a_candidate() {
-		let found_candidates =
-			backed_candidates_by_para_id(vec![create_backed_candidate(100), create_backed_candidate(200)], 100);
-
-		for found in found_candidates {
-			assert_eq!(found.candidate.descriptor.para_id.0, 100);
-		}
-	}
-}
-
 pub(crate) fn extract_misbehaving_validators(
 	session_keys: Option<&Vec<AccountId32>>,
 	info: &DisputeStatementSet,
