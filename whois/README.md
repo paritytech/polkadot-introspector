@@ -13,7 +13,10 @@ validator_index=<INDEX<>>, account=<ACCOUNT>, peer_id=<PEER_ID>, authorithy_id_d
 
 It uses the subp2p-explorer for querying the DHT information about each validator in the network.
 
-## Usage:
+## Usage
+
+Important: If querying more than 6 sessions behind the current one, you need to specify `--at-block` and
+provide a block hash. The block needs to be at most 6 sessions away from the query `--session-index` .
 
 ### Query by validator index
 ```

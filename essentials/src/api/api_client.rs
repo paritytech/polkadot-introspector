@@ -234,9 +234,18 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.storage().at_latest().await?.fetch(&addr).await
 	}
 
-	pub async fn get_session_account_keys(&self, session_index: u32) -> Result<Option<Vec<AccountId32>>, subxt::Error> {
+	pub async fn get_session_account_keys(
+		&self,
+		session_index: u32,
+		maybe_hash: Option<H256>,
+	) -> Result<Option<Vec<AccountId32>>, subxt::Error> {
 		let addr = polkadot::storage().para_session_info().account_keys(session_index);
-		self.storage().at_latest().await?.fetch(&addr).await
+
+		// Query session keys at a specific block hash.
+		let storage =
+			if let Some(hash) = maybe_hash { self.storage().at(hash) } else { self.storage().at_latest().await? };
+
+		storage.fetch(&addr).await
 	}
 
 	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
