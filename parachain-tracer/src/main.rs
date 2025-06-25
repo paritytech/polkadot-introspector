@@ -273,8 +273,11 @@ impl ParachainTracer {
 		let storage = TrackerStorage::new(para_id, api_service.storage(), hasher);
 
 		let metrics = self.metrics.clone();
+		metrics.init_counters(para_id);
 		let mut stats = ParachainStats::new(para_id, self.opts.last_skipped_slot_blocks);
 		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
+
+		info!("Starting tracker for parachain {}", para_id);
 
 		tokio::spawn(async move {
 			loop {
@@ -298,7 +301,7 @@ impl ParachainTracer {
 							tracker.inject_new_session(idx);
 						},
 						CollectorUpdateEvent::Termination(reason) => {
-							info!("collector is terminating");
+							info!("collector is terminating for parachain {}", para_id);
 							match reason {
 								TerminationReason::Normal => break,
 								TerminationReason::Abnormal(info) => {
@@ -310,7 +313,7 @@ impl ParachainTracer {
 						},
 					},
 					Err(_) => {
-						info!("Input channel has been closed");
+						info!("Input channel has been closed for parachain {}", para_id);
 						break
 					},
 				}
