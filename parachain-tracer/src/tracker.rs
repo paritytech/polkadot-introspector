@@ -1205,7 +1205,7 @@ mod test_progress {
 			.returning(|_| ());
 		mock_metrics
 			.expect_on_block()
-			.with(eq(6.0), eq(100))
+			.with(eq(Duration::from_secs(6)), eq(100))
 			.once()
 			.returning(|_, _| ());
 		let _progress = tracker
