@@ -429,7 +429,7 @@ impl SubxtTracker {
 		if !self.is_fork() {
 			let ts = self.current_block_time();
 			stats.on_block(ts);
-			metrics.on_block(ts.as_secs_f64(), self.para_id);
+			metrics.on_block(ts, self.para_id);
 		}
 	}
 
@@ -1194,7 +1194,7 @@ mod test_progress {
 			.returning(|_| ());
 		mock_metrics
 			.expect_on_block()
-			.with(eq(6.0), eq(100))
+			.with(eq(Duration::from_secs(6)), eq(100))
 			.once()
 			.returning(|_, _| ());
 		let _progress = tracker
