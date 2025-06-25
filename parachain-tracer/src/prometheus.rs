@@ -99,7 +99,7 @@ pub trait PrometheusMetrics {
 	/// Update relay chain specific metrics on new relay block
 	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize);
 	/// Update metrics on new block
-	fn on_block(&self, time: f64, para_id: u32);
+	fn on_block(&self, time: Duration, para_id: u32);
 	/// Update metrics on slow availability
 	fn on_slow_availability(&self, para_id: u32);
 	/// Update metrics on bitfields propogation
@@ -165,8 +165,9 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	fn on_block(&self, time: f64, para_id: u32) {
+	fn on_block(&self, time: Duration, para_id: u32) {
 		if let Some(metrics) = &self.0 {
+			let time = time.as_secs() as f64;
 			metrics
 				.relay_block_times
 				.with_label_values(&[&para_id.to_string()[..]])
@@ -279,7 +280,7 @@ impl PrometheusMetrics for Metrics {
 				metrics
 					.para_block_times_sec
 					.with_label_values(&[&para_str[..]])
-					.observe(time.as_secs_f64());
+					.observe(time.as_secs() as f64);
 			}
 			if let Some(backed_in) = backed_in {
 				metrics
@@ -316,7 +317,7 @@ impl PrometheusMetrics for Metrics {
 			metrics
 				.para_on_demand_delay_sec
 				.with_label_values(&[&para_str[..], until])
-				.set(delay_sec.as_secs_f64());
+				.set(delay_sec.as_secs() as f64);
 		}
 	}
 

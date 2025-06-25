@@ -438,7 +438,7 @@ impl SubxtTracker {
 		if !self.is_fork() {
 			let ts = self.current_block_time();
 			stats.on_block(ts);
-			metrics.on_block(ts.as_secs_f64(), self.para_id);
+			metrics.on_block(ts, self.para_id);
 		}
 	}
 
