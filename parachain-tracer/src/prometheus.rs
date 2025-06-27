@@ -167,7 +167,7 @@ impl PrometheusMetrics for Metrics {
 
 	fn on_block(&self, time: Duration, para_id: u32) {
 		if let Some(metrics) = &self.0 {
-			let time = time.as_secs() as f64;
+			let time = time.as_secs_f64().round();
 			metrics
 				.relay_block_times
 				.with_label_values(&[&para_id.to_string()[..]])
@@ -280,7 +280,7 @@ impl PrometheusMetrics for Metrics {
 				metrics
 					.para_block_times_sec
 					.with_label_values(&[&para_str[..]])
-					.observe(time.as_secs() as f64);
+					.observe(time.as_secs_f64().round());
 			}
 			if let Some(backed_in) = backed_in {
 				metrics
@@ -317,7 +317,7 @@ impl PrometheusMetrics for Metrics {
 			metrics
 				.para_on_demand_delay_sec
 				.with_label_values(&[&para_str[..], until])
-				.set(delay_sec.as_secs() as f64);
+				.set(delay_sec.as_secs_f64().round());
 		}
 	}
 
