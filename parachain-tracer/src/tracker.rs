@@ -32,6 +32,18 @@ use polkadot_introspector_essentials::{
 };
 use std::{collections::HashMap, default::Default, time::Duration};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackingType {
+	Sync,
+	Async,
+}
+
+impl BackingType {
+	fn is_sync(&self) -> bool {
+		matches!(self, BackingType::Sync)
+	}
+}
+
 /// A subxt based parachain candidate tracker.
 pub struct SubxtTracker {
 	/// Parachain ID to track.
@@ -55,6 +67,8 @@ pub struct SubxtTracker {
 	last_non_fork_relay_block_ts: Option<Timestamp>,
 	/// The relay chain block number at which the last candidate was backed.
 	last_backed_at_block_number: Option<BlockNumber>,
+	/// Backing type the parachain uses
+	backing_type: BackingType,
 	/// The relay chain block at which last candidate was included.
 	last_included_at: Option<BlockWithoutHash>,
 	/// The relay chain block at which previous candidate was included.
@@ -93,6 +107,7 @@ impl SubxtTracker {
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_backed_at_block_number: None,
+			backing_type: BackingType::Sync, // We default to sync backing
 			current_non_fork_relay_block_ts: None,
 			last_non_fork_relay_block_ts: None,
 			last_included_at: None,
@@ -288,6 +303,14 @@ impl SubxtTracker {
 			if let Some(current_fork) = self.relay_forks.last_mut() {
 				current_fork.backed_candidate = Some(candidate.candidate_hash);
 			}
+
+			if self.backing_type.is_sync() &&
+			// Check the interval between backings: 2 blocks for sync and 1 block for async
+				self.last_backed_at_block_number.is_some_and(|last| block_number - last == 1)
+			{
+				// if we observed a backing interval of 1 block there is no way to fall back to sync backing again
+				self.backing_type = BackingType::Async;
+			}
 			self.last_backed_at_block_number = Some(block_number);
 			self.candidates.entry(core).or_default().push(Some(candidate));
 
@@ -296,8 +319,15 @@ impl SubxtTracker {
 
 		let idle_cores = self.cores.keys().filter(|v| !used_cores.contains(v)).cloned();
 		for core in idle_cores {
-			if !self.has_backed_candidate(core) {
-				self.candidates.entry(core).or_default().push(None);
+			match self.backing_type {
+				BackingType::Sync =>
+					if !self.has_backed_or_included_candidate(core) {
+						self.candidates.entry(core).or_default().push(None);
+					},
+				BackingType::Async =>
+					if !self.has_backed_candidate(core) {
+						self.candidates.entry(core).or_default().push(None);
+					},
 			}
 		}
 	}
@@ -602,6 +632,13 @@ impl SubxtTracker {
 	}
 
 	fn has_backed_candidate(&self, core: u32) -> bool {
+		self.candidates.get(&core).is_some_and(|v| {
+			v.iter()
+				.any(|candidate| candidate.as_ref().map(|c| c.is_backed()).unwrap_or_default())
+		}) || self.relay_forks.iter().any(|fork| fork.backed_candidate.is_some())
+	}
+
+	fn has_backed_or_included_candidate(&self, core: u32) -> bool {
 		self.candidates
 			.get(&core)
 			.is_some_and(|v| v.iter().any(|candidate| candidate.is_some())) ||
@@ -1547,16 +1584,17 @@ mod test_logic {
 		let relay_hash = H256::default();
 		let relay_number = 42;
 		let mut tracker = SubxtTracker::new(100);
-		tracker
-			.candidates
-			.entry(0)
-			.or_default()
-			.push(Some(create_para_block_info(100, hasher)));
+		let backed_candidate = create_para_block_info(100, hasher);
+		let mut included_candidate = create_para_block_info(100, hasher);
+		included_candidate.set_included();
+		tracker.candidates.entry(0).or_default().push(Some(backed_candidate));
 		tracker.candidates.entry(1).or_default().push(None);
+		tracker.candidates.entry(3).or_default().push(Some(included_candidate));
 
 		assert!(tracker.has_backed_candidate(0));
 		assert!(!tracker.has_backed_candidate(1));
 		assert!(!tracker.has_backed_candidate(2));
+		assert!(!tracker.has_backed_candidate(3));
 
 		tracker.candidates.clear();
 		assert!(!tracker.has_backed_candidate(0));
@@ -1586,7 +1624,56 @@ mod test_logic {
 			backed_candidate: None,
 			included_candidate: Some(H256::default()),
 		});
-		assert!(tracker.has_backed_candidate(0));
+		assert!(!tracker.has_backed_candidate(0));
+	}
+
+	#[tokio::test]
+	async fn test_has_backed_or_included_candidate() {
+		let hasher = create_hasher().await;
+		let relay_hash = H256::default();
+		let relay_number = 42;
+		let mut tracker = SubxtTracker::new(100);
+		let backed_candidate = create_para_block_info(100, hasher);
+		let mut included_candidate = create_para_block_info(100, hasher);
+		included_candidate.set_included();
+		tracker.candidates.entry(0).or_default().push(Some(backed_candidate));
+		tracker.candidates.entry(1).or_default().push(None);
+		tracker.candidates.entry(3).or_default().push(Some(included_candidate));
+
+		assert!(tracker.has_backed_or_included_candidate(0));
+		assert!(!tracker.has_backed_or_included_candidate(1));
+		assert!(!tracker.has_backed_or_included_candidate(2));
+		assert!(tracker.has_backed_or_included_candidate(3));
+
+		tracker.candidates.clear();
+		assert!(!tracker.has_backed_or_included_candidate(0));
+
+		tracker.relay_forks.clear();
+		tracker.relay_forks.push(ForkTracker {
+			relay_hash,
+			relay_number,
+			backed_candidate: None,
+			included_candidate: None,
+		});
+		assert!(!tracker.has_backed_or_included_candidate(0));
+
+		tracker.relay_forks.clear();
+		tracker.relay_forks.push(ForkTracker {
+			relay_hash,
+			relay_number,
+			backed_candidate: Some(H256::default()),
+			included_candidate: None,
+		});
+		assert!(tracker.has_backed_or_included_candidate(0));
+
+		tracker.relay_forks.clear();
+		tracker.relay_forks.push(ForkTracker {
+			relay_hash,
+			relay_number,
+			backed_candidate: None,
+			included_candidate: Some(H256::default()),
+		});
+		assert!(tracker.has_backed_or_included_candidate(0));
 	}
 
 	#[tokio::test]
