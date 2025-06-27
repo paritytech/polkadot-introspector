@@ -4444,7 +4444,7 @@ dependencies = [
  "serde_urlencoded",
  "strum",
  "subxt",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-tungstenite",
  "typed-builder",
@@ -4460,7 +4460,7 @@ dependencies = [
  "futures",
  "pin-project-lite",
  "rand",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
 ]
 
@@ -4539,7 +4539,7 @@ dependencies = [
  "strum",
  "substrate-prometheus-endpoint",
  "subxt",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "time",
  "tokio",
  "typed-builder",
@@ -4566,7 +4566,7 @@ dependencies = [
  "ss58-registry",
  "subp2p-explorer",
  "subp2p-explorer-cli",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
 ]
 
