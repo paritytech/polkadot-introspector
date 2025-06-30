@@ -48,7 +48,7 @@ use polkadot_introspector_essentials::{
 use polkadot_introspector_priority_channel::{Receiver, Sender, channel_with_capacities};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use stats::ParachainStats;
-use std::{collections::HashMap, default::Default, ops::DerefMut};
+use std::{collections::HashMap, default::Default, ops::DerefMut, time::Duration};
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
 use tracker_storage::TrackerStorage;
@@ -64,6 +64,10 @@ mod utils;
 
 #[cfg(test)]
 mod test_utils;
+
+// HACK: We use a fake para id to receive only relay chain events
+const RELAY_CHAIN_ID: u32 = 0;
+const RELAY_CHAIN_ID_STR: &str = "0";
 
 #[derive(Clone, Debug, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
@@ -170,7 +174,8 @@ impl ParachainTracer {
 			self.clone(),
 			shutdown_tx.clone(),
 			// HACK: We use a fake para id to receive only relay chain events
-			collector.subscribe_parachain_updates(0).await?,
+			collector.subscribe_parachain_updates(RELAY_CHAIN_ID).await?,
+			collector.api(),
 		));
 
 		if self.opts.all {
@@ -208,9 +213,14 @@ impl ParachainTracer {
 		self,
 		shutdown_tx: BroadcastSender<Shutdown>,
 		from_collector: Receiver<CollectorUpdateEvent>,
+		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
 		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
+		let hasher = api_service.executor().hasher(&self.node).expect("Hasher must be available");
+		let storage = TrackerStorage::new(0, api_service.storage(), hasher);
 		let metrics = self.metrics.clone();
+
+		let mut last_ts = None;
 
 		tokio::spawn(async move {
 			loop {
@@ -221,10 +231,23 @@ impl ParachainTracer {
 							if new_head.relay_parent_number == 0 {
 								continue
 							}
+
+							let curr_ts = storage
+								.block_timestamp(
+									*new_head
+										.relay_parent_hashes
+										.first()
+										.expect("at least one relay parent hash must be present"),
+								)
+								.await;
+							let block_time = last_ts
+								.and_then(|last| curr_ts.map(|curr| curr.saturating_sub(last)))
+								.map(Duration::from_millis);
+							last_ts = curr_ts;
 							let backed = new_head.candidates_backed.len();
 							let included = new_head.candidates_included.len();
 							let timed_out = new_head.candidates_timed_out.len();
-							metrics.on_new_relay_block(backed, included, timed_out);
+							metrics.on_new_relay_block(backed, included, timed_out, block_time);
 							if is_cli {
 								println!(
 									"Block {}: backed {}, included {}, timed-out {}",
