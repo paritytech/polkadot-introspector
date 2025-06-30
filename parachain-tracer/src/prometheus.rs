@@ -49,6 +49,10 @@ struct DisputesMetrics {
 	concluded_invalid: IntCounterVec,
 	/// Average resolution time in blocks
 	resolution_time: HistogramVec,
+	/// Validators that initiated a dispute
+	initiators: IntCounterVec,
+	/// Validators that misbehaved in a dispute
+	misbehaving_validators: IntCounterVec,
 }
 
 #[derive(Clone)]
@@ -253,6 +257,21 @@ impl PrometheusMetrics for Metrics {
 					.with_label_values(&[&para_string])
 					.inc();
 			}
+
+			for (index, address) in dispute_outcome.initiators.iter() {
+				metrics
+					.disputes_stats
+					.initiators
+					.with_label_values(&[&para_string, &index.to_string(), address])
+					.inc();
+			}
+			for (index, address) in dispute_outcome.misbehaving_validators.iter() {
+				metrics
+					.disputes_stats
+					.misbehaving_validators
+					.with_label_values(&[&para_string, &index.to_string(), address])
+					.inc();
+			}
 		}
 	}
 
@@ -369,6 +388,21 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 				HistogramOpts::new("pc_disputed_resolve_time", "Dispute resolution time in relay parent blocks")
 					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		initiators: prometheus_endpoint::register(
+			IntCounterVec::new(Opts::new("pc_disputed_initiators", "Validators that initiated a dispute"), &[
+				"parachain_id",
+				"validator_index",
+				"validator_address",
+			])?,
+			registry,
+		)?,
+		misbehaving_validators: prometheus_endpoint::register(
+			IntCounterVec::new(
+				Opts::new("pc_disputed_misbehaving_validators", "Validators that misbehaved in a dispute"),
+				&["parachain_id", "validator_index", "validator_address"],
 			)?,
 			registry,
 		)?,
