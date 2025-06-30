@@ -185,7 +185,7 @@ impl SubxtTracker {
 			self.notify_candidate_state(&mut progress, stats, metrics, storage).await;
 			self.notify_disputes(&mut progress, stats, metrics);
 			self.notify_active_message_queues(&mut progress);
-			self.notify_current_block_time(stats, metrics);
+			self.notify_current_block_time(stats);
 			self.notify_finality_lag(metrics);
 			self.notify_on_demand_order(metrics);
 
@@ -455,11 +455,10 @@ impl SubxtTracker {
 		}
 	}
 
-	fn notify_current_block_time(&self, stats: &mut impl Stats, metrics: &impl PrometheusMetrics) {
+	fn notify_current_block_time(&self, stats: &mut impl Stats) {
 		if !self.is_fork() {
 			let ts = self.current_block_time();
 			stats.on_block(ts);
-			metrics.on_block(ts, self.para_id);
 		}
 	}
 
@@ -1129,7 +1128,6 @@ mod test_progress {
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_backed().returning(|_| ());
-		mock_metrics.expect_on_block().returning(|_, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 
 		// Bitfields propogation isn't slow
@@ -1229,11 +1227,6 @@ mod test_progress {
 			.with(eq(Duration::from_millis(6000)))
 			.once()
 			.returning(|_| ());
-		mock_metrics
-			.expect_on_block()
-			.with(eq(Duration::from_secs(6)), eq(100))
-			.once()
-			.returning(|_, _| ());
 		let _progress = tracker
 			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
 			.await
@@ -1257,7 +1250,6 @@ mod test_progress {
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
-		mock_metrics.expect_on_block().returning(|_, _| ());
 
 		// Without finality lag
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
@@ -1283,7 +1275,6 @@ mod test_progress {
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
-		mock_metrics.expect_on_block().returning(|_, _| ());
 
 		// Without disputes
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
@@ -1338,7 +1329,6 @@ mod test_progress {
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 		mock_metrics.expect_on_backed().returning(|_| ());
-		mock_metrics.expect_on_block().returning(|_, _| ());
 
 		// With on-demand order
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
@@ -1397,7 +1387,6 @@ mod test_progress {
 		mock_stats.expect_on_block().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
-		mock_metrics.expect_on_block().returning(|_, _| ());
 		storage_write(
 			CollectorPrefixType::Candidate(100),
 			candidate_hash,
@@ -1532,7 +1521,6 @@ mod test_progress {
 		mock_stats.expect_on_skipped_slot().returning(|_| ());
 		let mut mock_metrics = MockPrometheusMetrics::default();
 		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
-		mock_metrics.expect_on_block().returning(|_, _| ());
 		mock_metrics.expect_on_skipped_slot().returning(|_| ());
 
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });

@@ -14,7 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::types::{DisputesTracker, ParachainProgressUpdate};
+use crate::{
+	RELAY_CHAIN_ID_STR,
+	types::{DisputesTracker, ParachainProgressUpdate},
+};
 use clap::Parser;
 use color_eyre::Result;
 use mockall::automock;
@@ -97,9 +100,9 @@ pub trait PrometheusMetrics {
 	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
 	/// Update relay chain specific metrics on new relay block
-	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize);
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>);
 	/// Update metrics on new block
-	fn on_block(&self, time: Duration, para_id: u32);
+	// fn on_block(&self, time: Duration, para_id: u32);
 	/// Update metrics on slow availability
 	fn on_slow_availability(&self, para_id: u32);
 	/// Update metrics on bitfields propogation
@@ -148,7 +151,7 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize) {
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.relay_candidate_statuses
@@ -162,22 +165,17 @@ impl PrometheusMetrics for Metrics {
 				.relay_candidate_statuses
 				.with_label_values(&["timed_out"])
 				.observe(timed_out as f64);
-		}
-	}
 
-	fn on_block(&self, time: Duration, para_id: u32) {
-		if let Some(metrics) = &self.0 {
-			let time = time.as_secs_f64().round();
-			metrics
-				.relay_block_times
-				.with_label_values(&[&para_id.to_string()[..]])
-				.observe(time);
-			let skipped_slots = ((time / STANDARD_BLOCK_TIME).round() as u64).saturating_sub(1);
-			if skipped_slots > 0 {
-				metrics
-					.relay_skipped_slots
-					.with_label_values(&[&para_id.to_string()[..]])
-					.inc_by(skipped_slots);
+			if let Some(time) = block_time {
+				let time = time.as_secs_f64().round();
+				metrics.relay_block_times.with_label_values(&[RELAY_CHAIN_ID_STR]).observe(time);
+				let skipped_slots = ((time / STANDARD_BLOCK_TIME).round() as u64).saturating_sub(1);
+				if skipped_slots > 0 {
+					metrics
+						.relay_skipped_slots
+						.with_label_values(&[RELAY_CHAIN_ID_STR])
+						.inc_by(skipped_slots);
+				}
 			}
 		}
 	}
@@ -397,15 +395,21 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		disputes_stats,
 		relay_block_times: prometheus_endpoint::register(
 			HistogramVec::new(
-				HistogramOpts::new("pc_relay_block_time", "Relay chain block time measured in seconds")
-					.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
+				HistogramOpts::new(
+					"pc_relay_block_time",
+					"Relay chain block time measured in seconds, label `parachain_id` is deprecated",
+				)
+				.buckets(HISTOGRAM_TIME_BUCKETS_SECONDS.into()),
 				&["parachain_id"],
 			)?,
 			registry,
 		)?,
 		relay_skipped_slots: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new("pc_relay_skipped_slots", "Relay chain block time measured in standard blocks"),
+				Opts::new(
+					"pc_relay_skipped_slots",
+					"Relay chain block time measured in standard blocks, label `parachain_id` is deprecated",
+				),
 				&["parachain_id"],
 			)?,
 			registry,
