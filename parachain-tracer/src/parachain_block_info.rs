@@ -23,8 +23,6 @@ use polkadot_introspector_essentials::types::H256;
 pub struct ParachainBlockInfo {
 	/// Candidate hash
 	pub candidate_hash: H256,
-	/// The number of signed bitfields.
-	pub bitfield_count: u32,
 	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
 	pub max_availability_bits: u32,
 	/// The current number of observed availability bits set to 1.
@@ -38,8 +36,8 @@ pub struct ParachainBlockInfo {
 }
 
 impl ParachainBlockInfo {
-	pub fn new(candidate_hash: H256, assigned_core: u32, bitfield_count: u32) -> Self {
-		Self { candidate_hash, assigned_core, bitfield_count, ..Default::default() }
+	pub fn new(candidate_hash: H256, assigned_core: u32, max_availability_bits: u32) -> Self {
+		Self { candidate_hash, assigned_core, max_availability_bits, ..Default::default() }
 	}
 
 	pub fn set_pending(&mut self) {
@@ -67,7 +65,7 @@ impl ParachainBlockInfo {
 	}
 
 	pub fn is_bitfield_propagation_slow(&self) -> bool {
-		self.max_availability_bits > 0 && self.bitfield_count <= (self.max_availability_bits / 3) * 2
+		self.max_availability_bits > 0 && self.current_availability_bits <= (self.max_availability_bits / 3) * 2
 	}
 }
 
@@ -98,7 +96,7 @@ mod tests {
 		info.max_availability_bits = 200;
 		assert!(info.is_bitfield_propagation_slow());
 
-		info.bitfield_count = 120;
+		info.current_availability_bits = 120;
 		assert!(info.is_bitfield_propagation_slow());
 	}
 }
