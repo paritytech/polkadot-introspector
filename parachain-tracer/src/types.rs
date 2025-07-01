@@ -57,6 +57,8 @@ pub struct DisputesTracker {
 	pub misbehaving_validators: Vec<(u32, String)>,
 	/// Dispute conclusion time: how many blocks have passed since DisputeInitiated event
 	pub resolve_time: u32,
+	/// Session index
+	pub session_index: u32,
 }
 
 impl DisputesTracker {
@@ -76,7 +78,16 @@ impl DisputesTracker {
 			extract_misbehaving_validators(session_info, dispute_info, outcome == SubxtDisputeResult::Valid);
 		let resolve_time = concluded.saturating_sub(initiated);
 
-		Self { outcome, candidate, voted_for, voted_against, initiators, misbehaving_validators, resolve_time }
+		Self {
+			outcome,
+			candidate,
+			voted_for,
+			voted_against,
+			initiators,
+			misbehaving_validators,
+			resolve_time,
+			session_index: dispute_info.session,
+		}
 	}
 }
 
