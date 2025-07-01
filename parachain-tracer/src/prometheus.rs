@@ -262,14 +262,24 @@ impl PrometheusMetrics for Metrics {
 				metrics
 					.disputes_stats
 					.initiators
-					.with_label_values(&[&para_string, &index.to_string(), address])
+					.with_label_values(&[
+						&para_string,
+						&index.to_string(),
+						&dispute_outcome.session_index.to_string(),
+						address,
+					])
 					.inc();
 			}
 			for (index, address) in dispute_outcome.misbehaving_validators.iter() {
 				metrics
 					.disputes_stats
 					.misbehaving_validators
-					.with_label_values(&[&para_string, &index.to_string(), address])
+					.with_label_values(&[
+						&para_string,
+						&index.to_string(),
+						&dispute_outcome.session_index.to_string(),
+						address,
+					])
 					.inc();
 			}
 		}
@@ -395,6 +405,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			IntCounterVec::new(Opts::new("pc_disputed_initiators", "Validators that initiated a dispute"), &[
 				"parachain_id",
 				"validator_index",
+				"session_index",
 				"validator_address",
 			])?,
 			registry,
@@ -402,7 +413,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		misbehaving_validators: prometheus_endpoint::register(
 			IntCounterVec::new(
 				Opts::new("pc_disputed_misbehaving_validators", "Validators that misbehaved in a dispute"),
-				&["parachain_id", "validator_index", "validator_address"],
+				&["parachain_id", "validator_index", "session_index", "validator_address"],
 			)?,
 			registry,
 		)?,
