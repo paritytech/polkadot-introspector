@@ -17,16 +17,32 @@
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::types::H256;
 
+#[derive(Encode, Decode, Debug, Default)]
+pub struct BlockAvailability {
+	/// The current number of observed availability bits set to 1.
+	pub current: u32,
+	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
+	pub max: u32,
+}
+
+impl BlockAvailability {
+	pub fn new(current: u32, max: u32) -> Self {
+		Self { current, max }
+	}
+
+	pub fn is_slow(&self) -> bool {
+		self.max > 0 && self.current <= (self.max / 3) * 2
+	}
+}
+
 /// The parachain block tracking information.
 /// This is used for displaying CLI updates and also goes to Storage.
 #[derive(Encode, Decode, Debug, Default)]
 pub struct ParachainBlockInfo {
 	/// Candidate hash
 	pub candidate_hash: H256,
-	/// The maximum expected number of availability bits that can be set. Corresponds to `max_validators`.
-	pub max_availability_bits: u32,
-	/// The current number of observed availability bits set to 1.
-	pub current_availability_bits: u32,
+	/// The availability for the block.
+	pub availability: Option<BlockAvailability>,
 	/// Parachain availability core assignment information.
 	pub assigned_core: u32,
 	/// Core occupation status.
@@ -36,8 +52,8 @@ pub struct ParachainBlockInfo {
 }
 
 impl ParachainBlockInfo {
-	pub fn new(candidate_hash: H256, assigned_core: u32, max_availability_bits: u32) -> Self {
-		Self { candidate_hash, assigned_core, max_availability_bits, ..Default::default() }
+	pub fn new(candidate_hash: H256, assigned_core: u32) -> Self {
+		Self { candidate_hash, assigned_core, ..Default::default() }
 	}
 
 	pub fn set_pending(&mut self) {
@@ -64,8 +80,12 @@ impl ParachainBlockInfo {
 		self.state == ParachainBlockState::Dropped
 	}
 
+	pub fn set_availability(&mut self, availability: BlockAvailability) {
+		self.availability = Some(availability);
+	}
+
 	pub fn is_bitfield_propagation_slow(&self) -> bool {
-		self.max_availability_bits > 0 && self.current_availability_bits <= (self.max_availability_bits / 3) * 2
+		self.availability.as_ref().map_or(false, |availability| availability.is_slow())
 	}
 }
 
@@ -85,7 +105,10 @@ pub enum ParachainBlockState {
 
 #[cfg(test)]
 mod tests {
-	use crate::test_utils::{create_hasher, create_para_block_info};
+	use crate::{
+		parachain_block_info::BlockAvailability,
+		test_utils::{create_hasher, create_para_block_info},
+	};
 
 	#[tokio::test]
 	async fn test_is_bitfield_propagation_slow() {
@@ -93,10 +116,7 @@ mod tests {
 		let mut info = create_para_block_info(100, hasher);
 		assert!(!info.is_bitfield_propagation_slow());
 
-		info.max_availability_bits = 200;
-		assert!(info.is_bitfield_propagation_slow());
-
-		info.current_availability_bits = 120;
+		info.set_availability(BlockAvailability::new(120, 200));
 		assert!(info.is_bitfield_propagation_slow());
 	}
 }
