@@ -639,7 +639,7 @@ impl Collector {
 			debug!("new session: {}, hash: {}", cur_session, cur_session_hash);
 			let accounts_keys = self
 				.executor
-				.get_session_account_keys(self.endpoint.as_str(), cur_session, None)
+				.get_session_account_keys(self.endpoint.as_str(), cur_session, Some(block_hash))
 				.await?
 				.ok_or_else(|| eyre!("Missing account keys for session {}", cur_session))?;
 			self.storage_write_prefixed(
