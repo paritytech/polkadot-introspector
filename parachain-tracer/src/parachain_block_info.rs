@@ -85,7 +85,7 @@ impl ParachainBlockInfo {
 	}
 
 	pub fn is_bitfield_propagation_slow(&self) -> bool {
-		self.availability.as_ref().map_or(false, |availability| availability.is_slow())
+		self.availability.as_ref().is_some_and(|availability| availability.is_slow())
 	}
 }
 
