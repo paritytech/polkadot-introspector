@@ -214,6 +214,7 @@ impl SubxtTracker {
 						.is_some_and(|candidate| !candidate.is_included() && !candidate.is_dropped())
 			})
 		});
+		self.candidates.retain(|_, v| !v.is_empty());
 	}
 
 	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
