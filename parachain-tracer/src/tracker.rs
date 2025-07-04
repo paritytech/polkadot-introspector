@@ -17,7 +17,7 @@
 //! This module tracks parachain blocks.
 use crate::{
 	message_queues_tracker::MessageQueuesTracker,
-	parachain_block_info::{ParachainBlockInfo, ParachainBlockState},
+	parachain_block_info::{BlockAvailability, ParachainBlockInfo, ParachainBlockState},
 	prometheus::PrometheusMetrics,
 	stats::Stats,
 	tracker_storage::TrackerStorage,
@@ -136,16 +136,16 @@ impl SubxtTracker {
 			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
 			self.set_cores(block_hash, storage).await;
-			self.set_included_candidates(new_head.candidates_included.as_slice(), &bitfields)
-				.await;
-			self.set_backed_candidates(block_hash, block_number, new_head.candidates_backed.as_slice(), storage)
+			self.set_included_candidates(block_hash, new_head.candidates_included.as_slice(), &bitfields, storage)
 				.await?;
+			self.set_backed_candidates(block_number, new_head.candidates_backed.as_slice())
+				.await;
 			self.set_core_assignment(block_hash, storage).await;
 			self.set_disputes(disputes.as_slice(), new_head.disputes_concluded.as_slice(), storage)
 				.await;
 			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
-			self.set_pending_availability(&bitfields);
+			self.set_pending_availability(block_hash, &bitfields, storage).await?;
 			self.set_dropped_candidates();
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
@@ -214,6 +214,7 @@ impl SubxtTracker {
 						.is_some_and(|candidate| !candidate.is_included() && !candidate.is_dropped())
 			})
 		});
+		self.candidates.retain(|_, v| !v.is_empty());
 	}
 
 	async fn set_hrmp_channels(&mut self, block_hash: H256, storage: &TrackerStorage) -> color_eyre::Result<()> {
@@ -276,13 +277,20 @@ impl SubxtTracker {
 			.collect();
 	}
 
-	async fn set_included_candidates(&mut self, candidates_included: &[H256], bitfields: &[AvailabilityBitfield]) {
+	async fn set_included_candidates(
+		&mut self,
+		block_hash: H256,
+		candidates_included: &[H256],
+		bitfields: &[AvailabilityBitfield],
+		storage: &TrackerStorage,
+	) -> color_eyre::Result<()> {
+		let max_availability_bits = self.validators_indices(block_hash, storage).await?.len() as u32;
 		let mut last_included = None;
 		for candidate in self.all_candidates_mut() {
 			if candidates_included.contains(&candidate.candidate_hash) {
+				let current_availability_bits = extract_availability_bits_count(bitfields, candidate.assigned_core);
 				candidate.set_included();
-				candidate.current_availability_bits =
-					extract_availability_bits_count(bitfields, candidate.assigned_core);
+				candidate.set_availability(BlockAvailability::new(current_availability_bits, max_availability_bits));
 				last_included = Some(candidate.candidate_hash);
 			}
 		}
@@ -291,20 +299,15 @@ impl SubxtTracker {
 			self.previous_included_at = self.last_included_at;
 			self.last_included_at = self.current_relay_block.map(|v| v.into());
 		}
+
+		Ok(())
 	}
 
-	async fn set_backed_candidates(
-		&mut self,
-		block_hash: H256,
-		block_number: BlockNumber,
-		backed_candidates: &[BackedCandidateInfo],
-		storage: &TrackerStorage,
-	) -> color_eyre::Result<()> {
+	async fn set_backed_candidates(&mut self, block_number: BlockNumber, backed_candidates: &[BackedCandidateInfo]) {
 		let mut used_cores = vec![];
 		for candidate in backed_candidates.iter().filter(|v| v.para_id == self.para_id) {
 			let core = candidate.core_idx;
-			let max_availability_bits = self.validators_indices(block_hash, storage).await?.len() as u32;
-			let candidate = ParachainBlockInfo::new(candidate.candidate_hash, core, max_availability_bits);
+			let candidate = ParachainBlockInfo::new(candidate.candidate_hash, core);
 			if let Some(current_fork) = self.relay_forks.last_mut() {
 				current_fork.backed_candidate = Some(candidate.candidate_hash);
 			}
@@ -335,8 +338,6 @@ impl SubxtTracker {
 					},
 			}
 		}
-
-		Ok(())
 	}
 
 	fn set_dropped_candidates(&mut self) {
@@ -419,15 +420,24 @@ impl SubxtTracker {
 		}
 	}
 
-	fn set_pending_availability(&mut self, bitfields: &[AvailabilityBitfield]) {
+	async fn set_pending_availability(
+		&mut self,
+		block_hash: H256,
+		bitfields: &[AvailabilityBitfield],
+		storage: &TrackerStorage,
+	) -> color_eyre::Result<()> {
+		let max_availability_bits = self.validators_indices(block_hash, storage).await?.len() as u32;
 		let core_ids: Vec<u32> = self.cores.keys().cloned().collect();
 		for core in core_ids {
 			if self.is_current_candidate_backed(core) && !self.is_just_backed() {
 				let candidate = self.current_candidate_mut(core).expect("Checked above");
-				candidate.current_availability_bits = extract_availability_bits_count(bitfields, core);
+				let current_availability_bits = extract_availability_bits_count(bitfields, core);
 				candidate.set_pending();
+				candidate.set_availability(BlockAvailability::new(current_availability_bits, max_availability_bits));
 			}
 		}
+
+		Ok(())
 	}
 
 	fn notify_disputes(
@@ -514,17 +524,14 @@ impl SubxtTracker {
 		for &core in self.cores.keys() {
 			let Some(candidate) = self.current_candidate(core) else { continue };
 			if candidate.is_bitfield_propagation_slow() {
-				progress.events.push(ParachainConsensusEvent::SlowBitfieldPropagation(
-					candidate.current_availability_bits,
-					candidate.max_availability_bits,
-				))
+				if let Some(ref availability) = candidate.availability {
+					progress
+						.events
+						.push(ParachainConsensusEvent::SlowBitfieldPropagation(availability.current, availability.max));
+					stats.on_bitfields(availability.current, candidate.is_bitfield_propagation_slow());
+					metrics.on_bitfields(availability.current, candidate.is_bitfield_propagation_slow(), self.para_id);
+				}
 			}
-			stats.on_bitfields(candidate.current_availability_bits, candidate.is_bitfield_propagation_slow());
-			metrics.on_bitfields(
-				candidate.current_availability_bits,
-				candidate.is_bitfield_propagation_slow(),
-				self.para_id,
-			);
 		}
 	}
 
@@ -555,20 +562,24 @@ impl SubxtTracker {
 						.events
 						.push(ParachainConsensusEvent::PendingAvailability(candidate.candidate_hash));
 					if self.is_slow_availability(candidate.assigned_core) {
-						progress.events.push(ParachainConsensusEvent::SlowAvailability(
-							candidate.current_availability_bits,
-							candidate.max_availability_bits,
-						));
+						if let Some(ref availability) = candidate.availability {
+							progress.events.push(ParachainConsensusEvent::SlowAvailability(
+								availability.current,
+								availability.max,
+							));
+						}
 						stats.on_slow_availability();
 						metrics.on_slow_availability(self.para_id);
 					}
 				},
 				ParachainBlockState::Included => {
-					progress.events.push(ParachainConsensusEvent::Included(
-						candidate.candidate_hash,
-						candidate.current_availability_bits,
-						candidate.max_availability_bits,
-					));
+					if let Some(ref availability) = candidate.availability {
+						progress.events.push(ParachainConsensusEvent::Included(
+							candidate.candidate_hash,
+							availability.current,
+							availability.max,
+						));
+					}
 
 					let backed_in = self.candidate_backed_in(candidate.candidate_hash, storage).await;
 					let relay_block = self.current_relay_block.expect("Checked by caller; qed");
@@ -1122,7 +1133,7 @@ mod test_progress {
 		let hasher = create_hasher().await;
 		let mut tracker = SubxtTracker::new(100);
 		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
-		let mut candidate = create_para_block_info(100, hasher);
+		let candidate = create_para_block_info(100, hasher);
 		let mut mock_stats = MockStats::default();
 		mock_stats.expect_on_backed().returning(|| ());
 		mock_stats.expect_on_block().returning(|_| ());
@@ -1133,7 +1144,6 @@ mod test_progress {
 
 		// Bitfields propogation isn't slow
 		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		candidate.current_availability_bits = 120;
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.cores.entry(0).or_default().push(100);
 		mock_stats.expect_on_bitfields().with(eq(120), eq(false)).returning(|_, _| ());
@@ -1155,7 +1165,7 @@ mod test_progress {
 
 		// Bitfields propogation is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
-		candidate.max_availability_bits = 200;
+		candidate.set_availability(BlockAvailability::new(120, 200));
 		mock_stats.expect_on_bitfields().with(eq(120), eq(true)).returning(|_, _| ());
 		mock_metrics
 			.expect_on_bitfields()
@@ -1415,7 +1425,7 @@ mod test_progress {
 		);
 
 		// When candidate is backed
-		let candidate = ParachainBlockInfo::new(candidate_hash, 0, 0);
+		let candidate = ParachainBlockInfo::new(candidate_hash, 0);
 		tracker.candidates.clear();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		mock_stats.expect_on_backed().once().returning(|| ());
@@ -1441,8 +1451,7 @@ mod test_progress {
 		// And data is available
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
 		candidate.set_pending();
-		candidate.max_availability_bits = 200;
-		candidate.current_availability_bits = 140;
+		candidate.set_availability(BlockAvailability::new(140, 200));
 		let progress = tracker
 			.progress(&mut mock_stats, &mock_metrics, &tracker_storage)
 			.await
@@ -1457,8 +1466,7 @@ mod test_progress {
 
 		// And availability is slow
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
-		candidate.max_availability_bits = 200;
-		candidate.current_availability_bits = 120;
+		candidate.set_availability(BlockAvailability::new(120, 200));
 		candidate.core_occupied = true;
 		tracker.last_backed_at_block_number = Some(41);
 		mock_stats.expect_on_slow_availability().once().returning(|| ());
@@ -1482,8 +1490,7 @@ mod test_progress {
 		// When candidate is included and data is available
 		let candidate = tracker.candidates.entry(0).or_default().last_mut().unwrap().as_mut().unwrap();
 		candidate.set_included();
-		candidate.max_availability_bits = 200;
-		candidate.current_availability_bits = 140;
+		candidate.set_availability(BlockAvailability::new(140, 200));
 		tracker.previous_included_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
 		mock_stats
 			.expect_on_included()

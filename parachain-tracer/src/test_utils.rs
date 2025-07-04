@@ -180,7 +180,7 @@ pub fn candidate_hash(candidate: &BackedCandidate<H256>, hasher: PolkadotHasher)
 pub fn create_para_block_info(para_id: u32, hasher: PolkadotHasher) -> ParachainBlockInfo {
 	let candidate = create_backed_candidate(para_id);
 	let hash = candidate_hash(&candidate, hasher);
-	ParachainBlockInfo::new(hash, 0, 0)
+	ParachainBlockInfo::new(hash, 0)
 }
 
 pub async fn storage_write<T: Encode>(
