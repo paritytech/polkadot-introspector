@@ -523,14 +523,14 @@ impl SubxtTracker {
 	) {
 		for &core in self.cores.keys() {
 			let Some(candidate) = self.current_candidate(core) else { continue };
-			if candidate.is_bitfield_propagation_slow() {
-				if let Some(ref availability) = candidate.availability {
-					progress
-						.events
-						.push(ParachainConsensusEvent::SlowBitfieldPropagation(availability.current, availability.max));
-					stats.on_bitfields(availability.current, candidate.is_bitfield_propagation_slow());
-					metrics.on_bitfields(availability.current, candidate.is_bitfield_propagation_slow(), self.para_id);
-				}
+			let Some(ref availability) = candidate.availability else { continue };
+			let is_slow = candidate.is_bitfield_propagation_slow();
+			stats.on_bitfields(availability.current, is_slow);
+			metrics.on_bitfields(availability.current, is_slow, self.para_id);
+			if is_slow {
+				progress
+					.events
+					.push(ParachainConsensusEvent::SlowBitfieldPropagation(availability.current, availability.max));
 			}
 		}
 	}
