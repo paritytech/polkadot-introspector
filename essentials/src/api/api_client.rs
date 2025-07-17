@@ -18,36 +18,23 @@
 use crate::{
 	metadata::{
 		polkadot::{
-			self,
-			runtime_types::{
-				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-				polkadot_runtime_parachains::hrmp::HrmpChannel,
-			},
+			self, runtime_types::{
+				 polkadot_parachain_primitives::primitives::{HrmpChannelId, Id}, polkadot_runtime_parachains::hrmp::HrmpChannel, sp_consensus_babe::{self, digests::PreDigest}, sp_consensus_slots::Slot, sp_core::crypto::KeyTypeId, sp_runtime::generic::{digest::DigestItem}
+			}
 		},
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys,
-		SubxtHrmpChannel, Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys, SubxtHrmpChannel, Timestamp, H256
 	},
 };
+use parity_scale_codec::Decode;
 use clap::ValueEnum;
 use std::collections::BTreeMap;
 use subxt::{
-	OnlineClient, PolkadotConfig,
 	backend::{
-		StreamOf,
-		legacy::{LegacyRpcMethods, rpc_methods::NumberOrHex},
-		rpc::RpcClient,
-	},
-	blocks::{Block, BlockRef, BlocksClient},
-	client::OnlineClientT,
-	dynamic::Value,
-	events::{Events, EventsClient},
-	lightclient::LightClient,
-	runtime_api::{RuntimeApi, RuntimeApiClient},
-	storage::StorageClient,
-	utils::fetch_chainspec_from_rpc_node,
+		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods}, rpc::RpcClient, StreamOf
+	}, blocks::{Block, BlockRef, BlocksClient}, client::OnlineClientT, dynamic::Value, events::{Events, EventsClient}, lightclient::LightClient, runtime_api::{RuntimeApi, RuntimeApiClient}, storage::StorageClient, utils::fetch_chainspec_from_rpc_node, OnlineClient, PolkadotConfig
 };
 
 pub type HeaderStream = StreamOf<Result<(Header, BlockRef<H256>), subxt::Error>>;
@@ -203,6 +190,46 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
 		self.events().at(hash).await
+	}
+
+	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
+		let addr = polkadot::storage().babe().randomness();
+
+		let result = self.storage()
+			.at(hash)
+			.fetch(&addr)
+			.await;
+
+		result
+	}
+
+	pub async fn get_babe_authorities(&self, hash: H256) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
+		let addr = polkadot::storage().babe().authorities();
+		self.storage().at(hash).fetch(&addr).await.map(|res| res.map(|res| res.0).unwrap_or_default())
+	}
+
+	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
+		let addr = polkadot::storage().babe().current_slot();
+		self.storage().at(hash).fetch(&addr).await
+	}
+
+	pub async fn get_system_digest(&self, hash: H256) -> Result<Option<PreDigest>, subxt::Error> {
+		let addr = polkadot::storage().system().digest();
+		let result = self.storage().at(hash).fetch(&addr).await.unwrap().unwrap();
+
+		for pre_digest in result.logs.into_iter() {
+			if let DigestItem::PreRuntime(_, bytes) = pre_digest {
+				let pre_digest: PreDigest = PreDigest::decode(&mut &bytes[..]).unwrap();
+				return Ok(Some(pre_digest));
+			}
+		}
+
+		Ok(None)
+	}
+
+	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
+		let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
+		self.storage().at(hash).fetch(&addr).await
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreState<H256, u32>>, subxt::Error> {

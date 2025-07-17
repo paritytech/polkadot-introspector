@@ -8,8 +8,10 @@ repository.workspace = true
 publish = true
 
 [dependencies]
+sp-core-hashing = "16.0"
 async-trait = { workspace = true }
 clap = { workspace = true }
+
 parity-scale-codec = { workspace = true }
 color-eyre = { workspace = true }
 env_logger = { workspace = true }

@@ -4442,6 +4442,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
+ "sp-core-hashing",
  "strum",
  "subxt",
  "thiserror 2.0.12",
@@ -6077,6 +6078,15 @@ dependencies = [
  "log",
  "rand",
  "sha1",
+]
+
+[[package]]
+name = "sp-core-hashing"
+version = "16.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f812cb2dff962eb378c507612a50f1c59f52d92eb97b710f35be3c2346a3cd7"
+dependencies = [
+ "sp-crypto-hashing",
 ]
 
 [[package]]

@@ -70,6 +70,8 @@ struct MetricsInner {
 	relay_block_times: HistogramVec,
 	/// Relative time measurements (in standard blocks) for relay parent blocks
 	relay_skipped_slots: IntCounterVec,
+	/// Tracks authors that missed their slots in the relay chain
+	relay_authors_missing_slots: IntCounterVec,
 	/// Relay chain candidate metrics (backed, included, timed out)
 	relay_candidate_statuses: HistogramVec,
 	/// Number of slow availability events.
@@ -104,7 +106,7 @@ pub trait PrometheusMetrics {
 	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
 	/// Update relay chain specific metrics on new relay block
-	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>);
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>, block_number: u32, missing_authors: Vec<String>);
 	/// Update metrics on new block
 	// fn on_block(&self, time: Duration, para_id: u32);
 	/// Update metrics on slow availability
@@ -155,7 +157,7 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>) {
+	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>, block_number: u32, missing_authors: Vec<String>) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.relay_candidate_statuses
@@ -180,6 +182,12 @@ impl PrometheusMetrics for Metrics {
 						.with_label_values(&[RELAY_CHAIN_ID_STR])
 						.inc_by(skipped_slots);
 				}
+			}
+			for missing_author in missing_authors {
+				metrics
+					.relay_authors_missing_slots
+					.with_label_values(&[RELAY_CHAIN_ID_STR, &block_number.to_string(), &missing_author])
+					.inc();
 			}
 		}
 	}
@@ -402,12 +410,10 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			registry,
 		)?,
 		initiators: prometheus_endpoint::register(
-			IntCounterVec::new(Opts::new("pc_disputed_initiators", "Validators that initiated a dispute"), &[
-				"parachain_id",
-				"validator_index",
-				"session_index",
-				"validator_address",
-			])?,
+			IntCounterVec::new(
+				Opts::new("pc_disputed_initiators", "Validators that initiated a dispute"),
+				&["parachain_id", "validator_index", "session_index", "validator_address"],
+			)?,
 			registry,
 		)?,
 		misbehaving_validators: prometheus_endpoint::register(
@@ -456,6 +462,16 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 					"Relay chain block time measured in standard blocks, label `parachain_id` is deprecated",
 				),
 				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		relay_authors_missing_slots: prometheus_endpoint::register(
+			IntCounterVec::new(
+				Opts::new(
+					"pc_relay_authors_missing_slots",
+					"Authors that missed their slots in the relay chain, label `parachain_id` is deprecated",
+				),
+				&["parachain_id", "block_number", "author_account"],
 			)?,
 			registry,
 		)?,

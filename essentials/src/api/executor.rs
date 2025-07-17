@@ -16,18 +16,17 @@
 
 use crate::{
 	api::{
-		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
-		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
+		api_client::{build_online_client, ApiClient, ApiClientMode, HeaderStream},
+		dynamic::{self, decode_validator_groups, fetch_dynamic_storage, DynamicHostConfiguration},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
 	init::Shutdown,
 	metadata::{
-		polkadot::session::storage::types::queued_keys::QueuedKeys, polkadot_primitives,
+		polkadot::{runtime_apis::babe_api::types::generate_key_ownership_proof::Slot, runtime_types::sp_consensus_babe::{self, digests::PreDigest}, session::storage::types::queued_keys::QueuedKeys}, polkadot_primitives,
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData, PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp, H256
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -70,6 +69,12 @@ pub enum Request {
 	GetBestBlockSubscription,
 	GetFinalizedBlockSubscription,
 	GetChainName,
+	GetBabeRandomness(H256),
+	GetBabeAuthorithies(H256),
+	GetBabeCurrentSlot(H256),
+	GetSystemDigest(H256),
+	GetBabeKeyOwner(H256, sp_consensus_babe::app::Public),
+	
 }
 
 /// Response types for APIs.
@@ -109,6 +114,17 @@ enum Response {
 	ChainSubscription(HeaderStream),
 	/// Chain name
 	ChainName(String),
+	/// Babe randomness
+	BabeRandomness(Option<[u8; 32]>),
+	/// Babe authorithies
+	BabeAuthorithies(Vec<(sp_consensus_babe::app::Public, u64)>),
+	/// Babe current slot
+	BabeCurrentSlot(Option<Slot>),
+	/// System digest
+	SystemDigest(Option<PreDigest>),
+	/// Babe key owner
+	BabeKeyOwner(Option<AccountId32>),
+
 }
 
 #[derive(Debug, Error)]
@@ -253,6 +269,11 @@ impl RequestExecutorBackend {
 			)),
 			GetBestBlockSubscription => ChainSubscription(client.stream_best_block_headers().await?),
 			GetFinalizedBlockSubscription => ChainSubscription(client.stream_finalized_block_headers().await?),
+			GetBabeRandomness(hash) => BabeRandomness(client.get_babe_randomness(hash).await?),
+			GetBabeAuthorithies(hash) => BabeAuthorithies(client.get_babe_authorities(hash).await?),
+			GetBabeCurrentSlot(hash) => BabeCurrentSlot(client.get_babe_current_slot(hash).await?),
+			GetSystemDigest(hash) => SystemDigest(client.get_system_digest(hash).await?),
+			GetBabeKeyOwner(hash, key ) => BabeKeyOwner(client.get_babe_key_owner(hash, &key.0).await?),
 		};
 
 		Ok(response)
@@ -500,6 +521,48 @@ impl RequestExecutor {
 	) -> color_eyre::Result<HeaderStream, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetFinalizedBlockSubscription, ChainSubscription)
 	}
+
+	pub async fn get_babe_randomness(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Option<[u8; 32]>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetBabeRandomness, BabeRandomness, hash)
+	}
+
+	pub async fn get_babe_authorities(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Vec<(sp_consensus_babe::app::Public, u64)>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetBabeAuthorithies, BabeAuthorithies, hash)
+	}
+
+	pub async fn get_babe_current_slot(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Option<Slot>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetBabeCurrentSlot, BabeCurrentSlot, hash)
+	}
+
+	pub async fn get_system_digest(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Option<PreDigest>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetSystemDigest, SystemDigest, hash)
+	}
+
+	pub async fn get_babe_key_owner(
+		&mut self,
+		url: &str,
+		hash: H256,
+		key: sp_consensus_babe::app::Public,
+	) -> color_eyre::Result<Option<AccountId32>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetBabeKeyOwner, BabeKeyOwner, hash, key)
+	}
+
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.

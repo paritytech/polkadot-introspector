@@ -161,7 +161,7 @@ impl ParachainTracer {
 		);
 		if let Err(e) = print_host_configuration(self.opts.node.as_str(), executor).await {
 			warn!("Cannot get host configuration");
-			return Err(e)
+			return Err(e);
 		}
 		println!(
 			"{}",
@@ -229,7 +229,7 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewHead(new_head) => {
 							// Happens on startup
 							if new_head.relay_parent_number == 0 {
-								continue
+								continue;
 							}
 
 							let curr_ts = storage
@@ -247,11 +247,19 @@ impl ParachainTracer {
 							let backed = new_head.candidates_backed.len();
 							let included = new_head.candidates_included.len();
 							let timed_out = new_head.candidates_timed_out.len();
-							metrics.on_new_relay_block(backed, included, timed_out, block_time);
+							metrics.on_new_relay_block(backed, included, timed_out, block_time, new_head.relay_parent_number, new_head.authors_missing_their_slots.iter().map(|account| account.to_string()).collect());
 							if is_cli {
 								println!(
-									"Block {}: backed {}, included {}, timed-out {}",
-									new_head.relay_parent_number, backed, included, timed_out
+									"Block {}: backed {}, included {}, timed-out {} {:}",
+									new_head.relay_parent_number,
+									backed,
+									included,
+									timed_out,
+									if new_head.authors_missing_their_slots.is_empty() {
+										"".to_string()
+									} else {
+										format!(", authors missing their slot: {}", new_head.authors_missing_their_slots.iter().map(|account| account.to_string()).join(", "))
+									}
 								);
 							}
 						},
@@ -275,7 +283,7 @@ impl ParachainTracer {
 					},
 					Err(_) => {
 						info!("Input channel has been closed");
-						break
+						break;
 					},
 				}
 			}
@@ -306,7 +314,7 @@ impl ParachainTracer {
 			loop {
 				match from_collector.recv().await {
 					Ok(update_event) => match update_event {
-						CollectorUpdateEvent::NewHead(new_head) =>
+						CollectorUpdateEvent::NewHead(new_head) => {
 							for relay_fork in &new_head.relay_parent_hashes {
 								if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
@@ -319,7 +327,8 @@ impl ParachainTracer {
 									}
 								}
 								tracker.maybe_reset_state();
-							},
+							}
+						},
 						CollectorUpdateEvent::NewSession(idx) => {
 							tracker.inject_new_session(idx);
 						},
@@ -337,7 +346,7 @@ impl ParachainTracer {
 					},
 					Err(_) => {
 						info!("Input channel has been closed for parachain {}", para_id);
-						break
+						break;
 					},
 				}
 			}

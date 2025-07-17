@@ -38,6 +38,16 @@
         derive = "parity_scale_codec::Decode, parity_scale_codec::Encode",
         recursive
     ),
+	derive_for_type(
+        path = "sp_consensus_babe::digests::PreDigest",
+        derive = "parity_scale_codec::Decode, parity_scale_codec::Encode",
+        recursive
+    ),
+    	derive_for_type(
+        path = "sp_consensus_babe::app::Public",
+        derive = "Clone",
+        recursive
+    ),
  )]
 pub mod polkadot {}
 
