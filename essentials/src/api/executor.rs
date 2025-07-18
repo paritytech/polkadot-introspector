@@ -16,17 +16,23 @@
 
 use crate::{
 	api::{
-		api_client::{build_online_client, ApiClient, ApiClientMode, HeaderStream},
-		dynamic::{self, decode_validator_groups, fetch_dynamic_storage, DynamicHostConfiguration},
+		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
+		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
 	init::Shutdown,
 	metadata::{
-		polkadot::{runtime_apis::babe_api::types::generate_key_ownership_proof::Slot, runtime_types::sp_consensus_babe::{self, digests::PreDigest}, session::storage::types::queued_keys::QueuedKeys}, polkadot_primitives,
+		polkadot::{
+			runtime_apis::babe_api::types::generate_key_ownership_proof::Slot,
+			runtime_types::sp_consensus_babe::{self, digests::PreDigest},
+			session::storage::types::queued_keys::QueuedKeys,
+		},
+		polkadot_primitives,
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, Header, InboundOutBoundHrmpChannels, InherentData, PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp, H256
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
+		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -74,7 +80,6 @@ pub enum Request {
 	GetBabeCurrentSlot(H256),
 	GetSystemDigest(H256),
 	GetBabeKeyOwner(H256, sp_consensus_babe::app::Public),
-	
 }
 
 /// Response types for APIs.
@@ -124,7 +129,6 @@ enum Response {
 	SystemDigest(Option<PreDigest>),
 	/// Babe key owner
 	BabeKeyOwner(Option<AccountId32>),
-
 }
 
 #[derive(Debug, Error)]
@@ -273,7 +277,7 @@ impl RequestExecutorBackend {
 			GetBabeAuthorithies(hash) => BabeAuthorithies(client.get_babe_authorities(hash).await?),
 			GetBabeCurrentSlot(hash) => BabeCurrentSlot(client.get_babe_current_slot(hash).await?),
 			GetSystemDigest(hash) => SystemDigest(client.get_system_digest(hash).await?),
-			GetBabeKeyOwner(hash, key ) => BabeKeyOwner(client.get_babe_key_owner(hash, &key.0).await?),
+			GetBabeKeyOwner(hash, key) => BabeKeyOwner(client.get_babe_key_owner(hash, &key.0).await?),
 		};
 
 		Ok(response)
@@ -562,7 +566,6 @@ impl RequestExecutor {
 	) -> color_eyre::Result<Option<AccountId32>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeKeyOwner, BabeKeyOwner, hash, key)
 	}
-
 }
 
 // Attempts to connect to websocket and returns an RuntimeApi instance if successful.

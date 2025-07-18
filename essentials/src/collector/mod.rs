@@ -19,16 +19,17 @@ mod ws;
 
 use crate::{
 	api::{
-		executor::{RequestExecutor, RequestExecutorError}, ApiService
+		ApiService,
+		executor::{RequestExecutor, RequestExecutorError},
 	},
 	chain_events::{
-		decode_chain_event, ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult
+		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
 	init::Shutdown,
 	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp, H256},
+	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -48,7 +49,10 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::{config::{polkadot::U256, Hasher}, PolkadotConfig};
+use subxt::{
+	PolkadotConfig,
+	config::{Hasher, polkadot::U256},
+};
 use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
@@ -178,9 +182,8 @@ pub struct NewHeadEvent {
 	pub candidates_timed_out: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
-	///	List of accounts that did not author blocks in their slots
+	/// 	List of accounts that did not author blocks in their slots
 	pub authors_missing_their_slots: Vec<AccountId32>,
-
 }
 
 /// Basic information about a backed candidate
@@ -431,17 +434,22 @@ impl Collector {
 		self.executor.clone()
 	}
 
-	async fn update_state(&mut self, block_number: u32, block_hash: H256, block_parent_hash: H256) -> color_eyre::Result<()> {
-
+	async fn update_state(
+		&mut self,
+		block_number: u32,
+		block_hash: H256,
+		block_parent_hash: H256,
+	) -> color_eyre::Result<()> {
 		let current_slot = self.executor.get_babe_current_slot(&self.endpoint.as_str(), block_hash).await?;
-		let parent_slot =
-			self.executor.get_babe_current_slot(&self.endpoint.as_str(), block_parent_hash).await?;
-		
+		let parent_slot = self
+			.executor
+			.get_babe_current_slot(&self.endpoint.as_str(), block_parent_hash)
+			.await?;
+
 		let authors_missing_their_slots = match (current_slot, parent_slot) {
 			(Some(current_slot), Some(parent_slot)) if current_slot.0 - 1 > parent_slot.0 => {
 				// We skip a lot from our parent, so let's determine we should have build that blocks that we skipped.
-				let babe_randomness =
-					self.executor.get_babe_randomness(&self.endpoint.as_str(), block_hash).await?;
+				let babe_randomness = self.executor.get_babe_randomness(&self.endpoint.as_str(), block_hash).await?;
 				let authorities = self.executor.get_babe_authorities(&self.endpoint.as_str(), block_hash).await?;
 				let mut missed_slots = current_slot.0 - 1;
 				let mut authors_missing_their_slots = Vec::new();
@@ -453,18 +461,29 @@ impl Collector {
 
 						let idx = rand % authorities_len;
 						let idx = idx.as_u32();
-						let account_ids = self.executor.get_babe_key_owner(&self.endpoint.as_str(), block_parent_hash, authorities.get(idx as usize).expect("we computed the idx with modulo len; qed").0.clone()).await?;
+						let account_ids = self
+							.executor
+							.get_babe_key_owner(
+								&self.endpoint.as_str(),
+								block_parent_hash,
+								authorities
+									.get(idx as usize)
+									.expect("we computed the idx with modulo len; qed")
+									.0
+									.clone(),
+							)
+							.await?;
 
 						authors_missing_their_slots.extend(account_ids.into_iter());
 					}
 					missed_slots -= 1;
 				}
 				authors_missing_their_slots
-
-			}
-			(_, _) => {vec![]}
+			},
+			(_, _) => {
+				vec![]
+			},
 		};
-
 
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {
 			let candidates = self.state.candidates_seen.get(para_id);

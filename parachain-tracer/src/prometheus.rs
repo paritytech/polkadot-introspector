@@ -106,7 +106,15 @@ pub trait PrometheusMetrics {
 	/// Update metrics on candidate backing
 	fn on_backed(&self, para_id: u32);
 	/// Update relay chain specific metrics on new relay block
-	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>, block_number: u32, missing_authors: Vec<String>);
+	fn on_new_relay_block(
+		&self,
+		backed: usize,
+		included: usize,
+		timed_out: usize,
+		block_time: Option<Duration>,
+		block_number: u32,
+		missing_authors: Vec<String>,
+	);
 	/// Update metrics on new block
 	// fn on_block(&self, time: Duration, para_id: u32);
 	/// Update metrics on slow availability
@@ -157,7 +165,15 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	fn on_new_relay_block(&self, backed: usize, included: usize, timed_out: usize, block_time: Option<Duration>, block_number: u32, missing_authors: Vec<String>) {
+	fn on_new_relay_block(
+		&self,
+		backed: usize,
+		included: usize,
+		timed_out: usize,
+		block_time: Option<Duration>,
+		block_number: u32,
+		missing_authors: Vec<String>,
+	) {
 		if let Some(metrics) = &self.0 {
 			metrics
 				.relay_candidate_statuses

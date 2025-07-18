@@ -18,23 +18,41 @@
 use crate::{
 	metadata::{
 		polkadot::{
-			self, runtime_types::{
-				 polkadot_parachain_primitives::primitives::{HrmpChannelId, Id}, polkadot_runtime_parachains::hrmp::HrmpChannel, sp_consensus_babe::{self, digests::PreDigest}, sp_consensus_slots::Slot, sp_core::crypto::KeyTypeId, sp_runtime::generic::{digest::DigestItem}
-			}
+			self,
+			runtime_types::{
+				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+				polkadot_runtime_parachains::hrmp::HrmpChannel,
+				sp_consensus_babe::{self, digests::PreDigest},
+				sp_consensus_slots::Slot,
+				sp_core::crypto::KeyTypeId,
+				sp_runtime::generic::digest::DigestItem,
+			},
 		},
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys, SubxtHrmpChannel, Timestamp, H256
+		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys,
+		SubxtHrmpChannel, Timestamp,
 	},
 };
-use parity_scale_codec::Decode;
 use clap::ValueEnum;
+use parity_scale_codec::Decode;
 use std::collections::BTreeMap;
 use subxt::{
+	OnlineClient, PolkadotConfig,
 	backend::{
-		legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods}, rpc::RpcClient, StreamOf
-	}, blocks::{Block, BlockRef, BlocksClient}, client::OnlineClientT, dynamic::Value, events::{Events, EventsClient}, lightclient::LightClient, runtime_api::{RuntimeApi, RuntimeApiClient}, storage::StorageClient, utils::fetch_chainspec_from_rpc_node, OnlineClient, PolkadotConfig
+		StreamOf,
+		legacy::{LegacyRpcMethods, rpc_methods::NumberOrHex},
+		rpc::RpcClient,
+	},
+	blocks::{Block, BlockRef, BlocksClient},
+	client::OnlineClientT,
+	dynamic::Value,
+	events::{Events, EventsClient},
+	lightclient::LightClient,
+	runtime_api::{RuntimeApi, RuntimeApiClient},
+	storage::StorageClient,
+	utils::fetch_chainspec_from_rpc_node,
 };
 
 pub type HeaderStream = StreamOf<Result<(Header, BlockRef<H256>), subxt::Error>>;
@@ -195,17 +213,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
 		let addr = polkadot::storage().babe().randomness();
 
-		let result = self.storage()
-			.at(hash)
-			.fetch(&addr)
-			.await;
+		let result = self.storage().at(hash).fetch(&addr).await;
 
 		result
 	}
 
-	pub async fn get_babe_authorities(&self, hash: H256) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
+	pub async fn get_babe_authorities(
+		&self,
+		hash: H256,
+	) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
 		let addr = polkadot::storage().babe().authorities();
-		self.storage().at(hash).fetch(&addr).await.map(|res| res.map(|res| res.0).unwrap_or_default())
+		self.storage()
+			.at(hash)
+			.fetch(&addr)
+			.await
+			.map(|res| res.map(|res| res.0).unwrap_or_default())
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
