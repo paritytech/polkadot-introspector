@@ -41,8 +41,8 @@ impl MessageQueuesTracker {
 
 	/// Returns if there are HRMP messages in any direction
 	pub fn has_hrmp_messages(&self) -> bool {
-		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
-			|| self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
+		self.inbound_hrmp_channels.values().any(|channel| channel.total_size > 0) ||
+			self.outbound_hrmp_channels.values().any(|channel| channel.total_size > 0)
 	}
 
 	/// Returns active inbound channels

@@ -209,8 +209,8 @@ impl SubxtTracker {
 		self.disputes.clear();
 		self.candidates.values_mut().for_each(|v| {
 			v.retain(|v| {
-				v.is_some()
-					&& v.as_ref()
+				v.is_some() &&
+					v.as_ref()
 						.is_some_and(|candidate| !candidate.is_included() && !candidate.is_dropped())
 			})
 		});
@@ -328,16 +328,14 @@ impl SubxtTracker {
 		let idle_cores = self.cores.keys().filter(|v| !used_cores.contains(v)).cloned();
 		for core in idle_cores {
 			match self.backing_type {
-				BackingType::Sync => {
+				BackingType::Sync =>
 					if !self.has_backed_or_included_candidate(core) {
 						self.candidates.entry(core).or_default().push(None);
-					}
-				},
-				BackingType::Async => {
+					},
+				BackingType::Async =>
 					if !self.has_backed_candidate(core) {
 						self.candidates.entry(core).or_default().push(None);
-					}
-				},
+					},
 			}
 		}
 	}
@@ -594,9 +592,8 @@ impl SubxtTracker {
 						self.para_id,
 					);
 				},
-				ParachainBlockState::Dropped => {
-					progress.events.push(ParachainConsensusEvent::Dropped(candidate.candidate_hash))
-				},
+				ParachainBlockState::Dropped =>
+					progress.events.push(ParachainConsensusEvent::Dropped(candidate.candidate_hash)),
 			}
 		}
 	}
@@ -655,9 +652,8 @@ impl SubxtTracker {
 	fn has_backed_or_included_candidate(&self, core: u32) -> bool {
 		self.candidates
 			.get(&core)
-			.is_some_and(|v| v.iter().any(|candidate| candidate.is_some()))
-			|| self
-				.relay_forks
+			.is_some_and(|v| v.iter().any(|candidate| candidate.is_some())) ||
+			self.relay_forks
 				.iter()
 				.any(|fork| fork.backed_candidate.is_some() || fork.included_candidate.is_some())
 	}
@@ -667,8 +663,8 @@ impl SubxtTracker {
 	}
 
 	fn is_just_backed(&self) -> bool {
-		self.last_backed_at_block_number.is_some()
-			&& self.last_backed_at_block_number == self.current_relay_block.map(|v| v.num)
+		self.last_backed_at_block_number.is_some() &&
+			self.last_backed_at_block_number == self.current_relay_block.map(|v| v.num)
 	}
 
 	fn is_slow_availability(&self, core: u32) -> bool {

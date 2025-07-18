@@ -332,7 +332,7 @@ impl ParachainTracer {
 			loop {
 				match from_collector.recv().await {
 					Ok(update_event) => match update_event {
-						CollectorUpdateEvent::NewHead(new_head) => {
+						CollectorUpdateEvent::NewHead(new_head) =>
 							for relay_fork in &new_head.relay_parent_hashes {
 								if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
@@ -345,8 +345,7 @@ impl ParachainTracer {
 									}
 								}
 								tracker.maybe_reset_state();
-							}
-						},
+							},
 						CollectorUpdateEvent::NewSession(idx) => {
 							tracker.inject_new_session(idx);
 						},
