@@ -182,7 +182,7 @@ pub struct NewHeadEvent {
 	pub candidates_timed_out: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
-	/// 	List of accounts that did not author blocks in their slots
+	/// List of accounts that did not author blocks in their slots
 	pub authors_missing_their_slots: Vec<AccountId32>,
 }
 
@@ -449,6 +449,8 @@ impl Collector {
 		let authors_missing_their_slots = match (current_slot, parent_slot) {
 			(Some(current_slot), Some(parent_slot)) if current_slot.0 - 1 > parent_slot.0 => {
 				// We skip a lot from our parent, so let's determine we should have build that blocks that we skipped.
+				// This is the same logic as in babe secondary_slot_author, see:
+				// https://github.com/paritytech/polkadot-sdk/blob/0ae5c5bbd96a600aed81358339be2f16bade4a81/substrate/client/consensus/babe/src/authorship.rs#L102
 				let babe_randomness = self.executor.get_babe_randomness(&self.endpoint.as_str(), block_hash).await?;
 				let authorities = self.executor.get_babe_authorities(&self.endpoint.as_str(), block_hash).await?;
 				let mut missed_slots = current_slot.0 - 1;
