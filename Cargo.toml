@@ -54,7 +54,7 @@ serde_urlencoded = "0.7.1"
 snap = "1.1.1"
 ss58-registry = { version = "1.51.0", default-features = false }
 strum = { version = "0.25.0", features = ["derive"] }
-subxt = { version = "0.42.1", default-features = false, features = [
+subxt = { git = "https://github.com/paritytech/subxt", branch = "master", default-features = false, features = [
     "jsonrpsee",
     "native",
     "unstable-light-client",

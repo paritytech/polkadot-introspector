@@ -144,7 +144,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		recipient: u32,
 	) -> Result<Option<(u32, u32, HrmpChannel)>, subxt::Error> {
 		let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
-		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
+		let addr = polkadot::storage().hrmp().hrmp_channels(id);
 		Ok(storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v)))
 	}
 
@@ -249,7 +249,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
-		let addr = polkadot::storage().session().next_keys(account);
+		let addr = polkadot::storage().session().next_keys(account.clone());
 		self.storage().at_latest().await?.fetch(&addr).await
 	}
 

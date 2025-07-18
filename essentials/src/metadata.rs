@@ -15,7 +15,30 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-#[subxt::subxt(runtime_metadata_path = "assets/polkadot_metadata.scale")]
+
+#[subxt::subxt(
+	runtime_metadata_path = "assets/polkadot_metadata.scale",
+	derive_for_type(
+        path = "polkadot_primitives::vstaging::CandidateDescriptorV2",
+        derive = "parity_scale_codec::Decode, parity_scale_codec::Encode",
+        recursive
+    ),
+	derive_for_type(
+        path = "polkadot_primitives::v8::ValidatorIndex",
+        derive = "parity_scale_codec::Decode, parity_scale_codec::Encode",
+        recursive
+    ),
+	derive_for_type(
+        path = "polkadot_primitives::v8::CoreIndex",
+        derive = "parity_scale_codec::Decode, parity_scale_codec::Encode",
+        recursive
+    ),
+	derive_for_type(
+        path = "polkadot_primitives::vstaging::InherentData",
+        derive = "parity_scale_codec::Decode, parity_scale_codec::Encode",
+        recursive
+    ),
+ )]
 pub mod polkadot {}
 
 pub use polkadot::runtime_types::polkadot_primitives::{
