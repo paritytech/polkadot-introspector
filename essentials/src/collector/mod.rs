@@ -159,6 +159,8 @@ struct CollectorState {
 	current_session_index: u32,
 	/// Last finalized block number
 	last_finalized_block_number: Option<u32>,
+	/// List of authors that did not author blocks in their slots
+	authors_missing_their_slots: Vec<AccountId32>,
 	/// A list of paras for broadcasting
 	paras_seen: BTreeMap<u32, u32>,
 }
@@ -434,19 +436,18 @@ impl Collector {
 		self.executor.clone()
 	}
 
-	async fn update_state(
+	async fn authors_missing_their_slots(
 		&mut self,
-		block_number: u32,
 		block_hash: H256,
 		block_parent_hash: H256,
-	) -> color_eyre::Result<()> {
+	) -> color_eyre::Result<Vec<AccountId32>> {
 		let current_slot = self.executor.get_babe_current_slot(&self.endpoint.as_str(), block_hash).await?;
 		let parent_slot = self
 			.executor
 			.get_babe_current_slot(&self.endpoint.as_str(), block_parent_hash)
 			.await?;
 
-		let authors_missing_their_slots = match (current_slot, parent_slot) {
+		match (current_slot, parent_slot) {
 			(Some(current_slot), Some(parent_slot)) if current_slot.0 - 1 > parent_slot.0 => {
 				// We skip a lot from our parent, so let's determine we should have build that blocks that we skipped.
 				// This is the same logic as in babe secondary_slot_author, see:
@@ -480,13 +481,13 @@ impl Collector {
 					}
 					missed_slots -= 1;
 				}
-				authors_missing_their_slots
+				Ok(authors_missing_their_slots)
 			},
-			(_, _) => {
-				vec![]
-			},
-		};
+			(_, _) => Ok(vec![]),
+		}
+	}
 
+	async fn update_state(&mut self, block_number: u32, block_hash: H256) -> color_eyre::Result<()> {
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {
 			let candidates = self.state.candidates_seen.get(para_id);
 			let disputes_concluded = self.state.disputes_seen.get(para_id).map(|disputes_seen| {
@@ -508,7 +509,7 @@ impl Collector {
 						candidates_timed_out: self.state.candidates_timed_out.clone(),
 						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 						para_id: *para_id,
-						authors_missing_their_slots: authors_missing_their_slots.clone(),
+						authors_missing_their_slots: self.state.authors_missing_their_slots.clone(),
 					}))
 					.await?;
 			}
@@ -570,6 +571,7 @@ impl Collector {
 		self.state.candidates_included.clear();
 		self.state.candidates_timed_out.clear();
 		self.state.current_relay_chain_block_hashes.clear();
+		self.state.authors_missing_their_slots.clear();
 		self.state.current_relay_chain_block_number = block_number;
 		self.state.current_relay_chain_block_hashes.push(block_hash);
 		Ok(())
@@ -670,7 +672,7 @@ impl Collector {
 		match block_number.cmp(&self.state.current_relay_chain_block_number) {
 			Ordering::Greater => {
 				self.write_hrmp_channels(block_hash, block_number, ts).await?;
-				self.update_state(block_number, block_hash, header.parent_hash).await?;
+				self.update_state(block_number, block_hash).await?;
 			},
 			Ordering::Equal => {
 				// A fork
@@ -728,6 +730,9 @@ impl Collector {
 		self.write_occupied_cores(block_hash, block_number, ts).await?;
 		self.write_backing_groups(block_hash, block_number, ts).await?;
 		self.write_core_assignments(block_hash, block_number, ts).await?;
+		let authors_missing_their_slots = self.authors_missing_their_slots(block_hash, header.parent_hash).await?;
+
+		self.state.authors_missing_their_slots.extend(authors_missing_their_slots);
 
 		debug!(
 			"Success! new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
