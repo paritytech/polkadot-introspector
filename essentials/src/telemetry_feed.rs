@@ -591,18 +591,15 @@ mod test {
 	fn decode_version_best_block_best_finalized() {
 		let msg = r#"[0,32,1,[14783932,1679657352067,5998],2,[14783934,"0x0000000000000000000000000000000000000000000000000000000000000000"]]"#;
 
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::Version(Version(32)),
-				TelemetryFeed::BestBlock(BestBlock {
-					block_number: 14783932,
-					timestamp: 1679657352067,
-					avg_block_time: Some(5998)
-				}),
-				TelemetryFeed::BestFinalized(BestFinalized { block_number: 14783934, block_hash: H256::zero() })
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::Version(Version(32)),
+			TelemetryFeed::BestBlock(BestBlock {
+				block_number: 14783932,
+				timestamp: 1679657352067,
+				avg_block_time: Some(5998)
+			}),
+			TelemetryFeed::BestFinalized(BestFinalized { block_number: 14783934, block_hash: H256::zero() })
+		]);
 	}
 
 	#[test]
@@ -620,161 +617,138 @@ mod test {
 				1619604694363
 			]
 		]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::AddedNode(AddedNode {
-				node_id: 2324,
-				details: NodeDetails {
-					name: "literate-burn-3334".to_owned(),
-					implementation: "Parity Polkadot".to_owned(),
-					version: "0.8.30-4b86755c3".to_owned(),
-					validator: None,
-					network_id: Some("12D3KooWQXtq1V6DP9SuPzZFL4VY3ye96XW4NdxR8KxnqfNvS7Vo".to_owned()),
-					ip: None,
-					sysinfo: None
-				},
-				stats: NodeStats { peers: 1, txcount: 0 },
-				io: NodeIO { used_state_cache_size: vec![51238524.0, 51238524.0, 51238524.0] },
-				hardware: NodeHardware {
-					upload: vec![5865.8125, 7220.9375, 8373.84375],
-					download: vec![103230.375, 195559.8125, 517880.0625],
-					chart_stamps: vec![1679673031643.2812, 1679673120180.5312, 1679673200282.875,]
-				},
-				block_details: BlockDetails {
-					block: Block { hash: H256::zero(), height: 6321619 },
-					block_time: 0,
-					block_timestamp: 1679660148935,
-					propagation_time: None
-				},
-				location: Some(NodeLocation { lat: 50.0804, long: 14.5045, city: "Prague".to_owned() }),
-				startup_time: Some(1619604694363),
-				hwbench: None
-			})]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![TelemetryFeed::AddedNode(AddedNode {
+			node_id: 2324,
+			details: NodeDetails {
+				name: "literate-burn-3334".to_owned(),
+				implementation: "Parity Polkadot".to_owned(),
+				version: "0.8.30-4b86755c3".to_owned(),
+				validator: None,
+				network_id: Some("12D3KooWQXtq1V6DP9SuPzZFL4VY3ye96XW4NdxR8KxnqfNvS7Vo".to_owned()),
+				ip: None,
+				sysinfo: None
+			},
+			stats: NodeStats { peers: 1, txcount: 0 },
+			io: NodeIO { used_state_cache_size: vec![51238524.0, 51238524.0, 51238524.0] },
+			hardware: NodeHardware {
+				upload: vec![5865.8125, 7220.9375, 8373.84375],
+				download: vec![103230.375, 195559.8125, 517880.0625],
+				chart_stamps: vec![1679673031643.2812, 1679673120180.5312, 1679673200282.875,]
+			},
+			block_details: BlockDetails {
+				block: Block { hash: H256::zero(), height: 6321619 },
+				block_time: 0,
+				block_timestamp: 1679660148935,
+				propagation_time: None
+			},
+			location: Some(NodeLocation { lat: 50.0804, long: 14.5045, city: "Prague".to_owned() }),
+			startup_time: Some(1619604694363),
+			hwbench: None
+		})]);
 	}
 
 	#[test]
 	fn decode_removed_node_located_node() {
 		let msg = r#"[4,42,5,[1560,35.6893,139.6899,"Tokyo"]]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::RemovedNode(RemovedNode { node_id: 42 }),
-				TelemetryFeed::LocatedNode(LocatedNode {
-					node_id: 1560,
-					lat: 35.6893,
-					long: 139.6899,
-					city: "Tokyo".to_owned()
-				})
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::RemovedNode(RemovedNode { node_id: 42 }),
+			TelemetryFeed::LocatedNode(LocatedNode {
+				node_id: 1560,
+				lat: 35.6893,
+				long: 139.6899,
+				city: "Tokyo".to_owned()
+			})
+		]);
 	}
 
 	#[test]
 	fn decode_imported_block_finalized_block() {
 		let msg = r#"[6,[297,[11959,"0x0000000000000000000000000000000000000000000000000000000000000000",6073,1679669286310,233]],7,[92,12085,"0x0000000000000000000000000000000000000000000000000000000000000000"]]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::ImportedBlock(ImportedBlock {
-					node_id: 297,
-					block_details: BlockDetails {
-						block: Block { hash: H256::zero(), height: 11959 },
-						block_time: 6073,
-						block_timestamp: 1679669286310,
-						propagation_time: Some(233)
-					}
-				}),
-				TelemetryFeed::FinalizedBlock(FinalizedBlock {
-					node_id: 92,
-					block_number: 12085,
-					block_hash: H256::zero()
-				})
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::ImportedBlock(ImportedBlock {
+				node_id: 297,
+				block_details: BlockDetails {
+					block: Block { hash: H256::zero(), height: 11959 },
+					block_time: 6073,
+					block_timestamp: 1679669286310,
+					propagation_time: Some(233)
+				}
+			}),
+			TelemetryFeed::FinalizedBlock(FinalizedBlock {
+				node_id: 92,
+				block_number: 12085,
+				block_hash: H256::zero()
+			})
+		]);
 	}
 
 	#[test]
 	fn decode_node_stats_update_telemetry_feed() {
 		let msg = r#"[8,[1645,[8,0]],9,[514,[[10758,554,20534],[12966,13631,17685],[1679678136573,1679678136573,1679678141574]]]]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::NodeStatsUpdate(NodeStatsUpdate {
-					node_id: 1645,
-					stats: NodeStats { peers: 8, txcount: 0 }
-				}),
-				TelemetryFeed::Hardware(Hardware {
-					node_id: 514,
-					hardware: NodeHardware {
-						upload: vec![10758.0, 554.0, 20534.0],
-						download: vec![12966.0, 13631.0, 17685.0],
-						chart_stamps: vec![1679678136573.0, 1679678136573.0, 1679678141574.0]
-					}
-				})
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::NodeStatsUpdate(NodeStatsUpdate {
+				node_id: 1645,
+				stats: NodeStats { peers: 8, txcount: 0 }
+			}),
+			TelemetryFeed::Hardware(Hardware {
+				node_id: 514,
+				hardware: NodeHardware {
+					upload: vec![10758.0, 554.0, 20534.0],
+					download: vec![12966.0, 13631.0, 17685.0],
+					chart_stamps: vec![1679678136573.0, 1679678136573.0, 1679678141574.0]
+				}
+			})
+		]);
 	}
 
 	#[test]
 	fn decode_time_sync() {
 		let msg = r#"[10,1679670187855]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::TimeSync(TimeSync { time: 1679670187855 })]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![TelemetryFeed::TimeSync(TimeSync {
+			time: 1679670187855
+		})]);
 	}
 
 	#[test]
 	fn decode_added_chain_removed_chain() {
 		let msg = r#"[11,["Tick 558","0x0000000000000000000000000000000000000000000000000000000000000000",2],12,"0x0000000000000000000000000000000000000000000000000000000000000000"]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::AddedChain(AddedChain {
-					name: "Tick 558".to_owned(),
-					genesis_hash: H256::zero(),
-					node_count: 2
-				}),
-				TelemetryFeed::RemovedChain(RemovedChain { genesis_hash: H256::zero() })
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::AddedChain(AddedChain {
+				name: "Tick 558".to_owned(),
+				genesis_hash: H256::zero(),
+				node_count: 2
+			}),
+			TelemetryFeed::RemovedChain(RemovedChain { genesis_hash: H256::zero() })
+		]);
 	}
 
 	#[test]
 	fn decode_subscribed_to_unsubscribed_from() {
 		let msg = r#"[13,"0x0000000000000000000000000000000000000000000000000000000000000000",14,"0x0000000000000000000000000000000000000000000000000000000000000000"]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::SubscribedTo(SubscribedTo { genesis_hash: H256::zero() }),
-				TelemetryFeed::UnsubscribedFrom(UnsubscribedFrom { genesis_hash: H256::zero() })
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::SubscribedTo(SubscribedTo { genesis_hash: H256::zero() }),
+			TelemetryFeed::UnsubscribedFrom(UnsubscribedFrom { genesis_hash: H256::zero() })
+		]);
 	}
 
 	#[test]
 	fn decode_pong_stale_node() {
 		let msg = r#"[15,"pong",20,297]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::Pong(Pong { msg: "pong".to_owned() }),
-				TelemetryFeed::StaleNode(StaleNode { node_id: 297 })
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::Pong(Pong { msg: "pong".to_owned() }),
+			TelemetryFeed::StaleNode(StaleNode { node_id: 297 })
+		]);
 	}
 
 	#[test]
 	fn decode_node_io_update() {
 		let msg = r#"[21,[555,[[48442256,54228400,52903216]]]]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::NodeIOUpdate(NodeIOUpdate {
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![TelemetryFeed::NodeIOUpdate(
+			NodeIOUpdate {
 				node_id: 555,
 				io: NodeIO { used_state_cache_size: vec![48442256.0, 54228400.0, 52903216.0] }
-			})]
-		);
+			}
+		)]);
 	}
 
 	#[test]
@@ -797,9 +771,8 @@ mod test {
 				"disk_random_write_score": {"list": [[[0,10],22],[[10,30],218],[[30,50],96]],"other": 0,"unknown": 686}
 			}
 		]"#;
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![TelemetryFeed::ChainStatsUpdate(ChainStatsUpdate {
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![TelemetryFeed::ChainStatsUpdate(
+			ChainStatsUpdate {
 				stats: ChainStats {
 					version: Ranking {
 						list: vec![
@@ -879,23 +852,20 @@ mod test {
 						unknown: 686
 					}
 				}
-			})]
-		);
+			}
+		)]);
 	}
 
 	#[test]
 	fn decode_unknown() {
 		let msg = r#"[0,32,42,["0x0000000000000000000000000000000000000000000000000000000000000000", 1]]"#;
 
-		assert_eq!(
-			TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(),
-			vec![
-				TelemetryFeed::Version(Version(32)),
-				TelemetryFeed::UnknownValue(UnknownValue {
-					action: 42,
-					value: "[\"0x0000000000000000000000000000000000000000000000000000000000000000\", 1]".to_owned()
-				})
-			]
-		);
+		assert_eq!(TelemetryFeed::from_bytes(msg.as_bytes()).unwrap(), vec![
+			TelemetryFeed::Version(Version(32)),
+			TelemetryFeed::UnknownValue(UnknownValue {
+				action: 42,
+				value: "[\"0x0000000000000000000000000000000000000000000000000000000000000000\", 1]".to_owned()
+			})
+		]);
 	}
 }

@@ -426,10 +426,12 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			registry,
 		)?,
 		initiators: prometheus_endpoint::register(
-			IntCounterVec::new(
-				Opts::new("pc_disputed_initiators", "Validators that initiated a dispute"),
-				&["parachain_id", "validator_index", "session_index", "validator_address"],
-			)?,
+			IntCounterVec::new(Opts::new("pc_disputed_initiators", "Validators that initiated a dispute"), &[
+				"parachain_id",
+				"validator_index",
+				"session_index",
+				"validator_address",
+			])?,
 			registry,
 		)?,
 		misbehaving_validators: prometheus_endpoint::register(
