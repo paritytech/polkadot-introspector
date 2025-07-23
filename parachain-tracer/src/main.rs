@@ -229,7 +229,7 @@ impl ParachainTracer {
 						CollectorUpdateEvent::NewHead(new_head) => {
 							// Happens on startup
 							if new_head.relay_parent_number == 0 {
-								continue;
+								continue
 							}
 
 							let curr_ts = storage
@@ -294,14 +294,14 @@ impl ParachainTracer {
 								TerminationReason::Abnormal(info) => {
 									error!("Shutting down, {}", info);
 									let _ = shutdown_tx.send(Shutdown::Restart);
-									break;
+									break
 								},
 							}
 						},
 					},
 					Err(_) => {
 						info!("Input channel has been closed");
-						break;
+						break
 					},
 				}
 			}
