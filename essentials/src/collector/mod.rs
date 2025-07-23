@@ -441,10 +441,10 @@ impl Collector {
 		block_hash: H256,
 		block_parent_hash: H256,
 	) -> color_eyre::Result<Vec<AccountId32>> {
-		let current_slot = self.executor.get_babe_current_slot(&self.endpoint.as_str(), block_hash).await?;
+		let current_slot = self.executor.get_babe_current_slot(self.endpoint.as_str(), block_hash).await?;
 		let parent_slot = self
 			.executor
-			.get_babe_current_slot(&self.endpoint.as_str(), block_parent_hash)
+			.get_babe_current_slot(self.endpoint.as_str(), block_parent_hash)
 			.await?;
 
 		match (current_slot, parent_slot) {
@@ -452,8 +452,8 @@ impl Collector {
 				// We skipped a slot from our parent, so let's determine who should have build that block.
 				// This is the same logic as in babe secondary_slot_author, see:
 				// https://github.com/paritytech/polkadot-sdk/blob/0ae5c5bbd96a600aed81358339be2f16bade4a81/substrate/client/consensus/babe/src/authorship.rs#L102
-				let babe_randomness = self.executor.get_babe_randomness(&self.endpoint.as_str(), block_hash).await?;
-				let authorities = self.executor.get_babe_authorities(&self.endpoint.as_str(), block_hash).await?;
+				let babe_randomness = self.executor.get_babe_randomness(self.endpoint.as_str(), block_hash).await?;
+				let authorities = self.executor.get_babe_authorities(self.endpoint.as_str(), block_hash).await?;
 				let mut missed_slots = current_slot.0 - 1;
 				let mut authors_missing_their_slots = Vec::new();
 				while missed_slots > parent_slot.0 {
@@ -467,7 +467,7 @@ impl Collector {
 						let account_ids = self
 							.executor
 							.get_babe_key_owner(
-								&self.endpoint.as_str(),
+								self.endpoint.as_str(),
 								block_parent_hash,
 								authorities
 									.get(idx as usize)

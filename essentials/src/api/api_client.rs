@@ -212,10 +212,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
 		let addr = polkadot::storage().babe().randomness();
-
-		let result = self.storage().at(hash).fetch(&addr).await;
-
-		result
+		self.storage().at(hash).fetch(&addr).await
 	}
 
 	pub async fn get_babe_authorities(
