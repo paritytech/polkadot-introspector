@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.45"
+version = "0.2.46"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2024"
 readme = "README.md"
@@ -54,7 +54,7 @@ serde_urlencoded = "0.7.1"
 snap = "1.1.1"
 ss58-registry = { version = "1.51.0", default-features = false }
 strum = { version = "0.25.0", features = ["derive"] }
-subxt = { version = "0.42.1", default-features = false, features = [
+subxt = { version = "0.43.0", default-features = false, features = [
     "jsonrpsee",
     "native",
     "unstable-light-client",

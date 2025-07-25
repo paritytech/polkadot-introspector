@@ -247,11 +247,37 @@ impl ParachainTracer {
 							let backed = new_head.candidates_backed.len();
 							let included = new_head.candidates_included.len();
 							let timed_out = new_head.candidates_timed_out.len();
-							metrics.on_new_relay_block(backed, included, timed_out, block_time);
+							metrics.on_new_relay_block(
+								backed,
+								included,
+								timed_out,
+								block_time,
+								new_head.relay_parent_number,
+								new_head
+									.authors_missing_their_slots
+									.iter()
+									.map(|account| account.to_string())
+									.collect(),
+							);
 							if is_cli {
 								println!(
-									"Block {}: backed {}, included {}, timed-out {}",
-									new_head.relay_parent_number, backed, included, timed_out
+									"Block {}: backed {}, included {}, timed-out {} {:}",
+									new_head.relay_parent_number,
+									backed,
+									included,
+									timed_out,
+									if new_head.authors_missing_their_slots.is_empty() {
+										"".to_string()
+									} else {
+										format!(
+											", authors missing their slot: {}",
+											new_head
+												.authors_missing_their_slots
+												.iter()
+												.map(|account| account.to_string())
+												.join(", ")
+										)
+									}
 								);
 							}
 						},

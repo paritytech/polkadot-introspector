@@ -27,9 +27,9 @@ use crate::{
 	},
 	chain_subscription::ChainSubscriptionEvent,
 	init::Shutdown,
-	metadata::polkadot_primitives::DisputeStatement,
+	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -40,6 +40,7 @@ use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_priority_channel::{
 	Receiver, Sender, channel as priority_channel, channel_with_capacities as priority_channel_with_capacities,
 };
+use sp_core_hashing::blake2_256;
 use std::{
 	cmp::Ordering,
 	collections::BTreeMap,
@@ -48,7 +49,10 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::{PolkadotConfig, config::Hasher};
+use subxt::{
+	PolkadotConfig,
+	config::{Hasher, polkadot::U256},
+};
 use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
@@ -155,6 +159,8 @@ struct CollectorState {
 	current_session_index: u32,
 	/// Last finalized block number
 	last_finalized_block_number: Option<u32>,
+	/// List of authors that did not author blocks in their slots
+	authors_missing_their_slots: Vec<AccountId32>,
 	/// A list of paras for broadcasting
 	paras_seen: BTreeMap<u32, u32>,
 }
@@ -178,6 +184,8 @@ pub struct NewHeadEvent {
 	pub candidates_timed_out: Vec<H256>,
 	/// Disputes concluded in this block
 	pub disputes_concluded: Vec<DisputeInfo>,
+	/// List of accounts that did not author blocks in their slots
+	pub authors_missing_their_slots: Vec<AccountId32>,
 }
 
 /// Basic information about a backed candidate
@@ -428,6 +436,57 @@ impl Collector {
 		self.executor.clone()
 	}
 
+	async fn authors_missing_their_slots(
+		&mut self,
+		block_hash: H256,
+		block_parent_hash: H256,
+	) -> color_eyre::Result<Vec<AccountId32>> {
+		let current_slot = self.executor.get_babe_current_slot(self.endpoint.as_str(), block_hash).await?;
+		let parent_slot = self
+			.executor
+			.get_babe_current_slot(self.endpoint.as_str(), block_parent_hash)
+			.await?;
+
+		match (current_slot, parent_slot) {
+			(Some(current_slot), Some(parent_slot)) if current_slot.0 - 1 > parent_slot.0 => {
+				// We skipped a slot from our parent, so let's determine who should have build that block.
+				// This is the same logic as in babe secondary_slot_author, see:
+				// https://github.com/paritytech/polkadot-sdk/blob/0ae5c5bbd96a600aed81358339be2f16bade4a81/substrate/client/consensus/babe/src/authorship.rs#L102
+				let babe_randomness = self.executor.get_babe_randomness(self.endpoint.as_str(), block_hash).await?;
+				let authorities = self.executor.get_babe_authorities(self.endpoint.as_str(), block_hash).await?;
+				let mut missed_slots = current_slot.0 - 1;
+				let mut authors_missing_their_slots = Vec::new();
+				while missed_slots > parent_slot.0 {
+					let slot = Slot(missed_slots);
+					if let Some(babe_randomness) = babe_randomness {
+						let rand = U256::from_big_endian(&(babe_randomness, slot).using_encoded(blake2_256));
+						let authorities_len = U256::from(authorities.len());
+
+						let idx = rand % authorities_len;
+						let idx = idx.as_u32();
+						let account_ids = self
+							.executor
+							.get_babe_key_owner(
+								self.endpoint.as_str(),
+								block_parent_hash,
+								authorities
+									.get(idx as usize)
+									.expect("we computed the idx with modulo len; qed")
+									.0
+									.clone(),
+							)
+							.await?;
+
+						authors_missing_their_slots.extend(account_ids.into_iter());
+					}
+					missed_slots -= 1;
+				}
+				Ok(authors_missing_their_slots)
+			},
+			(_, _) => Ok(vec![]),
+		}
+	}
+
 	async fn update_state(&mut self, block_number: u32, block_hash: H256) -> color_eyre::Result<()> {
 		for (para_id, channels) in self.subscribe_channels.iter_mut() {
 			let candidates = self.state.candidates_seen.get(para_id);
@@ -450,6 +509,7 @@ impl Collector {
 						candidates_timed_out: self.state.candidates_timed_out.clone(),
 						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 						para_id: *para_id,
+						authors_missing_their_slots: self.state.authors_missing_their_slots.clone(),
 					}))
 					.await?;
 			}
@@ -500,6 +560,7 @@ impl Collector {
 						candidates_timed_out: self.state.candidates_timed_out.clone(),
 						disputes_concluded: disputes_concluded.clone().unwrap_or_default(),
 						para_id: *para_id,
+						authors_missing_their_slots: Vec::new(),
 					}))
 					.await?;
 			}
@@ -510,6 +571,7 @@ impl Collector {
 		self.state.candidates_included.clear();
 		self.state.candidates_timed_out.clear();
 		self.state.current_relay_chain_block_hashes.clear();
+		self.state.authors_missing_their_slots.clear();
 		self.state.current_relay_chain_block_number = block_number;
 		self.state.current_relay_chain_block_hashes.push(block_hash);
 		Ok(())
@@ -668,6 +730,9 @@ impl Collector {
 		self.write_occupied_cores(block_hash, block_number, ts).await?;
 		self.write_backing_groups(block_hash, block_number, ts).await?;
 		self.write_core_assignments(block_hash, block_number, ts).await?;
+		let authors_missing_their_slots = self.authors_missing_their_slots(block_hash, header.parent_hash).await?;
+
+		self.state.authors_missing_their_slots.extend(authors_missing_their_slots);
 
 		debug!(
 			"Success! new block hash: {:?}, number: {}, previous number: {}, previous hashes: {:?}",
