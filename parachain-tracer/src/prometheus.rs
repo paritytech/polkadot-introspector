@@ -485,10 +485,7 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		)?,
 		relay_authors_missing_slots: prometheus_endpoint::register(
 			IntCounterVec::new(
-				Opts::new(
-					"pc_relay_authors_missing_slots",
-					"Authors that missed their slots in the relay chain",
-				),
+				Opts::new("pc_relay_authors_missing_slots", "Authors that missed their slots in the relay chain"),
 				&["block_number", "author_account"],
 			)?,
 			registry,
