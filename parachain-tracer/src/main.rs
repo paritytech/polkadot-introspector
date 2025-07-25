@@ -161,7 +161,7 @@ impl ParachainTracer {
 		);
 		if let Err(e) = print_host_configuration(self.opts.node.as_str(), executor).await {
 			warn!("Cannot get host configuration");
-			return Err(e);
+			return Err(e)
 		}
 		println!(
 			"{}",
@@ -294,7 +294,7 @@ impl ParachainTracer {
 								TerminationReason::Abnormal(info) => {
 									error!("Shutting down, {}", info);
 									let _ = shutdown_tx.send(Shutdown::Restart);
-									break
+									break;
 								},
 							}
 						},
@@ -363,7 +363,7 @@ impl ParachainTracer {
 					},
 					Err(_) => {
 						info!("Input channel has been closed for parachain {}", para_id);
-						break;
+						break
 					},
 				}
 			}
