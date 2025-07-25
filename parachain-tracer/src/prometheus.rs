@@ -202,7 +202,7 @@ impl PrometheusMetrics for Metrics {
 			for missing_author in missing_authors {
 				metrics
 					.relay_authors_missing_slots
-					.with_label_values(&[RELAY_CHAIN_ID_STR, &block_number.to_string(), &missing_author])
+					.with_label_values(&[&block_number.to_string(), &missing_author])
 					.inc();
 			}
 		}
@@ -487,9 +487,9 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 			IntCounterVec::new(
 				Opts::new(
 					"pc_relay_authors_missing_slots",
-					"Authors that missed their slots in the relay chain, label `parachain_id` is deprecated",
+					"Authors that missed their slots in the relay chain",
 				),
-				&["parachain_id", "block_number", "author_account"],
+				&["block_number", "author_account"],
 			)?,
 			registry,
 		)?,
