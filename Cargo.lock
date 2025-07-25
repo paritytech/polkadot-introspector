@@ -212,12 +212,12 @@ dependencies = [
 
 [[package]]
 name = "async-channel"
-version = "2.3.1"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b47800b0be77592da0afd425cc03468052844aff33b84e33cc696f64e77b6a"
+checksum = "16c74e56284d2188cabb6ad99603d1ace887a5d7e7b695d01b728155ed9ed427"
 dependencies = [
  "concurrent-queue",
- "event-listener-strategy 0.5.2",
+ "event-listener-strategy 0.5.4",
  "futures-core",
  "pin-project-lite",
 ]
@@ -323,7 +323,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15c1cd5d253ecac3d3cf15e390fd96bd92a13b1d14497d81abf077304794fb04"
 dependencies = [
- "async-channel 2.3.1",
+ "async-channel 2.4.0",
  "async-io 2.3.0",
  "async-lock 3.3.0",
  "async-signal",
@@ -1413,9 +1413,9 @@ dependencies = [
 
 [[package]]
 name = "event-listener-strategy"
-version = "0.5.2"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f214dc438f977e6d4e3500aaa277f5ad94ca83fbbd9b1a15713ce2344ccc5a1"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener 5.3.0",
  "pin-project-lite",
@@ -4457,7 +4457,7 @@ dependencies = [
 name = "polkadot-introspector-priority-channel"
 version = "0.2.46"
 dependencies = [
- "async-channel 2.3.1",
+ "async-channel 2.4.0",
  "futures",
  "pin-project-lite",
  "rand",
@@ -5906,7 +5906,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e635339259e51ef85ac7aa29a1cd991b957047507288697a690e80ab97d07cad"
 dependencies = [
- "async-channel 2.3.1",
+ "async-channel 2.4.0",
  "async-executor",
  "async-fs",
  "async-io 2.3.0",
@@ -5977,7 +5977,7 @@ version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bad7762a41b43cc95e5253214ca8f85a2308a048f4fe8217927888065bafd30c"
 dependencies = [
- "async-channel 2.3.1",
+ "async-channel 2.4.0",
  "async-lock 3.3.0",
  "base64 0.22.1",
  "blake2-rfc",
