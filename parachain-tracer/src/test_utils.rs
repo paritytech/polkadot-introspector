@@ -50,7 +50,7 @@ pub fn rpc_node_url() -> &'static str {
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
 
 	if let Ok(url) = std::env::var("WS_URL") {
-		return Box::leak(url.into_boxed_str())
+		return Box::leak(url.into_boxed_str());
 	}
 
 	RPC_NODE_URL

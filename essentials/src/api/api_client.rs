@@ -22,6 +22,10 @@ use crate::{
 			runtime_types::{
 				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
 				polkadot_runtime_parachains::hrmp::HrmpChannel,
+				sp_consensus_babe::{self, digests::PreDigest},
+				sp_consensus_slots::Slot,
+				sp_core::crypto::KeyTypeId,
+				sp_runtime::generic::digest::DigestItem,
 			},
 		},
 		polkadot_staging_primitives::CoreState,
@@ -32,6 +36,7 @@ use crate::{
 	},
 };
 use clap::ValueEnum;
+use parity_scale_codec::Decode;
 use std::collections::BTreeMap;
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -144,7 +149,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		recipient: u32,
 	) -> Result<Option<(u32, u32, HrmpChannel)>, subxt::Error> {
 		let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
-		let addr = polkadot::storage().hrmp().hrmp_channels(&id);
+		let addr = polkadot::storage().hrmp().hrmp_channels(id);
 		Ok(storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v)))
 	}
 
@@ -205,6 +210,47 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.events().at(hash).await
 	}
 
+	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
+		let addr = polkadot::storage().babe().randomness();
+		self.storage().at(hash).fetch(&addr).await
+	}
+
+	pub async fn get_babe_authorities(
+		&self,
+		hash: H256,
+	) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
+		let addr = polkadot::storage().babe().authorities();
+		self.storage()
+			.at(hash)
+			.fetch(&addr)
+			.await
+			.map(|res| res.map(|res| res.0).unwrap_or_default())
+	}
+
+	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
+		let addr = polkadot::storage().babe().current_slot();
+		self.storage().at(hash).fetch(&addr).await
+	}
+
+	pub async fn get_system_digest(&self, hash: H256) -> Result<Option<PreDigest>, subxt::Error> {
+		let addr = polkadot::storage().system().digest();
+		let result = self.storage().at(hash).fetch(&addr).await.unwrap().unwrap();
+
+		for pre_digest in result.logs.into_iter() {
+			if let DigestItem::PreRuntime(_, bytes) = pre_digest {
+				let pre_digest: PreDigest = PreDigest::decode(&mut &bytes[..]).unwrap();
+				return Ok(Some(pre_digest));
+			}
+		}
+
+		Ok(None)
+	}
+
+	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
+		let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
+		self.storage().at(hash).fetch(&addr).await
+	}
+
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreState<H256, u32>>, subxt::Error> {
 		let addr = polkadot::apis().parachain_host().availability_cores();
 		self.runtime_api_at(Some(hash)).await?.call(addr).await
@@ -249,7 +295,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
-		let addr = polkadot::storage().session().next_keys(account);
+		let addr = polkadot::storage().session().next_keys(account.clone());
 		self.storage().at_latest().await?.fetch(&addr).await
 	}
 

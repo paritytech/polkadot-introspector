@@ -39,6 +39,7 @@ jobs:
 
       - name: fmt
         run: |
+          time cargo +nightly fmt --version
           time cargo +nightly fmt --all -- --check
 
       - name: Clippy
