@@ -619,10 +619,7 @@ impl Collector {
 			self.storage_write_prefixed(
 				CollectorPrefixType::RelevantFinalizedBlockNumber,
 				block_hash,
-				StorageEntry::new_onchain(
-					RecordTime::with_ts(block_number, Duration::from_secs(ts)),
-					last_finalized,
-				),
+				StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), last_finalized),
 			)
 			.await?;
 		}
