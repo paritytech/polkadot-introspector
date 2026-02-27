@@ -149,10 +149,9 @@ impl TelemetrySubscription {
 
 					for message in feed.unwrap() {
 						debug!("[telemetry] {:?}", message);
-						if !subscribed {
-							if let TelemetryFeed::AddedChain(chain) = &message {
-								chains.insert(chain.genesis_hash, chain.clone());
-							}
+						if !subscribed
+							&& let TelemetryFeed::AddedChain(chain) = &message {
+							chains.insert(chain.genesis_hash, chain.clone());
 						}
 						if let Err(e) = update_channel.send(TelemetryEvent::NewMessage(message)).await {
 							return on_consumer_error(e);
@@ -201,12 +200,7 @@ async fn choose_chain(
 	chains: &HashMap<H256, AddedChain>,
 	maybe_chain_name: &Option<String>,
 ) -> color_eyre::Result<H256, ChooseChainError> {
-	let list: Vec<AddedChain> = chains
-		.iter()
-		.map(|(_, v)| v)
-		.cloned()
-		.sorted_by_key(|c| Reverse(c.node_count))
-		.collect();
+	let list: Vec<AddedChain> = chains.values().cloned().sorted_by_key(|c| Reverse(c.node_count)).collect();
 
 	if list.is_empty() {
 		return Err(ChooseChainError::NoChains)

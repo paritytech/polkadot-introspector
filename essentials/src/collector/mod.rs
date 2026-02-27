@@ -378,11 +378,11 @@ impl Collector {
 		};
 		let mut chain_events = vec![new_head_event];
 
-		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
-			if let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await? {
-				for block_event in block_events.iter() {
-					chain_events.push(decode_chain_event(*hash, block_event.unwrap(), self.hasher).await?);
-				}
+		if let Some(hash) = new_head_hash(event, self.subscribe_mode) &&
+			let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await?
+		{
+			for block_event in block_events.iter() {
+				chain_events.push(decode_chain_event(*hash, block_event.unwrap(), self.hasher).await?);
 			}
 		};
 
@@ -616,14 +616,11 @@ impl Collector {
 		let ts = self.executor.get_block_timestamp(self.endpoint.as_str(), block_hash).await?;
 		let block_number = header.number;
 
-		if self.state.last_finalized_block_number.is_some() {
+		if let Some(last_finalized) = self.state.last_finalized_block_number {
 			self.storage_write_prefixed(
 				CollectorPrefixType::RelevantFinalizedBlockNumber,
 				block_hash,
-				StorageEntry::new_onchain(
-					RecordTime::with_ts(block_number, Duration::from_secs(ts)),
-					self.state.last_finalized_block_number.unwrap(),
-				),
+				StorageEntry::new_onchain(RecordTime::with_ts(block_number, Duration::from_secs(ts)), last_finalized),
 			)
 			.await?;
 		}
