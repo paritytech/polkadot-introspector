@@ -570,6 +570,7 @@ impl Collector {
 		self.state.candidates_backed.clear();
 		self.state.candidates_included.clear();
 		self.state.candidates_timed_out.clear();
+		self.state.disputes_seen.clear();
 		self.state.current_relay_chain_block_hashes.clear();
 		self.state.authors_missing_their_slots.clear();
 		self.state.current_relay_chain_block_number = block_number;

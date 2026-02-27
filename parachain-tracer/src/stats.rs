@@ -20,7 +20,7 @@ use crate::types::{DisputesTracker, ParachainProgressUpdate};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::Stylize;
 use mockall::automock;
-use polkadot_introspector_essentials::types::H256;
+use polkadot_introspector_essentials::{chain_events::SubxtDisputeResult, types::H256};
 use std::{
 	collections::VecDeque,
 	default::Default,
@@ -102,6 +102,7 @@ struct DisputesStats {
 	disputed_count: u32,
 	concluded_valid: u32,
 	concluded_invalid: u32,
+	concluded_timed_out: u32,
 	/// Average count of validators that voted against supermajority
 	misbehaving_validators: AvgBucket<u32>,
 	/// Average resolution time in blocks
@@ -210,10 +211,10 @@ impl Stats for ParachainStats {
 	fn on_disputed(&mut self, dispute_outcome: &DisputesTracker) {
 		self.disputes_stats.disputed_count += 1;
 
-		if dispute_outcome.voted_for > dispute_outcome.voted_against {
-			self.disputes_stats.concluded_valid += 1;
-		} else {
-			self.disputes_stats.concluded_invalid += 1;
+		match dispute_outcome.outcome {
+			SubxtDisputeResult::Valid => self.disputes_stats.concluded_valid += 1,
+			SubxtDisputeResult::Invalid => self.disputes_stats.concluded_invalid += 1,
+			SubxtDisputeResult::TimedOut => self.disputes_stats.concluded_timed_out += 1,
 		}
 
 		self.disputes_stats
@@ -299,10 +300,11 @@ impl Display for DisputesStats {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"{} disputes tracked, {} concluded valid, {} concluded invalid, {} blocks average resolution time, {} average misbehaving validators",
+			"{} disputes tracked, {} concluded valid, {} concluded invalid, {} timed out, {} blocks average resolution time, {} average misbehaving validators",
 			self.disputed_count,
 			self.concluded_valid.to_string().bright_green(),
 			self.concluded_invalid.to_string().bold(),
+			self.concluded_timed_out.to_string().bright_yellow(),
 			format!("{:.2}", self.resolution_time.value()).bold(),
 			format!("{:.1}", self.misbehaving_validators.value()).bright_red()
 		)
