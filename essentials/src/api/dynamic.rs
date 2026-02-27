@@ -19,7 +19,6 @@ use crate::{
 	metadata::polkadot_primitives::ValidatorIndex,
 	types::{H256, OnDemandOrder},
 };
-use log::error;
 use subxt::{
 	OnlineClient, PolkadotConfig,
 	dynamic::{At, Value},
