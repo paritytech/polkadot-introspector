@@ -339,8 +339,9 @@ impl ParachainTracer {
 									let _ = shutdown_tx.send(Shutdown::Restart);
 									break;
 								}
-								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await
-									&& is_cli {
+								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await &&
+									is_cli
+								{
 									println!("{}", progress)
 								}
 								tracker.maybe_reset_state();

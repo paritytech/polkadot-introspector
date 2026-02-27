@@ -237,8 +237,9 @@ pub fn decode_keys<D: IntrospectorKvdb>(db: &D, opts: &KeyDecodeOptions) -> Resu
 
 			final_result.0.push(KeyDecodeResult { fields: cur, value_size: v.len() });
 
-			if let Some(lim) = opts.lim
-				&& final_result.0.len() > *lim {
+			if let Some(lim) = opts.lim &&
+				final_result.0.len() > *lim
+			{
 				final_result.0.truncate(*lim);
 				break
 			}

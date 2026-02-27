@@ -200,11 +200,7 @@ async fn choose_chain(
 	chains: &HashMap<H256, AddedChain>,
 	maybe_chain_name: &Option<String>,
 ) -> color_eyre::Result<H256, ChooseChainError> {
-	let list: Vec<AddedChain> = chains
-		.values()
-		.cloned()
-		.sorted_by_key(|c| Reverse(c.node_count))
-		.collect();
+	let list: Vec<AddedChain> = chains.values().cloned().sorted_by_key(|c| Reverse(c.node_count)).collect();
 
 	if list.is_empty() {
 		return Err(ChooseChainError::NoChains)
