@@ -615,13 +615,13 @@ impl Collector {
 		let ts = self.executor.get_block_timestamp(self.endpoint.as_str(), block_hash).await?;
 		let block_number = header.number;
 
-		if self.state.last_finalized_block_number.is_some() {
+		if let Some(last_finalized) = self.state.last_finalized_block_number {
 			self.storage_write_prefixed(
 				CollectorPrefixType::RelevantFinalizedBlockNumber,
 				block_hash,
 				StorageEntry::new_onchain(
 					RecordTime::with_ts(block_number, Duration::from_secs(ts)),
-					self.state.last_finalized_block_number.unwrap(),
+					last_finalized,
 				),
 			)
 			.await?;
