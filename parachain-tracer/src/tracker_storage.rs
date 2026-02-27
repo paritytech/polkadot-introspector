@@ -207,10 +207,10 @@ mod tests {
 			.storage_write_prefixed(
 				CollectorPrefixType::OnDemandOrder(100),
 				hash,
-				StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), OnDemandOrder {
-					para_id: 100,
-					spot_price: 1,
-				}),
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(0, Duration::from_secs(0)),
+					OnDemandOrder { para_id: 100, spot_price: 1 },
+				),
 			)
 			.await
 			.unwrap();
@@ -248,15 +248,18 @@ mod tests {
 			.storage_write_prefixed(
 				CollectorPrefixType::Dispute(100),
 				hash,
-				StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), DisputeInfo {
-					initiated: 1000,
-					initiator_indices: vec![42],
-					session_index: 1000,
-					dispute: SubxtDispute { relay_parent_block: H256::random(), candidate_hash: hash },
-					parachain_id: 100,
-					outcome: None,
-					concluded: None,
-				}),
+				StorageEntry::new_onchain(
+					RecordTime::with_ts(0, Duration::from_secs(0)),
+					DisputeInfo {
+						initiated: 1000,
+						initiator_indices: vec![42],
+						session_index: 1000,
+						dispute: SubxtDispute { relay_parent_block: H256::random(), candidate_hash: hash },
+						parachain_id: 100,
+						outcome: None,
+						concluded: None,
+					},
+				),
 			)
 			.await
 			.unwrap();
