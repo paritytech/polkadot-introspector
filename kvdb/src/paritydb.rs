@@ -49,7 +49,7 @@ impl IntrospectorKvdb for IntrospectorParityDB {
 		Ok(&self.columns)
 	}
 
-	fn iter_values(&self, column: &str) -> Result<DBIter> {
+	fn iter_values(&self, column: &str) -> Result<DBIter<'_>> {
 		let column_idx = self
 			.columns
 			.iter()

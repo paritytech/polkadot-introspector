@@ -213,12 +213,6 @@ async fn health_handler(api: CollectorStorageApi, ping: Option<HealthQuery>) -> 
 	Ok(warp::reply::json(&HealthReply { candidates_stored: storage_size, ts }))
 }
 
-#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
-pub struct CandidatesReply {
-	/// How many candidates have we processed
-	pub candidates: Vec<H256>,
-}
-
 async fn candidates_handler(
 	api: CollectorStorageApi,
 	filter: Option<CandidatesQuery>,
