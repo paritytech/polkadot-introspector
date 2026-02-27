@@ -49,7 +49,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		Ok(&self.columns)
 	}
 
-	fn iter_values(&self, column: &str) -> Result<DBIter> {
+	fn iter_values(&self, column: &str) -> Result<DBIter<'_>> {
 		let mut iter_config = rocksdb::ReadOptions::default();
 		// Do not cache values we read
 		iter_config.fill_cache(false);
@@ -80,7 +80,7 @@ impl IntrospectorKvdb for IntrospectorRocksDB {
 		})))
 	}
 
-	fn prefixed_iter_values(&self, column: &str, prefix: &str) -> Result<DBIter> {
+	fn prefixed_iter_values(&self, column: &str, prefix: &str) -> Result<DBIter<'_>> {
 		let cf_handle = self
 			.inner
 			.cf_handle(column)

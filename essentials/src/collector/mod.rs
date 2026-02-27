@@ -378,11 +378,10 @@ impl Collector {
 		};
 		let mut chain_events = vec![new_head_event];
 
-		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
-			if let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await? {
-				for block_event in block_events.iter() {
-					chain_events.push(decode_chain_event(*hash, block_event.unwrap(), self.hasher).await?);
-				}
+		if let Some(hash) = new_head_hash(event, self.subscribe_mode)
+			&& let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await? {
+			for block_event in block_events.iter() {
+				chain_events.push(decode_chain_event(*hash, block_event.unwrap(), self.hasher).await?);
 			}
 		};
 
