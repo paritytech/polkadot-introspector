@@ -21,7 +21,9 @@ use crate::{
 use clap::Parser;
 use color_eyre::Result;
 use mockall::automock;
-use polkadot_introspector_essentials::{constants::STANDARD_BLOCK_TIME, types::OnDemandOrder};
+use polkadot_introspector_essentials::{
+	chain_events::SubxtDisputeResult, constants::STANDARD_BLOCK_TIME, types::OnDemandOrder,
+};
 use prometheus_endpoint::{
 	Registry,
 	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
@@ -43,10 +45,12 @@ pub struct ParachainTracerPrometheusOptions {
 struct DisputesMetrics {
 	/// Number of candidates disputed.
 	disputed_count: IntCounterVec,
-	/// Average count of validators that voted in favor of supermajority
+	/// Number of disputes concluded as valid
 	concluded_valid: IntCounterVec,
-	/// Average count of validators that voted against supermajority
+	/// Number of disputes concluded as invalid
 	concluded_invalid: IntCounterVec,
+	/// Number of disputes that timed out
+	concluded_timed_out: IntCounterVec,
 	/// Average resolution time in blocks
 	resolution_time: HistogramVec,
 	/// Validators that initiated a dispute
@@ -258,6 +262,11 @@ impl PrometheusMetrics for Metrics {
 				.concluded_invalid
 				.with_label_values(&[&para_string])
 				.reset();
+			metrics
+				.disputes_stats
+				.concluded_timed_out
+				.with_label_values(&[&para_string])
+				.reset();
 		}
 	}
 
@@ -272,14 +281,19 @@ impl PrometheusMetrics for Metrics {
 				.with_label_values(&[&para_string])
 				.observe(dispute_outcome.resolve_time as f64);
 
-			if dispute_outcome.voted_for > dispute_outcome.voted_against {
-				metrics.disputes_stats.concluded_valid.with_label_values(&[&para_string]).inc();
-			} else {
-				metrics
+			match dispute_outcome.outcome {
+				SubxtDisputeResult::Valid =>
+					metrics.disputes_stats.concluded_valid.with_label_values(&[&para_string]).inc(),
+				SubxtDisputeResult::Invalid => metrics
 					.disputes_stats
 					.concluded_invalid
 					.with_label_values(&[&para_string])
-					.inc();
+					.inc(),
+				SubxtDisputeResult::TimedOut => metrics
+					.disputes_stats
+					.concluded_timed_out
+					.with_label_values(&[&para_string])
+					.inc(),
 			}
 
 			for (index, address) in dispute_outcome.initiators.iter() {
@@ -413,6 +427,13 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 		concluded_invalid: prometheus_endpoint::register(
 			IntCounterVec::new(
 				Opts::new("pc_disputed_invalid_count", "Number of disputed candidates concluded invalid"),
+				&["parachain_id"],
+			)?,
+			registry,
+		)?,
+		concluded_timed_out: prometheus_endpoint::register(
+			IntCounterVec::new(
+				Opts::new("pc_disputed_timed_out_count", "Number of disputed candidates that timed out"),
 				&["parachain_id"],
 			)?,
 			registry,

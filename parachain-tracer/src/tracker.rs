@@ -446,6 +446,10 @@ impl SubxtTracker {
 		stats: &mut impl Stats,
 		metrics: &impl PrometheusMetrics,
 	) {
+		if self.is_fork() {
+			return; // We already processed disputes for this block
+		}
+
 		self.disputes.iter().for_each(|outcome| {
 			progress.events.push(ParachainConsensusEvent::Disputed(outcome.clone()));
 			stats.on_disputed(outcome);
