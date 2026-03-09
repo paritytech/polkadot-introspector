@@ -64,9 +64,12 @@ impl Retry {
 			return Err(RetryError::MaxCountReached)
 		}
 
-		let ms = self.delay * (self.count + 1);
+		let ms = (self.delay as u64).saturating_mul(1u64 << self.count);
 		warn!("Retrying in {}ms...", ms);
-		sleep(Duration::from_millis(ms.into())).await;
+		tokio::select! {
+			_ = sleep(Duration::from_millis(ms)) => {},
+			_ = tokio::signal::ctrl_c() => return Err(RetryError::MaxCountReached),
+		}
 
 		Ok(())
 	}
