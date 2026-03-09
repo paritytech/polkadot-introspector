@@ -524,8 +524,8 @@ async fn main() -> color_eyre::Result<()> {
 	init::init_cli(&opts.verbose)?;
 
 	let whois = Whois::new(opts.clone())?;
-	let shutdown_tx = init::init_shutdown();
-	let executor = RequestExecutor::build(opts.ws.clone(), ApiClientMode::RPC, &opts.retry, &shutdown_tx).await?;
+	let (run_context, _outcome_rx) = init::init_run_context();
+	let executor = RequestExecutor::build(opts.ws.clone(), ApiClientMode::RPC, &opts.retry, &run_context).await?;
 
 	let mut futures = vec![];
 	futures.extend(whois.run(executor).await?);

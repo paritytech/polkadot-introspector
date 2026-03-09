@@ -41,7 +41,7 @@ use polkadot_introspector_essentials::{
 	collector::{self, Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent, TerminationReason},
 	consumer::{EventConsumerInit, EventStream},
 	historical_subscription::HistoricalSubscription,
-	init::{self, Shutdown},
+	init::{self, RunContext},
 	types::BlockNumber,
 	utils::{Retry, RetryOptions},
 };
@@ -49,7 +49,6 @@ use polkadot_introspector_priority_channel::{Receiver, Sender, channel_with_capa
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
 use stats::ParachainStats;
 use std::{collections::HashMap, default::Default, ops::DerefMut, time::Duration};
-use tokio::sync::broadcast::Sender as BroadcastSender;
 use tracker::SubxtTracker;
 use tracker_storage::TrackerStorage;
 
@@ -139,14 +138,14 @@ impl ParachainTracer {
 	/// Spawn the UI and subxt tasks and return their futures.
 	pub(crate) async fn run(
 		self,
-		shutdown_tx: &BroadcastSender<Shutdown>,
+		run_context: &RunContext,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
 		executor: &mut RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let mut output_futures = vec![];
 
 		let mut collector = Collector::new(self.opts.node.as_str(), self.opts.collector_opts.clone(), executor.clone());
-		collector.spawn(shutdown_tx).await?;
+		collector.spawn(run_context).await?;
 
 		println!(
 			"{}\n\twill trace {}\n\ton {}\n\tusing {} Client\n",
@@ -172,7 +171,7 @@ impl ParachainTracer {
 
 		output_futures.push(ParachainTracer::watch_node_for_relay_chain(
 			self.clone(),
-			shutdown_tx.clone(),
+			run_context.clone(),
 			// HACK: We use a fake para id to receive only relay chain events
 			collector.subscribe_parachain_updates(RELAY_CHAIN_ID).await?,
 			collector.api(),
@@ -182,7 +181,7 @@ impl ParachainTracer {
 			let from_collector = collector.subscribe_broadcast_updates().await?;
 			output_futures.push(tokio::spawn(ParachainTracer::watch_node_broadcast(
 				self.clone(),
-				shutdown_tx.clone(),
+				run_context.clone(),
 				from_collector,
 				collector.api(),
 			)));
@@ -191,7 +190,7 @@ impl ParachainTracer {
 				let from_collector = collector.subscribe_parachain_updates(*para_id).await?;
 				output_futures.push(ParachainTracer::watch_node_for_parachain(
 					self.clone(),
-					shutdown_tx.clone(),
+					run_context.clone(),
 					from_collector,
 					*para_id,
 					collector.api(),
@@ -211,7 +210,7 @@ impl ParachainTracer {
 
 	fn watch_node_for_relay_chain(
 		self,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 		from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
@@ -293,7 +292,7 @@ impl ParachainTracer {
 								TerminationReason::Normal => break,
 								TerminationReason::Abnormal(info) => {
 									error!("Shutting down, {}", info);
-									let _ = shutdown_tx.send(Shutdown::Restart);
+									run_context.request_restart();
 									break;
 								},
 							}
@@ -312,7 +311,7 @@ impl ParachainTracer {
 	// Follows the stream of events and updates the application state.
 	fn watch_node_for_parachain(
 		self,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 		from_collector: Receiver<CollectorUpdateEvent>,
 		para_id: u32,
 		api_service: CollectorStorageApi,
@@ -336,7 +335,7 @@ impl ParachainTracer {
 							for relay_fork in &new_head.relay_parent_hashes {
 								if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
-									let _ = shutdown_tx.send(Shutdown::Restart);
+									run_context.request_restart();
 									break;
 								}
 								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await &&
@@ -355,7 +354,7 @@ impl ParachainTracer {
 								TerminationReason::Normal => break,
 								TerminationReason::Abnormal(info) => {
 									error!("Shutting down, {}", info);
-									let _ = shutdown_tx.send(Shutdown::Restart);
+									run_context.request_restart();
 									break;
 								},
 							}
@@ -378,7 +377,7 @@ impl ParachainTracer {
 
 	async fn watch_node_broadcast(
 		self,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 		from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) {
@@ -402,7 +401,7 @@ impl ParachainTracer {
 
 								let to_tracker = trackers.entry(para_id).or_insert_with(|| {
 									let (tx, rx) = channel_with_capacities(collector::COLLECTOR_NORMAL_CHANNEL_CAPACITY, 1);
-									futures.push(ParachainTracer::watch_node_for_parachain(self.clone(), shutdown_tx.clone(), rx, para_id, api_service.clone()));
+									futures.push(ParachainTracer::watch_node_for_parachain(self.clone(), run_context.clone(), rx, para_id, api_service.clone()));
 									info!("Added tracker for parachain {}", para_id);
 
 									tx
@@ -430,7 +429,7 @@ impl ParachainTracer {
 									TerminationReason::Normal => break,
 									TerminationReason::Abnormal(info) => {
 										error!("Shutting down, {}", info);
-										let _ = shutdown_tx.send(Shutdown::Restart);
+										run_context.request_restart();
 										break;
 									},
 								}
@@ -505,19 +504,33 @@ async fn main() -> color_eyre::Result<()> {
 
 	loop {
 		let tracer = ParachainTracer::new(opts.clone(), metrics.clone())?;
-		let shutdown_tx = init::init_shutdown();
-		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut executor =
-			match RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &shutdown_tx).await {
-				Ok(executor) => executor,
-				Err(e) => {
-					error!("Failed to build RequestExecutor: {:?}", e);
-					if retry.sleep().await.is_err() {
-						break;
-					}
+		let (run_context, mut outcome_rx) = init::init_run_context();
+		let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
+		let mut executor = match tokio::select! {
+			result = RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &run_context) => result,
+			maybe_outcome = outcome_rx.recv() => {
+				let Some(outcome) = maybe_outcome else {
+					error!("All RunContext senders dropped without signaling an outcome");
+					shutdown_listener.abort();
+					break;
+				};
+				shutdown_listener.abort();
+				if outcome.is_restart_requested() && retry.sleep().await.is_ok() {
 					continue;
-				},
-			};
+				}
+				break;
+			}
+		} {
+			Ok(executor) => executor,
+			Err(e) => {
+				shutdown_listener.abort();
+				error!("Failed to build RequestExecutor: {:?}", e);
+				if retry.sleep().await.is_err() {
+					break;
+				}
+				continue;
+			},
+		};
 
 		let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 			let (from, to) = historical_bounds(&opts)?;
@@ -528,17 +541,29 @@ async fn main() -> color_eyre::Result<()> {
 		let consumer_init = sub.create_consumer();
 
 		let mut futures = vec![];
-		futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut executor).await?);
-		futures.extend(sub.run(&shutdown_tx).await?);
-		init::run(futures, &shutdown_tx).await?;
+		let tracer_futures = tokio::select! {
+			result = tracer.run(&run_context, consumer_init, &mut executor) => result?,
+			maybe_outcome = outcome_rx.recv() => {
+				let Some(outcome) = maybe_outcome else {
+					error!("All RunContext senders dropped without signaling an outcome");
+					executor.close().await;
+					shutdown_listener.abort();
+					break;
+				};
+				executor.close().await;
+				shutdown_listener.abort();
+				if outcome.is_restart_requested() && retry.sleep().await.is_ok() {
+					continue;
+				}
+				break;
+			}
+		};
+		futures.extend(tracer_futures);
+		futures.extend(sub.run(&run_context).await?);
+		let outcome = init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
 		executor.close().await;
 
-		let should_break = match shutdown_rx.recv().await {
-			Ok(Shutdown::Restart) => retry.sleep().await.is_err(),
-			_ => true,
-		};
-
-		if should_break {
+		if !outcome.is_restart_requested() || retry.sleep().await.is_err() {
 			break;
 		}
 	}
