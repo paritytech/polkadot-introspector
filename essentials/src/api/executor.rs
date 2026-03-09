@@ -20,7 +20,7 @@ use crate::{
 		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
-	init::Shutdown,
+	init::RunContext,
 	metadata::{
 		polkadot::{
 			runtime_apis::babe_api::types::generate_key_ownership_proof::Slot,
@@ -44,10 +44,7 @@ use polkadot_introspector_priority_channel::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 use subxt::{OnlineClient, PolkadotConfig};
 use thiserror::Error;
-use tokio::sync::{
-	broadcast::Sender as BroadcastSender,
-	oneshot::{Sender as OneshotSender, error::RecvError as OneshotRecvError},
-};
+use tokio::sync::oneshot::{Sender as OneshotSender, error::RecvError as OneshotRecvError};
 
 enum ExecutorMessage {
 	Close,
@@ -179,9 +176,7 @@ impl RequestExecutorBackend {
 		url: String,
 		api_client_mode: ApiClientMode,
 	) -> color_eyre::Result<Self, RequestExecutorError> {
-		let client = build_client(&url, api_client_mode, &retry)
-			.await
-			.ok_or(RequestExecutorError::ClientBuildFailed(url))?;
+		let client = build_client(&url, api_client_mode).await?;
 
 		Ok(RequestExecutorBackend { client, retry })
 	}
@@ -354,18 +349,18 @@ impl RequestExecutor {
 		nodes: impl RequestExecutorNodes,
 		api_client_mode: ApiClientMode,
 		retry: &RetryOptions,
-		shutdown_tx: &BroadcastSender<Shutdown>,
+		run_context: &RunContext,
 	) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
 		let mut clients = HashMap::new();
 		for node in nodes.unique_nodes() {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
 			let mut backend = RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode).await?;
 			let _ = clients.insert(node, (to_backend, backend.hasher()));
-			let shutdown_tx = shutdown_tx.clone();
+			let run_context = run_context.clone();
 			tokio::spawn(async move {
 				if let Err(e) = backend.run(from_frontend).await {
 					error!("Request Executor Backend failed to run, closing the application: {:?}", e);
-					let _ = shutdown_tx.send(Shutdown::Restart);
+					run_context.request_restart();
 				}
 			});
 		}
@@ -572,18 +567,11 @@ impl RequestExecutor {
 async fn build_client(
 	url: &str,
 	api_client_mode: ApiClientMode,
-	retry: &RetryOptions,
-) -> Option<ApiClient<OnlineClient<PolkadotConfig>>> {
-	let mut retry = Retry::new(retry);
-	loop {
-		match build_online_client(url, api_client_mode).await {
-			Ok(client) => return Some(client),
-			Err(err) => {
-				error!("[{}] RpcClient error: {:?}", url, err);
-				if (retry.sleep().await).is_err() {
-					return None
-				}
-			},
-		}
-	}
+) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, RequestExecutorError> {
+	build_online_client(url, api_client_mode)
+		.await
+		.map_err(|err| {
+			error!("[{}] RpcClient error: {:?}", url, err);
+			RequestExecutorError::ClientBuildFailed(url.to_owned())
+		})
 }

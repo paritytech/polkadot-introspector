@@ -26,7 +26,6 @@ use crate::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
-	init::Shutdown,
 	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
@@ -54,7 +53,6 @@ use subxt::{
 	config::{Hasher, polkadot::U256},
 };
 use thiserror::Error;
-use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
 
 /// Used for bulk messages in the normal channels
@@ -282,11 +280,11 @@ impl Collector {
 	}
 
 	/// Spawns a collector futures (e.g. websocket server)
-	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<Shutdown>) -> color_eyre::Result<()> {
+	pub async fn spawn(&mut self, run_context: &crate::init::RunContext) -> color_eyre::Result<()> {
 		if let Some(ws_listener) = &self.ws_listener {
 			let (to_websocket, from_collector) = priority_channel(32);
 			ws_listener
-				.spawn(shutdown_tx.subscribe(), from_collector)
+				.spawn(run_context.subscribe_shutdown(), from_collector)
 				.await
 				.map_err(|e| eyre!("Cannot spawn a listener: {:?}", e))?;
 			self.to_websocket = Some(to_websocket);
