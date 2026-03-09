@@ -19,7 +19,7 @@ use super::telemetry_feed::TelemetryFeed;
 use crate::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
-	init::Shutdown,
+	init::RunContext,
 	telemetry_feed::AddedChain,
 	types::H256,
 };
@@ -34,7 +34,7 @@ use std::{
 	collections::HashMap,
 	io::{BufRead, stdin},
 };
-use tokio::{net::TcpStream, sync::broadcast::Sender as BroadcastSender};
+use tokio::net::TcpStream;
 use tokio_tungstenite::{
 	MaybeTlsStream, WebSocketStream, connect_async,
 	tungstenite::{Error as WsError, Message},
@@ -93,10 +93,7 @@ impl EventStream for TelemetrySubscription {
 		EventConsumerInit::new(vec![update_rx])
 	}
 
-	async fn run(
-		&self,
-		shutdown_tx: &BroadcastSender<Shutdown>,
-	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	async fn run(&self, run_context: &RunContext) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		Ok(self
 			.consumers
 			.clone()
@@ -106,7 +103,7 @@ impl EventStream for TelemetrySubscription {
 					update_channel,
 					self.url.clone(),
 					self.maybe_chain_name.clone(),
-					shutdown_tx.clone(),
+					run_context.clone(),
 				))
 			})
 			.collect::<Vec<_>>())
@@ -123,9 +120,9 @@ impl TelemetrySubscription {
 		mut update_channel: Sender<TelemetryEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
 		maybe_chain_name: Option<String>,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 	) {
-		let mut shutdown_rx = shutdown_tx.subscribe();
+		let mut cancel_rx = run_context.subscribe_cancel();
 		let mut stream = match TelemetryStream::connect(&url).await {
 			Ok(v) => v,
 			Err(e) => return on_stream_error(e),
@@ -173,7 +170,7 @@ impl TelemetrySubscription {
 						}
 					}
 				},
-				_ = shutdown_rx.recv() => {
+				_ = cancel_rx.changed() => {
 					return on_ctrl_c();
 				}
 			}

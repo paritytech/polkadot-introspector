@@ -20,15 +20,12 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
-	init::Shutdown,
+	init::RunContext,
 };
 use async_trait::async_trait;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{Sender, channel};
-use tokio::{
-	sync::broadcast::Sender as BroadcastSender,
-	time::{Duration, interval_at},
-};
+use tokio::time::{Duration, interval_at};
 
 pub struct ChainHeadSubscription {
 	urls: Vec<String>,
@@ -58,12 +55,9 @@ impl EventStream for ChainHeadSubscription {
 		EventConsumerInit::new(update_channels)
 	}
 
-	async fn run(
-		&self,
-		shutdown_tx: &BroadcastSender<Shutdown>,
-	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	async fn run(&self, run_context: &RunContext) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let futures = self.consumers.clone().into_iter().map(|update_channels| {
-			Self::run_per_consumer(update_channels, self.urls.clone(), shutdown_tx.clone(), &self.executor)
+			Self::run_per_consumer(update_channels, self.urls.clone(), run_context.clone(), &self.executor)
 		});
 
 		Ok(futures.flatten().collect::<Vec<_>>())
@@ -79,19 +73,19 @@ impl ChainHeadSubscription {
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
 		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 		mut executor: RequestExecutor,
 	) {
 		use futures::stream::{StreamExt, select};
 		use futures_util::TryStreamExt;
 
-		let mut shutdown_rx = shutdown_tx.subscribe();
+		let mut cancel_rx = run_context.subscribe_cancel();
 		let best_sub = match executor.get_best_block_subscription(&url).await {
 			Ok(v) => v.map_ok(|v| ChainSubscriptionEvent::NewBestHead((v.1.hash(), v.0))),
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
 				let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
-				let _ = shutdown_tx.send(Shutdown::Restart);
+				run_context.request_restart();
 				return
 			},
 		};
@@ -100,7 +94,7 @@ impl ChainHeadSubscription {
 			Err(e) => {
 				error!("Subscription to {} failed: {:?}", url, e);
 				let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
-				let _ = shutdown_tx.send(Shutdown::Restart);
+				run_context.request_restart();
 				return
 			},
 		};
@@ -110,6 +104,14 @@ impl ChainHeadSubscription {
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
 		loop {
+			if *cancel_rx.borrow() {
+				info!("Received interrupt signal shutting down subscription");
+				if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
+					info!("Event consumer has already terminated: {:?}", e);
+				}
+				return;
+			}
+
 			tokio::select! {
 				message = sub.next() => {
 					let event = match message {
@@ -117,13 +119,13 @@ impl ChainHeadSubscription {
 						Some(Err(e)) => {
 							error!("Subscription to {} failed: {:?}", url, e);
 							let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
-							let _ = shutdown_tx.send(Shutdown::Restart);
+							run_context.request_restart();
 							return
 						},
 						None => {
 							error!("Subscription to {} failed, received None instead of an event", url);
 							let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
-							let _ = shutdown_tx.send(Shutdown::Restart);
+							run_context.request_restart();
 							return
 						}
 					};
@@ -133,7 +135,7 @@ impl ChainHeadSubscription {
 						return;
 					}
 				},
-				_ = shutdown_rx.recv() => {
+				_ = cancel_rx.changed() => {
 					info!("Received interrupt signal shutting down subscription");
 					if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
 						info!("Event consumer has already terminated: {:?}", e);
@@ -155,14 +157,14 @@ impl ChainHeadSubscription {
 	fn run_per_consumer(
 		update_channels: Vec<Sender<ChainSubscriptionEvent>>,
 		urls: Vec<String>,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 		executor: &RequestExecutor,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
 			.into_iter()
 			.zip(urls)
 			.map(|(update_channel, url)| {
-				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), executor.clone()))
+				tokio::spawn(Self::run_per_node(update_channel, url, run_context.clone(), executor.clone()))
 			})
 			.collect()
 	}
