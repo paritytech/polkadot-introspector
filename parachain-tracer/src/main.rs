@@ -43,7 +43,7 @@ use polkadot_introspector_essentials::{
 	historical_subscription::HistoricalSubscription,
 	init::{self, RunContext},
 	types::BlockNumber,
-	utils::{Retry, RetryOptions},
+	utils::RetryOptions,
 };
 use polkadot_introspector_priority_channel::{Receiver, Sender, channel_with_capacities};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
@@ -494,55 +494,31 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let mut retry = Retry::new(&opts.retry);
-
 	let metrics = if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = opts.mode {
 		prometheus::run_prometheus_endpoint(prometheus_opts).await?
 	} else {
 		Default::default()
 	};
 
-	loop {
-		let tracer = ParachainTracer::new(opts.clone(), metrics.clone())?;
-		let (run_context, mut outcome_rx) = init::init_run_context();
-		let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
-		let mut executor = match tokio::select! {
-			result = RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &run_context) => result,
-			Some(outcome) = outcome_rx.recv() => {
-				shutdown_listener.abort();
-				if outcome.is_restart_requested() && retry.sleep().await.is_ok() { continue; }
-				break;
-			}
-		} {
-			Ok(executor) => executor,
-			Err(e) => {
-				shutdown_listener.abort();
-				error!("Failed to build RequestExecutor: {:?}", e);
-				if retry.sleep().await.is_err() {
-					break;
-				}
-				continue;
-			},
-		};
+	let tracer = ParachainTracer::new(opts.clone(), metrics)?;
+	let (run_context, mut outcome_rx) = init::init_run_context();
+	let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
+	let mut executor =
+		RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &run_context).await?;
 
-		let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
-			let (from, to) = historical_bounds(&opts)?;
-			Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, executor.clone()))
-		} else {
-			Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], executor.clone()))
-		};
-		let consumer_init = sub.create_consumer();
+	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
+		let (from, to) = historical_bounds(&opts)?;
+		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, executor.clone()))
+	} else {
+		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], executor.clone()))
+	};
+	let consumer_init = sub.create_consumer();
 
-		let mut futures = vec![];
-		futures.extend(tracer.run(&run_context, consumer_init, &mut executor).await?);
-		futures.extend(sub.run(&run_context).await?);
-		let outcome = init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
-		executor.close().await;
-
-		if !outcome.is_restart_requested() || retry.sleep().await.is_err() {
-			break;
-		}
-	}
+	let mut futures = vec![];
+	futures.extend(tracer.run(&run_context, consumer_init, &mut executor).await?);
+	futures.extend(sub.run(&run_context).await?);
+	init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
+	executor.close().await;
 
 	Ok(())
 }
