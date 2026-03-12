@@ -20,16 +20,20 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
-	init::Shutdown,
+	init::RunContext,
 	types::BlockNumber,
 };
 use async_trait::async_trait;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{Sender, channel};
-use tokio::{
-	sync::broadcast::{Sender as BroadcastSender, error::TryRecvError},
-	time::{Duration, interval_at},
-};
+
+macro_rules! send_termination {
+	($ch:expr) => {
+		if let Err(e) = $ch.send(ChainSubscriptionEvent::Termination).await {
+			info!("Event consumer has already terminated: {:?}", e);
+		}
+	};
+}
 
 pub struct HistoricalSubscription {
 	urls: Vec<String>,
@@ -61,17 +65,14 @@ impl EventStream for HistoricalSubscription {
 		EventConsumerInit::new(update_channels)
 	}
 
-	async fn run(
-		&self,
-		shutdown_tx: &BroadcastSender<Shutdown>,
-	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	async fn run(&self, run_context: &RunContext) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		let futures = self.consumers.clone().into_iter().map(|update_channels| {
 			Self::run_per_consumer(
 				update_channels,
 				self.urls.clone(),
 				self.from_block_number,
 				self.to_block_number,
-				shutdown_tx.clone(),
+				run_context.clone(),
 				&self.executor,
 			)
 		});
@@ -93,42 +94,52 @@ impl HistoricalSubscription {
 	// Per node
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
-		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
+		url: String,
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 		mut executor: RequestExecutor,
 	) {
-		let mut shutdown_rx = shutdown_tx.subscribe();
-		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
-		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
+		let cancel_rx = run_context.subscribe_cancel();
 
 		let last_block_number = match executor.get_block_number(&url, None).await {
 			Ok(v) => v,
-			Err(_) => {
-				error!("Subscription to {} failed, last block not found", url);
+			Err(e) => {
+				error!("Subscription to {} failed to fetch last block: {:?}", url, e);
+				send_termination!(update_channel);
+				run_context.request_restart();
 				return
 			},
 		};
 
 		if from_block_number >= last_block_number || to_block_number >= last_block_number {
 			error!("`--from` and `--to` must be less then {}", last_block_number);
+			send_termination!(update_channel);
+			run_context.complete();
 			return
 		}
 
 		for block_number in from_block_number..=to_block_number {
+			if *cancel_rx.borrow() {
+				info!("Received interrupt signal shutting down subscription");
+				send_termination!(update_channel);
+				return;
+			}
+
 			debug!("Subscription advacing to block #{}/#{}", block_number, to_block_number);
 
 			let block_hash = match executor.get_block_hash(&url, Some(block_number)).await {
 				Ok(Some(v)) => v,
 				Ok(None) => {
 					error!("Subscription to {} failed, block hash for block #{} not found", url, block_number);
-					let _ = shutdown_tx.send(Shutdown::Restart);
+					send_termination!(update_channel);
+					run_context.request_restart();
 					return
 				},
 				Err(e) => {
 					error!("Subscription to {} failed: {:?}", url, e);
-					let _ = shutdown_tx.send(Shutdown::Restart);
+					send_termination!(update_channel);
+					run_context.request_restart();
 					return
 				},
 			};
@@ -136,12 +147,14 @@ impl HistoricalSubscription {
 				Ok(Some(v)) => v,
 				Ok(None) => {
 					error!("Subscription to {} failed, header for block #{} not found", url, block_number);
-					let _ = shutdown_tx.send(Shutdown::Restart);
+					send_termination!(update_channel);
+					run_context.request_restart();
 					return
 				},
 				Err(e) => {
 					error!("Subscription to {} failed: {:?}", url, e);
-					let _ = shutdown_tx.send(Shutdown::Restart);
+					send_termination!(update_channel);
+					run_context.request_restart();
 					return
 				},
 			};
@@ -161,34 +174,11 @@ impl HistoricalSubscription {
 				info!("Event consumer has terminated: {:?}, shutting down", e);
 				return
 			}
-
-			match shutdown_rx.try_recv() {
-				Err(TryRecvError::Closed) | Ok(_) => {
-					info!("Received interrupt signal shutting down subscription");
-					return
-				},
-				_ => {},
-			}
 		}
 
-		loop {
-			// We wait here for termination.
-			tokio::select! {
-				_ = shutdown_rx.recv() => {
-					info!("Received interrupt signal shutting down subscription");
-					return;
-				}
-				_ = heartbeat_periodic.tick() => {
-					debug!("sent heartbeat to subscribers");
-					let res = update_channel.send(ChainSubscriptionEvent::Heartbeat).await;
-					if let Err(e) = res {
-						info!("Event consumer has terminated: {:?}, shutting down", e);
-						return;
-					}
-					heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
-				}
-			}
-		}
+		info!("[{}] Historical range completed, terminating subscription", url);
+		send_termination!(update_channel);
+		run_context.complete();
 	}
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.
@@ -197,7 +187,7 @@ impl HistoricalSubscription {
 		urls: Vec<String>,
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		run_context: RunContext,
 		executor: &RequestExecutor,
 	) -> Vec<tokio::task::JoinHandle<()>> {
 		update_channels
@@ -209,7 +199,7 @@ impl HistoricalSubscription {
 					url,
 					from_block_number,
 					to_block_number,
-					shutdown_tx.clone(),
+					run_context.clone(),
 					executor.clone(),
 				))
 			})

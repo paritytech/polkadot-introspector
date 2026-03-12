@@ -373,19 +373,21 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let shutdown_tx = init::init_shutdown();
-	let executor = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &shutdown_tx).await?;
+	let (run_context, mut outcome_rx) = init::init_run_context();
+	let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
+	let mut executor =
+		RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &run_context).await?;
 	let monitor = BlockTimeMonitor::new(opts.clone(), executor.clone())?;
-	let shutdown_tx = init::init_shutdown();
 	let mut futures = vec![];
 
-	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), executor);
+	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), executor.clone());
 	let consumer_init = sub.create_consumer();
 
 	futures.extend(monitor.run(consumer_init).await?);
-	futures.extend(sub.run(&shutdown_tx).await?);
+	futures.extend(sub.run(&run_context).await?);
 
-	init::run(futures, &shutdown_tx).await?;
+	init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
+	executor.close().await;
 
 	Ok(())
 }
