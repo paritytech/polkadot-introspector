@@ -567,4 +567,3 @@ impl RequestExecutor {
 		wrap_backend_call!(self, url, GetBabeKeyOwner, BabeKeyOwner, hash, key)
 	}
 }
-

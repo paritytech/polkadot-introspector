@@ -92,10 +92,7 @@ impl EventStream for TelemetrySubscription {
 		EventConsumerInit::new(vec![update_rx])
 	}
 
-	async fn run(
-		&self,
-		shutdown_tx: &BroadcastSender<()>,
-	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
+	async fn run(&self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
 		Ok(self
 			.consumers
 			.clone()
