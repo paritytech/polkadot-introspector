@@ -74,13 +74,7 @@ impl EventStream for HistoricalSubscription {
 }
 
 impl HistoricalSubscription {
-	async fn finish(update_channel: &mut Sender<ChainSubscriptionEvent>) {
-		if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
-			info!("Event consumer has already terminated: {:?}", e);
-		}
-	}
-
-	async fn terminate_on_cancel(update_channel: &mut Sender<ChainSubscriptionEvent>) {
+	async fn send_termination(update_channel: &mut Sender<ChainSubscriptionEvent>) {
 		if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
 			info!("Event consumer has already terminated: {:?}", e);
 		}
@@ -110,13 +104,13 @@ impl HistoricalSubscription {
 			result = executor.get_block_number(&url, None) => result,
 			_ = cancel_rx.changed() => {
 				info!("Received interrupt signal shutting down subscription");
-				Self::terminate_on_cancel(&mut update_channel).await;
+				Self::send_termination(&mut update_channel).await;
 				return;
 			}
 		} {
 			Ok(v) => v,
-			Err(_) => {
-				error!("Subscription to {} failed, last block not found", url);
+			Err(e) => {
+				error!("Subscription to {} failed to fetch last block: {:?}", url, e);
 				let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
 				run_context.request_restart();
 				return
@@ -137,7 +131,7 @@ impl HistoricalSubscription {
 				result = executor.get_block_hash(&url, Some(block_number)) => result,
 				_ = cancel_rx.changed() => {
 					info!("Received interrupt signal shutting down subscription");
-					Self::terminate_on_cancel(&mut update_channel).await;
+					Self::send_termination(&mut update_channel).await;
 					return;
 				}
 			} {
@@ -159,7 +153,7 @@ impl HistoricalSubscription {
 				result = executor.get_block_head(&url, Some(block_hash)) => result,
 				_ = cancel_rx.changed() => {
 					info!("Received interrupt signal shutting down subscription");
-					Self::terminate_on_cancel(&mut update_channel).await;
+					Self::send_termination(&mut update_channel).await;
 					return;
 				}
 			} {
@@ -196,13 +190,13 @@ impl HistoricalSubscription {
 
 			if *cancel_rx.borrow() {
 				info!("Received interrupt signal shutting down subscription");
-				Self::terminate_on_cancel(&mut update_channel).await;
+				Self::send_termination(&mut update_channel).await;
 				return;
 			}
 		}
 
 		info!("[{}] Historical range completed, terminating subscription", url);
-		Self::finish(&mut update_channel).await;
+		Self::send_termination(&mut update_channel).await;
 	}
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.

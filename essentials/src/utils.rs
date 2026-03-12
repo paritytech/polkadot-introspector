@@ -52,6 +52,8 @@ pub struct Retry {
 pub enum RetryError {
 	#[error("Max count reached")]
 	MaxCountReached,
+	#[error("Cancelled")]
+	Cancelled,
 }
 
 impl Default for Retry {
@@ -85,11 +87,13 @@ impl Retry {
 			return Err(RetryError::MaxCountReached)
 		}
 
-		let ms = (self.delay as u64).saturating_mul(1u64 << self.count);
+		// Cap at 50 to prevent shift overflow panic when count >= 64
+		let exponent = self.count.min(50);
+		let ms = (self.delay as u64).saturating_mul(1u64 << exponent);
 		warn!("Retrying in {}ms...", ms);
 		tokio::select! {
 			_ = sleep(Duration::from_millis(ms)) => {},
-			_ = tokio::signal::ctrl_c() => return Err(RetryError::MaxCountReached),
+			_ = tokio::signal::ctrl_c() => return Err(RetryError::Cancelled),
 		}
 
 		Ok(())

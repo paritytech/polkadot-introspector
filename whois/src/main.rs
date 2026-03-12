@@ -15,7 +15,6 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::{Args, Parser, Subcommand};
-use futures::future;
 use itertools::Itertools;
 use libp2p::{Multiaddr, PeerId};
 use polkadot_introspector_essentials::{
@@ -524,13 +523,14 @@ async fn main() -> color_eyre::Result<()> {
 	init::init_cli(&opts.verbose)?;
 
 	let whois = Whois::new(opts.clone())?;
-	let (run_context, _outcome_rx) = init::init_run_context();
+	let (run_context, mut outcome_rx) = init::init_run_context();
+	let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
 	let executor = RequestExecutor::build(opts.ws.clone(), ApiClientMode::RPC, &opts.retry, &run_context).await?;
 
 	let mut futures = vec![];
 	futures.extend(whois.run(executor).await?);
 
-	future::try_join_all(futures).await?;
+	let _outcome = init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
 
 	Ok(())
 }

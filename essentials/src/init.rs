@@ -123,7 +123,7 @@ pub async fn on_shutdown(run_context: RunContext) {
 		Ok(()) => run_context.request_cancel(),
 		Err(e) => {
 			error!("Failed to listen for shutdown signal: {:?}", e);
-			futures::future::pending::<()>().await;
+			run_context.request_cancel();
 		},
 	}
 }
