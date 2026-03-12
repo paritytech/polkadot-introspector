@@ -287,15 +287,11 @@ impl ParachainTracer {
 							}
 						},
 						CollectorUpdateEvent::Termination(reason) => {
-							info!("collector is terminating");
-							match reason {
-								TerminationReason::Normal => break,
-								TerminationReason::Abnormal(info) => {
-									error!("Shutting down, {}", info);
-									run_context.request_restart();
-									break;
-								},
+							if let TerminationReason::Abnormal(info) = &reason {
+								error!("Shutting down, {}", info);
 							}
+							run_context.complete();
+							break;
 						},
 					},
 					Err(_) => {
@@ -335,7 +331,7 @@ impl ParachainTracer {
 							for relay_fork in &new_head.relay_parent_hashes {
 								if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
-									run_context.request_restart();
+									run_context.complete();
 									break;
 								}
 								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await &&
@@ -349,15 +345,11 @@ impl ParachainTracer {
 							tracker.inject_new_session(idx);
 						},
 						CollectorUpdateEvent::Termination(reason) => {
-							info!("collector is terminating for parachain {}", para_id);
-							match reason {
-								TerminationReason::Normal => break,
-								TerminationReason::Abnormal(info) => {
-									error!("Shutting down, {}", info);
-									run_context.request_restart();
-									break;
-								},
+							if let TerminationReason::Abnormal(info) = &reason {
+								error!("Shutting down parachain {}, {}", para_id, info);
 							}
+							run_context.complete();
+							break;
 						},
 					},
 					Err(_) => {
@@ -423,16 +415,13 @@ impl ParachainTracer {
 									to_tracker.send(CollectorUpdateEvent::NewSession(idx)).await.unwrap();
 								},
 							CollectorUpdateEvent::Termination(reason) => {
+								if let TerminationReason::Abnormal(info) = &reason {
+									error!("Shutting down, {}", info);
+								}
 								info!("Received termination event, {} trackers will be terminated, {} futures are pending",
 									trackers.len(), futures.len());
-								match reason {
-									TerminationReason::Normal => break,
-									TerminationReason::Abnormal(info) => {
-										error!("Shutting down, {}", info);
-										run_context.request_restart();
-										break;
-									},
-								}
+								run_context.complete();
+								break;
 							},
 						},
 						None => {
