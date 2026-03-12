@@ -16,7 +16,6 @@
 //
 //! Event consumer traits and types. Abstracts on-chain/off-chain event streams and
 //! APIs for RPC nodes and internal storage.
-use crate::init::Shutdown;
 use async_trait::async_trait;
 use polkadot_introspector_priority_channel::Receiver;
 use tokio::sync::broadcast::Sender as BroadcastSender;
@@ -31,7 +30,7 @@ pub trait EventStream {
 	/// Prepare futures to join.
 	async fn run(
 		&self,
-		shutdown_tx: &BroadcastSender<Shutdown>,
+		shutdown_tx: &BroadcastSender<()>,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>>;
 }
 

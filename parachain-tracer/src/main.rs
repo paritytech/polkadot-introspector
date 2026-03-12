@@ -41,9 +41,9 @@ use polkadot_introspector_essentials::{
 	collector::{self, Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent, TerminationReason},
 	consumer::{EventConsumerInit, EventStream},
 	historical_subscription::HistoricalSubscription,
-	init::{self, Shutdown},
+	init,
 	types::BlockNumber,
-	utils::{Retry, RetryOptions},
+	utils::RetryOptions,
 };
 use polkadot_introspector_priority_channel::{Receiver, Sender, channel_with_capacities};
 use prometheus::{Metrics, ParachainTracerPrometheusOptions};
@@ -139,7 +139,7 @@ impl ParachainTracer {
 	/// Spawn the UI and subxt tasks and return their futures.
 	pub(crate) async fn run(
 		self,
-		shutdown_tx: &BroadcastSender<Shutdown>,
+		shutdown_tx: &BroadcastSender<()>,
 		consumer_config: EventConsumerInit<ChainSubscriptionEvent>,
 		executor: &mut RequestExecutor,
 	) -> color_eyre::Result<Vec<tokio::task::JoinHandle<()>>> {
@@ -211,7 +211,7 @@ impl ParachainTracer {
 
 	fn watch_node_for_relay_chain(
 		self,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		shutdown_tx: BroadcastSender<()>,
 		from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
@@ -293,7 +293,7 @@ impl ParachainTracer {
 								TerminationReason::Normal => break,
 								TerminationReason::Abnormal(info) => {
 									error!("Shutting down, {}", info);
-									let _ = shutdown_tx.send(Shutdown::Restart);
+									let _ = shutdown_tx.send(());
 									break;
 								},
 							}
@@ -312,7 +312,7 @@ impl ParachainTracer {
 	// Follows the stream of events and updates the application state.
 	fn watch_node_for_parachain(
 		self,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		shutdown_tx: BroadcastSender<()>,
 		from_collector: Receiver<CollectorUpdateEvent>,
 		para_id: u32,
 		api_service: CollectorStorageApi,
@@ -336,7 +336,7 @@ impl ParachainTracer {
 							for relay_fork in &new_head.relay_parent_hashes {
 								if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
 									error!("error occurred when processing block {}: {:?}", relay_fork, e);
-									let _ = shutdown_tx.send(Shutdown::Restart);
+									let _ = shutdown_tx.send(());
 									break;
 								}
 								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await &&
@@ -355,7 +355,7 @@ impl ParachainTracer {
 								TerminationReason::Normal => break,
 								TerminationReason::Abnormal(info) => {
 									error!("Shutting down, {}", info);
-									let _ = shutdown_tx.send(Shutdown::Restart);
+									let _ = shutdown_tx.send(());
 									break;
 								},
 							}
@@ -378,7 +378,7 @@ impl ParachainTracer {
 
 	async fn watch_node_broadcast(
 		self,
-		shutdown_tx: BroadcastSender<Shutdown>,
+		shutdown_tx: BroadcastSender<()>,
 		from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) {
@@ -430,7 +430,7 @@ impl ParachainTracer {
 									TerminationReason::Normal => break,
 									TerminationReason::Abnormal(info) => {
 										error!("Shutting down, {}", info);
-										let _ = shutdown_tx.send(Shutdown::Restart);
+										let _ = shutdown_tx.send(());
 										break;
 									},
 								}
@@ -495,53 +495,30 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	let mut retry = Retry::new(&opts.retry);
-
 	let metrics = if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = opts.mode {
 		prometheus::run_prometheus_endpoint(prometheus_opts).await?
 	} else {
 		Default::default()
 	};
 
-	loop {
-		let tracer = ParachainTracer::new(opts.clone(), metrics.clone())?;
-		let shutdown_tx = init::init_shutdown();
-		let mut shutdown_rx = shutdown_tx.subscribe();
-		let mut executor =
-			match RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &shutdown_tx).await {
-				Ok(executor) => executor,
-				Err(e) => {
-					error!("Failed to build RequestExecutor: {:?}", e);
-					if retry.sleep().await.is_err() {
-						break;
-					}
-					continue;
-				},
-			};
+	let tracer = ParachainTracer::new(opts.clone(), metrics)?;
+	let shutdown_tx = init::init_shutdown();
+	let mut executor =
+		RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &shutdown_tx).await?;
 
-		let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
-			let (from, to) = historical_bounds(&opts)?;
-			Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, executor.clone()))
-		} else {
-			Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], executor.clone()))
-		};
-		let consumer_init = sub.create_consumer();
+	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
+		let (from, to) = historical_bounds(&opts)?;
+		Box::new(HistoricalSubscription::new(vec![opts.node.clone()], from, to, executor.clone()))
+	} else {
+		Box::new(ChainHeadSubscription::new(vec![opts.node.clone()], executor.clone()))
+	};
+	let consumer_init = sub.create_consumer();
 
-		let mut futures = vec![];
-		futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut executor).await?);
-		futures.extend(sub.run(&shutdown_tx).await?);
-		init::run(futures, &shutdown_tx).await?;
-		executor.close().await;
-
-		let should_break = match shutdown_rx.recv().await {
-			Ok(Shutdown::Restart) => retry.sleep().await.is_err(),
-			_ => true,
-		};
-
-		if should_break {
-			break;
-		}
-	}
+	let mut futures = vec![];
+	futures.extend(tracer.run(&shutdown_tx, consumer_init, &mut executor).await?);
+	futures.extend(sub.run(&shutdown_tx).await?);
+	init::run(futures, &shutdown_tx).await?;
+	executor.close().await;
 
 	Ok(())
 }

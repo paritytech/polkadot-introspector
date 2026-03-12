@@ -26,7 +26,6 @@ use crate::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
-	init::Shutdown,
 	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
@@ -282,7 +281,7 @@ impl Collector {
 	}
 
 	/// Spawns a collector futures (e.g. websocket server)
-	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<Shutdown>) -> color_eyre::Result<()> {
+	pub async fn spawn(&mut self, shutdown_tx: &BroadcastSender<()>) -> color_eyre::Result<()> {
 		if let Some(ws_listener) = &self.ws_listener {
 			let (to_websocket, from_collector) = priority_channel(32);
 			ws_listener
