@@ -568,10 +568,8 @@ async fn build_client(
 	url: &str,
 	api_client_mode: ApiClientMode,
 ) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, RequestExecutorError> {
-	build_online_client(url, api_client_mode)
-		.await
-		.map_err(|err| {
-			error!("[{}] RpcClient error: {:?}", url, err);
-			RequestExecutorError::ClientBuildFailed(url.to_owned())
-		})
+	build_online_client(url, api_client_mode).await.map_err(|err| {
+		error!("[{}] RpcClient error: {:?}", url, err);
+		RequestExecutorError::ClientBuildFailed(url.to_owned())
+	})
 }

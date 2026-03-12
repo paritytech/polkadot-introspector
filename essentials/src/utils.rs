@@ -16,8 +16,8 @@
 //
 
 use clap::Parser;
-use log::warn;
-use std::time::Duration;
+use log::{info, warn};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::time::sleep;
 
@@ -33,12 +33,19 @@ pub struct RetryOptions {
 	/// Delay in ms to wait between retry attempts
 	#[clap(default_value = "100", long)]
 	retry_delay: u32,
+	/// Seconds of stable operation after which the retry counter resets.
+	/// If the last retry was longer ago than this threshold, the counter
+	/// resets to zero so a new series of failures gets the full budget.
+	#[clap(default_value = "3600", long)]
+	retry_reset_after: u64,
 }
 
 pub struct Retry {
 	count: u32,
 	max_count: u32,
 	delay: u32,
+	reset_after: Duration,
+	last_attempt: Option<Instant>,
 }
 
 #[derive(Debug, Error)]
@@ -55,10 +62,24 @@ impl Default for Retry {
 
 impl Retry {
 	pub fn new(opts: &RetryOptions) -> Self {
-		Self { count: 0, max_count: opts.max_count, delay: opts.retry_delay }
+		Self {
+			count: 0,
+			max_count: opts.max_count,
+			delay: opts.retry_delay,
+			reset_after: Duration::from_secs(opts.retry_reset_after),
+			last_attempt: None,
+		}
 	}
 
 	pub async fn sleep(&mut self) -> color_eyre::Result<(), RetryError> {
+		if let Some(last) = self.last_attempt &&
+			last.elapsed() >= self.reset_after
+		{
+			info!("Last retry was over {}s ago, resetting retry counter", self.reset_after.as_secs());
+			self.count = 0;
+		}
+		self.last_attempt = Some(Instant::now());
+
 		self.count += 1;
 		if self.count > self.max_count {
 			return Err(RetryError::MaxCountReached)
