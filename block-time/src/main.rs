@@ -377,7 +377,7 @@ async fn main() -> color_eyre::Result<()> {
 	loop {
 		let (run_context, mut outcome_rx) = init::init_run_context();
 		let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
-		let mut executor = tokio::select! {
+		let mut executor = match tokio::select! {
 			result = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &run_context) => result,
 			maybe_outcome = outcome_rx.recv() => {
 				let Some(outcome) = maybe_outcome else {
@@ -391,7 +391,17 @@ async fn main() -> color_eyre::Result<()> {
 				}
 				break;
 			}
-		}?;
+		} {
+			Ok(executor) => executor,
+			Err(e) => {
+				shutdown_listener.abort();
+				log::error!("Failed to build RequestExecutor: {:?}", e);
+				if retry.sleep().await.is_err() {
+					break;
+				}
+				continue;
+			},
+		};
 		let monitor = BlockTimeMonitor::new(opts.clone(), executor.clone())?;
 		let mut futures = vec![];
 

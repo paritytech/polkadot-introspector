@@ -151,7 +151,7 @@ pub async fn run_supervised(
 				Err(e) if e.is_cancelled() => {},
 				Err(e) => return Err(e.into()),
 			}
-			return Ok(RunOutcome::Completed);
+			return Ok(outcome_rx.try_recv().unwrap_or(RunOutcome::Completed));
 		},
 		maybe_outcome = outcome_rx.recv() => {
 			match maybe_outcome {

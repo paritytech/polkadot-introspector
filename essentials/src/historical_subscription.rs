@@ -197,6 +197,7 @@ impl HistoricalSubscription {
 
 		info!("[{}] Historical range completed, terminating subscription", url);
 		Self::send_termination(&mut update_channel).await;
+		run_context.complete();
 	}
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.

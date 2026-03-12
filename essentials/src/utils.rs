@@ -87,8 +87,7 @@ impl Retry {
 			return Err(RetryError::MaxCountReached)
 		}
 
-		// Cap at 50 to prevent shift overflow panic when count >= 64
-		let exponent = self.count.min(50);
+		let exponent = self.count.min(10);
 		let ms = (self.delay as u64).saturating_mul(1u64 << exponent);
 		warn!("Retrying in {}ms...", ms);
 		tokio::select! {

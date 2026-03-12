@@ -125,7 +125,11 @@ impl TelemetrySubscription {
 		let mut cancel_rx = run_context.subscribe_cancel();
 		let mut stream = match TelemetryStream::connect(&url).await {
 			Ok(v) => v,
-			Err(e) => return on_stream_error(e),
+			Err(e) => {
+				on_stream_error(e);
+				run_context.request_restart();
+				return;
+			},
 		};
 		let mut subscribed: bool = false;
 		let mut chains: HashMap<H256, AddedChain> = Default::default();
@@ -151,7 +155,9 @@ impl TelemetrySubscription {
 							chains.insert(chain.genesis_hash, chain.clone());
 						}
 						if let Err(e) = update_channel.send(TelemetryEvent::NewMessage(message)).await {
-							return on_consumer_error(e);
+							on_consumer_error(e);
+							run_context.complete();
+							return;
 						}
 					}
 
@@ -160,12 +166,16 @@ impl TelemetrySubscription {
 							Ok(hash) => {
 								if let Err(e) = stream.subscribe_to(&hash).await {
 									on_stream_error(e);
+									run_context.request_restart();
+									return;
 								} else {
 									subscribed = true;
 								}
 							},
 							Err(e) => {
-								return on_choose_chain_error(e);
+								on_choose_chain_error(e);
+								run_context.complete();
+								return;
 							}
 						}
 					}
