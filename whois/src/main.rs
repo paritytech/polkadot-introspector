@@ -530,10 +530,7 @@ async fn main() -> color_eyre::Result<()> {
 	let mut futures = vec![];
 	futures.extend(whois.run(executor).await?);
 
-	let outcome = init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
-	if outcome.is_restart_requested() {
-		return Err(color_eyre::eyre::eyre!("Unexpected restart requested during whois execution"));
-	}
+	init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
 
 	Ok(())
 }

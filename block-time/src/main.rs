@@ -372,45 +372,22 @@ fn register_metric(registry: &Registry) -> HistogramVec {
 async fn main() -> color_eyre::Result<()> {
 	let opts = BlockTimeOptions::parse();
 	init::init_cli(&opts.verbose)?;
-	let mut retry = utils::Retry::new(&opts.retry);
 
-	loop {
-		let (run_context, mut outcome_rx) = init::init_run_context();
-		let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
-		let mut executor = match tokio::select! {
-			result = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &run_context) => result,
-			Some(outcome) = outcome_rx.recv() => {
-				shutdown_listener.abort();
-				if outcome.is_restart_requested() && retry.sleep().await.is_ok() { continue; }
-				break;
-			}
-		} {
-			Ok(executor) => executor,
-			Err(e) => {
-				shutdown_listener.abort();
-				log::error!("Failed to build RequestExecutor: {:?}", e);
-				if retry.sleep().await.is_err() {
-					break;
-				}
-				continue;
-			},
-		};
-		let monitor = BlockTimeMonitor::new(opts.clone(), executor.clone())?;
-		let mut futures = vec![];
+	let (run_context, mut outcome_rx) = init::init_run_context();
+	let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
+	let mut executor =
+		RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &run_context).await?;
+	let monitor = BlockTimeMonitor::new(opts.clone(), executor.clone())?;
+	let mut futures = vec![];
 
-		let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), executor.clone());
-		let consumer_init = sub.create_consumer();
+	let mut sub = ChainHeadSubscription::new(opts.nodes.clone(), executor.clone());
+	let consumer_init = sub.create_consumer();
 
-		futures.extend(monitor.run(consumer_init).await?);
-		futures.extend(sub.run(&run_context).await?);
+	futures.extend(monitor.run(consumer_init).await?);
+	futures.extend(sub.run(&run_context).await?);
 
-		let outcome = init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
-		executor.close().await;
-
-		if !outcome.is_restart_requested() || retry.sleep().await.is_err() {
-			break;
-		}
-	}
+	init::run_supervised(futures, shutdown_listener, &mut outcome_rx).await?;
+	executor.close().await;
 
 	Ok(())
 }
