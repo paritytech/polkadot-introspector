@@ -27,6 +27,14 @@ use async_trait::async_trait;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{Sender, channel};
 
+macro_rules! send_termination {
+	($ch:expr) => {
+		if let Err(e) = $ch.send(ChainSubscriptionEvent::Termination).await {
+			info!("Event consumer has already terminated: {:?}", e);
+		}
+	};
+}
+
 pub struct HistoricalSubscription {
 	urls: Vec<String>,
 	from_block_number: BlockNumber,
@@ -74,12 +82,6 @@ impl EventStream for HistoricalSubscription {
 }
 
 impl HistoricalSubscription {
-	async fn send_termination(update_channel: &mut Sender<ChainSubscriptionEvent>) {
-		if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
-			info!("Event consumer has already terminated: {:?}", e);
-		}
-	}
-
 	pub fn new(
 		urls: Vec<String>,
 		from_block_number: BlockNumber,
@@ -92,26 +94,19 @@ impl HistoricalSubscription {
 	// Per node
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
-		url: String, // `String` rather than `&str` because we spawn this method as an asynchronous task
+		url: String,
 		from_block_number: BlockNumber,
 		to_block_number: BlockNumber,
 		run_context: RunContext,
 		mut executor: RequestExecutor,
 	) {
-		let mut cancel_rx = run_context.subscribe_cancel();
+		let cancel_rx = run_context.subscribe_cancel();
 
-		let last_block_number = match tokio::select! {
-			result = executor.get_block_number(&url, None) => result,
-			_ = cancel_rx.changed() => {
-				info!("Received interrupt signal shutting down subscription");
-				Self::send_termination(&mut update_channel).await;
-				return;
-			}
-		} {
+		let last_block_number = match executor.get_block_number(&url, None).await {
 			Ok(v) => v,
 			Err(e) => {
 				error!("Subscription to {} failed to fetch last block: {:?}", url, e);
-				let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
+				send_termination!(update_channel);
 				run_context.request_restart();
 				return
 			},
@@ -119,54 +114,46 @@ impl HistoricalSubscription {
 
 		if from_block_number >= last_block_number || to_block_number >= last_block_number {
 			error!("`--from` and `--to` must be less then {}", last_block_number);
-			let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
+			send_termination!(update_channel);
 			run_context.complete();
 			return
 		}
 
 		for block_number in from_block_number..=to_block_number {
+			if *cancel_rx.borrow() {
+				info!("Received interrupt signal shutting down subscription");
+				send_termination!(update_channel);
+				return;
+			}
+
 			debug!("Subscription advacing to block #{}/#{}", block_number, to_block_number);
 
-			let block_hash = match tokio::select! {
-				result = executor.get_block_hash(&url, Some(block_number)) => result,
-				_ = cancel_rx.changed() => {
-					info!("Received interrupt signal shutting down subscription");
-					Self::send_termination(&mut update_channel).await;
-					return;
-				}
-			} {
+			let block_hash = match executor.get_block_hash(&url, Some(block_number)).await {
 				Ok(Some(v)) => v,
 				Ok(None) => {
 					error!("Subscription to {} failed, block hash for block #{} not found", url, block_number);
-					let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
+					send_termination!(update_channel);
 					run_context.request_restart();
 					return
 				},
 				Err(e) => {
 					error!("Subscription to {} failed: {:?}", url, e);
-					let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
+					send_termination!(update_channel);
 					run_context.request_restart();
 					return
 				},
 			};
-			let header = match tokio::select! {
-				result = executor.get_block_head(&url, Some(block_hash)) => result,
-				_ = cancel_rx.changed() => {
-					info!("Received interrupt signal shutting down subscription");
-					Self::send_termination(&mut update_channel).await;
-					return;
-				}
-			} {
+			let header = match executor.get_block_head(&url, Some(block_hash)).await {
 				Ok(Some(v)) => v,
 				Ok(None) => {
 					error!("Subscription to {} failed, header for block #{} not found", url, block_number);
-					let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
+					send_termination!(update_channel);
 					run_context.request_restart();
 					return
 				},
 				Err(e) => {
 					error!("Subscription to {} failed: {:?}", url, e);
-					let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
+					send_termination!(update_channel);
 					run_context.request_restart();
 					return
 				},
@@ -187,16 +174,10 @@ impl HistoricalSubscription {
 				info!("Event consumer has terminated: {:?}, shutting down", e);
 				return
 			}
-
-			if *cancel_rx.borrow() {
-				info!("Received interrupt signal shutting down subscription");
-				Self::send_termination(&mut update_channel).await;
-				return;
-			}
 		}
 
 		info!("[{}] Historical range completed, terminating subscription", url);
-		Self::send_termination(&mut update_channel).await;
+		send_termination!(update_channel);
 		run_context.complete();
 	}
 

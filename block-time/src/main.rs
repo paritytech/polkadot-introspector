@@ -379,16 +379,9 @@ async fn main() -> color_eyre::Result<()> {
 		let shutdown_listener = init::spawn_shutdown_listener(run_context.clone());
 		let mut executor = match tokio::select! {
 			result = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &run_context) => result,
-			maybe_outcome = outcome_rx.recv() => {
-				let Some(outcome) = maybe_outcome else {
-					log::error!("All RunContext senders dropped without signaling an outcome");
-					shutdown_listener.abort();
-					break;
-				};
+			Some(outcome) = outcome_rx.recv() => {
 				shutdown_listener.abort();
-				if outcome.is_restart_requested() && retry.sleep().await.is_ok() {
-					continue;
-				}
+				if outcome.is_restart_requested() && retry.sleep().await.is_ok() { continue; }
 				break;
 			}
 		} {
