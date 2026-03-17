@@ -20,7 +20,6 @@ use crate::{
 		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
 	},
 	constants::MAX_MSG_QUEUE_SIZE,
-	init::Shutdown,
 	metadata::{
 		polkadot::{
 			runtime_apis::babe_api::types::generate_key_ownership_proof::Slot,
@@ -179,9 +178,10 @@ impl RequestExecutorBackend {
 		url: String,
 		api_client_mode: ApiClientMode,
 	) -> color_eyre::Result<Self, RequestExecutorError> {
-		let client = build_client(&url, api_client_mode, &retry)
-			.await
-			.ok_or(RequestExecutorError::ClientBuildFailed(url))?;
+		let client = build_online_client(&url, api_client_mode).await.map_err(|err| {
+			error!("[{}] RpcClient error: {:?}", url, err);
+			RequestExecutorError::ClientBuildFailed(url.clone())
+		})?;
 
 		Ok(RequestExecutorBackend { client, retry })
 	}
@@ -354,7 +354,7 @@ impl RequestExecutor {
 		nodes: impl RequestExecutorNodes,
 		api_client_mode: ApiClientMode,
 		retry: &RetryOptions,
-		shutdown_tx: &BroadcastSender<Shutdown>,
+		shutdown_tx: &BroadcastSender<()>,
 	) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
 		let mut clients = HashMap::new();
 		for node in nodes.unique_nodes() {
@@ -365,7 +365,7 @@ impl RequestExecutor {
 			tokio::spawn(async move {
 				if let Err(e) = backend.run(from_frontend).await {
 					error!("Request Executor Backend failed to run, closing the application: {:?}", e);
-					let _ = shutdown_tx.send(Shutdown::Restart);
+					let _ = shutdown_tx.send(());
 				}
 			});
 		}
@@ -565,25 +565,5 @@ impl RequestExecutor {
 		key: sp_consensus_babe::app::Public,
 	) -> color_eyre::Result<Option<AccountId32>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeKeyOwner, BabeKeyOwner, hash, key)
-	}
-}
-
-// Attempts to connect to websocket and returns an RuntimeApi instance if successful.
-async fn build_client(
-	url: &str,
-	api_client_mode: ApiClientMode,
-	retry: &RetryOptions,
-) -> Option<ApiClient<OnlineClient<PolkadotConfig>>> {
-	let mut retry = Retry::new(retry);
-	loop {
-		match build_online_client(url, api_client_mode).await {
-			Ok(client) => return Some(client),
-			Err(err) => {
-				error!("[{}] RpcClient error: {:?}", url, err);
-				if (retry.sleep().await).is_err() {
-					return None
-				}
-			},
-		}
 	}
 }
