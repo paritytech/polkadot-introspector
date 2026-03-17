@@ -29,7 +29,7 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
@@ -59,7 +59,7 @@ jobs:
     environment: tags
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Set image tag for Docker image
         run: |
