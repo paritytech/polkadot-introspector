@@ -201,7 +201,7 @@ impl ParachainTracer {
 
 		let consumer_channels: Vec<Receiver<ChainSubscriptionEvent>> = consumer_config.into();
 		let collector_fut = collector
-			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap())
+			.run_with_consumer_channel(consumer_channels.into_iter().next().unwrap(), shutdown_tx.clone())
 			.await;
 
 		output_futures.push(collector_fut);
@@ -223,86 +223,95 @@ impl ParachainTracer {
 		let mut last_ts = None;
 
 		tokio::spawn(async move {
+			let mut shutdown_rx = shutdown_tx.subscribe();
 			loop {
-				match from_collector.recv().await {
-					Ok(update_event) => match update_event {
-						CollectorUpdateEvent::NewHead(new_head) => {
-							// Happens on startup
-							if new_head.relay_parent_number == 0 {
-								continue
-							}
-
-							let curr_ts = storage
-								.block_timestamp(
-									*new_head
-										.relay_parent_hashes
-										.first()
-										.expect("at least one relay parent hash must be present"),
-								)
-								.await;
-							let block_time = last_ts
-								.and_then(|last| curr_ts.map(|curr| curr.saturating_sub(last)))
-								.map(Duration::from_millis);
-							last_ts = curr_ts;
-							let backed = new_head.candidates_backed.len();
-							let included = new_head.candidates_included.len();
-							let timed_out = new_head.candidates_timed_out.len();
-							metrics.on_new_relay_block(
-								backed,
-								included,
-								timed_out,
-								block_time,
-								new_head.relay_parent_number,
-								new_head
-									.authors_missing_their_slots
-									.iter()
-									.map(|account| account.to_string())
-									.collect(),
-							);
-							if is_cli {
-								println!(
-									"Block {}: backed {}, included {}, timed-out {} {:}",
-									new_head.relay_parent_number,
-									backed,
-									included,
-									timed_out,
-									if new_head.authors_missing_their_slots.is_empty() {
-										"".to_string()
-									} else {
-										format!(
-											", authors missing their slot: {}",
-											new_head
-												.authors_missing_their_slots
-												.iter()
-												.map(|account| account.to_string())
-												.join(", ")
-										)
+				tokio::select! {
+					result = from_collector.recv() => {
+						match result {
+							Ok(update_event) => match update_event {
+								CollectorUpdateEvent::NewHead(new_head) => {
+									// Happens on startup
+									if new_head.relay_parent_number == 0 {
+										continue
 									}
-								);
-							}
-						},
-						CollectorUpdateEvent::NewSession(session_id) => {
-							metrics.on_new_session(session_id);
-							if is_cli {
-								println!("Session {}", session_id);
-							}
-						},
-						CollectorUpdateEvent::Termination(reason) => {
-							info!("collector is terminating");
-							match reason {
-								TerminationReason::Normal => break,
-								TerminationReason::Abnormal(info) => {
-									error!("Shutting down, {}", info);
-									let _ = shutdown_tx.send(());
-									break;
+
+									let curr_ts = storage
+										.block_timestamp(
+											*new_head
+												.relay_parent_hashes
+												.first()
+												.expect("at least one relay parent hash must be present"),
+										)
+										.await;
+									let block_time = last_ts
+										.and_then(|last| curr_ts.map(|curr| curr.saturating_sub(last)))
+										.map(Duration::from_millis);
+									last_ts = curr_ts;
+									let backed = new_head.candidates_backed.len();
+									let included = new_head.candidates_included.len();
+									let timed_out = new_head.candidates_timed_out.len();
+									metrics.on_new_relay_block(
+										backed,
+										included,
+										timed_out,
+										block_time,
+										new_head.relay_parent_number,
+										new_head
+											.authors_missing_their_slots
+											.iter()
+											.map(|account| account.to_string())
+											.collect(),
+									);
+									if is_cli {
+										println!(
+											"Block {}: backed {}, included {}, timed-out {} {:}",
+											new_head.relay_parent_number,
+											backed,
+											included,
+											timed_out,
+											if new_head.authors_missing_their_slots.is_empty() {
+												"".to_string()
+											} else {
+												format!(
+													", authors missing their slot: {}",
+													new_head
+														.authors_missing_their_slots
+														.iter()
+														.map(|account| account.to_string())
+														.join(", ")
+												)
+											}
+										);
+									}
 								},
-							}
-						},
-					},
-					Err(_) => {
-						info!("Input channel has been closed");
-						break
-					},
+								CollectorUpdateEvent::NewSession(session_id) => {
+									metrics.on_new_session(session_id);
+									if is_cli {
+										println!("Session {}", session_id);
+									}
+								},
+								CollectorUpdateEvent::Termination(reason) => {
+									info!("collector is terminating");
+									match reason {
+										TerminationReason::Normal => break,
+										TerminationReason::Abnormal(info) => {
+											error!("Shutting down, {}", info);
+											let _ = shutdown_tx.send(());
+											break;
+										},
+									}
+								},
+							},
+							Err(_) => {
+								info!("Input channel has been closed");
+								break
+							},
+						}
+					}
+					_ = shutdown_rx.recv() => {
+						info!("Received shutdown signal in relay chain watcher");
+						break;
+					}
 				}
 			}
 		})
@@ -329,42 +338,51 @@ impl ParachainTracer {
 		info!("Starting tracker for parachain {}", para_id);
 
 		tokio::spawn(async move {
+			let mut shutdown_rx = shutdown_tx.subscribe();
 			loop {
-				match from_collector.recv().await {
-					Ok(update_event) => match update_event {
-						CollectorUpdateEvent::NewHead(new_head) =>
-							for relay_fork in &new_head.relay_parent_hashes {
-								if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
-									error!("error occurred when processing block {}: {:?}", relay_fork, e);
-									let _ = shutdown_tx.send(());
-									break;
-								}
-								if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await &&
-									is_cli
-								{
-									println!("{}", progress)
-								}
-								tracker.maybe_reset_state();
-							},
-						CollectorUpdateEvent::NewSession(idx) => {
-							tracker.inject_new_session(idx);
-						},
-						CollectorUpdateEvent::Termination(reason) => {
-							info!("collector is terminating for parachain {}", para_id);
-							match reason {
-								TerminationReason::Normal => break,
-								TerminationReason::Abnormal(info) => {
-									error!("Shutting down, {}", info);
-									let _ = shutdown_tx.send(());
-									break;
+				tokio::select! {
+					result = from_collector.recv() => {
+						match result {
+							Ok(update_event) => match update_event {
+								CollectorUpdateEvent::NewHead(new_head) =>
+									for relay_fork in &new_head.relay_parent_hashes {
+										if let Err(e) = tracker.inject_block(*relay_fork, new_head.clone(), &storage).await {
+											error!("error occurred when processing block {}: {:?}", relay_fork, e);
+											let _ = shutdown_tx.send(());
+											break;
+										}
+										if let Some(progress) = tracker.progress(&mut stats, &metrics, &storage).await &&
+											is_cli
+										{
+											println!("{}", progress)
+										}
+										tracker.maybe_reset_state();
+									},
+								CollectorUpdateEvent::NewSession(idx) => {
+									tracker.inject_new_session(idx);
 								},
-							}
-						},
-					},
-					Err(_) => {
-						info!("Input channel has been closed for parachain {}", para_id);
-						break
-					},
+								CollectorUpdateEvent::Termination(reason) => {
+									info!("collector is terminating for parachain {}", para_id);
+									match reason {
+										TerminationReason::Normal => break,
+										TerminationReason::Abnormal(info) => {
+											error!("Shutting down, {}", info);
+											let _ = shutdown_tx.send(());
+											break;
+										},
+									}
+								},
+							},
+							Err(_) => {
+								info!("Input channel has been closed for parachain {}", para_id);
+								break
+							},
+						}
+					}
+					_ = shutdown_rx.recv() => {
+						info!("Received shutdown signal in parachain {} watcher", para_id);
+						break;
+					}
 				}
 			}
 
@@ -382,6 +400,7 @@ impl ParachainTracer {
 		from_collector: Receiver<CollectorUpdateEvent>,
 		api_service: CollectorStorageApi,
 	) {
+		let mut shutdown_rx = shutdown_tx.subscribe();
 		let mut trackers = HashMap::new();
 		// Used to track last block seen in parachain to evict stalled parachains
 		// Another approach would be a BtreeMap indexed by a block number, but
@@ -443,6 +462,10 @@ impl ParachainTracer {
 					};
 				},
 				Some(_) = futures.next() => {},
+				_ = shutdown_rx.recv() => {
+					info!("Received shutdown signal in broadcast watcher");
+					break;
+				}
 				else => break,
 			}
 		}
