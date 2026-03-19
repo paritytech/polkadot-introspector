@@ -23,7 +23,7 @@ use crate::{
 			ValidDisputeStatementKind, ValidatorIndex, validator_app,
 		},
 	},
-	types::{H256, OnDemandOrder, ParaInherentFields},
+	types::{CoreOccupied, H256, OnDemandOrder, ParaInherentFields},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -173,6 +173,27 @@ fn decode_u128_value(value: &Value<u32>) -> Result<u128, DynamicError> {
 		ValueDef::Primitive(Primitive::U128(v)) => Ok(*v),
 		other => Err(DynamicError::DecodeDynamicError("u128".to_string(), other.clone())),
 	}
+}
+
+pub(crate) fn decode_availability_cores(raw: &Value<u32>) -> Result<Vec<CoreOccupied>, DynamicError> {
+	let cores = decode_unnamed_composite(raw)?;
+	let mut result = Vec::with_capacity(cores.len());
+	for core in cores {
+		match &core.value {
+			ValueDef::Variant(variant) => match variant.name.as_str() {
+				"Free" => result.push(CoreOccupied::Free),
+				"Scheduled" => result.push(CoreOccupied::Scheduled),
+				"Occupied" => result.push(CoreOccupied::Occupied),
+				other =>
+					return Err(DynamicError::DecodeDynamicError(
+						format!("CoreState variant (Free/Scheduled/Occupied), got '{}'", other),
+						core.value.clone(),
+					)),
+			},
+			other => return Err(DynamicError::DecodeDynamicError("variant for CoreState".to_string(), other.clone())),
+		}
+	}
+	Ok(result)
 }
 
 pub(crate) fn decode_para_inherent_fields(raw: &Composite<u32>) -> Result<ParaInherentFields, DynamicError> {
