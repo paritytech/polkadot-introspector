@@ -50,18 +50,15 @@ impl From<subxt::error::Error> for DynamicError {
 }
 
 pub(crate) fn decode_validator_groups(raw_groups: &Value<u32>) -> Result<Vec<Vec<ValidatorIndex>>, DynamicError> {
-	let decoded_groups = decode_unnamed_composite(raw_groups)?;
-	let mut groups = Vec::with_capacity(decoded_groups.len());
-	for raw_group in decoded_groups.iter() {
-		let decoded_group = decode_unnamed_composite(raw_group)?;
-		let mut group = Vec::with_capacity(decoded_group.len());
-		for raw_index in decoded_group.iter() {
-			group.push(ValidatorIndex(decode_composite_u128_value(raw_index)? as u32));
-		}
-		groups.push(group)
-	}
-
-	Ok(groups)
+	decode_unnamed_composite(raw_groups)?
+		.iter()
+		.map(|raw_group| {
+			decode_unnamed_composite(raw_group)?
+				.iter()
+				.map(|raw_index| Ok(ValidatorIndex(decode_composite_u128_value(raw_index)? as u32)))
+				.collect()
+		})
+		.collect()
 }
 
 pub(crate) fn decode_candidate_event(raw: &Composite<u32>) -> Result<(u32, H256, u32), DynamicError> {
@@ -118,41 +115,57 @@ fn decode_h256(value: &Value<u32>) -> Result<H256, DynamicError> {
 	}
 }
 
+fn decode_byte_slice(bytes: &[Value<u32>]) -> Result<Vec<u8>, DynamicError> {
+	bytes
+		.iter()
+		.enumerate()
+		.map(|(i, b)| match &b.value {
+			ValueDef::Primitive(Primitive::U128(v)) => u8::try_from(*v).map_err(|_| {
+				DynamicError::DecodeDynamicError(
+					format!("u8 at index {} (got {} which overflows u8)", i, v),
+					b.value.clone(),
+				)
+			}),
+			other => Err(DynamicError::DecodeDynamicError(format!("u8 at index {}", i), other.clone())),
+		})
+		.collect()
+}
+
 fn decode_h256_from_bytes(bytes: &[Value<u32>]) -> Result<H256, DynamicError> {
-	let mut arr = [0u8; 32];
-	for (i, b) in bytes.iter().enumerate() {
-		match &b.value {
-			ValueDef::Primitive(Primitive::U128(v)) =>
-				arr[i] = u8::try_from(*v).map_err(|_| {
-					DynamicError::DecodeDynamicError(
-						format!("u8 at index {} (got {} which overflows u8)", i, v),
-						b.value.clone(),
-					)
-				})?,
-			other => return Err(DynamicError::DecodeDynamicError(format!("u8 at index {}", i), other.clone())),
-		}
-	}
+	let decoded = decode_byte_slice(bytes)?;
+	let arr: [u8; 32] = decoded.try_into().map_err(|v: Vec<u8>| {
+		DynamicError::DecodeDynamicError(
+			format!("32 bytes (got {})", v.len()),
+			ValueDef::Composite(Composite::Unnamed(bytes.to_vec())),
+		)
+	})?;
 	Ok(H256::from(arr))
+}
+
+fn find_named_field<'a>(
+	fields: &'a [(String, Value<u32>)],
+	name: &str,
+	context: &Composite<u32>,
+) -> Result<&'a Value<u32>, DynamicError> {
+	fields
+		.iter()
+		.find_map(|(field, value)| if field == name { Some(value) } else { None })
+		.ok_or_else(|| {
+			DynamicError::DecodeDynamicError(format!("field '{}'", name), ValueDef::Composite(context.clone()))
+		})
+}
+
+fn variant_inner_value<'a>(variant: &'a Variant<u32>, context: &str) -> Result<&'a Value<u32>, DynamicError> {
+	variant.values.values().next().ok_or_else(|| {
+		DynamicError::DecodeDynamicError(format!("inner value for {}", context), ValueDef::Variant(variant.clone()))
+	})
 }
 
 pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrder, DynamicError> {
 	match raw {
 		Composite::Named(v) => {
-			let raw_para_id = v
-				.iter()
-				.find_map(|(field, value)| if field == "para_id" { Some(value) } else { None })
-				.ok_or(DynamicError::DecodeDynamicError(
-					"named composite with field `para_id`".to_string(),
-					ValueDef::Composite(raw.clone()),
-				))?;
-			let raw_spot_price = v
-				.iter()
-				.find_map(|(field, value)| if field == "spot_price" { Some(value) } else { None })
-				.ok_or(DynamicError::DecodeDynamicError(
-					"named composite with field `spot_price`".to_string(),
-					ValueDef::Composite(raw.clone()),
-				))?;
-
+			let raw_para_id = find_named_field(v, "para_id", raw)?;
+			let raw_spot_price = find_named_field(v, "spot_price", raw)?;
 			Ok(OnDemandOrder {
 				para_id: decode_composite_u128_value(raw_para_id)? as u32,
 				spot_price: decode_u128_value(raw_spot_price)?,
@@ -184,37 +197,26 @@ fn decode_u128_value(value: &Value<u32>) -> Result<u128, DynamicError> {
 }
 
 pub(crate) fn decode_availability_cores(raw: &Value<u32>) -> Result<Vec<CoreOccupied>, DynamicError> {
-	let cores = decode_unnamed_composite(raw)?;
-	let mut result = Vec::with_capacity(cores.len());
-	for core in cores {
-		match &core.value {
+	decode_unnamed_composite(raw)?
+		.iter()
+		.map(|core| match &core.value {
 			ValueDef::Variant(variant) => match variant.name.as_str() {
-				"Free" => result.push(CoreOccupied::Free),
-				"Scheduled" => result.push(CoreOccupied::Scheduled),
-				"Occupied" => result.push(CoreOccupied::Occupied),
-				other =>
-					return Err(DynamicError::DecodeDynamicError(
-						format!("CoreState variant (Free/Scheduled/Occupied), got '{}'", other),
-						core.value.clone(),
-					)),
+				"Free" => Ok(CoreOccupied::Free),
+				"Scheduled" => Ok(CoreOccupied::Scheduled),
+				"Occupied" => Ok(CoreOccupied::Occupied),
+				other => Err(DynamicError::DecodeDynamicError(
+					format!("CoreState variant (Free/Scheduled/Occupied), got '{}'", other),
+					core.value.clone(),
+				)),
 			},
-			other => return Err(DynamicError::DecodeDynamicError("variant for CoreState".to_string(), other.clone())),
-		}
-	}
-	Ok(result)
+			other => Err(DynamicError::DecodeDynamicError("variant for CoreState".to_string(), other.clone())),
+		})
+		.collect()
 }
 
 pub(crate) fn decode_para_inherent_fields(raw: &Composite<u32>) -> Result<ParaInherentFields, DynamicError> {
 	let data = match raw {
-		Composite::Named(fields) => fields
-			.iter()
-			.find_map(|(name, val)| if name == "data" { Some(val) } else { None })
-			.ok_or_else(|| {
-				DynamicError::DecodeDynamicError(
-					"named composite with 'data' field".to_string(),
-					ValueDef::Composite(raw.clone()),
-				)
-			})?,
+		Composite::Named(fields) => find_named_field(fields, "data", raw)?,
 		Composite::Unnamed(fields) if !fields.is_empty() => &fields[0],
 		_ =>
 			return Err(DynamicError::DecodeDynamicError(
@@ -226,25 +228,25 @@ pub(crate) fn decode_para_inherent_fields(raw: &Composite<u32>) -> Result<ParaIn
 	let raw_bitfields = data
 		.at("bitfields")
 		.ok_or_else(|| DynamicError::DecodeDynamicError("bitfields field".to_string(), data.value.clone()))?;
-	let bitfields_vec = decode_unnamed_composite(raw_bitfields)?;
-	let mut bitfields = Vec::with_capacity(bitfields_vec.len());
-	for raw_signed in bitfields_vec {
-		let payload = raw_signed.at("payload").ok_or_else(|| {
-			DynamicError::DecodeDynamicError("payload field in bitfield".to_string(), raw_signed.value.clone())
-		})?;
-		bitfields.push(decode_availability_bitfield(payload)?);
-	}
+	let bitfields: Result<Vec<_>, _> = decode_unnamed_composite(raw_bitfields)?
+		.iter()
+		.map(|raw_signed| {
+			let payload = raw_signed.at("payload").ok_or_else(|| {
+				DynamicError::DecodeDynamicError("payload field in bitfield".to_string(), raw_signed.value.clone())
+			})?;
+			decode_availability_bitfield(payload)
+		})
+		.collect();
 
 	let raw_disputes = data
 		.at("disputes")
 		.ok_or_else(|| DynamicError::DecodeDynamicError("disputes field".to_string(), data.value.clone()))?;
-	let disputes_vec = decode_unnamed_composite(raw_disputes)?;
-	let mut disputes = Vec::with_capacity(disputes_vec.len());
-	for raw_dispute in disputes_vec {
-		disputes.push(decode_dispute_statement_set(raw_dispute)?);
-	}
+	let disputes: Result<Vec<_>, _> = decode_unnamed_composite(raw_disputes)?
+		.iter()
+		.map(decode_dispute_statement_set)
+		.collect();
 
-	Ok(ParaInherentFields { bitfields, disputes })
+	Ok(ParaInherentFields { bitfields: bitfields?, disputes: disputes? })
 }
 
 fn decode_availability_bitfield(value: &Value<u32>) -> Result<AvailabilityBitfield, DynamicError> {
@@ -302,14 +304,8 @@ fn decode_dispute_statement_set(value: &Value<u32>) -> Result<DisputeStatementSe
 fn decode_dispute_statement(value: &Value<u32>) -> Result<DisputeStatement, DynamicError> {
 	match &value.value {
 		ValueDef::Variant(variant) => match variant.name.as_str() {
-			"Valid" => {
-				let kind = decode_valid_dispute_statement_kind(variant)?;
-				Ok(DisputeStatement::Valid(kind))
-			},
-			"Invalid" => {
-				let kind = decode_invalid_dispute_statement_kind(variant)?;
-				Ok(DisputeStatement::Invalid(kind))
-			},
+			"Valid" => Ok(DisputeStatement::Valid(decode_valid_dispute_statement_kind(variant)?)),
+			"Invalid" => Ok(DisputeStatement::Invalid(decode_invalid_dispute_statement_kind(variant)?)),
 			other => Err(DynamicError::DecodeDynamicError(
 				format!("Valid or Invalid dispute statement, got '{}'", other),
 				value.value.clone(),
@@ -320,41 +316,24 @@ fn decode_dispute_statement(value: &Value<u32>) -> Result<DisputeStatement, Dyna
 }
 
 fn decode_valid_dispute_statement_kind(variant: &Variant<u32>) -> Result<ValidDisputeStatementKind, DynamicError> {
-	let inner = variant.values.values().next().ok_or_else(|| {
-		DynamicError::DecodeDynamicError(
-			"inner variant for ValidDisputeStatementKind".to_string(),
-			ValueDef::Variant(variant.clone()),
-		)
-	})?;
+	let inner = variant_inner_value(variant, "ValidDisputeStatementKind")?;
 	match &inner.value {
 		ValueDef::Variant(inner_variant) => match inner_variant.name.as_str() {
 			"Explicit" => Ok(ValidDisputeStatementKind::Explicit),
 			"BackingSeconded" => {
-				let hash_val = inner_variant.values.values().next().ok_or_else(|| {
-					DynamicError::DecodeDynamicError("hash in BackingSeconded".to_string(), inner.value.clone())
-				})?;
+				let hash_val = variant_inner_value(inner_variant, "BackingSeconded")?;
 				Ok(ValidDisputeStatementKind::BackingSeconded(decode_h256(hash_val)?))
 			},
 			"BackingValid" => {
-				let hash_val = inner_variant.values.values().next().ok_or_else(|| {
-					DynamicError::DecodeDynamicError("hash in BackingValid".to_string(), inner.value.clone())
-				})?;
+				let hash_val = variant_inner_value(inner_variant, "BackingValid")?;
 				Ok(ValidDisputeStatementKind::BackingValid(decode_h256(hash_val)?))
 			},
 			"ApprovalChecking" => Ok(ValidDisputeStatementKind::ApprovalChecking),
 			"ApprovalCheckingMultipleCandidates" => {
-				let candidates_val = inner_variant.values.values().next().ok_or_else(|| {
-					DynamicError::DecodeDynamicError(
-						"candidates in ApprovalCheckingMultipleCandidates".to_string(),
-						inner.value.clone(),
-					)
-				})?;
+				let candidates_val = variant_inner_value(inner_variant, "ApprovalCheckingMultipleCandidates")?;
 				let candidates_vec = decode_unnamed_composite(candidates_val)?;
-				let mut candidates = Vec::with_capacity(candidates_vec.len());
-				for c in candidates_vec {
-					candidates.push(decode_candidate_hash(c)?);
-				}
-				Ok(ValidDisputeStatementKind::ApprovalCheckingMultipleCandidates(candidates))
+				let candidates: Result<Vec<_>, _> = candidates_vec.iter().map(decode_candidate_hash).collect();
+				Ok(ValidDisputeStatementKind::ApprovalCheckingMultipleCandidates(candidates?))
 			},
 			other => Err(DynamicError::DecodeDynamicError(
 				format!("known ValidDisputeStatementKind, got '{}'", other),
@@ -369,12 +348,7 @@ fn decode_valid_dispute_statement_kind(variant: &Variant<u32>) -> Result<ValidDi
 }
 
 fn decode_invalid_dispute_statement_kind(variant: &Variant<u32>) -> Result<InvalidDisputeStatementKind, DynamicError> {
-	let inner = variant.values.values().next().ok_or_else(|| {
-		DynamicError::DecodeDynamicError(
-			"inner variant for InvalidDisputeStatementKind".to_string(),
-			ValueDef::Variant(variant.clone()),
-		)
-	})?;
+	let inner = variant_inner_value(variant, "InvalidDisputeStatementKind")?;
 	match &inner.value {
 		ValueDef::Variant(inner_variant) => match inner_variant.name.as_str() {
 			"Explicit" => Ok(InvalidDisputeStatementKind::Explicit),
@@ -417,23 +391,10 @@ fn decode_validator_signature(value: &Value<u32>) -> Result<validator_app::Signa
 	match &value.value {
 		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_validator_signature(&inner[0]),
 		ValueDef::Composite(Composite::Unnamed(bytes)) if bytes.len() == 64 => {
-			let mut arr = [0u8; 64];
-			for (i, b) in bytes.iter().enumerate() {
-				match &b.value {
-					ValueDef::Primitive(Primitive::U128(v)) =>
-						arr[i] = u8::try_from(*v).map_err(|_| {
-							DynamicError::DecodeDynamicError(
-								format!("u8 at signature index {} (got {} which overflows u8)", i, v),
-								b.value.clone(),
-							)
-						})?,
-					other =>
-						return Err(DynamicError::DecodeDynamicError(
-							format!("u8 at signature index {}", i),
-							other.clone(),
-						)),
-				}
-			}
+			let decoded = decode_byte_slice(bytes)?;
+			let arr: [u8; 64] = decoded.try_into().map_err(|v: Vec<u8>| {
+				DynamicError::DecodeDynamicError(format!("64 bytes (got {})", v.len()), value.value.clone())
+			})?;
 			Ok(validator_app::Signature(arr))
 		},
 		other => Err(DynamicError::DecodeDynamicError("64-byte signature".to_string(), other.clone())),

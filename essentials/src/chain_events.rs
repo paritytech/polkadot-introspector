@@ -121,21 +121,27 @@ pub async fn decode_chain_event(
 	}
 
 	if is_specific_event::<CandidateBacked, PolkadotConfig>(&event) {
-		return Ok(ChainEvent::CandidateChanged(Box::new(
-			decode_candidate_changed(&event, SubxtCandidateEventType::Backed, hasher)?,
-		)))
+		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+			&event,
+			SubxtCandidateEventType::Backed,
+			hasher,
+		)?)))
 	}
 
 	if is_specific_event::<CandidateIncluded, PolkadotConfig>(&event) {
-		return Ok(ChainEvent::CandidateChanged(Box::new(
-			decode_candidate_changed(&event, SubxtCandidateEventType::Included, hasher)?,
-		)))
+		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+			&event,
+			SubxtCandidateEventType::Included,
+			hasher,
+		)?)))
 	}
 
 	if is_specific_event::<CandidateTimedOut, PolkadotConfig>(&event) {
-		return Ok(ChainEvent::CandidateChanged(Box::new(
-			decode_candidate_changed(&event, SubxtCandidateEventType::TimedOut, hasher)?,
-		)))
+		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+			&event,
+			SubxtCandidateEventType::TimedOut,
+			hasher,
+		)?)))
 	}
 
 	// TODO: Use `is_specific_event` as soon as shows up in types
