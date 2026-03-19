@@ -109,7 +109,7 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 	}
 }
 
-pub fn create_inherent_data(_para_id: u32) -> ParaInherentFields {
+pub fn create_inherent_data() -> ParaInherentFields {
 	ParaInherentFields {
 		bitfields: vec![AvailabilityBitfield(DecodedBits::from_iter([true]))],
 		disputes: vec![create_dispute_statement_set()],

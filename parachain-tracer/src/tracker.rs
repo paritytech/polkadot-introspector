@@ -826,7 +826,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::BackingGroups, first_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &storage)
+		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::Timestamp, first_hash, 1_u64, &storage)
@@ -856,7 +856,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::BackingGroups, second_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(100), &storage)
+		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &storage)
@@ -887,7 +887,7 @@ mod test_inject_block {
 		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
-		let inherent_data = create_inherent_data(100);
+		let inherent_data = create_inherent_data();
 		let backed_candidate = create_backed_candidate(100);
 		let candidate_hash = candidate_hash(&backed_candidate, hasher);
 
@@ -932,7 +932,7 @@ mod test_inject_block {
 		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
-		let inherent_data = create_inherent_data(100);
+		let inherent_data = create_inherent_data();
 		let backed_candidate = create_backed_candidate(100);
 		let candidate_hash = candidate_hash(&backed_candidate, hasher);
 
@@ -1011,7 +1011,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::InherentData, block_hash, create_inherent_data(100), &storage)
+		storage_write(CollectorPrefixType::InherentData, block_hash, create_inherent_data(), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)

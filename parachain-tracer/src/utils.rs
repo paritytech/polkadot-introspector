@@ -134,7 +134,7 @@ mod test_extract_inherent_fields {
 
 	#[test]
 	fn test_returns_fields() {
-		let (bitfields, disputes) = extract_inherent_fields(create_inherent_data(100));
+		let (bitfields, disputes) = extract_inherent_fields(create_inherent_data());
 
 		println!("{:?}", matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
 

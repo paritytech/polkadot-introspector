@@ -91,6 +91,7 @@ pub enum SubxtDisputeResult {
 	TimedOut,
 }
 
+// SCALE-encoded size of CandidateReceiptV2: CandidateDescriptorV2 (292 bytes) + commitments_hash (32 bytes)
 const CANDIDATE_RECEIPT_V2_SIZE: usize = 324;
 
 pub async fn decode_chain_event(
@@ -120,39 +121,21 @@ pub async fn decode_chain_event(
 	}
 
 	if is_specific_event::<CandidateBacked, PolkadotConfig>(&event) {
-		let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
-		let candidate_hash = hasher.hash(&event.field_bytes()[..CANDIDATE_RECEIPT_V2_SIZE]);
-		return Ok(ChainEvent::CandidateChanged(Box::new(SubxtCandidateEvent {
-			candidate_hash,
-			candidate_descriptor: CandidateDescriptor { para_id, relay_parent },
-			parachain_id: para_id,
-			event_type: SubxtCandidateEventType::Backed,
-			core_idx,
-		})))
+		return Ok(ChainEvent::CandidateChanged(Box::new(
+			decode_candidate_changed(&event, SubxtCandidateEventType::Backed, hasher)?,
+		)))
 	}
 
 	if is_specific_event::<CandidateIncluded, PolkadotConfig>(&event) {
-		let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
-		let candidate_hash = hasher.hash(&event.field_bytes()[..CANDIDATE_RECEIPT_V2_SIZE]);
-		return Ok(ChainEvent::CandidateChanged(Box::new(SubxtCandidateEvent {
-			candidate_hash,
-			candidate_descriptor: CandidateDescriptor { para_id, relay_parent },
-			parachain_id: para_id,
-			event_type: SubxtCandidateEventType::Included,
-			core_idx,
-		})))
+		return Ok(ChainEvent::CandidateChanged(Box::new(
+			decode_candidate_changed(&event, SubxtCandidateEventType::Included, hasher)?,
+		)))
 	}
 
 	if is_specific_event::<CandidateTimedOut, PolkadotConfig>(&event) {
-		let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
-		let candidate_hash = hasher.hash(&event.field_bytes()[..CANDIDATE_RECEIPT_V2_SIZE]);
-		return Ok(ChainEvent::CandidateChanged(Box::new(SubxtCandidateEvent {
-			candidate_hash,
-			candidate_descriptor: CandidateDescriptor { para_id, relay_parent },
-			parachain_id: para_id,
-			event_type: SubxtCandidateEventType::TimedOut,
-			core_idx,
-		})))
+		return Ok(ChainEvent::CandidateChanged(Box::new(
+			decode_candidate_changed(&event, SubxtCandidateEventType::TimedOut, hasher)?,
+		)))
 	}
 
 	// TODO: Use `is_specific_event` as soon as shows up in types
@@ -162,6 +145,30 @@ pub async fn decode_chain_event(
 	}
 
 	Ok(ChainEvent::RawEvent(block_hash, event))
+}
+
+fn decode_candidate_changed(
+	event: &subxt::events::EventDetails<PolkadotConfig>,
+	event_type: SubxtCandidateEventType,
+	hasher: PolkadotHasher,
+) -> Result<SubxtCandidateEvent> {
+	let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
+	let bytes = event.field_bytes();
+	if bytes.len() < CANDIDATE_RECEIPT_V2_SIZE {
+		return Err(eyre!(
+			"event field_bytes too short ({} < {}), cannot compute candidate hash",
+			bytes.len(),
+			CANDIDATE_RECEIPT_V2_SIZE
+		))
+	}
+	let candidate_hash = hasher.hash(&bytes[..CANDIDATE_RECEIPT_V2_SIZE]);
+	Ok(SubxtCandidateEvent {
+		candidate_hash,
+		candidate_descriptor: CandidateDescriptor { para_id, relay_parent },
+		parachain_id: para_id,
+		event_type,
+		core_idx,
+	})
 }
 
 fn is_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(

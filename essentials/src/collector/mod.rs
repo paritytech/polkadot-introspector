@@ -380,11 +380,18 @@ impl Collector {
 		if let Some(hash) = new_head_hash(event, self.subscribe_mode) &&
 			let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await?
 		{
+			let mut skipped_events = 0u32;
 			for block_event in block_events.iter() {
 				match block_event {
 					Ok(event) => chain_events.push(decode_chain_event(*hash, event, self.hasher).await?),
-					Err(e) => log::warn!("Failed to decode block event at {hash:?}, skipping: {e}"),
+					Err(e) => {
+						log::warn!("Failed to decode block event at {hash:?}, skipping: {e}");
+						skipped_events += 1;
+					},
 				}
+			}
+			if skipped_events > 0 {
+				log::error!("Skipped {skipped_events} undecoded events in block {hash:?}");
 			}
 		};
 

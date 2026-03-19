@@ -102,7 +102,9 @@ pub(crate) fn decode_candidate_event(raw: &Composite<u32>) -> Result<(u32, H256,
 
 fn decode_dynamic_u32(value: &Value<u32>) -> Result<u32, DynamicError> {
 	match &value.value {
-		ValueDef::Primitive(Primitive::U128(v)) => Ok(*v as u32),
+		ValueDef::Primitive(Primitive::U128(v)) => u32::try_from(*v).map_err(|_| {
+			DynamicError::DecodeDynamicError(format!("u32 value (got {} which overflows u32)", v), value.value.clone())
+		}),
 		ValueDef::Composite(Composite::Unnamed(inner)) if !inner.is_empty() => decode_dynamic_u32(&inner[0]),
 		other => Err(DynamicError::DecodeDynamicError("u32-like value".to_string(), other.clone())),
 	}
@@ -120,7 +122,13 @@ fn decode_h256_from_bytes(bytes: &[Value<u32>]) -> Result<H256, DynamicError> {
 	let mut arr = [0u8; 32];
 	for (i, b) in bytes.iter().enumerate() {
 		match &b.value {
-			ValueDef::Primitive(Primitive::U128(v)) => arr[i] = *v as u8,
+			ValueDef::Primitive(Primitive::U128(v)) =>
+				arr[i] = u8::try_from(*v).map_err(|_| {
+					DynamicError::DecodeDynamicError(
+						format!("u8 at index {} (got {} which overflows u8)", i, v),
+						b.value.clone(),
+					)
+				})?,
 			other => return Err(DynamicError::DecodeDynamicError(format!("u8 at index {}", i), other.clone())),
 		}
 	}
@@ -390,10 +398,18 @@ fn decode_candidate_hash(value: &Value<u32>) -> Result<CandidateHash, DynamicErr
 			let hash_val = fields
 				.iter()
 				.find_map(|(name, val)| if name == "0" { Some(val) } else { None })
-				.unwrap_or(value);
+				.ok_or_else(|| {
+					DynamicError::DecodeDynamicError(
+						"field '0' in named CandidateHash composite".to_string(),
+						value.value.clone(),
+					)
+				})?;
 			Ok(CandidateHash(decode_h256(hash_val)?))
 		},
-		_ => Ok(CandidateHash(decode_h256(value)?)),
+		other => Err(DynamicError::DecodeDynamicError(
+			"CandidateHash (unnamed 1-tuple or named composite with field '0')".to_string(),
+			other.clone(),
+		)),
 	}
 }
 
@@ -404,7 +420,13 @@ fn decode_validator_signature(value: &Value<u32>) -> Result<validator_app::Signa
 			let mut arr = [0u8; 64];
 			for (i, b) in bytes.iter().enumerate() {
 				match &b.value {
-					ValueDef::Primitive(Primitive::U128(v)) => arr[i] = *v as u8,
+					ValueDef::Primitive(Primitive::U128(v)) =>
+						arr[i] = u8::try_from(*v).map_err(|_| {
+							DynamicError::DecodeDynamicError(
+								format!("u8 at signature index {} (got {} which overflows u8)", i, v),
+								b.value.clone(),
+							)
+						})?,
 					other =>
 						return Err(DynamicError::DecodeDynamicError(
 							format!("u8 at signature index {}", i),

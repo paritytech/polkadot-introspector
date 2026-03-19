@@ -182,7 +182,7 @@ mod tests {
 		let hash = H256::random();
 		assert!(storage.inherent_data(hash).await.is_none());
 
-		let data = create_inherent_data(100);
+		let data = create_inherent_data();
 		api.storage()
 			.storage_write_prefixed(
 				CollectorPrefixType::InherentData,

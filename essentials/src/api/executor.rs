@@ -93,7 +93,7 @@ enum Response {
 	MaybeBlockHash(Option<H256>),
 	/// Block events
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
-	/// `ParaInherent` data.
+	/// `ParaInherent` fields (bitfields and disputes).
 	ParaInherentData(ParaInherentFields),
 	/// Claim queue for parachains.
 	ClaimQueue(ClaimQueue),
