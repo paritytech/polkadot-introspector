@@ -380,8 +380,18 @@ impl Collector {
 		if let Some(hash) = new_head_hash(event, self.subscribe_mode) &&
 			let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await?
 		{
+			let mut skipped_events = 0u32;
 			for block_event in block_events.iter() {
-				chain_events.push(decode_chain_event(*hash, block_event.unwrap(), self.hasher).await?);
+				match block_event {
+					Ok(event) => chain_events.push(decode_chain_event(*hash, event, self.hasher).await?),
+					Err(e) => {
+						log::warn!("Failed to decode block event at {hash:?}, skipping: {e}");
+						skipped_events += 1;
+					},
+				}
+			}
+			if skipped_events > 0 {
+				log::error!("Skipped {skipped_events} undecoded events in block {hash:?}");
 			}
 		};
 
@@ -913,13 +923,10 @@ impl Collector {
 				)
 				.await?;
 
-				let Some(relay_parent) = self
-					.read_or_fetch_header(change_event.candidate_descriptor.relay_parent)
-					.await?
-				else {
+				let Some(relay_parent) = self.read_or_fetch_header(change_event.relay_parent).await? else {
 					return Err(eyre!(
 						"no stored relay parent {:?} for candidate {:?}, parachain id: {}",
-						change_event.candidate_descriptor.relay_parent,
+						change_event.relay_parent,
 						change_event.candidate_hash,
 						change_event.parachain_id
 					)
@@ -928,7 +935,7 @@ impl Collector {
 
 				let relay_block_number = self.state.current_relay_chain_block_number;
 				let candidate_inclusion = CandidateInclusionRecord {
-					relay_parent: change_event.candidate_descriptor.relay_parent,
+					relay_parent: change_event.relay_parent,
 					relay_parent_number: relay_parent.number,
 					parachain_id: change_event.parachain_id,
 					backed: relay_block_number,
@@ -1155,8 +1162,8 @@ impl Collector {
 			statement_set
 				.statements
 				.iter()
-				.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Invalid(_)))
-				.map(|(_, idx, _)| idx.0)
+				.filter(|(statement, _)| matches!(statement, DisputeStatement::Invalid(_)))
+				.map(|(_, idx)| idx.0)
 				.collect(),
 			statement_set.session,
 		))

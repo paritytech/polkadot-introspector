@@ -178,12 +178,14 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_inherent_data() {
+		use parity_scale_codec::Encode;
+
 		let (storage, api) = setup_client().await;
 		let hash = H256::random();
 		assert!(storage.inherent_data(hash).await.is_none());
 
-		let data = create_inherent_data(100);
-		let parent_hash = data.parent_header.parent_hash;
+		let data = create_inherent_data();
+		let encoded = data.encode();
 		api.storage()
 			.storage_write_prefixed(
 				CollectorPrefixType::InherentData,
@@ -194,7 +196,7 @@ mod tests {
 			.unwrap();
 
 		let storage_data = storage.inherent_data(hash).await.unwrap();
-		assert_eq!(storage_data.parent_header.parent_hash, parent_hash);
+		assert_eq!(storage_data.encode(), encoded);
 	}
 
 	#[tokio::test]

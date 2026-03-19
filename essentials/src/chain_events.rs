@@ -16,13 +16,10 @@
 //
 
 use crate::{
-	api::dynamic::decode_on_demand_order,
-	metadata::{
-		polkadot::{
-			para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
-			paras_disputes::events::{DisputeConcluded, DisputeInitiated},
-		},
-		polkadot_staging_primitives::CandidateDescriptorV2,
+	api::dynamic::{decode_candidate_event, decode_on_demand_order},
+	metadata::polkadot::{
+		para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
+		paras_disputes::events::{DisputeConcluded, DisputeInitiated},
 	},
 	types::{H256, Header, OnDemandOrder, PolkadotHash, PolkadotHasher},
 };
@@ -64,8 +61,8 @@ pub enum SubxtCandidateEventType {
 pub struct SubxtCandidateEvent {
 	/// Result of candidate receipt hashing
 	pub candidate_hash: PolkadotHash,
-	/// Full candidate receipt if needed
-	pub candidate_descriptor: CandidateDescriptorV2<PolkadotHash>,
+	/// Relay parent from the candidate descriptor
+	pub relay_parent: H256,
 	/// The parachain id
 	pub parachain_id: u32,
 	/// The event type
@@ -122,36 +119,27 @@ pub async fn decode_chain_event(
 	}
 
 	if is_specific_event::<CandidateBacked, PolkadotConfig>(&event) {
-		let decoded = decode_to_specific_event::<CandidateBacked, PolkadotConfig>(&event)?;
-		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
-			decoded.0.commitments_hash,
-			decoded.0.descriptor,
-			decoded.2.0,
+		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+			&event,
 			SubxtCandidateEventType::Backed,
 			hasher,
-		))))
+		)?)))
 	}
 
 	if is_specific_event::<CandidateIncluded, PolkadotConfig>(&event) {
-		let decoded = decode_to_specific_event::<CandidateIncluded, PolkadotConfig>(&event)?;
-		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
-			decoded.0.commitments_hash,
-			decoded.0.descriptor,
-			decoded.2.0,
+		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+			&event,
 			SubxtCandidateEventType::Included,
 			hasher,
-		))))
+		)?)))
 	}
 
 	if is_specific_event::<CandidateTimedOut, PolkadotConfig>(&event) {
-		let decoded = decode_to_specific_event::<CandidateTimedOut, PolkadotConfig>(&event)?;
-		return Ok(ChainEvent::CandidateChanged(Box::new(create_candidate_event(
-			decoded.0.commitments_hash,
-			decoded.0.descriptor,
-			decoded.2.0,
+		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+			&event,
 			SubxtCandidateEventType::TimedOut,
 			hasher,
-		))))
+		)?)))
 	}
 
 	// TODO: Use `is_specific_event` as soon as shows up in types
@@ -193,14 +181,27 @@ fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
 		})
 }
 
-fn create_candidate_event(
-	commitments_hash: PolkadotHash,
-	candidate_descriptor: CandidateDescriptorV2<PolkadotHash>,
-	core_idx: u32,
+// SCALE-encoded size of CandidateReceipt: CandidateDescriptor (292 bytes) + commitments_hash (32 bytes).
+// Hashing raw bytes makes us independent of receipt version since the byte layout is stable.
+const CANDIDATE_RECEIPT_SIZE: usize = 324;
+
+fn hash_candidate_receipt(bytes: &[u8], hasher: PolkadotHasher) -> Result<PolkadotHash> {
+	if bytes.len() < CANDIDATE_RECEIPT_SIZE {
+		return Err(eyre!(
+			"event field_bytes too short ({} < {}), cannot compute candidate hash",
+			bytes.len(),
+			CANDIDATE_RECEIPT_SIZE
+		))
+	}
+	Ok(hasher.hash(&bytes[..CANDIDATE_RECEIPT_SIZE]))
+}
+
+fn decode_candidate_changed(
+	event: &subxt::events::EventDetails<PolkadotConfig>,
 	event_type: SubxtCandidateEventType,
 	hasher: PolkadotHasher,
-) -> SubxtCandidateEvent {
-	let candidate_hash = hasher.hash_of(&(&candidate_descriptor, commitments_hash));
-	let parachain_id = candidate_descriptor.para_id.0;
-	SubxtCandidateEvent { event_type, candidate_descriptor, parachain_id, candidate_hash, core_idx }
+) -> Result<SubxtCandidateEvent> {
+	let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
+	let candidate_hash = hash_candidate_receipt(event.field_bytes(), hasher)?;
+	Ok(SubxtCandidateEvent { candidate_hash, relay_parent, parachain_id: para_id, event_type, core_idx })
 }

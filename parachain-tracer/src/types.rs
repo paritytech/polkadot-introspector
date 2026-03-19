@@ -20,8 +20,7 @@ use crossterm::style::Stylize;
 use parity_scale_codec::{Decode, Encode};
 use polkadot_introspector_essentials::{
 	chain_events::SubxtDisputeResult,
-	metadata::polkadot_primitives::DisputeStatementSet,
-	types::{AccountId32, BlockNumber, H256, SubxtHrmpChannel, Timestamp},
+	types::{AccountId32, BlockNumber, DisputeStatementSet, H256, SubxtHrmpChannel, Timestamp},
 };
 use std::{
 	collections::HashMap,
