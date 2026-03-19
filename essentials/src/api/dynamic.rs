@@ -57,6 +57,69 @@ pub(crate) fn decode_validator_groups(raw_groups: &Value<u32>) -> Result<Vec<Vec
 	Ok(groups)
 }
 
+pub(crate) fn decode_candidate_event(raw: &Composite<u32>) -> Result<(u32, H256, u32), DynamicError> {
+	let receipt = match raw {
+		Composite::Unnamed(fields) if !fields.is_empty() => &fields[0],
+		_ =>
+			return Err(DynamicError::DecodeDynamicError(
+				"unnamed composite with candidate receipt".to_string(),
+				ValueDef::Composite(raw.clone()),
+			)),
+	};
+
+	let descriptor = receipt
+		.at("descriptor")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("descriptor field".to_string(), receipt.value.clone()))?;
+
+	let raw_para_id = descriptor
+		.at("para_id")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("para_id field".to_string(), descriptor.value.clone()))?;
+	let para_id = decode_dynamic_u32(raw_para_id)?;
+
+	let raw_relay_parent = descriptor
+		.at("relay_parent")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("relay_parent field".to_string(), descriptor.value.clone()))?;
+	let relay_parent = decode_h256(raw_relay_parent)?;
+
+	let core_idx = match raw {
+		Composite::Unnamed(fields) if fields.len() > 2 => decode_dynamic_u32(&fields[2])?,
+		_ =>
+			return Err(DynamicError::DecodeDynamicError(
+				"core_index field (3rd unnamed field)".to_string(),
+				ValueDef::Composite(raw.clone()),
+			)),
+	};
+
+	Ok((para_id, relay_parent, core_idx))
+}
+
+fn decode_dynamic_u32(value: &Value<u32>) -> Result<u32, DynamicError> {
+	match &value.value {
+		ValueDef::Primitive(Primitive::U128(v)) => Ok(*v as u32),
+		ValueDef::Composite(Composite::Unnamed(inner)) if !inner.is_empty() => decode_dynamic_u32(&inner[0]),
+		other => Err(DynamicError::DecodeDynamicError("u32-like value".to_string(), other.clone())),
+	}
+}
+
+fn decode_h256(value: &Value<u32>) -> Result<H256, DynamicError> {
+	match &value.value {
+		ValueDef::Composite(Composite::Unnamed(bytes)) if bytes.len() == 32 => decode_h256_from_bytes(bytes),
+		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_h256(&inner[0]),
+		other => Err(DynamicError::DecodeDynamicError("H256 (32-byte composite)".to_string(), other.clone())),
+	}
+}
+
+fn decode_h256_from_bytes(bytes: &[Value<u32>]) -> Result<H256, DynamicError> {
+	let mut arr = [0u8; 32];
+	for (i, b) in bytes.iter().enumerate() {
+		match &b.value {
+			ValueDef::Primitive(Primitive::U128(v)) => arr[i] = *v as u8,
+			other => return Err(DynamicError::DecodeDynamicError(format!("u8 at index {}", i), other.clone())),
+		}
+	}
+	Ok(H256::from(arr))
+}
+
 pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrder, DynamicError> {
 	match raw {
 		Composite::Named(v) => {

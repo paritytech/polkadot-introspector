@@ -381,7 +381,10 @@ impl Collector {
 			let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await?
 		{
 			for block_event in block_events.iter() {
-				chain_events.push(decode_chain_event(*hash, block_event.unwrap(), self.hasher).await?);
+				match block_event {
+					Ok(event) => chain_events.push(decode_chain_event(*hash, event, self.hasher).await?),
+					Err(e) => log::warn!("Failed to decode block event at {hash:?}, skipping: {e}"),
+				}
 			}
 		};
 
