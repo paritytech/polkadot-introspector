@@ -1165,8 +1165,8 @@ impl Collector {
 			statement_set
 				.statements
 				.iter()
-				.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Invalid(_)))
-				.map(|(_, idx, _)| idx.0)
+				.filter(|(statement, _)| matches!(statement, DisputeStatement::Invalid(_)))
+				.map(|(_, idx)| idx.0)
 				.collect(),
 			statement_set.session,
 		))

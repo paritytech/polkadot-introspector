@@ -15,7 +15,10 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::{polkadot::runtime_types as subxt_runtime_types, polkadot_primitives};
+use crate::metadata::{
+	polkadot::runtime_types::{self as subxt_runtime_types, polkadot_core_primitives::CandidateHash},
+	polkadot_primitives,
+};
 use parity_scale_codec::{Decode, Encode};
 use std::collections::BTreeMap;
 use subxt::{
@@ -37,9 +40,16 @@ pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
 
 #[derive(Debug, Encode, Decode)]
+pub struct DisputeStatementSet {
+	pub candidate_hash: CandidateHash,
+	pub session: u32,
+	pub statements: Vec<(polkadot_primitives::DisputeStatement, polkadot_primitives::ValidatorIndex)>,
+}
+
+#[derive(Debug, Encode, Decode)]
 pub struct ParaInherentFields {
 	pub bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
-	pub disputes: Vec<polkadot_primitives::DisputeStatementSet>,
+	pub disputes: Vec<DisputeStatementSet>,
 }
 
 /// A wrapper over subxt HRMP channel configuration

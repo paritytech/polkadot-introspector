@@ -57,7 +57,6 @@ pub enum SubxtCandidateEventType {
 }
 #[derive(Debug)]
 pub struct CandidateDescriptor {
-	pub para_id: u32,
 	pub relay_parent: H256,
 }
 
@@ -170,7 +169,7 @@ fn decode_candidate_changed(
 	let candidate_hash = hasher.hash(&bytes[..CANDIDATE_RECEIPT_V2_SIZE]);
 	Ok(SubxtCandidateEvent {
 		candidate_hash,
-		candidate_descriptor: CandidateDescriptor { para_id, relay_parent },
+		candidate_descriptor: CandidateDescriptor { relay_parent },
 		parachain_id: para_id,
 		event_type,
 		core_idx,

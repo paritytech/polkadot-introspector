@@ -19,11 +19,11 @@ use crate::{
 	metadata::{
 		polkadot::runtime_types::polkadot_core_primitives::CandidateHash,
 		polkadot_primitives::{
-			AvailabilityBitfield, DisputeStatement, DisputeStatementSet, InvalidDisputeStatementKind,
-			ValidDisputeStatementKind, ValidatorIndex, validator_app,
+			AvailabilityBitfield, DisputeStatement, InvalidDisputeStatementKind, ValidDisputeStatementKind,
+			ValidatorIndex,
 		},
 	},
-	types::{CoreOccupied, H256, OnDemandOrder, ParaInherentFields},
+	types::{CoreOccupied, DisputeStatementSet, H256, OnDemandOrder, ParaInherentFields},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -294,8 +294,7 @@ fn decode_dispute_statement_set(value: &Value<u32>) -> Result<DisputeStatementSe
 		}
 		let statement = decode_dispute_statement(&tuple[0])?;
 		let validator_index = ValidatorIndex(decode_dynamic_u32(&tuple[1])?);
-		let signature = decode_validator_signature(&tuple[2])?;
-		statements.push((statement, validator_index, signature));
+		statements.push((statement, validator_index));
 	}
 
 	Ok(DisputeStatementSet { candidate_hash, session, statements })
@@ -384,20 +383,6 @@ fn decode_candidate_hash(value: &Value<u32>) -> Result<CandidateHash, DynamicErr
 			"CandidateHash (unnamed 1-tuple or named composite with field '0')".to_string(),
 			other.clone(),
 		)),
-	}
-}
-
-fn decode_validator_signature(value: &Value<u32>) -> Result<validator_app::Signature, DynamicError> {
-	match &value.value {
-		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_validator_signature(&inner[0]),
-		ValueDef::Composite(Composite::Unnamed(bytes)) if bytes.len() == 64 => {
-			let decoded = decode_byte_slice(bytes)?;
-			let arr: [u8; 64] = decoded.try_into().map_err(|v: Vec<u8>| {
-				DynamicError::DecodeDynamicError(format!("64 bytes (got {})", v.len()), value.value.clone())
-			})?;
-			Ok(validator_app::Signature(arr))
-		},
-		other => Err(DynamicError::DecodeDynamicError("64-byte signature".to_string(), other.clone())),
 	}
 }
 

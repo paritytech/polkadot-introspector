@@ -30,15 +30,15 @@ use polkadot_introspector_essentials::{
 			},
 		},
 		polkadot_primitives::{
-			AvailabilityBitfield, CandidateCommitments, DisputeStatement, DisputeStatementSet,
-			InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex, validator_app,
+			AvailabilityBitfield, CandidateCommitments, DisputeStatement, InvalidDisputeStatementKind,
+			ValidDisputeStatementKind, ValidatorIndex,
 		},
 		polkadot_staging_primitives::{
 			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InternalVersion,
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{H256, ParaInherentFields, PolkadotHasher, SubxtHrmpChannel},
+	types::{DisputeStatementSet, H256, ParaInherentFields, PolkadotHasher, SubxtHrmpChannel},
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
@@ -90,21 +90,9 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 		candidate_hash: CandidateHash(H256::random()),
 		session: 0,
 		statements: vec![
-			(
-				DisputeStatement::Valid(ValidDisputeStatementKind::Explicit),
-				ValidatorIndex(1),
-				create_validator_signature(),
-			),
-			(
-				DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
-				ValidatorIndex(2),
-				create_validator_signature(),
-			),
-			(
-				DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
-				ValidatorIndex(3),
-				create_validator_signature(),
-			),
+			(DisputeStatement::Valid(ValidDisputeStatementKind::Explicit), ValidatorIndex(1)),
+			(DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit), ValidatorIndex(2)),
+			(DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit), ValidatorIndex(3)),
 		],
 	}
 }
@@ -181,10 +169,6 @@ pub async fn storage_write<T: Encode>(
 			StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), entry),
 		)
 		.await
-}
-
-fn create_validator_signature() -> validator_app::Signature {
-	validator_app::Signature([0; 64])
 }
 
 pub async fn create_hasher() -> PolkadotHasher {

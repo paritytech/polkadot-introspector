@@ -15,8 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use polkadot_introspector_essentials::{
-	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement, DisputeStatementSet},
-	types::{AccountId32, ParaInherentFields, Timestamp},
+	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement},
+	types::{AccountId32, DisputeStatementSet, ParaInherentFields, Timestamp},
 };
 use std::time::Duration;
 
@@ -150,14 +150,14 @@ pub(crate) fn extract_misbehaving_validators(
 ) -> Vec<(u32, String)> {
 	info.statements
 		.iter()
-		.filter(|(statement, _, _)| {
+		.filter(|(statement, _)| {
 			if against_valid {
 				!matches!(statement, DisputeStatement::Valid(_))
 			} else {
 				matches!(statement, DisputeStatement::Valid(_))
 			}
 		})
-		.map(|(_, idx, _)| extract_validator_address(session_keys, idx.0))
+		.map(|(_, idx)| extract_validator_address(session_keys, idx.0))
 		.collect()
 }
 
@@ -179,7 +179,7 @@ pub(crate) fn extract_votes(info: &DisputeStatementSet) -> (u32, u32) {
 	let voted_for = info
 		.statements
 		.iter()
-		.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+		.filter(|(statement, _)| matches!(statement, DisputeStatement::Valid(_)))
 		.count() as u32;
 	let voted_against = info.statements.len() as u32 - voted_for;
 
