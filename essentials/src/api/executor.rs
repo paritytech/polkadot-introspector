@@ -29,8 +29,8 @@ use crate::{
 		polkadot_primitives,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels,
-		ParaInherentFields, PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
+		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -93,8 +93,8 @@ enum Response {
 	MaybeBlockHash(Option<H256>),
 	/// Block events
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
-	/// `ParaInherent` fields (bitfields and disputes).
-	ParaInherentData(ParaInherentFields),
+	/// `ParaInherent` data.
+	ParaInherentData(InherentData),
 	/// Claim queue for parachains.
 	ClaimQueue(ClaimQueue),
 	/// List of the occupied availability cores.
@@ -242,12 +242,7 @@ impl RequestExecutorBackend {
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
-			GetOccupiedCores(hash) => {
-				let value = client
-					.fetch_dynamic_runtime_api(Some(hash), "ParachainHost", "availability_cores")
-					.await?;
-				OccupiedCores(dynamic::decode_availability_cores(&value)?)
-			},
+			GetOccupiedCores(hash) => OccupiedCores(client.get_occupied_cores(hash).await?),
 			GetBackingGroups(hash) => {
 				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ValidatorGroups").await?;
 				BackingGroups(decode_validator_groups(&value)?)
@@ -424,7 +419,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<H256>,
-	) -> color_eyre::Result<ParaInherentFields, RequestExecutorError> {
+	) -> color_eyre::Result<InherentData, RequestExecutorError> {
 		wrap_backend_call!(self, url, ExtractParaInherent, ParaInherentData, maybe_hash)
 	}
 

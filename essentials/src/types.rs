@@ -40,16 +40,16 @@ pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
 
 #[derive(Debug, Encode, Decode)]
+pub struct InherentData {
+	pub bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
+	pub disputes: Vec<DisputeStatementSet>,
+}
+
+#[derive(Debug, Encode, Decode)]
 pub struct DisputeStatementSet {
 	pub candidate_hash: CandidateHash,
 	pub session: u32,
 	pub statements: Vec<(polkadot_primitives::DisputeStatement, polkadot_primitives::ValidatorIndex)>,
-}
-
-#[derive(Debug, Encode, Decode)]
-pub struct ParaInherentFields {
-	pub bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
-	pub disputes: Vec<DisputeStatementSet>,
 }
 
 /// A wrapper over subxt HRMP channel configuration

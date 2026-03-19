@@ -38,7 +38,7 @@ use polkadot_introspector_essentials::{
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{DisputeStatementSet, H256, ParaInherentFields, PolkadotHasher, SubxtHrmpChannel},
+	types::{DisputeStatementSet, H256, InherentData, PolkadotHasher, SubxtHrmpChannel},
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
@@ -97,8 +97,8 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 	}
 }
 
-pub fn create_inherent_data() -> ParaInherentFields {
-	ParaInherentFields {
+pub fn create_inherent_data() -> InherentData {
+	InherentData {
 		bitfields: vec![AvailabilityBitfield(DecodedBits::from_iter([true]))],
 		disputes: vec![create_dispute_statement_set()],
 	}

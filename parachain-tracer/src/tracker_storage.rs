@@ -22,7 +22,7 @@ use polkadot_introspector_essentials::{
 		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},
 	types::{
-		AccountId32, CoreOccupied, H256, OnDemandOrder, ParaInherentFields, PolkadotHasher, SubxtHrmpChannel, Timestamp,
+		AccountId32, CoreOccupied, H256, InherentData, OnDemandOrder, PolkadotHasher, SubxtHrmpChannel, Timestamp,
 	},
 };
 use std::collections::BTreeMap;
@@ -50,7 +50,7 @@ impl TrackerStorage {
 	}
 
 	/// Reads inherent data of a relay block by its block hash
-	pub async fn inherent_data(&self, block_hash: H256) -> Option<ParaInherentFields> {
+	pub async fn inherent_data(&self, block_hash: H256) -> Option<InherentData> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
 			.await
@@ -178,11 +178,14 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_reads_inherent_data() {
+		use parity_scale_codec::Encode;
+
 		let (storage, api) = setup_client().await;
 		let hash = H256::random();
 		assert!(storage.inherent_data(hash).await.is_none());
 
 		let data = create_inherent_data();
+		let encoded = data.encode();
 		api.storage()
 			.storage_write_prefixed(
 				CollectorPrefixType::InherentData,
@@ -193,7 +196,7 @@ mod tests {
 			.unwrap();
 
 		let storage_data = storage.inherent_data(hash).await.unwrap();
-		assert!(!storage_data.disputes.is_empty());
+		assert_eq!(storage_data.encode(), encoded);
 	}
 
 	#[tokio::test]

@@ -23,7 +23,7 @@ use crate::{
 			ValidatorIndex,
 		},
 	},
-	types::{CoreOccupied, DisputeStatementSet, H256, OnDemandOrder, ParaInherentFields},
+	types::{CoreOccupied, DisputeStatementSet, H256, InherentData, OnDemandOrder},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -214,7 +214,7 @@ pub(crate) fn decode_availability_cores(raw: &Value<u32>) -> Result<Vec<CoreOccu
 		.collect()
 }
 
-pub(crate) fn decode_para_inherent_fields(raw: &Composite<u32>) -> Result<ParaInherentFields, DynamicError> {
+pub(crate) fn decode_inherent_data(raw: &Composite<u32>) -> Result<InherentData, DynamicError> {
 	let data = match raw {
 		Composite::Named(fields) => find_named_field(fields, "data", raw)?,
 		Composite::Unnamed(fields) if !fields.is_empty() => &fields[0],
@@ -246,7 +246,7 @@ pub(crate) fn decode_para_inherent_fields(raw: &Composite<u32>) -> Result<ParaIn
 		.map(decode_dispute_statement_set)
 		.collect();
 
-	Ok(ParaInherentFields { bitfields: bitfields?, disputes: disputes? })
+	Ok(InherentData { bitfields: bitfields?, disputes: disputes? })
 }
 
 fn decode_availability_bitfield(value: &Value<u32>) -> Result<AvailabilityBitfield, DynamicError> {

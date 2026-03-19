@@ -28,7 +28,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, H256, Header, OnDemandOrder, ParaInherentFields, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -923,13 +923,10 @@ impl Collector {
 				)
 				.await?;
 
-				let Some(relay_parent) = self
-					.read_or_fetch_header(change_event.candidate_descriptor.relay_parent)
-					.await?
-				else {
+				let Some(relay_parent) = self.read_or_fetch_header(change_event.relay_parent).await? else {
 					return Err(eyre!(
 						"no stored relay parent {:?} for candidate {:?}, parachain id: {}",
-						change_event.candidate_descriptor.relay_parent,
+						change_event.relay_parent,
 						change_event.candidate_hash,
 						change_event.parachain_id
 					)
@@ -938,7 +935,7 @@ impl Collector {
 
 				let relay_block_number = self.state.current_relay_chain_block_number;
 				let candidate_inclusion = CandidateInclusionRecord {
-					relay_parent: change_event.candidate_descriptor.relay_parent,
+					relay_parent: change_event.relay_parent,
 					relay_parent_number: relay_parent.number,
 					parachain_id: change_event.parachain_id,
 					backed: relay_block_number,
@@ -1151,7 +1148,7 @@ impl Collector {
 			None => return Ok(default_value),
 		};
 
-		let data: ParaInherentFields = entry.into_inner()?;
+		let data: InherentData = entry.into_inner()?;
 		let statement_set = match data
 			.disputes
 			.iter()

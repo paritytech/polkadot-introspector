@@ -16,7 +16,7 @@
 
 use polkadot_introspector_essentials::{
 	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement},
-	types::{AccountId32, DisputeStatementSet, ParaInherentFields, Timestamp},
+	types::{AccountId32, DisputeStatementSet, Timestamp},
 };
 use std::time::Duration;
 
@@ -118,28 +118,6 @@ mod test_extract_validator_addresses {
 			extract_validator_addresses(Some(&keys), vec![0]),
 			vec![(0, "5C4hrfjw9DjXZTzV3MwzrrAr9P1MJhSrvWGWqi1eSuyUpnhM".to_string())]
 		);
-	}
-}
-
-pub(crate) fn extract_inherent_fields(
-	data: ParaInherentFields,
-) -> (Vec<AvailabilityBitfield>, Vec<DisputeStatementSet>) {
-	(data.bitfields, data.disputes)
-}
-
-#[cfg(test)]
-mod test_extract_inherent_fields {
-	use super::*;
-	use crate::test_utils::create_inherent_data;
-
-	#[test]
-	fn test_returns_fields() {
-		let (bitfields, disputes) = extract_inherent_fields(create_inherent_data());
-
-		println!("{:?}", matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
-
-		assert!(matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
-		assert!(matches!(disputes.first().unwrap(), DisputeStatementSet { .. }));
 	}
 }
 

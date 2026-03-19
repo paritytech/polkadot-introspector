@@ -55,17 +55,19 @@ pub enum SubxtCandidateEventType {
 	/// Candidate has been timed out
 	TimedOut,
 }
-#[derive(Debug)]
-pub struct CandidateDescriptor {
-	pub relay_parent: H256,
-}
-
+/// A structure that helps to deal with the candidate events decoding some of
+/// the important fields there
 #[derive(Debug)]
 pub struct SubxtCandidateEvent {
+	/// Result of candidate receipt hashing
 	pub candidate_hash: PolkadotHash,
-	pub candidate_descriptor: CandidateDescriptor,
+	/// Relay parent from the candidate descriptor
+	pub relay_parent: H256,
+	/// The parachain id
 	pub parachain_id: u32,
+	/// The event type
 	pub event_type: SubxtCandidateEventType,
+	/// Core index
 	pub core_idx: u32,
 }
 
@@ -89,9 +91,6 @@ pub enum SubxtDisputeResult {
 	/// Dispute has been timed out
 	TimedOut,
 }
-
-// SCALE-encoded size of CandidateReceiptV2: CandidateDescriptorV2 (292 bytes) + commitments_hash (32 bytes)
-const CANDIDATE_RECEIPT_V2_SIZE: usize = 324;
 
 pub async fn decode_chain_event(
 	block_hash: PolkadotHash,
@@ -152,30 +151,6 @@ pub async fn decode_chain_event(
 	Ok(ChainEvent::RawEvent(block_hash, event))
 }
 
-fn decode_candidate_changed(
-	event: &subxt::events::EventDetails<PolkadotConfig>,
-	event_type: SubxtCandidateEventType,
-	hasher: PolkadotHasher,
-) -> Result<SubxtCandidateEvent> {
-	let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
-	let bytes = event.field_bytes();
-	if bytes.len() < CANDIDATE_RECEIPT_V2_SIZE {
-		return Err(eyre!(
-			"event field_bytes too short ({} < {}), cannot compute candidate hash",
-			bytes.len(),
-			CANDIDATE_RECEIPT_V2_SIZE
-		))
-	}
-	let candidate_hash = hasher.hash(&bytes[..CANDIDATE_RECEIPT_V2_SIZE]);
-	Ok(SubxtCandidateEvent {
-		candidate_hash,
-		candidate_descriptor: CandidateDescriptor { relay_parent },
-		parachain_id: para_id,
-		event_type,
-		core_idx,
-	})
-}
-
 fn is_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
 	raw_event: &subxt::events::EventDetails<C>,
 ) -> bool {
@@ -204,4 +179,29 @@ fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
 				)
 			})
 		})
+}
+
+// SCALE-encoded size of CandidateReceipt: CandidateDescriptor (292 bytes) + commitments_hash (32 bytes).
+// Hashing raw bytes makes us independent of receipt version since the byte layout is stable.
+const CANDIDATE_RECEIPT_SIZE: usize = 324;
+
+fn hash_candidate_receipt(bytes: &[u8], hasher: PolkadotHasher) -> Result<PolkadotHash> {
+	if bytes.len() < CANDIDATE_RECEIPT_SIZE {
+		return Err(eyre!(
+			"event field_bytes too short ({} < {}), cannot compute candidate hash",
+			bytes.len(),
+			CANDIDATE_RECEIPT_SIZE
+		))
+	}
+	Ok(hasher.hash(&bytes[..CANDIDATE_RECEIPT_SIZE]))
+}
+
+fn decode_candidate_changed(
+	event: &subxt::events::EventDetails<PolkadotConfig>,
+	event_type: SubxtCandidateEventType,
+	hasher: PolkadotHasher,
+) -> Result<SubxtCandidateEvent> {
+	let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
+	let candidate_hash = hash_candidate_receipt(event.field_bytes(), hasher)?;
+	Ok(SubxtCandidateEvent { candidate_hash, relay_parent, parachain_id: para_id, event_type, core_idx })
 }
