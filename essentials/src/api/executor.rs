@@ -30,8 +30,8 @@ use crate::{
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels,
+		ParaInherentFields, PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -95,7 +95,7 @@ enum Response {
 	/// Block events
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
 	/// `ParaInherent` data.
-	ParaInherentData(InherentData),
+	ParaInherentData(ParaInherentFields),
 	/// Claim queue for parachains.
 	ClaimQueue(ClaimQueue),
 	/// List of the occupied availability cores.
@@ -432,7 +432,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		maybe_hash: Option<H256>,
-	) -> color_eyre::Result<InherentData, RequestExecutorError> {
+	) -> color_eyre::Result<ParaInherentFields, RequestExecutorError> {
 		wrap_backend_call!(self, url, ExtractParaInherent, ParaInherentData, maybe_hash)
 	}
 

@@ -28,7 +28,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, H256, Header, OnDemandOrder, ParaInherentFields, PolkadotHasher, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -1144,7 +1144,7 @@ impl Collector {
 			None => return Ok(default_value),
 		};
 
-		let data: InherentData = entry.into_inner()?;
+		let data: ParaInherentFields = entry.into_inner()?;
 		let statement_set = match data
 			.disputes
 			.iter()

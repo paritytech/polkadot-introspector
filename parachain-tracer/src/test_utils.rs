@@ -27,20 +27,18 @@ use polkadot_introspector_essentials::{
 				bounded_collections::bounded_vec::BoundedVec,
 				polkadot_core_primitives::CandidateHash,
 				polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
-				sp_runtime::generic::{digest::Digest, header::Header},
 			},
 		},
 		polkadot_primitives::{
 			AvailabilityBitfield, CandidateCommitments, DisputeStatement, DisputeStatementSet,
-			InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex, signed::UncheckedSigned,
-			validator_app,
+			InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex, validator_app,
 		},
 		polkadot_staging_primitives::{
-			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InherentData, InternalVersion,
+			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InternalVersion,
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{H256, PolkadotHasher, SubxtHrmpChannel},
+	types::{H256, ParaInherentFields, PolkadotHasher, SubxtHrmpChannel},
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
@@ -111,23 +109,10 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 	}
 }
 
-pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
-	InherentData {
-		bitfields: vec![UncheckedSigned {
-			payload: AvailabilityBitfield(DecodedBits::from_iter([true])),
-			validator_index: ValidatorIndex(1),
-			signature: create_validator_signature(),
-			__ignore: Default::default(),
-		}],
-		backed_candidates: vec![create_backed_candidate(para_id)],
+pub fn create_inherent_data(_para_id: u32) -> ParaInherentFields {
+	ParaInherentFields {
+		bitfields: vec![AvailabilityBitfield(DecodedBits::from_iter([true]))],
 		disputes: vec![create_dispute_statement_set()],
-		parent_header: Header {
-			parent_hash: H256::random(),
-			number: Default::default(),
-			state_root: Default::default(),
-			extrinsics_root: Default::default(),
-			digest: Digest { logs: Default::default() },
-		},
 	}
 }
 

@@ -16,13 +16,20 @@
 
 use crate::{
 	api::api_client::ApiClient,
-	metadata::polkadot_primitives::ValidatorIndex,
-	types::{H256, OnDemandOrder},
+	metadata::{
+		polkadot::runtime_types::polkadot_core_primitives::CandidateHash,
+		polkadot_primitives::{
+			AvailabilityBitfield, DisputeStatement, DisputeStatementSet, InvalidDisputeStatementKind,
+			ValidDisputeStatementKind, ValidatorIndex, validator_app,
+		},
+	},
+	types::{H256, OnDemandOrder, ParaInherentFields},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
 	dynamic::{At, Value},
-	ext::scale_value::{Composite, Primitive, ValueDef},
+	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
+	utils::bits::DecodedBits,
 };
 use thiserror::Error;
 
@@ -165,6 +172,228 @@ fn decode_u128_value(value: &Value<u32>) -> Result<u128, DynamicError> {
 	match &value.value {
 		ValueDef::Primitive(Primitive::U128(v)) => Ok(*v),
 		other => Err(DynamicError::DecodeDynamicError("u128".to_string(), other.clone())),
+	}
+}
+
+pub(crate) fn decode_para_inherent_fields(raw: &Composite<u32>) -> Result<ParaInherentFields, DynamicError> {
+	let data = match raw {
+		Composite::Named(fields) => fields
+			.iter()
+			.find_map(|(name, val)| if name == "data" { Some(val) } else { None })
+			.ok_or_else(|| {
+				DynamicError::DecodeDynamicError(
+					"named composite with 'data' field".to_string(),
+					ValueDef::Composite(raw.clone()),
+				)
+			})?,
+		Composite::Unnamed(fields) if !fields.is_empty() => &fields[0],
+		_ =>
+			return Err(DynamicError::DecodeDynamicError(
+				"composite with inherent data".to_string(),
+				ValueDef::Composite(raw.clone()),
+			)),
+	};
+
+	let raw_bitfields = data
+		.at("bitfields")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("bitfields field".to_string(), data.value.clone()))?;
+	let bitfields_vec = decode_unnamed_composite(raw_bitfields)?;
+	let mut bitfields = Vec::with_capacity(bitfields_vec.len());
+	for raw_signed in bitfields_vec {
+		let payload = raw_signed.at("payload").ok_or_else(|| {
+			DynamicError::DecodeDynamicError("payload field in bitfield".to_string(), raw_signed.value.clone())
+		})?;
+		bitfields.push(decode_availability_bitfield(payload)?);
+	}
+
+	let raw_disputes = data
+		.at("disputes")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("disputes field".to_string(), data.value.clone()))?;
+	let disputes_vec = decode_unnamed_composite(raw_disputes)?;
+	let mut disputes = Vec::with_capacity(disputes_vec.len());
+	for raw_dispute in disputes_vec {
+		disputes.push(decode_dispute_statement_set(raw_dispute)?);
+	}
+
+	Ok(ParaInherentFields { bitfields, disputes })
+}
+
+fn decode_availability_bitfield(value: &Value<u32>) -> Result<AvailabilityBitfield, DynamicError> {
+	match &value.value {
+		ValueDef::BitSequence(bits) => Ok(AvailabilityBitfield(DecodedBits::from_iter(bits.iter()))),
+		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_availability_bitfield(&inner[0]),
+		ValueDef::Composite(Composite::Unnamed(bits)) => {
+			let bools: Result<Vec<bool>, _> = bits
+				.iter()
+				.map(|b| match &b.value {
+					ValueDef::Primitive(Primitive::Bool(v)) => Ok(*v),
+					ValueDef::Primitive(Primitive::U128(v)) => Ok(*v != 0),
+					other => Err(DynamicError::DecodeDynamicError("bool in bitfield".to_string(), other.clone())),
+				})
+				.collect();
+			Ok(AvailabilityBitfield(DecodedBits::from_iter(bools?)))
+		},
+		other => Err(DynamicError::DecodeDynamicError("availability bitfield".to_string(), other.clone())),
+	}
+}
+
+fn decode_dispute_statement_set(value: &Value<u32>) -> Result<DisputeStatementSet, DynamicError> {
+	let raw_candidate_hash = value
+		.at("candidate_hash")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("candidate_hash field".to_string(), value.value.clone()))?;
+	let candidate_hash = decode_candidate_hash(raw_candidate_hash)?;
+
+	let raw_session = value
+		.at("session")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("session field".to_string(), value.value.clone()))?;
+	let session = decode_dynamic_u32(raw_session)?;
+
+	let raw_statements = value
+		.at("statements")
+		.ok_or_else(|| DynamicError::DecodeDynamicError("statements field".to_string(), value.value.clone()))?;
+	let statements_vec = decode_unnamed_composite(raw_statements)?;
+	let mut statements = Vec::with_capacity(statements_vec.len());
+	for raw_stmt in statements_vec {
+		let tuple = decode_unnamed_composite(raw_stmt)?;
+		if tuple.len() < 3 {
+			return Err(DynamicError::DecodeDynamicError(
+				"statement tuple with 3 elements".to_string(),
+				raw_stmt.value.clone(),
+			));
+		}
+		let statement = decode_dispute_statement(&tuple[0])?;
+		let validator_index = ValidatorIndex(decode_dynamic_u32(&tuple[1])?);
+		let signature = decode_validator_signature(&tuple[2])?;
+		statements.push((statement, validator_index, signature));
+	}
+
+	Ok(DisputeStatementSet { candidate_hash, session, statements })
+}
+
+fn decode_dispute_statement(value: &Value<u32>) -> Result<DisputeStatement, DynamicError> {
+	match &value.value {
+		ValueDef::Variant(variant) => match variant.name.as_str() {
+			"Valid" => {
+				let kind = decode_valid_dispute_statement_kind(variant)?;
+				Ok(DisputeStatement::Valid(kind))
+			},
+			"Invalid" => {
+				let kind = decode_invalid_dispute_statement_kind(variant)?;
+				Ok(DisputeStatement::Invalid(kind))
+			},
+			other => Err(DynamicError::DecodeDynamicError(
+				format!("Valid or Invalid dispute statement, got '{}'", other),
+				value.value.clone(),
+			)),
+		},
+		other => Err(DynamicError::DecodeDynamicError("variant for DisputeStatement".to_string(), other.clone())),
+	}
+}
+
+fn decode_valid_dispute_statement_kind(variant: &Variant<u32>) -> Result<ValidDisputeStatementKind, DynamicError> {
+	let inner = variant.values.values().next().ok_or_else(|| {
+		DynamicError::DecodeDynamicError(
+			"inner variant for ValidDisputeStatementKind".to_string(),
+			ValueDef::Variant(variant.clone()),
+		)
+	})?;
+	match &inner.value {
+		ValueDef::Variant(inner_variant) => match inner_variant.name.as_str() {
+			"Explicit" => Ok(ValidDisputeStatementKind::Explicit),
+			"BackingSeconded" => {
+				let hash_val = inner_variant.values.values().next().ok_or_else(|| {
+					DynamicError::DecodeDynamicError("hash in BackingSeconded".to_string(), inner.value.clone())
+				})?;
+				Ok(ValidDisputeStatementKind::BackingSeconded(decode_h256(hash_val)?))
+			},
+			"BackingValid" => {
+				let hash_val = inner_variant.values.values().next().ok_or_else(|| {
+					DynamicError::DecodeDynamicError("hash in BackingValid".to_string(), inner.value.clone())
+				})?;
+				Ok(ValidDisputeStatementKind::BackingValid(decode_h256(hash_val)?))
+			},
+			"ApprovalChecking" => Ok(ValidDisputeStatementKind::ApprovalChecking),
+			"ApprovalCheckingMultipleCandidates" => {
+				let candidates_val = inner_variant.values.values().next().ok_or_else(|| {
+					DynamicError::DecodeDynamicError(
+						"candidates in ApprovalCheckingMultipleCandidates".to_string(),
+						inner.value.clone(),
+					)
+				})?;
+				let candidates_vec = decode_unnamed_composite(candidates_val)?;
+				let mut candidates = Vec::with_capacity(candidates_vec.len());
+				for c in candidates_vec {
+					candidates.push(decode_candidate_hash(c)?);
+				}
+				Ok(ValidDisputeStatementKind::ApprovalCheckingMultipleCandidates(candidates))
+			},
+			other => Err(DynamicError::DecodeDynamicError(
+				format!("known ValidDisputeStatementKind, got '{}'", other),
+				inner.value.clone(),
+			)),
+		},
+		_ => Err(DynamicError::DecodeDynamicError(
+			"variant for ValidDisputeStatementKind".to_string(),
+			inner.value.clone(),
+		)),
+	}
+}
+
+fn decode_invalid_dispute_statement_kind(variant: &Variant<u32>) -> Result<InvalidDisputeStatementKind, DynamicError> {
+	let inner = variant.values.values().next().ok_or_else(|| {
+		DynamicError::DecodeDynamicError(
+			"inner variant for InvalidDisputeStatementKind".to_string(),
+			ValueDef::Variant(variant.clone()),
+		)
+	})?;
+	match &inner.value {
+		ValueDef::Variant(inner_variant) => match inner_variant.name.as_str() {
+			"Explicit" => Ok(InvalidDisputeStatementKind::Explicit),
+			other => Err(DynamicError::DecodeDynamicError(
+				format!("known InvalidDisputeStatementKind, got '{}'", other),
+				inner.value.clone(),
+			)),
+		},
+		_ => Err(DynamicError::DecodeDynamicError(
+			"variant for InvalidDisputeStatementKind".to_string(),
+			inner.value.clone(),
+		)),
+	}
+}
+
+fn decode_candidate_hash(value: &Value<u32>) -> Result<CandidateHash, DynamicError> {
+	match &value.value {
+		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 =>
+			Ok(CandidateHash(decode_h256(&inner[0])?)),
+		ValueDef::Composite(Composite::Named(fields)) => {
+			let hash_val = fields
+				.iter()
+				.find_map(|(name, val)| if name == "0" { Some(val) } else { None })
+				.unwrap_or(value);
+			Ok(CandidateHash(decode_h256(hash_val)?))
+		},
+		_ => Ok(CandidateHash(decode_h256(value)?)),
+	}
+}
+
+fn decode_validator_signature(value: &Value<u32>) -> Result<validator_app::Signature, DynamicError> {
+	match &value.value {
+		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_validator_signature(&inner[0]),
+		ValueDef::Composite(Composite::Unnamed(bytes)) if bytes.len() == 64 => {
+			let mut arr = [0u8; 64];
+			for (i, b) in bytes.iter().enumerate() {
+				match &b.value {
+					ValueDef::Primitive(Primitive::U128(v)) => arr[i] = *v as u8,
+					other =>
+						return Err(DynamicError::DecodeDynamicError(
+							format!("u8 at signature index {}", i),
+							other.clone(),
+						)),
+				}
+			}
+			Ok(validator_app::Signature(arr))
+		},
+		other => Err(DynamicError::DecodeDynamicError("64-byte signature".to_string(), other.clone())),
 	}
 }
 

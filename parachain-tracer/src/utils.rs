@@ -16,7 +16,7 @@
 
 use polkadot_introspector_essentials::{
 	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement, DisputeStatementSet},
-	types::{AccountId32, InherentData, Timestamp},
+	types::{AccountId32, ParaInherentFields, Timestamp},
 };
 use std::time::Duration;
 
@@ -121,14 +121,10 @@ mod test_extract_validator_addresses {
 	}
 }
 
-pub(crate) fn extract_inherent_fields(data: InherentData) -> (Vec<AvailabilityBitfield>, Vec<DisputeStatementSet>) {
-	let bitfields = data
-		.bitfields
-		.into_iter()
-		.map(|b| b.payload)
-		.collect::<Vec<AvailabilityBitfield>>();
-
-	(bitfields, data.disputes)
+pub(crate) fn extract_inherent_fields(
+	data: ParaInherentFields,
+) -> (Vec<AvailabilityBitfield>, Vec<DisputeStatementSet>) {
+	(data.bitfields, data.disputes)
 }
 
 #[cfg(test)]

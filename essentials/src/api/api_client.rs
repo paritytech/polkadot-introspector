@@ -16,6 +16,7 @@
 //
 
 use crate::{
+	api::dynamic::decode_para_inherent_fields,
 	metadata::{
 		polkadot::{
 			self,
@@ -31,8 +32,8 @@ use crate::{
 		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys,
-		SubxtHrmpChannel, Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, H256, Header, ParaInherentFields, PolkadotHasher, QueuedKeys,
+		SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 };
 use clap::ValueEnum;
@@ -366,7 +367,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		}
 	}
 
-	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error> {
+	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<ParaInherentFields, subxt::Error> {
 		let block = self.block_at(maybe_hash).await?;
 		let ex = block
 			.extrinsics()
@@ -375,12 +376,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.take(2)
 			.last()
 			.ok_or_else(|| "`ParaInherent` data is always at index #1".to_string())?;
-		let enter = ex
-			.as_extrinsic::<polkadot::para_inherent::calls::types::Enter>()
-			.map_err(|_| "Failed to decode `ParaInherent`".to_string())?
-			.ok_or_else(|| "`ParaInherent` must exist".to_string())?;
-
-		Ok(enter.data)
+		let field_values = ex
+			.field_values()
+			.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))?;
+		decode_para_inherent_fields(&field_values)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent: {e}")))
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes

@@ -22,7 +22,7 @@ use polkadot_introspector_essentials::{
 		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},
 	types::{
-		AccountId32, CoreOccupied, H256, InherentData, OnDemandOrder, PolkadotHasher, SubxtHrmpChannel, Timestamp,
+		AccountId32, CoreOccupied, H256, OnDemandOrder, ParaInherentFields, PolkadotHasher, SubxtHrmpChannel, Timestamp,
 	},
 };
 use std::collections::BTreeMap;
@@ -50,7 +50,7 @@ impl TrackerStorage {
 	}
 
 	/// Reads inherent data of a relay block by its block hash
-	pub async fn inherent_data(&self, block_hash: H256) -> Option<InherentData> {
+	pub async fn inherent_data(&self, block_hash: H256) -> Option<ParaInherentFields> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
 			.await
@@ -183,7 +183,6 @@ mod tests {
 		assert!(storage.inherent_data(hash).await.is_none());
 
 		let data = create_inherent_data(100);
-		let parent_hash = data.parent_header.parent_hash;
 		api.storage()
 			.storage_write_prefixed(
 				CollectorPrefixType::InherentData,
@@ -194,7 +193,7 @@ mod tests {
 			.unwrap();
 
 		let storage_data = storage.inherent_data(hash).await.unwrap();
-		assert_eq!(storage_data.parent_header.parent_hash, parent_hash);
+		assert!(!storage_data.disputes.is_empty());
 	}
 
 	#[tokio::test]
