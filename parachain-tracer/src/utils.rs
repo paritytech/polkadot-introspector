@@ -15,8 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
 use polkadot_introspector_essentials::{
-	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement, DisputeStatementSet},
-	types::{AccountId32, InherentData, Timestamp},
+	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement},
+	types::{AccountId32, DisputeStatementSet, Timestamp},
 };
 use std::time::Duration;
 
@@ -121,32 +121,6 @@ mod test_extract_validator_addresses {
 	}
 }
 
-pub(crate) fn extract_inherent_fields(data: InherentData) -> (Vec<AvailabilityBitfield>, Vec<DisputeStatementSet>) {
-	let bitfields = data
-		.bitfields
-		.into_iter()
-		.map(|b| b.payload)
-		.collect::<Vec<AvailabilityBitfield>>();
-
-	(bitfields, data.disputes)
-}
-
-#[cfg(test)]
-mod test_extract_inherent_fields {
-	use super::*;
-	use crate::test_utils::create_inherent_data;
-
-	#[test]
-	fn test_returns_fields() {
-		let (bitfields, disputes) = extract_inherent_fields(create_inherent_data(100));
-
-		println!("{:?}", matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
-
-		assert!(matches!(bitfields.first().unwrap(), AvailabilityBitfield(_)));
-		assert!(matches!(disputes.first().unwrap(), DisputeStatementSet { .. }));
-	}
-}
-
 pub(crate) fn extract_misbehaving_validators(
 	session_keys: Option<&Vec<AccountId32>>,
 	info: &DisputeStatementSet,
@@ -154,14 +128,14 @@ pub(crate) fn extract_misbehaving_validators(
 ) -> Vec<(u32, String)> {
 	info.statements
 		.iter()
-		.filter(|(statement, _, _)| {
+		.filter(|(statement, _)| {
 			if against_valid {
 				!matches!(statement, DisputeStatement::Valid(_))
 			} else {
 				matches!(statement, DisputeStatement::Valid(_))
 			}
 		})
-		.map(|(_, idx, _)| extract_validator_address(session_keys, idx.0))
+		.map(|(_, idx)| extract_validator_address(session_keys, idx.0))
 		.collect()
 }
 
@@ -183,7 +157,7 @@ pub(crate) fn extract_votes(info: &DisputeStatementSet) -> (u32, u32) {
 	let voted_for = info
 		.statements
 		.iter()
-		.filter(|(statement, _, _)| matches!(statement, DisputeStatement::Valid(_)))
+		.filter(|(statement, _)| matches!(statement, DisputeStatement::Valid(_)))
 		.count() as u32;
 	let voted_against = info.statements.len() as u32 - voted_for;
 

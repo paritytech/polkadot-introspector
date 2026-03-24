@@ -27,7 +27,6 @@ use crate::{
 			session::storage::types::queued_keys::QueuedKeys,
 		},
 		polkadot_primitives,
-		polkadot_staging_primitives::CoreState,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
@@ -243,19 +242,7 @@ impl RequestExecutorBackend {
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
-			GetOccupiedCores(hash) => {
-				let value = client
-					.get_occupied_cores(hash)
-					.await?
-					.iter()
-					.map(|core_state| match core_state {
-						CoreState::Free => CoreOccupied::Free,
-						CoreState::Scheduled(_) => CoreOccupied::Scheduled,
-						CoreState::Occupied(_) => CoreOccupied::Occupied,
-					})
-					.collect();
-				OccupiedCores(value)
-			},
+			GetOccupiedCores(hash) => OccupiedCores(client.get_occupied_cores(hash).await?),
 			GetBackingGroups(hash) => {
 				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ValidatorGroups").await?;
 				BackingGroups(decode_validator_groups(&value)?)

@@ -16,23 +16,21 @@
 //
 
 use crate::{
-	metadata::{
-		polkadot::{
-			self,
-			runtime_types::{
-				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-				polkadot_runtime_parachains::hrmp::HrmpChannel,
-				sp_consensus_babe::{self, digests::PreDigest},
-				sp_consensus_slots::Slot,
-				sp_core::crypto::KeyTypeId,
-				sp_runtime::generic::digest::DigestItem,
-			},
+	api::dynamic::{decode_availability_cores, decode_inherent_data},
+	metadata::polkadot::{
+		self,
+		runtime_types::{
+			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+			polkadot_runtime_parachains::hrmp::HrmpChannel,
+			sp_consensus_babe::{self, digests::PreDigest},
+			sp_consensus_slots::Slot,
+			sp_core::crypto::KeyTypeId,
+			sp_runtime::generic::digest::DigestItem,
 		},
-		polkadot_staging_primitives::CoreState,
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, H256, Header, InherentData, PolkadotHasher, QueuedKeys, SessionKeys,
-		SubxtHrmpChannel, Timestamp,
+		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
+		SessionKeys, SubxtHrmpChannel, Timestamp,
 	},
 };
 use clap::ValueEnum;
@@ -251,9 +249,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.storage().at(hash).fetch(&addr).await
 	}
 
-	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreState<H256, u32>>, subxt::Error> {
-		let addr = polkadot::apis().parachain_host().availability_cores();
-		self.runtime_api_at(Some(hash)).await?.call(addr).await
+	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
+		let addr = subxt::runtime_api::dynamic("ParachainHost", "availability_cores", Vec::<Value<()>>::new());
+		let value = self.runtime_api_at(Some(hash)).await?.call(addr).await?.to_value()?;
+		decode_availability_cores(&value)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))
 	}
 
 	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
@@ -375,12 +375,10 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.take(2)
 			.last()
 			.ok_or_else(|| "`ParaInherent` data is always at index #1".to_string())?;
-		let enter = ex
-			.as_extrinsic::<polkadot::para_inherent::calls::types::Enter>()
-			.map_err(|_| "Failed to decode `ParaInherent`".to_string())?
-			.ok_or_else(|| "`ParaInherent` must exist".to_string())?;
-
-		Ok(enter.data)
+		ex.field_values()
+			.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
+			.and_then(|v| decode_inherent_data(&v).map_err(|e| format!("Failed to decode ParaInherent: {e}")))
+			.map_err(subxt::Error::Other)
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes
