@@ -25,10 +25,7 @@ use crate::{
 use async_trait::async_trait;
 use log::{debug, error, info};
 use polkadot_introspector_priority_channel::{Sender, channel};
-use tokio::{
-	sync::broadcast::{Sender as BroadcastSender, error::TryRecvError},
-	time::{Duration, interval_at},
-};
+use tokio::sync::broadcast::{Sender as BroadcastSender, error::TryRecvError};
 
 pub struct HistoricalSubscription {
 	urls: Vec<String>,
@@ -96,8 +93,6 @@ impl HistoricalSubscription {
 		mut executor: RequestExecutor,
 	) {
 		let mut shutdown_rx = shutdown_tx.subscribe();
-		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
-		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
 		let last_block_number = match executor.get_block_number(&url, None).await {
 			Ok(v) => v,
@@ -167,24 +162,8 @@ impl HistoricalSubscription {
 			}
 		}
 
-		loop {
-			// We wait here for termination.
-			tokio::select! {
-				_ = shutdown_rx.recv() => {
-					info!("Received interrupt signal shutting down subscription");
-					return;
-				}
-				_ = heartbeat_periodic.tick() => {
-					debug!("sent heartbeat to subscribers");
-					let res = update_channel.send(ChainSubscriptionEvent::Heartbeat).await;
-					if let Err(e) = res {
-						info!("Event consumer has terminated: {:?}, shutting down", e);
-						return;
-					}
-					heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
-				}
-			}
-		}
+		info!("Historical subscription completed");
+		let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
 	}
 
 	// Sets up per websocket tasks to handle updates and reconnects on errors.

@@ -14,13 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{chain_events::SubxtDisputeResult, metadata::polkadot_staging_primitives, types::H256};
+use crate::{chain_events::SubxtDisputeResult, types::H256};
 use parity_scale_codec::{Decode, Encode};
-use serde::{
-	Deserialize, Serialize,
-	ser::{SerializeStruct, Serializer},
-};
-use std::{hash::Hash, time::Duration};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Tracks candidate inclusion as seen by a node(s)
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
@@ -57,41 +54,6 @@ pub struct CandidateDisputed {
 	pub disputed: u32,
 	/// Result of a dispute
 	pub concluded: Option<DisputeResult>,
-}
-
-impl<T> Serialize for polkadot_staging_primitives::CandidateDescriptorV2<T>
-where
-	T: Hash + Serialize + Decode + Encode,
-{
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		let mut state = serializer.serialize_struct("CandidateDescriptorV2", 9)?;
-		state.serialize_field("para_id", &self.para_id.0)?;
-		state.serialize_field("relay_parent", &self.relay_parent)?;
-		state.serialize_field("persisted_validation_data_hash", &self.persisted_validation_data_hash)?;
-		state.serialize_field("pov_hash", &self.pov_hash)?;
-		state.serialize_field("erasure_root", &self.erasure_root)?;
-		state.serialize_field("para_head", &self.para_head)?;
-		state.serialize_field("validation_code_hash", &self.validation_code_hash.0)?;
-		state.end()
-	}
-}
-
-impl<T> Serialize for polkadot_staging_primitives::CandidateReceiptV2<T>
-where
-	T: Hash + Serialize + Decode + Encode,
-{
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		let mut state = serializer.serialize_struct("CandidateReceipt", 2)?;
-		state.serialize_field("descriptor", &self.descriptor)?;
-		state.serialize_field("commitments_hash", &self.commitments_hash)?;
-		state.end()
-	}
 }
 
 /// Stores tracking data for a candidate
