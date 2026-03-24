@@ -298,67 +298,52 @@ impl Collector {
 	pub async fn run_with_consumer_channel(
 		mut self,
 		consumer_channel: Receiver<ChainSubscriptionEvent>,
+		shutdown_tx: BroadcastSender<()>,
 	) -> tokio::task::JoinHandle<()> {
 		tokio::spawn(async move {
+			let mut shutdown_rx = shutdown_tx.subscribe();
 			let mut consumer_channel = Box::pin(consumer_channel);
 			loop {
-				match consumer_channel.next().await {
-					None => {
-						error!("no more events from the consumer channel");
-						self.broadcast_event_priority(CollectorUpdateEvent::Termination(TerminationReason::Normal))
-							.await
-							.unwrap();
-						return
-					},
-					Some(ChainSubscriptionEvent::Termination) => {
-						info!("subscribtion terminated");
-						self.broadcast_event_priority(CollectorUpdateEvent::Termination(TerminationReason::Normal))
-							.await
-							.unwrap();
-						return
-					},
-					Some(event) => match self.collect_chain_events(&event).await {
-						Ok(subxt_events) =>
-							for event in subxt_events.iter() {
-								if let Err(error) = self.process_chain_event(event).await {
-									error!("collector service could not process event: {:?}", error);
-									match error {
-										CollectorError::ExecutorFatal(e) => {
-											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
-												TerminationReason::Abnormal(format!(
-													"Collector's executor error: {}",
-													e
-												)),
-											))
-											.await
-											.unwrap();
-											return
-										},
-										CollectorError::SendFatal(e) => {
-											self.broadcast_event_priority(CollectorUpdateEvent::Termination(
-												TerminationReason::Abnormal(format!(
-													"Collector's channel error: {}",
-													e
-												)),
-											))
-											.await
-											.unwrap();
-											return
-										},
-										_ => continue,
-									}
-								}
+				tokio::select! {
+					message = consumer_channel.next() => {
+						match message {
+							None | Some(ChainSubscriptionEvent::Termination) => {
+								info!("Subscription terminated");
+								self.terminate(TerminationReason::Normal).await;
+								let _ = shutdown_tx.send(());
+								return
 							},
-						Err(e) => {
-							error!("collector service could not process events: {:?}", e);
-							self.broadcast_event_priority(CollectorUpdateEvent::Termination(
-								TerminationReason::Abnormal(format!("Collector's service error: {}", e)),
-							))
-							.await
-							.unwrap();
-							return
-						},
-					},
+							Some(event) => match self.collect_chain_events(&event).await {
+								Ok(subxt_events) =>
+									for event in subxt_events.iter() {
+										if let Err(error) = self.process_chain_event(event).await {
+											error!("collector service could not process event: {:?}", error);
+											match error {
+												CollectorError::ExecutorFatal(e) => {
+													self.terminate(TerminationReason::Abnormal(format!("Collector's executor error: {}", e))).await;
+													return
+												},
+												CollectorError::SendFatal(e) => {
+													self.terminate(TerminationReason::Abnormal(format!("Collector's channel error: {}", e))).await;
+													return
+												},
+												_ => continue,
+											}
+										}
+									},
+								Err(e) => {
+									error!("collector service could not process events: {:?}", e);
+									self.terminate(TerminationReason::Abnormal(format!("Collector's service error: {}", e))).await;
+									return
+								},
+							},
+						}
+					}
+					_ = shutdown_rx.recv() => {
+						info!("Received shutdown signal in collector");
+						self.terminate(TerminationReason::Normal).await;
+						return;
+					}
 				}
 			}
 		})
@@ -603,18 +588,20 @@ impl Collector {
 	}
 
 	/// Send a priority event to all open channels
-	async fn broadcast_event_priority(&mut self, event: CollectorUpdateEvent) -> color_eyre::Result<()> {
+	async fn broadcast_event_priority(&mut self, event: CollectorUpdateEvent) {
 		for (_, channels) in self.subscribe_channels.iter_mut() {
 			for channel in channels {
-				channel.send_priority(event.clone()).await?;
+				let _ = channel.send_priority(event.clone()).await;
 			}
 		}
 
 		for broadcast_channel in self.broadcast_channels.iter_mut() {
-			broadcast_channel.send_priority(event.clone()).await?;
+			let _ = broadcast_channel.send_priority(event.clone()).await;
 		}
+	}
 
-		Ok(())
+	async fn terminate(&mut self, reason: TerminationReason) {
+		self.broadcast_event_priority(CollectorUpdateEvent::Termination(reason)).await;
 	}
 
 	async fn process_new_best_head(
