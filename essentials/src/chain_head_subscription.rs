@@ -187,3 +187,26 @@ impl ChainHeadSubscription {
 			.collect()
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn check_stall_returns_false_when_recent() {
+		let last_block_at = tokio::time::Instant::now();
+		assert!(!ChainHeadSubscription::check_stall("wss://test:443", last_block_at));
+	}
+
+	#[test]
+	fn check_stall_returns_true_when_exceeded() {
+		let last_block_at = tokio::time::Instant::now() - Duration::from_secs(121);
+		assert!(ChainHeadSubscription::check_stall("wss://test:443", last_block_at));
+	}
+
+	#[test]
+	fn check_stall_returns_false_at_boundary() {
+		let last_block_at = tokio::time::Instant::now() - Duration::from_secs(119);
+		assert!(!ChainHeadSubscription::check_stall("wss://test:443", last_block_at));
+	}
+}
