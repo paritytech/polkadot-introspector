@@ -77,11 +77,7 @@ impl ChainHeadSubscription {
 	fn check_stall(url: &str, last_block_at: tokio::time::Instant) -> bool {
 		const BLOCK_STALL_TIMEOUT: Duration = Duration::from_secs(120);
 		if last_block_at.elapsed() > BLOCK_STALL_TIMEOUT {
-			error!(
-				"No new blocks from {} for {:?} — RPC connection appears stalled",
-				url,
-				last_block_at.elapsed()
-			);
+			error!("No new blocks from {} for {:?} — RPC connection appears stalled", url, last_block_at.elapsed());
 			return true;
 		}
 		false
@@ -157,8 +153,9 @@ impl ChainHeadSubscription {
 				}
 				_ = heartbeat_periodic.tick() => {
 					if Self::check_stall(&url, last_block_at) {
-						// Terminate only this stalled task, shutdown broadcast would kill all
-						let _ = update_channel.send(ChainSubscriptionEvent::Termination).await;
+						if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
+							info!("Failed to deliver Termination for {}: {:?}", url, e);
+						}
 						return;
 					}
 					debug!("sent heartbeat to subscribers");
