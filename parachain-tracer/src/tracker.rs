@@ -22,13 +22,13 @@ use crate::{
 	stats::Stats,
 	tracker_storage::TrackerStorage,
 	types::{Block, BlockWithoutHash, DisputesTracker, ForkTracker, ParachainConsensusEvent, ParachainProgressUpdate},
-	utils::{extract_availability_bits_count, extract_inherent_fields, time_diff},
+	utils::{extract_availability_bits_count, time_diff},
 };
 use log::{error, info};
 use polkadot_introspector_essentials::{
 	collector::{BackedCandidateInfo, DisputeInfo, NewHeadEvent},
-	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatementSet, ValidatorIndex},
-	types::{BlockNumber, CoreOccupied, H256, OnDemandOrder, Timestamp},
+	metadata::polkadot_primitives::{AvailabilityBitfield, ValidatorIndex},
+	types::{BlockNumber, CoreOccupied, DisputeStatementSet, H256, OnDemandOrder, Timestamp},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
 
@@ -130,22 +130,26 @@ impl SubxtTracker {
 		storage: &TrackerStorage,
 	) -> color_eyre::Result<()> {
 		if let Some(inherent) = storage.inherent_data(block_hash).await {
-			let (bitfields, disputes) = extract_inherent_fields(inherent);
 			let block_number = new_head.relay_parent_number;
 
 			self.set_relay_block(block_hash, block_number, storage).await?;
 			self.set_forks(block_hash, block_number);
 			self.set_cores(block_hash, storage).await;
-			self.set_included_candidates(block_hash, new_head.candidates_included.as_slice(), &bitfields, storage)
-				.await?;
+			self.set_included_candidates(
+				block_hash,
+				new_head.candidates_included.as_slice(),
+				&inherent.bitfields,
+				storage,
+			)
+			.await?;
 			self.set_backed_candidates(block_number, new_head.candidates_backed.as_slice())
 				.await;
 			self.set_core_assignment(block_hash, storage).await;
-			self.set_disputes(disputes.as_slice(), new_head.disputes_concluded.as_slice(), storage)
+			self.set_disputes(inherent.disputes.as_slice(), new_head.disputes_concluded.as_slice(), storage)
 				.await;
 			self.set_hrmp_channels(block_hash, storage).await?;
 			self.set_on_demand_order(block_hash, storage).await;
-			self.set_pending_availability(block_hash, &bitfields, storage).await?;
+			self.set_pending_availability(block_hash, &inherent.bitfields, storage).await?;
 			self.set_dropped_candidates();
 		} else {
 			error!("Failed to get inherent data for {:?}", block_hash);
@@ -770,8 +774,8 @@ mod test_maybe_reset_state {
 mod test_inject_block {
 	use super::*;
 	use crate::test_utils::{
-		candidate_hash, create_candidate_record, create_hasher, create_inherent_data, create_para_block_info,
-		create_storage, storage_write,
+		candidate_hash, create_backed_candidate, create_candidate_record, create_hasher, create_inherent_data,
+		create_para_block_info, create_storage, storage_write,
 	};
 	use polkadot_introspector_essentials::collector::CollectorPrefixType;
 	use std::collections::BTreeMap;
@@ -826,7 +830,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::BackingGroups, first_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(100), &storage)
+		storage_write(CollectorPrefixType::InherentData, first_hash, create_inherent_data(), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::Timestamp, first_hash, 1_u64, &storage)
@@ -856,7 +860,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::BackingGroups, second_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(100), &storage)
+		storage_write(CollectorPrefixType::InherentData, second_hash, create_inherent_data(), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::RelevantFinalizedBlockNumber, second_hash, 40, &storage)
@@ -887,9 +891,9 @@ mod test_inject_block {
 		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
-		let inherent_data = create_inherent_data(100);
-		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = candidate_hash(backed_candidate, hasher);
+		let inherent_data = create_inherent_data();
+		let backed_candidate = create_backed_candidate(100);
+		let candidate_hash = candidate_hash(&backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
@@ -932,9 +936,9 @@ mod test_inject_block {
 		let mut tracker = SubxtTracker::new(100);
 
 		let block_hash = H256::random();
-		let inherent_data = create_inherent_data(100);
-		let backed_candidate = inherent_data.backed_candidates.first().unwrap();
-		let candidate_hash = candidate_hash(backed_candidate, hasher);
+		let inherent_data = create_inherent_data();
+		let backed_candidate = create_backed_candidate(100);
+		let candidate_hash = candidate_hash(&backed_candidate, hasher);
 
 		// Inject a block
 		storage_write(
@@ -1011,7 +1015,7 @@ mod test_inject_block {
 		storage_write(CollectorPrefixType::BackingGroups, block_hash, Vec::<Vec<ValidatorIndex>>::default(), &storage)
 			.await
 			.unwrap();
-		storage_write(CollectorPrefixType::InherentData, block_hash, create_inherent_data(100), &storage)
+		storage_write(CollectorPrefixType::InherentData, block_hash, create_inherent_data(), &storage)
 			.await
 			.unwrap();
 		storage_write(CollectorPrefixType::Timestamp, block_hash, 1_u64, &storage)

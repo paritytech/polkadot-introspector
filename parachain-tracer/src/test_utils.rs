@@ -27,20 +27,18 @@ use polkadot_introspector_essentials::{
 				bounded_collections::bounded_vec::BoundedVec,
 				polkadot_core_primitives::CandidateHash,
 				polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
-				sp_runtime::generic::{digest::Digest, header::Header},
 			},
 		},
 		polkadot_primitives::{
-			AvailabilityBitfield, CandidateCommitments, DisputeStatement, DisputeStatementSet,
-			InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex, signed::UncheckedSigned,
-			validator_app,
+			AvailabilityBitfield, CandidateCommitments, DisputeStatement, InvalidDisputeStatementKind,
+			ValidDisputeStatementKind, ValidatorIndex,
 		},
 		polkadot_staging_primitives::{
-			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InherentData, InternalVersion,
+			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InternalVersion,
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{H256, PolkadotHasher, SubxtHrmpChannel},
+	types::{DisputeStatementSet, H256, InherentData, PolkadotHasher, SubxtHrmpChannel},
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
@@ -92,42 +90,17 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 		candidate_hash: CandidateHash(H256::random()),
 		session: 0,
 		statements: vec![
-			(
-				DisputeStatement::Valid(ValidDisputeStatementKind::Explicit),
-				ValidatorIndex(1),
-				create_validator_signature(),
-			),
-			(
-				DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
-				ValidatorIndex(2),
-				create_validator_signature(),
-			),
-			(
-				DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
-				ValidatorIndex(3),
-				create_validator_signature(),
-			),
+			(DisputeStatement::Valid(ValidDisputeStatementKind::Explicit), ValidatorIndex(1)),
+			(DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit), ValidatorIndex(2)),
+			(DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit), ValidatorIndex(3)),
 		],
 	}
 }
 
-pub fn create_inherent_data(para_id: u32) -> InherentData<Header<u32>> {
+pub fn create_inherent_data() -> InherentData {
 	InherentData {
-		bitfields: vec![UncheckedSigned {
-			payload: AvailabilityBitfield(DecodedBits::from_iter([true])),
-			validator_index: ValidatorIndex(1),
-			signature: create_validator_signature(),
-			__ignore: Default::default(),
-		}],
-		backed_candidates: vec![create_backed_candidate(para_id)],
+		bitfields: vec![AvailabilityBitfield(DecodedBits::from_iter([true]))],
 		disputes: vec![create_dispute_statement_set()],
-		parent_header: Header {
-			parent_hash: H256::random(),
-			number: Default::default(),
-			state_root: Default::default(),
-			extrinsics_root: Default::default(),
-			digest: Digest { logs: Default::default() },
-		},
 	}
 }
 
@@ -196,10 +169,6 @@ pub async fn storage_write<T: Encode>(
 			StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), entry),
 		)
 		.await
-}
-
-fn create_validator_signature() -> validator_app::Signature {
-	validator_app::Signature([0; 64])
 }
 
 pub async fn create_hasher() -> PolkadotHasher {
