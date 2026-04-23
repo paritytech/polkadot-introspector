@@ -71,6 +71,18 @@ impl ChainHeadSubscription {
 		ChainHeadSubscription { urls, consumers: Vec::new(), executor }
 	}
 
+	/// Check for absence of new blocks within a timeout.
+	/// If none, consider the connection to the RPC stalled
+	/// and return `true`.
+	fn check_stall(url: &str, last_block_at: tokio::time::Instant) -> bool {
+		const BLOCK_STALL_TIMEOUT: Duration = Duration::from_secs(120);
+		if last_block_at.elapsed() > BLOCK_STALL_TIMEOUT {
+			error!("No new blocks from {} for {:?} — RPC connection appears stalled", url, last_block_at.elapsed());
+			return true;
+		}
+		false
+	}
+
 	// Per node
 	async fn run_per_node(
 		mut update_channel: Sender<ChainSubscriptionEvent>,
@@ -104,6 +116,7 @@ impl ChainHeadSubscription {
 
 		const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
 		let mut heartbeat_periodic = interval_at(tokio::time::Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
+		let mut last_block_at = tokio::time::Instant::now();
 
 		loop {
 			tokio::select! {
@@ -124,6 +137,8 @@ impl ChainHeadSubscription {
 						}
 					};
 
+					last_block_at = tokio::time::Instant::now();
+
 					if let Err(e) = update_channel.send(event).await {
 						info!("Event consumer has terminated: {:?}, shutting down", e);
 						return;
@@ -137,6 +152,12 @@ impl ChainHeadSubscription {
 					return;
 				}
 				_ = heartbeat_periodic.tick() => {
+					if Self::check_stall(&url, last_block_at) {
+						if let Err(e) = update_channel.send(ChainSubscriptionEvent::Termination).await {
+							info!("Failed to deliver Termination for {}: {:?}", url, e);
+						}
+						return;
+					}
 					debug!("sent heartbeat to subscribers");
 					if let Err(e) = update_channel.send(ChainSubscriptionEvent::Heartbeat).await {
 						info!("Event consumer has terminated: {:?}, shutting down", e);
@@ -161,5 +182,28 @@ impl ChainHeadSubscription {
 				tokio::spawn(Self::run_per_node(update_channel, url, shutdown_tx.clone(), executor.clone()))
 			})
 			.collect()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn check_stall_returns_false_when_recent() {
+		let last_block_at = tokio::time::Instant::now();
+		assert!(!ChainHeadSubscription::check_stall("wss://test:443", last_block_at));
+	}
+
+	#[test]
+	fn check_stall_returns_true_when_exceeded() {
+		let last_block_at = tokio::time::Instant::now() - Duration::from_secs(121);
+		assert!(ChainHeadSubscription::check_stall("wss://test:443", last_block_at));
+	}
+
+	#[test]
+	fn check_stall_returns_false_at_boundary() {
+		let last_block_at = tokio::time::Instant::now() - Duration::from_secs(119);
+		assert!(!ChainHeadSubscription::check_stall("wss://test:443", last_block_at));
 	}
 }
