@@ -44,7 +44,7 @@ prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https:
 rand = "0.8.6"
 rasciigraph = "0.2.0"
 reqwest = { version = "0.11.27" }
-rocksdb = "0.21.0"
+rocksdb = "0.23.0"
 serde = "1.0.217"
 serde-binary = "0.5"
 serde_bytes = "0.11.17"
