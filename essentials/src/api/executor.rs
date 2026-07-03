@@ -28,6 +28,7 @@ use crate::{
 		},
 		polkadot_primitives,
 	},
+	chain_events::SubxtCandidateEvent,
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
 		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
@@ -59,6 +60,7 @@ pub enum Request {
 	GetBlockNumber(Option<H256>),
 	GetBlockHash(Option<BlockNumber>),
 	GetEvents(H256),
+	GetCandidateEvents(H256),
 	ExtractParaInherent(Option<H256>),
 	GetClaimQueue(H256),
 	GetOccupiedCores(H256),
@@ -93,6 +95,8 @@ enum Response {
 	MaybeBlockHash(Option<H256>),
 	/// Block events
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
+	/// Candidate (backed/included/timed-out) events for a block, decoded without metadata.
+	CandidateEvents(Vec<SubxtCandidateEvent>),
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
 	/// Claim queue for parachains.
@@ -241,6 +245,7 @@ impl RequestExecutorBackend {
 			GetBlockHash(maybe_block_number) => MaybeBlockHash(client.legacy_get_block_hash(maybe_block_number).await?),
 			GetChainName => ChainName(client.legacy_get_chain_name().await?),
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
+			GetCandidateEvents(hash) => CandidateEvents(client.get_candidate_events(hash).await?),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
 			GetOccupiedCores(hash) => OccupiedCores(client.get_occupied_cores(hash).await?),
@@ -299,11 +304,16 @@ impl RequestExecutorNodes for &str {
 }
 
 #[derive(Clone)]
-pub struct RequestExecutor(HashMap<String, (PrioritySender<ExecutorMessage>, PolkadotHasher)>);
+pub struct RequestExecutor {
+	clients: HashMap<String, (PrioritySender<ExecutorMessage>, PolkadotHasher)>,
+	/// Whether reads are shadow-decoded through the metadata-free path and compared. See
+	/// [`crate::api::shadow`].
+	shadow: bool,
+}
 
 macro_rules! wrap_backend_call {
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
-		if let Some((to_backend, _)) = $self.0.get_mut($url) {
+		if let Some((to_backend, _)) = $self.clients.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty;
 			to_backend.send(ExecutorMessage::Rpc(tx, Request::$request_ty)).await?;
@@ -319,7 +329,7 @@ macro_rules! wrap_backend_call {
 		}
 	};
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
-		if let Some((to_backend, _)) = $self.0.get_mut($url) {
+		if let Some((to_backend, _)) = $self.clients.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty($($arg),*);
 			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
@@ -359,16 +369,21 @@ impl RequestExecutor {
 			});
 		}
 
-		Ok(RequestExecutor(clients))
+		Ok(RequestExecutor { clients, shadow })
 	}
 
 	pub fn hasher(&self, url: &str) -> Option<PolkadotHasher> {
-		self.0.get(url).map(|(_, hasher)| *hasher)
+		self.clients.get(url).map(|(_, hasher)| *hasher)
+	}
+
+	/// Whether reads should be shadow-decoded through the metadata-free path and compared.
+	pub fn shadow_enabled(&self) -> bool {
+		self.shadow
 	}
 
 	/// Closes all RPC clients
 	pub async fn close(&mut self) {
-		for (to_backend, _) in self.0.values_mut() {
+		for (to_backend, _) in self.clients.values_mut() {
 			let _ = to_backend.send(ExecutorMessage::Close).await;
 		}
 	}
@@ -415,6 +430,14 @@ impl RequestExecutor {
 		hash: H256,
 	) -> color_eyre::Result<Option<subxt::events::Events<PolkadotConfig>>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetEvents, MaybeEvents, hash)
+	}
+
+	pub async fn get_candidate_events(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Vec<SubxtCandidateEvent>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetCandidateEvents, CandidateEvents, hash)
 	}
 
 	pub async fn extract_parainherent_data(

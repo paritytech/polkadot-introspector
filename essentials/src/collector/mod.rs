@@ -21,6 +21,7 @@ use crate::{
 	api::{
 		ApiService,
 		executor::{RequestExecutor, RequestExecutorError},
+		shadow,
 	},
 	chain_events::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
@@ -378,9 +379,37 @@ impl Collector {
 			if skipped_events > 0 {
 				log::error!("Skipped {skipped_events} undecoded events in block {hash:?}");
 			}
+
+			if self.executor.shadow_enabled() {
+				self.shadow_candidate_events(*hash, &chain_events).await?;
+			}
 		};
 
 		Ok(chain_events)
+	}
+
+	/// Shadow-decodes candidate events for a block through the metadata-free
+	/// `ParachainHost_candidate_events` runtime call and compares them, as a set keyed by
+	/// `(candidate_hash, event_type)`, against the ones scraped from `System.Events`. Aborts on any
+	/// mismatch; the scraped events remain what the tool returns while shadowing.
+	async fn shadow_candidate_events(
+		&mut self,
+		hash: H256,
+		chain_events: &[ChainEvent<PolkadotConfig>],
+	) -> color_eyre::Result<()> {
+		let scraped: Vec<SubxtCandidateEvent> = chain_events
+			.iter()
+			.filter_map(|event| match event {
+				ChainEvent::CandidateChanged(candidate) => Some((**candidate).clone()),
+				_ => None,
+			})
+			.collect();
+		let metadata_free = self.executor.get_candidate_events(self.endpoint.as_str(), hash).await?;
+		shadow::compare_set(hash, "candidate_events", &scraped, &metadata_free, |event| {
+			(event.candidate_hash, candidate_event_type_key(event.event_type))
+		});
+
+		Ok(())
 	}
 
 	/// Process a next chain event
@@ -1286,6 +1315,15 @@ impl Collector {
 
 fn get_unix_time_unwrap() -> Duration {
 	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+}
+
+/// A stable per-variant key so candidate events can be compared as a set by `(hash, type)`.
+fn candidate_event_type_key(event_type: SubxtCandidateEventType) -> u8 {
+	match event_type {
+		SubxtCandidateEventType::Backed => 0,
+		SubxtCandidateEventType::Included => 1,
+		SubxtCandidateEventType::TimedOut => 2,
+	}
 }
 
 pub fn new_head_hash(event: &ChainSubscriptionEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {

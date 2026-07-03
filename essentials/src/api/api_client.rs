@@ -16,7 +16,11 @@
 //
 
 use crate::{
-	api::dynamic::{decode_availability_cores, decode_inherent_data},
+	api::{
+		decode::decode_candidate_events,
+		dynamic::{decode_availability_cores, decode_inherent_data},
+	},
+	chain_events::SubxtCandidateEvent,
 	metadata::polkadot::{
 		self,
 		runtime_types::{
@@ -215,6 +219,17 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
 		self.events().at(hash).await
+	}
+
+	/// Reads candidate (backed/included/timed-out) events for a block through the
+	/// `ParachainHost_candidate_events` runtime call and decodes them without metadata.
+	pub async fn get_candidate_events(&self, hash: H256) -> Result<Vec<SubxtCandidateEvent>, subxt::Error> {
+		let bytes = self
+			.legacy_rpc_methods
+			.state_call("ParachainHost_candidate_events", None, Some(hash))
+			.await?;
+		decode_candidate_events(&bytes, self.hasher)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode candidate_events: {e}")))
 	}
 
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {

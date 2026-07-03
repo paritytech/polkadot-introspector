@@ -522,10 +522,6 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
-	if opts.shadow_decode_without_metadata {
-		unimplemented!("--shadow-decode-without-metadata: no reads have been migrated to the metadata-free path yet");
-	}
-
 	let metrics = if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = opts.mode {
 		prometheus::run_prometheus_endpoint(prometheus_opts).await?
 	} else {
