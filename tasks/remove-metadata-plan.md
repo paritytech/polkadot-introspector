@@ -51,7 +51,7 @@ All chain-data decoding lives in `essentials/src/api/` plus two `field_values()`
 
 Work top to bottom; each is one reviewable change, green build, zero shadow mismatches. Runtime calls come first — they are the most stable and they kill the `System.Events` dependency.
 
-- [ ] 1. Build the shadow-decode harness: `--shadow-decode-without-metadata` flag, per-read wrapper (decode both, return old, compare), abort loudly on any mismatch.
+- [ ] 1. Build the shadow-decode harness: `--shadow-decode-without-metadata` flag, per-read wrapper (decode both, return old, compare), abort loudly on any mismatch. (Flag added and wired through `RequestExecutor::build` → `build_online_client` → `ApiClient.shadow` (`shadow_enabled()`); today parachain-tracer `unimplemented!()`s at startup when set. The compare/abort functions land with task 2, once the first read defines what to compare.)
 - [ ] 2. Candidate events → `ParachainHost_candidate_events`; stop scraping `ParaInclusion`. See note 2.
 - [ ] 3. Disputes → `ParachainHost_disputes`; map `DisputeInfo` first (note 3), then stop scraping `ParasDisputes`.
 - [ ] 4. Occupied cores → `state_call availability_cores` + positional (free/scheduled/occupied).

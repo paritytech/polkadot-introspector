@@ -176,8 +176,9 @@ impl RequestExecutorBackend {
 		retry: RetryOptions,
 		url: String,
 		api_client_mode: ApiClientMode,
+		shadow: bool,
 	) -> color_eyre::Result<Self, RequestExecutorError> {
-		let client = build_online_client(&url, api_client_mode).await.map_err(|err| {
+		let client = build_online_client(&url, api_client_mode, shadow).await.map_err(|err| {
 			error!("[{}] RpcClient error: {:?}", url, err);
 			RequestExecutorError::ClientBuildFailed(url.clone())
 		})?;
@@ -342,11 +343,12 @@ impl RequestExecutor {
 		api_client_mode: ApiClientMode,
 		retry: &RetryOptions,
 		shutdown_tx: &BroadcastSender<()>,
+		shadow: bool,
 	) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
 		let mut clients = HashMap::new();
 		for node in nodes.unique_nodes() {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-			let mut backend = RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode).await?;
+			let mut backend = RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode, shadow).await?;
 			let _ = clients.insert(node, (to_backend, backend.hasher()));
 			let shutdown_tx = shutdown_tx.clone();
 			tokio::spawn(async move {

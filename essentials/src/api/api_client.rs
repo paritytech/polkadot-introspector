@@ -71,11 +71,20 @@ where
 	client: T,
 	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
 	hasher: PolkadotHasher,
+	/// When set, each migrated read is also decoded through the metadata-free path and the two
+	/// results are compared, aborting on any mismatch. The comparison harness itself lands with
+	/// the first migrated read.
+	shadow: bool,
 }
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub fn hasher(&self) -> PolkadotHasher {
 		self.hasher
+	}
+
+	/// Whether the shadow-decode harness is enabled for this client.
+	pub fn shadow_enabled(&self) -> bool {
+		self.shadow
 	}
 
 	fn storage(&self) -> StorageClient<PolkadotConfig, T> {
@@ -406,6 +415,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 pub async fn build_online_client(
 	url: &str,
 	mode: ApiClientMode,
+	shadow: bool,
 ) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, String> {
 	let (client, rpc_client) = match mode {
 		ApiClientMode::RPC => {
@@ -432,7 +442,7 @@ pub async fn build_online_client(
 	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
 	let hasher = client.hasher();
 
-	Ok(ApiClient { client, legacy_rpc_methods, hasher })
+	Ok(ApiClient { client, legacy_rpc_methods, hasher, shadow })
 }
 
 async fn join_requests<I, T>(fut: I) -> Result<Vec<T>, subxt::Error>

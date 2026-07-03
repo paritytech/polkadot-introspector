@@ -102,6 +102,10 @@ pub(crate) struct ParachainTracerOptions {
 	/// Defines client to communicate with rpc node.
 	#[clap(long = "client", default_value_t, value_enum)]
 	pub api_client_mode: ApiClientMode,
+	/// Shadow-decode each migrated read through the metadata-free path and abort on any mismatch.
+	/// Temporary aid for removing the metadata dependency; doubles RPC load, off by default.
+	#[clap(name = "shadow-decode-without-metadata", long, default_value = "false")]
+	pub shadow_decode_without_metadata: bool,
 	/// Run in historical mode to trace parachains between specific blocks instead of following live chain progress
 	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
 	is_historical: bool,
@@ -518,6 +522,10 @@ async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
 	init::init_cli(&opts.verbose)?;
 
+	if opts.shadow_decode_without_metadata {
+		unimplemented!("--shadow-decode-without-metadata: no reads have been migrated to the metadata-free path yet");
+	}
+
 	let metrics = if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = opts.mode {
 		prometheus::run_prometheus_endpoint(prometheus_opts).await?
 	} else {
@@ -527,7 +535,14 @@ async fn main() -> color_eyre::Result<()> {
 	let tracer = ParachainTracer::new(opts.clone(), metrics)?;
 	let shutdown_tx = init::init_shutdown();
 	let mut executor =
-		RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &shutdown_tx).await?;
+		RequestExecutor::build(
+			opts.node.clone(),
+			opts.api_client_mode,
+			&opts.retry,
+			&shutdown_tx,
+			opts.shadow_decode_without_metadata,
+		)
+		.await?;
 
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;

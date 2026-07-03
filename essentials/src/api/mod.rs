@@ -95,7 +95,7 @@ mod tests {
 
 	async fn request_executor() -> RequestExecutor {
 		let shutdown_tx = init::init_shutdown();
-		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx)
+		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx, false)
 			.await
 			.unwrap()
 	}
