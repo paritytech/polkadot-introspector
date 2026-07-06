@@ -355,10 +355,11 @@ impl Collector {
 		&mut self,
 		event: &ChainSubscriptionEvent,
 	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
-		let new_head_event = match event {
-			ChainSubscriptionEvent::NewBestHead((hash, header)) => ChainEvent::NewBestHead((*hash, header.clone())),
+		let (new_head_event, block_number) = match event {
+			ChainSubscriptionEvent::NewBestHead((hash, header)) =>
+				(ChainEvent::NewBestHead((*hash, header.clone())), header.number),
 			ChainSubscriptionEvent::NewFinalizedBlock((hash, header)) =>
-				ChainEvent::NewFinalizedHead((*hash, header.clone())),
+				(ChainEvent::NewFinalizedHead((*hash, header.clone())), header.number),
 			_ => return Ok(vec![]),
 		};
 		let mut chain_events = vec![new_head_event];
@@ -382,6 +383,7 @@ impl Collector {
 
 			if self.executor.shadow_enabled() {
 				self.shadow_candidate_events(*hash, &chain_events).await?;
+				self.shadow_disputes(*hash, block_number, &chain_events).await?;
 			}
 		};
 
@@ -407,6 +409,64 @@ impl Collector {
 		let metadata_free = self.executor.get_candidate_events(self.endpoint.as_str(), hash).await?;
 		shadow::compare_set(hash, "candidate_events", &scraped, &metadata_free, |event| {
 			(event.candidate_hash, candidate_event_type_key(event.event_type))
+		});
+
+		Ok(())
+	}
+
+	/// Shadow-decodes disputes for a block through the metadata-free `ParachainHost_disputes` runtime
+	/// call and compares them against the ones scraped from `System.Events`. The runtime call returns
+	/// the rolling window of recent disputes, so it is sliced by relay block number to the per-block
+	/// deltas the scraped events represent: `start == block_number` are the ones initiated in this
+	/// block, `concluded_at == Some(block_number)` the ones concluded in it. Both are compared as sets
+	/// keyed by candidate hash; the concluded outcome is derived from which validator side prevailed.
+	/// Aborts on any mismatch; the scraped events remain what the tool returns while shadowing.
+	async fn shadow_disputes(
+		&mut self,
+		hash: H256,
+		block_number: u32,
+		chain_events: &[ChainEvent<PolkadotConfig>],
+	) -> color_eyre::Result<()> {
+		let scraped_initiated: Vec<H256> = chain_events
+			.iter()
+			.filter_map(|event| match event {
+				ChainEvent::DisputeInitiated(dispute) => Some(dispute.candidate_hash),
+				_ => None,
+			})
+			.collect();
+		let scraped_concluded: Vec<ConcludedDispute> = chain_events
+			.iter()
+			.filter_map(|event| match event {
+				ChainEvent::DisputeConcluded(dispute, outcome) =>
+					Some(ConcludedDispute { candidate_hash: dispute.candidate_hash, outcome: *outcome }),
+				_ => None,
+			})
+			.collect();
+
+		let disputes = self.executor.get_disputes(self.endpoint.as_str(), hash).await?;
+		let metadata_free_initiated: Vec<H256> = disputes
+			.iter()
+			.filter(|dispute| dispute.start == block_number)
+			.map(|dispute| dispute.candidate_hash)
+			.collect();
+		let metadata_free_concluded: Vec<ConcludedDispute> = disputes
+			.iter()
+			.filter(|dispute| dispute.concluded_at == Some(block_number))
+			.map(|dispute| ConcludedDispute {
+				candidate_hash: dispute.candidate_hash,
+				// A dispute concludes when one side reaches a supermajority, so the larger tally is
+				// the prevailing side. `TimedOut` never concludes, so it never reaches this branch.
+				outcome: if dispute.validators_for.len() >= dispute.validators_against.len() {
+					SubxtDisputeResult::Valid
+				} else {
+					SubxtDisputeResult::Invalid
+				},
+			})
+			.collect();
+
+		shadow::compare_set(hash, "disputes_initiated", &scraped_initiated, &metadata_free_initiated, |hash| *hash);
+		shadow::compare_set(hash, "disputes_concluded", &scraped_concluded, &metadata_free_concluded, |dispute| {
+			dispute.candidate_hash
 		});
 
 		Ok(())
@@ -1315,6 +1375,14 @@ impl Collector {
 
 fn get_unix_time_unwrap() -> Duration {
 	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+}
+
+/// A concluded dispute reduced to its identity and outcome, so the scraped and metadata-free paths
+/// can be compared as a set keyed by candidate hash while still catching an outcome mismatch.
+#[derive(Debug, PartialEq, Eq)]
+struct ConcludedDispute {
+	candidate_hash: H256,
+	outcome: SubxtDisputeResult,
 }
 
 /// A stable per-variant key so candidate events can be compared as a set by `(hash, type)`.

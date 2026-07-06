@@ -17,8 +17,10 @@
 use crate::{
 	api::{
 		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
+		decode::DecodedDispute,
 		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
 	},
+	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	metadata::{
 		polkadot::{
@@ -28,7 +30,6 @@ use crate::{
 		},
 		polkadot_primitives,
 	},
-	chain_events::SubxtCandidateEvent,
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
 		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
@@ -61,6 +62,7 @@ pub enum Request {
 	GetBlockHash(Option<BlockNumber>),
 	GetEvents(H256),
 	GetCandidateEvents(H256),
+	GetDisputes(H256),
 	ExtractParaInherent(Option<H256>),
 	GetClaimQueue(H256),
 	GetOccupiedCores(H256),
@@ -97,6 +99,8 @@ enum Response {
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
 	/// Candidate (backed/included/timed-out) events for a block, decoded without metadata.
 	CandidateEvents(Vec<SubxtCandidateEvent>),
+	/// Recent disputes for a block, decoded without metadata.
+	Disputes(Vec<DecodedDispute>),
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
 	/// Claim queue for parachains.
@@ -246,6 +250,7 @@ impl RequestExecutorBackend {
 			GetChainName => ChainName(client.legacy_get_chain_name().await?),
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
 			GetCandidateEvents(hash) => CandidateEvents(client.get_candidate_events(hash).await?),
+			GetDisputes(hash) => Disputes(client.get_disputes(hash).await?),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
 			GetOccupiedCores(hash) => OccupiedCores(client.get_occupied_cores(hash).await?),
@@ -358,7 +363,8 @@ impl RequestExecutor {
 		let mut clients = HashMap::new();
 		for node in nodes.unique_nodes() {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-			let mut backend = RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode, shadow).await?;
+			let mut backend =
+				RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode, shadow).await?;
 			let _ = clients.insert(node, (to_backend, backend.hasher()));
 			let shutdown_tx = shutdown_tx.clone();
 			tokio::spawn(async move {
@@ -438,6 +444,14 @@ impl RequestExecutor {
 		hash: H256,
 	) -> color_eyre::Result<Vec<SubxtCandidateEvent>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetCandidateEvents, CandidateEvents, hash)
+	}
+
+	pub async fn get_disputes(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Vec<DecodedDispute>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetDisputes, Disputes, hash)
 	}
 
 	pub async fn extract_parainherent_data(

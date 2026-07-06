@@ -17,7 +17,7 @@
 
 use crate::{
 	api::{
-		decode::decode_candidate_events,
+		decode::{DecodedDispute, decode_candidate_events, decode_disputes},
 		dynamic::{decode_availability_cores, decode_inherent_data},
 	},
 	chain_events::SubxtCandidateEvent,
@@ -230,6 +230,16 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.await?;
 		decode_candidate_events(&bytes, self.hasher)
 			.map_err(|e| subxt::Error::Other(format!("Failed to decode candidate_events: {e}")))
+	}
+
+	/// Reads the recent disputes for a block through the `ParachainHost_disputes` runtime call and
+	/// decodes them without metadata.
+	pub async fn get_disputes(&self, hash: H256) -> Result<Vec<DecodedDispute>, subxt::Error> {
+		let bytes = self
+			.legacy_rpc_methods
+			.state_call("ParachainHost_disputes", None, Some(hash))
+			.await?;
+		decode_disputes(&bytes).map_err(|e| subxt::Error::Other(format!("Failed to decode disputes: {e}")))
 	}
 
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {

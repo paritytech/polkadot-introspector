@@ -26,7 +26,7 @@ use crate::{
 	types::{H256, PolkadotHash},
 };
 use color_eyre::{Result, eyre::eyre};
-use parity_scale_codec::{Decode, DecodeAll, Encode};
+use parity_scale_codec::{Compact, Decode, DecodeAll, Encode};
 use subxt::config::Hasher;
 
 /// SCALE-encoded size of a `CandidateReceipt`: `CandidateDescriptor` (292 bytes) plus the
@@ -79,8 +79,7 @@ pub fn decode_candidate_events<H: Hasher<Output = PolkadotHash>>(
 					(receipt, SubxtCandidateEventType::Backed, core),
 				RawCandidateEvent::Included(receipt, _head, core, _group) =>
 					(receipt, SubxtCandidateEventType::Included, core),
-				RawCandidateEvent::TimedOut(receipt, _head, core) =>
-					(receipt, SubxtCandidateEventType::TimedOut, core),
+				RawCandidateEvent::TimedOut(receipt, _head, core) => (receipt, SubxtCandidateEventType::TimedOut, core),
 			};
 			SubxtCandidateEvent {
 				candidate_hash: hasher.hash(&receipt.encode()),
@@ -90,6 +89,82 @@ pub fn decode_candidate_events<H: Hasher<Output = PolkadotHash>>(
 				core_idx,
 			}
 		})
+		.collect())
+}
+
+/// One recent dispute from the `ParachainHost_disputes` runtime call, decoded only as far as the
+/// fields the tools use: `(SessionIndex, CandidateHash, DisputeState)`. The two validator bitsets are
+/// kept as the indices of their set bits — enough to tally each side and derive the outcome — and
+/// `start` / `concluded_at` give the relay block the dispute was recorded and (if any) concluded at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedDispute {
+	pub session: u32,
+	pub candidate_hash: PolkadotHash,
+	pub validators_for: Vec<u32>,
+	pub validators_against: Vec<u32>,
+	pub start: u32,
+	pub concluded_at: Option<u32>,
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_disputes` runtime call. The layout of each
+/// element is `SessionIndex ++ CandidateHash ++ DisputeState`, and `DisputeState` is
+/// `validators_for ++ validators_against ++ start ++ concluded_at` — the two bitsets come first, so
+/// their variable length is consumed before the fixed `start` / `concluded_at` fields. Fails loud on
+/// truncation or trailing bytes, so a layout change never yields a silently wrong value.
+pub fn decode_disputes(bytes: &[u8]) -> Result<Vec<DecodedDispute>> {
+	let mut input = bytes;
+	let len = Compact::<u32>::decode(&mut input)
+		.map_err(|e| eyre!("disputes: cannot decode length prefix: {e}"))?
+		.0;
+
+	let mut disputes = Vec::with_capacity(len as usize);
+	for i in 0..len {
+		let session =
+			u32::decode(&mut input).map_err(|e| eyre!("disputes: cannot decode session for dispute {i}: {e}"))?;
+		let candidate_hash = <[u8; 32]>::decode(&mut input)
+			.map_err(|e| eyre!("disputes: cannot decode candidate_hash for dispute {i}: {e}"))?;
+		let validators_for = decode_bitset_indices(&mut input)
+			.map_err(|e| eyre!("disputes: cannot decode validators_for for dispute {i}: {e}"))?;
+		let validators_against = decode_bitset_indices(&mut input)
+			.map_err(|e| eyre!("disputes: cannot decode validators_against for dispute {i}: {e}"))?;
+		let start = u32::decode(&mut input).map_err(|e| eyre!("disputes: cannot decode start for dispute {i}: {e}"))?;
+		let concluded_at = Option::<u32>::decode(&mut input)
+			.map_err(|e| eyre!("disputes: cannot decode concluded_at for dispute {i}: {e}"))?;
+
+		disputes.push(DecodedDispute {
+			session,
+			candidate_hash: H256::from(candidate_hash),
+			validators_for,
+			validators_against,
+			start,
+			concluded_at,
+		});
+	}
+
+	if !input.is_empty() {
+		return Err(eyre!("disputes: {} trailing bytes after {len} disputes", input.len()));
+	}
+
+	Ok(disputes)
+}
+
+/// Decodes a SCALE-encoded `BitVec<u8, Lsb0>` into the indices of its set bits. The encoding is a
+/// compact bit count followed by `ceil(bits / 8)` bytes, least-significant bit first within each
+/// byte. Errors rather than guesses if the byte payload is shorter than the declared bit count.
+fn decode_bitset_indices(input: &mut &[u8]) -> Result<Vec<u32>> {
+	let bit_len = Compact::<u32>::decode(input)
+		.map_err(|e| eyre!("cannot decode bitset length: {e}"))?
+		.0 as usize;
+	let byte_len = bit_len.div_ceil(8);
+	if input.len() < byte_len {
+		return Err(eyre!("bitset payload too short: need {byte_len} bytes, have {}", input.len()));
+	}
+	let (bytes, rest) = input.split_at(byte_len);
+	*input = rest;
+
+	Ok((0..bit_len)
+		.filter(|&i| bytes[i / 8] & (1 << (i % 8)) != 0)
+		.map(|i| i as u32)
 		.collect())
 }
 
@@ -163,5 +238,85 @@ mod tests {
 		let mut blob = Compact(1u32).encode();
 		blob.extend(bogus);
 		assert!(decode_candidate_events(&blob, BlakeTwo256).is_err());
+	}
+
+	// SCALE-encodes a `BitVec<u8, Lsb0>` over the given set-bit indices: compact bit count then the
+	// packed bytes, least-significant bit first.
+	fn encode_bitset(set_indices: &[u32], bit_len: usize) -> Vec<u8> {
+		let byte_len = bit_len.div_ceil(8);
+		let mut bytes = vec![0u8; byte_len];
+		for &i in set_indices {
+			bytes[i as usize / 8] |= 1 << (i as usize % 8);
+		}
+		let mut out = Compact(bit_len as u32).encode();
+		out.extend(bytes);
+		out
+	}
+
+	// Encodes one `(SessionIndex, CandidateHash, DisputeState)` element.
+	fn encode_dispute(
+		session: u32,
+		candidate_hash: [u8; 32],
+		validators_for: &[u32],
+		validators_against: &[u32],
+		bit_len: usize,
+		start: u32,
+		concluded_at: Option<u32>,
+	) -> Vec<u8> {
+		let mut out = session.encode();
+		out.extend(candidate_hash);
+		out.extend(encode_bitset(validators_for, bit_len));
+		out.extend(encode_bitset(validators_against, bit_len));
+		out.extend(start.encode());
+		out.extend(concluded_at.encode());
+		out
+	}
+
+	#[test]
+	fn decodes_disputes_positionally() {
+		let ongoing = encode_dispute(100, [0xAA; 32], &[0, 2, 5], &[1], 8, 42, None);
+		let concluded = encode_dispute(101, [0xBB; 32], &[3], &[0, 1, 2, 4], 8, 40, Some(50));
+
+		let mut blob = Compact(2u32).encode();
+		blob.extend(ongoing);
+		blob.extend(concluded);
+
+		let disputes = decode_disputes(&blob).unwrap();
+		assert_eq!(disputes.len(), 2);
+
+		assert_eq!(disputes[0].session, 100);
+		assert_eq!(disputes[0].candidate_hash, H256::from([0xAA; 32]));
+		assert_eq!(disputes[0].validators_for, vec![0, 2, 5]);
+		assert_eq!(disputes[0].validators_against, vec![1]);
+		assert_eq!(disputes[0].start, 42);
+		assert_eq!(disputes[0].concluded_at, None);
+
+		assert_eq!(disputes[1].session, 101);
+		assert_eq!(disputes[1].candidate_hash, H256::from([0xBB; 32]));
+		assert_eq!(disputes[1].validators_against, vec![0, 1, 2, 4]);
+		assert_eq!(disputes[1].concluded_at, Some(50));
+	}
+
+	#[test]
+	fn decodes_empty_disputes() {
+		let blob = Compact(0u32).encode();
+		assert!(decode_disputes(&blob).unwrap().is_empty());
+	}
+
+	#[test]
+	fn rejects_disputes_trailing_bytes() {
+		let mut blob = Compact(1u32).encode();
+		blob.extend(encode_dispute(1, [0; 32], &[0], &[], 8, 1, None));
+		blob.push(0xFF); // one byte too many
+		assert!(decode_disputes(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_disputes_truncated_bitset() {
+		let mut blob = Compact(1u32).encode();
+		blob.extend(1u32.encode()); // session
+		blob.extend([0u8; 32]); // candidate_hash
+		blob.extend(Compact(64u32).encode()); // claims 64 bits, but no payload bytes follow
+		assert!(decode_disputes(&blob).is_err());
 	}
 }
