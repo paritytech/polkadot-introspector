@@ -23,10 +23,10 @@
 
 use crate::{
 	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
-	types::{H256, PolkadotHash},
+	types::{CoreOccupied, H256, PolkadotHash},
 };
 use color_eyre::{Result, eyre::eyre};
-use parity_scale_codec::{Compact, Decode, DecodeAll, Encode};
+use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError, Input};
 use subxt::config::Hasher;
 
 /// SCALE-encoded size of a `CandidateReceipt`: `CandidateDescriptor` (292 bytes) plus the
@@ -165,6 +165,77 @@ fn decode_bitset_indices(input: &mut &[u8]) -> Result<Vec<u32>> {
 	Ok((0..bit_len)
 		.filter(|&i| bytes[i / 8] & (1 << (i % 8)) != 0)
 		.map(|i| i as u32)
+		.collect())
+}
+
+/// Consumes a SCALE-encoded `BitVec<u8, Lsb0>` (compact bit length followed by `ceil(bits / 8)`
+/// packed bytes) without retaining it, so the decoder advances past `OccupiedCore::availability` —
+/// a field the tools don't read. parity-scale-codec offers no derive for bitvecs, hence this manual
+/// `Decode` used as a field type below.
+struct SkipBitVec;
+
+impl Decode for SkipBitVec {
+	fn decode<I: Input>(input: &mut I) -> core::result::Result<Self, CodecError> {
+		let bit_len = Compact::<u32>::decode(input)?.0 as usize;
+		let mut buf = vec![0u8; bit_len.div_ceil(8)];
+		input.read(&mut buf)?;
+		Ok(SkipBitVec)
+	}
+}
+
+/// `polkadot_primitives::ScheduledCore`. Only decoded to advance the cursor; fields go unread.
+#[derive(Decode)]
+#[allow(dead_code)]
+struct RawScheduledCore {
+	para_id: u32,
+	collator: Option<[u8; 32]>,
+}
+
+/// `polkadot_primitives::OccupiedCore`, decoded in full only to advance the cursor past an occupied
+/// core — the tools keep just the `CoreState` variant. `candidate_descriptor` is the fixed 292-byte
+/// `CandidateDescriptorV2` window (see [`CANDIDATE_RECEIPT_SIZE`]); pinning its length makes a
+/// resized descriptor fail to decode rather than silently desync the surrounding vector.
+#[derive(Decode)]
+#[allow(dead_code)]
+struct RawOccupiedCore {
+	next_up_on_available: Option<RawScheduledCore>,
+	occupied_since: u32,
+	time_out_at: u32,
+	next_up_on_time_out: Option<RawScheduledCore>,
+	availability: SkipBitVec,
+	group_responsible: u32,
+	candidate_hash: [u8; 32],
+	candidate_descriptor: [u8; CANDIDATE_RECEIPT_SIZE - 32],
+}
+
+/// One element of the `ParachainHost_availability_cores` result, keyed by the runtime's own variant
+/// indices. Payloads are decoded through their SCALE shapes so the cursor advances; only the variant
+/// is kept.
+#[derive(Decode)]
+#[allow(dead_code)] // payloads are decoded to advance the cursor, then discarded; only the tag is read
+enum RawCoreState {
+	#[codec(index = 0)]
+	Occupied(Box<RawOccupiedCore>),
+	#[codec(index = 1)]
+	Scheduled(RawScheduledCore),
+	#[codec(index = 2)]
+	Free,
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_availability_cores` runtime call into the
+/// per-core states the tools track, preserving order (cores are addressed by index). Codec drives
+/// the traversal and `decode_all` fails loud on trailing bytes or an unknown variant.
+pub fn decode_availability_cores(bytes: &[u8]) -> Result<Vec<CoreOccupied>> {
+	let raw = Vec::<RawCoreState>::decode_all(&mut &bytes[..])
+		.map_err(|e| eyre!("availability_cores: cannot decode: {e}"))?;
+
+	Ok(raw
+		.into_iter()
+		.map(|core| match core {
+			RawCoreState::Occupied(_) => CoreOccupied::Occupied,
+			RawCoreState::Scheduled(_) => CoreOccupied::Scheduled,
+			RawCoreState::Free => CoreOccupied::Free,
+		})
 		.collect())
 }
 
@@ -318,5 +389,67 @@ mod tests {
 		blob.extend([0u8; 32]); // candidate_hash
 		blob.extend(Compact(64u32).encode()); // claims 64 bits, but no payload bytes follow
 		assert!(decode_disputes(&blob).is_err());
+	}
+
+	// Encodes a `ScheduledCore { para_id, collator: None }`.
+	fn encode_scheduled_core(para_id: u32) -> Vec<u8> {
+		let mut bytes = para_id.encode();
+		bytes.push(0x00); // collator: None
+		bytes
+	}
+
+	// Encodes an `OccupiedCore` with the given availability bit count, exercising `SkipBitVec`.
+	fn encode_occupied_core(availability_bits: u32) -> Vec<u8> {
+		let mut bytes = vec![0x00]; // next_up_on_available: None
+		bytes.extend(10u32.encode()); // occupied_since
+		bytes.extend(20u32.encode()); // time_out_at
+		bytes.push(0x00); // next_up_on_time_out: None
+		bytes.extend(Compact(availability_bits).encode());
+		bytes.extend(vec![0xFFu8; (availability_bits as usize).div_ceil(8)]); // availability payload
+		bytes.extend(7u32.encode()); // group_responsible
+		bytes.extend([0xAAu8; 32]); // candidate_hash
+		bytes.extend([0xBBu8; CANDIDATE_RECEIPT_SIZE - 32]); // candidate_descriptor
+		bytes
+	}
+
+	#[test]
+	fn decodes_core_states_in_order() {
+		let mut blob = Compact(4u32).encode();
+		blob.push(2); // Free
+		blob.push(1);
+		blob.extend(encode_scheduled_core(1000)); // Scheduled
+		blob.push(0);
+		blob.extend(encode_occupied_core(0)); // Occupied, empty availability
+		blob.push(0);
+		blob.extend(encode_occupied_core(20)); // Occupied, 20-bit availability (3 bytes)
+
+		let cores = decode_availability_cores(&blob).unwrap();
+		assert_eq!(
+			cores,
+			vec![CoreOccupied::Free, CoreOccupied::Scheduled, CoreOccupied::Occupied, CoreOccupied::Occupied]
+		);
+	}
+
+	#[test]
+	fn rejects_core_states_trailing_bytes() {
+		let mut blob = Compact(1u32).encode();
+		blob.push(2); // Free
+		blob.push(0xFF); // one byte too many
+		assert!(decode_availability_cores(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_core_states_unknown_variant() {
+		let mut blob = Compact(1u32).encode();
+		blob.push(3); // unknown CoreState variant
+		assert!(decode_availability_cores(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_core_states_truncated_occupied_core() {
+		let mut blob = Compact(1u32).encode();
+		blob.push(0); // Occupied variant, then a truncated payload
+		blob.push(0x00); // next_up_on_available: None, nothing after
+		assert!(decode_availability_cores(&blob).is_err());
 	}
 }

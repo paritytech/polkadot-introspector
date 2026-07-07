@@ -101,7 +101,7 @@ pub struct Assignment {
 }
 
 /// Abstraction to cover core states
-#[derive(Debug, Decode, Encode)]
+#[derive(Debug, Decode, Encode, PartialEq, Eq)]
 pub enum CoreOccupied {
 	/// The core is not occupied.
 	Free,

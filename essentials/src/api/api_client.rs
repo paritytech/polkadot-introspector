@@ -17,8 +17,9 @@
 
 use crate::{
 	api::{
-		decode::{DecodedDispute, decode_candidate_events, decode_disputes},
-		dynamic::{decode_availability_cores, decode_inherent_data},
+		decode::{DecodedDispute, decode_availability_cores, decode_candidate_events, decode_disputes},
+		dynamic::{decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data},
+		shadow,
 	},
 	chain_events::SubxtCandidateEvent,
 	metadata::polkadot::{
@@ -286,8 +287,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
 		let addr = subxt::runtime_api::dynamic("ParachainHost", "availability_cores", Vec::<Value<()>>::new());
 		let value = self.runtime_api_at(Some(hash)).await?.call(addr).await?.to_value()?;
-		decode_availability_cores(&value)
-			.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))
+		let cores = decode_availability_cores_dynamic(&value)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))?;
+
+		if self.shadow {
+			let bytes = self
+				.legacy_rpc_methods
+				.state_call("ParachainHost_availability_cores", None, Some(hash))
+				.await?;
+			let metadata_free = decode_availability_cores(&bytes).map_err(|e| {
+				subxt::Error::Other(format!("Failed to decode availability_cores (metadata-free): {e}"))
+			})?;
+			shadow::compare(hash, "availability_cores", &cores, &metadata_free);
+		}
+
+		Ok(cores)
 	}
 
 	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
