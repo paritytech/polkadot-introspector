@@ -19,21 +19,28 @@ use crate::{
 	api::{
 		decode::{
 			DecodedDispute, decode_availability_cores, decode_candidate_events, decode_claim_queue, decode_disputes,
+			decode_validator_groups,
 		},
-		dynamic::{decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data},
+		dynamic::{
+			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
+			decode_validator_groups as decode_validator_groups_dynamic,
+		},
 		shadow,
 	},
 	chain_events::SubxtCandidateEvent,
-	metadata::polkadot::{
-		self,
-		runtime_types::{
-			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-			polkadot_runtime_parachains::hrmp::HrmpChannel,
-			sp_consensus_babe::{self, digests::PreDigest},
-			sp_consensus_slots::Slot,
-			sp_core::crypto::KeyTypeId,
-			sp_runtime::generic::digest::DigestItem,
+	metadata::{
+		polkadot::{
+			self,
+			runtime_types::{
+				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+				polkadot_runtime_parachains::hrmp::HrmpChannel,
+				sp_consensus_babe::{self, digests::PreDigest},
+				sp_consensus_slots::Slot,
+				sp_core::crypto::KeyTypeId,
+				sp_runtime::generic::digest::DigestItem,
+			},
 		},
+		polkadot_primitives::ValidatorIndex,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
@@ -330,6 +337,28 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		}
 
 		Ok(queue)
+	}
+
+	pub async fn get_backing_groups(&self, hash: H256) -> Result<Vec<Vec<ValidatorIndex>>, subxt::Error> {
+		let value = self
+			.fetch_dynamic_storage(Some(hash), "ParaScheduler", "ValidatorGroups")
+			.await?
+			.ok_or_else(|| subxt::Error::Other("ParaScheduler.ValidatorGroups not found".to_string()))?;
+		let groups = decode_validator_groups_dynamic(&value)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode validator groups: {e}")))?;
+
+		if self.shadow {
+			let bytes = self
+				.legacy_rpc_methods
+				.state_call("ParachainHost_validator_groups", None, Some(hash))
+				.await?;
+			let metadata_free = decode_validator_groups(&bytes)
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode validator_groups (metadata-free): {e}")))?;
+			let old: Vec<Vec<u32>> = groups.iter().map(|group| group.iter().map(|idx| idx.0).collect()).collect();
+			shadow::compare(hash, "validator_groups", &old, &metadata_free);
+		}
+
+		Ok(groups)
 	}
 
 	pub async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {

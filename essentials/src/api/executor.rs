@@ -18,7 +18,7 @@ use crate::{
 	api::{
 		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
 		decode::DecodedDispute,
-		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
+		dynamic::{self, DynamicHostConfiguration, fetch_dynamic_storage},
 	},
 	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -254,10 +254,7 @@ impl RequestExecutorBackend {
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
 			GetOccupiedCores(hash) => OccupiedCores(client.get_occupied_cores(hash).await?),
-			GetBackingGroups(hash) => {
-				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ValidatorGroups").await?;
-				BackingGroups(decode_validator_groups(&value)?)
-			},
+			GetBackingGroups(hash) => BackingGroups(client.get_backing_groups(hash).await?),
 			GetSessionIndex(hash) => SessionIndex(client.get_session_index(hash).await?.unwrap_or_default()),
 			GetSessionAccountKeys(session_index, maybe_hash) =>
 				SessionAccountKeys(client.get_session_account_keys(session_index, maybe_hash).await?),

@@ -247,6 +247,17 @@ pub fn decode_claim_queue(bytes: &[u8]) -> Result<ClaimQueue> {
 	Vec::<(u32, Vec<u32>)>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("claim_queue: cannot decode: {e}"))
 }
 
+/// Decodes the SCALE-encoded result of the `ParachainHost_validator_groups` runtime call. The call
+/// returns `(Vec<Vec<ValidatorIndex>>, GroupRotationInfo)`; only the groups are kept, and each
+/// `ValidatorIndex` / `GroupRotationInfo` field is a transparent `u32`. `decode_all` drives the
+/// traversal and fails loud on trailing bytes. Group order is preserved (groups are indexed).
+pub fn decode_validator_groups(bytes: &[u8]) -> Result<Vec<Vec<u32>>> {
+	// `GroupRotationInfo` is `(session_start_block, group_rotation_frequency, now)`, all `u32`.
+	let (groups, _rotation) = <(Vec<Vec<u32>>, (u32, u32, u32))>::decode_all(&mut &bytes[..])
+		.map_err(|e| eyre!("validator_groups: cannot decode: {e}"))?;
+	Ok(groups)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -480,5 +491,26 @@ mod tests {
 		let mut blob = vec![(0u32, vec![1u32])].encode();
 		blob.push(0xFF); // one byte too many
 		assert!(decode_claim_queue(&blob).is_err());
+	}
+
+	#[test]
+	fn decodes_validator_groups_and_drops_rotation_info() {
+		let groups: Vec<Vec<u32>> = vec![vec![0, 1, 2], vec![3, 4], vec![]];
+		let rotation = (100u32, 10u32, 105u32); // GroupRotationInfo
+		let blob = (groups.clone(), rotation).encode();
+		assert_eq!(decode_validator_groups(&blob).unwrap(), groups);
+	}
+
+	#[test]
+	fn rejects_validator_groups_missing_rotation_info() {
+		let blob = vec![vec![0u32, 1]].encode(); // groups only, no GroupRotationInfo tuple
+		assert!(decode_validator_groups(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_validator_groups_trailing_bytes() {
+		let mut blob = (vec![vec![0u32]], (1u32, 2u32, 3u32)).encode();
+		blob.push(0xFF); // one byte too many
+		assert!(decode_validator_groups(&blob).is_err());
 	}
 }
