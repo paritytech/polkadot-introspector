@@ -18,9 +18,9 @@
 use crate::{
 	api::{
 		decode::{
-			DecodedDispute, decode_account_keys, decode_availability_cores, decode_candidate_events,
-			decode_claim_queue, decode_disputes, decode_session_index, decode_validator_groups,
-			para_session_account_keys_key,
+			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_keys, decode_availability_cores,
+			decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes, decode_session_index,
+			decode_slot, decode_validator_groups, para_session_account_keys_key,
 		},
 		dynamic::{
 			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
@@ -253,9 +253,27 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		decode_disputes(&bytes).map_err(|e| subxt::Error::Other(format!("Failed to decode disputes: {e}")))
 	}
 
+	/// Reads the current Babe epoch through the `BabeApi_current_epoch` runtime call, decoded without
+	/// metadata. Used to shadow the `Babe.Randomness` and `Babe.Authorities` storage reads.
+	async fn babe_current_epoch(&self, hash: H256) -> Result<DecodedBabeEpoch, subxt::Error> {
+		let bytes = self
+			.legacy_rpc_methods
+			.state_call("BabeApi_current_epoch", None, Some(hash))
+			.await?;
+		decode_babe_epoch(&bytes)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode BabeApi_current_epoch: {e}")))
+	}
+
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
 		let addr = polkadot::storage().babe().randomness();
-		self.storage().at(hash).fetch(&addr).await
+		let randomness = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let epoch = self.babe_current_epoch(hash).await?;
+			shadow::compare(hash, "babe_randomness", &randomness, &Some(epoch.randomness));
+		}
+
+		Ok(randomness)
 	}
 
 	pub async fn get_babe_authorities(
@@ -263,16 +281,39 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		hash: H256,
 	) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
 		let addr = polkadot::storage().babe().authorities();
-		self.storage()
+		let authorities = self
+			.storage()
 			.at(hash)
 			.fetch(&addr)
 			.await
-			.map(|res| res.map(|res| res.0).unwrap_or_default())
+			.map(|res| res.map(|res| res.0).unwrap_or_default())?;
+
+		if self.shadow {
+			let epoch = self.babe_current_epoch(hash).await?;
+			// `app::Public` wraps the 32 raw key bytes, matching the metadata-free `[u8; 32]`.
+			let old: Vec<([u8; 32], u64)> = authorities.iter().map(|(public, weight)| (public.0, *weight)).collect();
+			shadow::compare(hash, "babe_authorities", &old, &epoch.authorities);
+		}
+
+		Ok(authorities)
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
 		let addr = polkadot::storage().babe().current_slot();
-		self.storage().at(hash).fetch(&addr).await
+		let slot = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let metadata_free = self
+				.legacy_rpc_methods
+				.state_get_storage(&babe_current_slot_key(), Some(hash))
+				.await?
+				.map(|bytes| decode_slot(&bytes))
+				.transpose()
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode Babe.CurrentSlot (metadata-free): {e}")))?;
+			shadow::compare(hash, "babe_current_slot", &slot.as_ref().map(|slot| slot.0), &metadata_free);
+		}
+
+		Ok(slot)
 	}
 
 	pub async fn get_system_digest(&self, hash: H256) -> Result<Option<PreDigest>, subxt::Error> {

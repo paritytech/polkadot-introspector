@@ -283,6 +283,44 @@ pub fn decode_account_keys(bytes: &[u8]) -> Result<Vec<AccountId32>> {
 	Vec::<AccountId32>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("account_keys: cannot decode: {e}"))
 }
 
+/// The fields of the `BabeApi_current_epoch` result the tools use: the epoch `randomness` and the
+/// `(authority public key, weight)` list. `epoch_index`, `start_slot` and `duration` precede them and
+/// are skipped; `config` (and anything appended later) trails `randomness` and is ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedBabeEpoch {
+	pub authorities: Vec<([u8; 32], u64)>,
+	pub randomness: [u8; 32],
+}
+
+/// Decodes the SCALE-encoded result of the `BabeApi_current_epoch` runtime call. `Epoch` is
+/// `epoch_index ++ start_slot ++ duration ++ authorities ++ randomness ++ config`; we read positionally
+/// through `randomness` and ignore the trailing `config`, so fields appended in an upgrade are
+/// tolerated. Fails loud if the bytes are too short for the fields we read.
+pub fn decode_babe_epoch(bytes: &[u8]) -> Result<DecodedBabeEpoch> {
+	let mut input = bytes;
+	let _epoch_index = u64::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode epoch_index: {e}"))?;
+	let _start_slot = u64::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode start_slot: {e}"))?;
+	let _duration = u64::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode duration: {e}"))?;
+	let authorities =
+		Vec::<([u8; 32], u64)>::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode authorities: {e}"))?;
+	let randomness = <[u8; 32]>::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode randomness: {e}"))?;
+	Ok(DecodedBabeEpoch { authorities, randomness })
+}
+
+/// Builds the storage key for the `Babe::CurrentSlot` value. It is a `StorageValue`, so the key is the
+/// bare `twox_128` pallet/storage prefix with no per-key hash.
+pub fn babe_current_slot_key() -> Vec<u8> {
+	let mut key = Vec::with_capacity(32);
+	key.extend_from_slice(&twox_128(b"Babe"));
+	key.extend_from_slice(&twox_128(b"CurrentSlot"));
+	key
+}
+
+/// Decodes the `Slot` (`u64`) stored at `Babe::CurrentSlot`. `decode_all` fails loud on trailing bytes.
+pub fn decode_slot(bytes: &[u8]) -> Result<u64> {
+	u64::decode_all(&mut &bytes[..]).map_err(|e| eyre!("slot: cannot decode: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -571,5 +609,57 @@ mod tests {
 		let mut blob = vec![AccountId32::from([0u8; 32])].encode();
 		blob.push(0xFF);
 		assert!(decode_account_keys(&blob).is_err());
+	}
+
+	// Encodes a Babe `Epoch` with the given authorities and randomness, including the trailing config.
+	fn encode_babe_epoch(authorities: &[([u8; 32], u64)], randomness: [u8; 32]) -> Vec<u8> {
+		let mut bytes = 5u64.encode(); // epoch_index
+		bytes.extend(100u64.encode()); // start_slot
+		bytes.extend(600u64.encode()); // duration
+		bytes.extend(authorities.to_vec().encode());
+		bytes.extend(randomness);
+		bytes.extend((1u64, 4u64).encode()); // config.c
+		bytes.push(0u8); // config.allowed_slots
+		bytes
+	}
+
+	#[test]
+	fn decodes_babe_epoch_and_ignores_trailing_config() {
+		let authorities = vec![([0xAAu8; 32], 1u64), ([0xBBu8; 32], 1u64)];
+		let randomness = [0xCDu8; 32];
+		let blob = encode_babe_epoch(&authorities, randomness);
+
+		let epoch = decode_babe_epoch(&blob).unwrap();
+		assert_eq!(epoch.authorities, authorities);
+		assert_eq!(epoch.randomness, randomness);
+	}
+
+	#[test]
+	fn rejects_babe_epoch_truncated_before_randomness() {
+		let mut blob = 5u64.encode(); // epoch_index
+		blob.extend(100u64.encode()); // start_slot
+		blob.extend(600u64.encode()); // duration
+		blob.extend(vec![([0u8; 32], 1u64)].encode()); // authorities, then no randomness
+		assert!(decode_babe_epoch(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_babe_current_slot_key() {
+		let key = babe_current_slot_key();
+		assert_eq!(key.len(), 32);
+		assert_eq!(&key[..16], &twox_128(b"Babe"));
+		assert_eq!(&key[16..], &twox_128(b"CurrentSlot"));
+	}
+
+	#[test]
+	fn decodes_slot() {
+		assert_eq!(decode_slot(&123456789u64.encode()).unwrap(), 123456789);
+	}
+
+	#[test]
+	fn rejects_slot_trailing_bytes() {
+		let mut blob = 1u64.encode();
+		blob.push(0xFF);
+		assert!(decode_slot(&blob).is_err());
 	}
 }
