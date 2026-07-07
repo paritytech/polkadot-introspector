@@ -17,7 +17,9 @@
 
 use crate::{
 	api::{
-		decode::{DecodedDispute, decode_availability_cores, decode_candidate_events, decode_disputes},
+		decode::{
+			DecodedDispute, decode_availability_cores, decode_candidate_events, decode_claim_queue, decode_disputes,
+		},
 		dynamic::{decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data},
 		shadow,
 	},
@@ -306,7 +308,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
 		let addr = polkadot::apis().parachain_host().claim_queue();
-		self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
+		let queue: ClaimQueue = self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
 			queue
 				.iter()
 				.map(|(core, ids)| {
@@ -315,7 +317,19 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 					(core, ids)
 				})
 				.collect::<Vec<_>>()
-		})
+		})?;
+
+		if self.shadow {
+			let bytes = self
+				.legacy_rpc_methods
+				.state_call("ParachainHost_claim_queue", None, Some(hash))
+				.await?;
+			let metadata_free = decode_claim_queue(&bytes)
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode claim_queue (metadata-free): {e}")))?;
+			shadow::compare(hash, "claim_queue", &queue, &metadata_free);
+		}
+
+		Ok(queue)
 	}
 
 	pub async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {

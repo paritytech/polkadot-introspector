@@ -23,7 +23,7 @@
 
 use crate::{
 	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
-	types::{CoreOccupied, H256, PolkadotHash},
+	types::{ClaimQueue, CoreOccupied, H256, PolkadotHash},
 };
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError, Input};
@@ -239,6 +239,14 @@ pub fn decode_availability_cores(bytes: &[u8]) -> Result<Vec<CoreOccupied>> {
 		.collect())
 }
 
+/// Decodes the SCALE-encoded result of the `ParachainHost_claim_queue` runtime call. The runtime
+/// returns `BTreeMap<CoreIndex, VecDeque<Id>>`, whose wire format — a compact entry count followed by
+/// key-sorted `(u32, Vec<u32>)` pairs — matches [`ClaimQueue`] directly, so codec decodes it whole.
+/// `decode_all` fails loud on trailing bytes. Order follows the map's key order (by core index).
+pub fn decode_claim_queue(bytes: &[u8]) -> Result<ClaimQueue> {
+	Vec::<(u32, Vec<u32>)>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("claim_queue: cannot decode: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -451,5 +459,26 @@ mod tests {
 		blob.push(0); // Occupied variant, then a truncated payload
 		blob.push(0x00); // next_up_on_available: None, nothing after
 		assert!(decode_availability_cores(&blob).is_err());
+	}
+
+	#[test]
+	fn decodes_claim_queue() {
+		// BTreeMap<CoreIndex, VecDeque<Id>> wire format: compact entry count then sorted pairs.
+		let queue: Vec<(u32, Vec<u32>)> = vec![(0, vec![2004, 2000]), (1, vec![]), (2, vec![3369])];
+		let blob = queue.encode();
+		assert_eq!(decode_claim_queue(&blob).unwrap(), queue);
+	}
+
+	#[test]
+	fn decodes_empty_claim_queue() {
+		let blob = Compact(0u32).encode();
+		assert!(decode_claim_queue(&blob).unwrap().is_empty());
+	}
+
+	#[test]
+	fn rejects_claim_queue_trailing_bytes() {
+		let mut blob = vec![(0u32, vec![1u32])].encode();
+		blob.push(0xFF); // one byte too many
+		assert!(decode_claim_queue(&blob).is_err());
 	}
 }
