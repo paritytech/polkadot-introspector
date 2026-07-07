@@ -321,6 +321,21 @@ pub fn decode_slot(bytes: &[u8]) -> Result<u64> {
 	u64::decode_all(&mut &bytes[..]).map_err(|e| eyre!("slot: cannot decode: {e}"))
 }
 
+/// Builds the storage key for the `Timestamp::Now` value. It is a `StorageValue`, so the key is the
+/// bare `twox_128` pallet/storage prefix with no per-key hash.
+pub fn timestamp_now_key() -> Vec<u8> {
+	let mut key = Vec::with_capacity(32);
+	key.extend_from_slice(&twox_128(b"Timestamp"));
+	key.extend_from_slice(&twox_128(b"Now"));
+	key
+}
+
+/// Decodes the millisecond timestamp (`u64`) stored at `Timestamp::Now`. `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_timestamp(bytes: &[u8]) -> Result<u64> {
+	u64::decode_all(&mut &bytes[..]).map_err(|e| eyre!("timestamp: cannot decode: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -661,5 +676,25 @@ mod tests {
 		let mut blob = 1u64.encode();
 		blob.push(0xFF);
 		assert!(decode_slot(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_timestamp_now_key() {
+		let key = timestamp_now_key();
+		assert_eq!(key.len(), 32);
+		assert_eq!(&key[..16], &twox_128(b"Timestamp"));
+		assert_eq!(&key[16..], &twox_128(b"Now"));
+	}
+
+	#[test]
+	fn decodes_timestamp() {
+		assert_eq!(decode_timestamp(&1_700_000_000_000u64.encode()).unwrap(), 1_700_000_000_000);
+	}
+
+	#[test]
+	fn rejects_timestamp_trailing_bytes() {
+		let mut blob = 1u64.encode();
+		blob.push(0xFF);
+		assert!(decode_timestamp(&blob).is_err());
 	}
 }

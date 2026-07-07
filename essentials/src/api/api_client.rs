@@ -20,7 +20,7 @@ use crate::{
 		decode::{
 			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_keys, decode_availability_cores,
 			decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes, decode_session_index,
-			decode_slot, decode_validator_groups, para_session_account_keys_key,
+			decode_slot, decode_timestamp, decode_validator_groups, para_session_account_keys_key, timestamp_now_key,
 		},
 		dynamic::{
 			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
@@ -224,8 +224,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
-		let timestamp = polkadot::storage().timestamp().now();
-		self.storage().at(hash).fetch(&timestamp).await
+		let addr = polkadot::storage().timestamp().now();
+		let timestamp = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let metadata_free = self
+				.legacy_rpc_methods
+				.state_get_storage(&timestamp_now_key(), Some(hash))
+				.await?
+				.map(|bytes| decode_timestamp(&bytes))
+				.transpose()
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode Timestamp.Now (metadata-free): {e}")))?;
+			shadow::compare(hash, "block_timestamp", &timestamp, &metadata_free);
+		}
+
+		Ok(timestamp)
 	}
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
