@@ -376,6 +376,56 @@ pub fn decode_hrmp_channel_digests(bytes: &[u8]) -> Result<Vec<(u32, Vec<u32>)>>
 	Vec::<(u32, Vec<u32>)>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel_digests: cannot decode: {e}"))
 }
 
+/// `SessionKeys` decoded only to advance the cursor and pull out `authority_discovery` (the one key
+/// the tools read). The order matches the runtime's `impl_opaque_keys!`: five sr25519/ed25519 keys
+/// (`[u8; 32]`) followed by the ECDSA `beefy` key (`[u8; 33]`), 193 bytes total. Pinning each length
+/// makes a resized or reordered key set fail to decode rather than silently shift the field.
+#[derive(Decode)]
+#[allow(dead_code)] // only `authority_discovery` is read; the rest advance the cursor
+struct RawSessionKeys {
+	grandpa: [u8; 32],
+	babe: [u8; 32],
+	para_validator: [u8; 32],
+	para_assignment: [u8; 32],
+	authority_discovery: [u8; 32],
+	beefy: [u8; 33],
+}
+
+/// Builds the storage key for the `Session::QueuedKeys` value (a `StorageValue`, so the key is the
+/// bare `twox_128` pallet/storage prefix with no per-key hash).
+pub fn queued_keys_key() -> Vec<u8> {
+	let mut key = Vec::with_capacity(32);
+	key.extend_from_slice(&twox_128(b"Session"));
+	key.extend_from_slice(&twox_128(b"QueuedKeys"));
+	key
+}
+
+/// Decodes `Session::QueuedKeys` (`Vec<(ValidatorId, SessionKeys)>`) into `(account,
+/// authority_discovery key)` per validator — the projection the tools consume. `decode_all` fails
+/// loud on trailing bytes, and the fixed `SessionKeys` layout means a wrong key set desyncs the
+/// vector and is caught rather than yielding a shifted key.
+pub fn decode_queued_authority_discovery_keys(bytes: &[u8]) -> Result<Vec<(AccountId32, [u8; 32])>> {
+	let raw = Vec::<(AccountId32, RawSessionKeys)>::decode_all(&mut &bytes[..])
+		.map_err(|e| eyre!("queued_keys: cannot decode: {e}"))?;
+	Ok(raw
+		.into_iter()
+		.map(|(account, keys)| (account, keys.authority_discovery))
+		.collect())
+}
+
+/// Builds the storage key for `Session::KeyOwner[(key_type_id, public)]`, a `Twox64Concat` map keyed
+/// by `(KeyTypeId, Vec<u8>)` — the id encodes as its four raw bytes, the key as compact-length-prefixed
+/// bytes.
+pub fn session_key_owner_key(key_type_id: [u8; 4], public: &[u8]) -> Vec<u8> {
+	twox64_concat_key(b"Session", b"KeyOwner", &(key_type_id, public.to_vec()).encode())
+}
+
+/// Decodes a single `AccountId32` value (a transparent `[u8; 32]`). `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_account_id(bytes: &[u8]) -> Result<AccountId32> {
+	AccountId32::decode_all(&mut &bytes[..]).map_err(|e| eyre!("account_id: cannot decode: {e}"))
+}
+
 /// Decodes an `HrmpChannel` value. `SubxtHrmpChannel` mirrors the runtime struct field-for-field
 /// (`max_capacity ++ max_total_size ++ max_message_size ++ msg_count ++ total_size ++ mqc_head ++
 /// sender_deposit ++ recipient_deposit`), so codec decodes it directly; `decode_all` fails loud on
@@ -794,5 +844,65 @@ mod tests {
 		let mut blob = SubxtHrmpChannel::default().encode();
 		blob.push(0xFF);
 		assert!(decode_hrmp_channel(&blob).is_err());
+	}
+
+	// Encodes one `SessionKeys` (5 × [u8;32] + beefy [u8;33] = 193 bytes) with a marked
+	// authority_discovery key.
+	fn encode_session_keys(authority_discovery: [u8; 32]) -> Vec<u8> {
+		let mut bytes = Vec::with_capacity(193);
+		bytes.extend([0x01u8; 32]); // grandpa
+		bytes.extend([0x02u8; 32]); // babe
+		bytes.extend([0x03u8; 32]); // para_validator
+		bytes.extend([0x04u8; 32]); // para_assignment
+		bytes.extend(authority_discovery);
+		bytes.extend([0x06u8; 33]); // beefy (ecdsa, 33 bytes)
+		bytes
+	}
+
+	#[test]
+	fn builds_queued_keys_key() {
+		let key = queued_keys_key();
+		assert_eq!(key.len(), 32);
+		assert_eq!(&key[..16], &twox_128(b"Session"));
+		assert_eq!(&key[16..], &twox_128(b"QueuedKeys"));
+	}
+
+	#[test]
+	fn decodes_queued_authority_discovery_keys() {
+		let a0 = AccountId32::from([0xA0u8; 32]);
+		let a1 = AccountId32::from([0xA1u8; 32]);
+		let mut blob = Compact(2u32).encode();
+		blob.extend(a0.encode());
+		blob.extend(encode_session_keys([0xD0u8; 32]));
+		blob.extend(a1.encode());
+		blob.extend(encode_session_keys([0xD1u8; 32]));
+
+		let decoded = decode_queued_authority_discovery_keys(&blob).unwrap();
+		assert_eq!(decoded, vec![(a0, [0xD0u8; 32]), (a1, [0xD1u8; 32])]);
+	}
+
+	#[test]
+	fn rejects_queued_keys_truncated_session_keys() {
+		let mut blob = Compact(1u32).encode();
+		blob.extend(AccountId32::from([0u8; 32]).encode());
+		blob.extend([0u8; 160]); // only 5×32 bytes: missing the 33-byte beefy key
+		assert!(decode_queued_authority_discovery_keys(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_key_owner_key() {
+		let public = [0x07u8; 32];
+		let key = session_key_owner_key(*b"babe", &public);
+		let encoded_key = (*b"babe", public.to_vec()).encode();
+		assert_eq!(&key[..16], &twox_128(b"Session"));
+		assert_eq!(&key[16..32], &twox_128(b"KeyOwner"));
+		assert_eq!(&key[32..40], &twox_64(&encoded_key));
+		assert_eq!(&key[40..], &encoded_key[..]);
+	}
+
+	#[test]
+	fn decodes_account_id() {
+		let account = AccountId32::from([0x11u8; 32]);
+		assert_eq!(decode_account_id(&account.encode()).unwrap(), account);
 	}
 }

@@ -18,11 +18,12 @@
 use crate::{
 	api::{
 		decode::{
-			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_keys, decode_availability_cores,
-			decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes, decode_hrmp_channel,
-			decode_hrmp_channel_digests, decode_para_ids, decode_session_index, decode_slot, decode_timestamp,
-			decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
-			para_session_account_keys_key, timestamp_now_key,
+			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
+			decode_availability_cores, decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes,
+			decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids, decode_queued_authority_discovery_keys,
+			decode_session_index, decode_slot, decode_timestamp, decode_validator_groups, hrmp_channel_digests_key,
+			hrmp_channels_key, hrmp_egress_channels_index_key, para_session_account_keys_key, queued_keys_key,
+			session_key_owner_key, timestamp_now_key,
 		},
 		dynamic::{
 			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
@@ -406,7 +407,20 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
 		let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
-		self.storage().at(hash).fetch(&addr).await
+		let owner = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let metadata_free = self
+				.legacy_rpc_methods
+				.state_get_storage(&session_key_owner_key(*b"babe", public), Some(hash))
+				.await?
+				.map(|bytes| decode_account_id(&bytes))
+				.transpose()
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode Session.KeyOwner (metadata-free): {e}")))?;
+			shadow::compare(hash, "session_key_owner", &owner, &metadata_free);
+		}
+
+		Ok(owner)
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
@@ -537,11 +551,36 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_session_queued_keys(&self, hash: Option<H256>) -> Result<Option<QueuedKeys>, subxt::Error> {
 		let addr = polkadot::storage().session().queued_keys();
-		if let Some(hash) = hash {
-			self.storage().at(hash).fetch(&addr).await
+		let queued = if let Some(hash) = hash {
+			self.storage().at(hash).fetch(&addr).await?
 		} else {
-			self.storage().at_latest().await?.fetch(&addr).await
+			self.storage().at_latest().await?.fetch(&addr).await?
+		};
+
+		// Shadow only at a concrete hash; at latest the typed and raw reads could race to different blocks.
+		if self.shadow &&
+			let Some(hash) = hash
+		{
+			let old: Vec<(AccountId32, [u8; 32])> = queued
+				.as_ref()
+				.map(|keys| {
+					keys.iter()
+						.map(|(account, keys)| (account.clone(), keys.authority_discovery.0))
+						.collect()
+				})
+				.unwrap_or_default();
+			let metadata_free = self
+				.legacy_rpc_methods
+				.state_get_storage(&queued_keys_key(), Some(hash))
+				.await?
+				.map(|bytes| decode_queued_authority_discovery_keys(&bytes))
+				.transpose()
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode Session.QueuedKeys (metadata-free): {e}")))?
+				.unwrap_or_default();
+			shadow::compare(hash, "session_queued_keys", &old, &metadata_free);
 		}
+
+		Ok(queued)
 	}
 
 	pub async fn get_inbound_outbound_hrmp_channels(

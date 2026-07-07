@@ -56,6 +56,10 @@ struct WhoIsOptions {
 	/// An optional block hash at which we fetch storage items, otherwise use the best block.
 	#[clap(long)]
 	pub at_block: Option<H256>,
+	/// Shadow-decode migrated reads through the metadata-free path and abort on any mismatch.
+	/// Temporary scaffold for the metadata-removal work; off by default.
+	#[clap(long, default_value_t = false)]
+	pub shadow_decode_without_metadata: bool,
 	/// Tells if we should update the p2p cache.
 	///
 	/// Note building the p2p cache takes around 10 to 15 minutes
@@ -525,7 +529,14 @@ async fn main() -> color_eyre::Result<()> {
 
 	let whois = Whois::new(opts.clone())?;
 	let shutdown_tx = init::init_shutdown();
-	let executor = RequestExecutor::build(opts.ws.clone(), ApiClientMode::RPC, &opts.retry, &shutdown_tx, false).await?;
+	let executor = RequestExecutor::build(
+		opts.ws.clone(),
+		ApiClientMode::RPC,
+		&opts.retry,
+		&shutdown_tx,
+		opts.shadow_decode_without_metadata,
+	)
+	.await?;
 
 	let mut futures = vec![];
 	futures.extend(whois.run(executor).await?);
