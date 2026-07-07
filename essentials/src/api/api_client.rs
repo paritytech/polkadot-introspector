@@ -19,8 +19,10 @@ use crate::{
 	api::{
 		decode::{
 			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_keys, decode_availability_cores,
-			decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes, decode_session_index,
-			decode_slot, decode_timestamp, decode_validator_groups, para_session_account_keys_key, timestamp_now_key,
+			decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes, decode_hrmp_channel,
+			decode_hrmp_channel_digests, decode_para_ids, decode_session_index, decode_slot, decode_timestamp,
+			decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
+			para_session_account_keys_key, timestamp_now_key,
 		},
 		dynamic::{
 			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
@@ -134,45 +136,92 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	async fn get_hrmp_egress_channels_index(
 		storage: StorageClient<PolkadotConfig, T>,
+		legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
+		shadow: bool,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<u32>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
-		Ok(storage
+		let index: Vec<u32> = storage
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.unwrap_or_default()
 			.iter()
 			.map(|id| id.0)
-			.collect())
+			.collect();
+
+		if shadow {
+			let metadata_free = legacy_rpc_methods
+				.state_get_storage(&hrmp_egress_channels_index_key(para_id), Some(block_hash))
+				.await?
+				.map(|bytes| decode_para_ids(&bytes))
+				.transpose()
+				.map_err(|e| {
+					subxt::Error::Other(format!("Failed to decode HrmpEgressChannelsIndex (metadata-free): {e}"))
+				})?
+				.unwrap_or_default();
+			shadow::compare(block_hash, "hrmp_egress_channels_index", &index, &metadata_free);
+		}
+
+		Ok(index)
 	}
 
 	async fn get_hrmp_channel_digests(
 		storage: StorageClient<PolkadotConfig, T>,
+		legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
+		shadow: bool,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<(u32, Vec<u32>)>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
-		Ok(storage
+		let digests: Vec<(u32, Vec<u32>)> = storage
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.unwrap_or_default()
 			.into_iter()
 			.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
-			.collect())
+			.collect();
+
+		if shadow {
+			let metadata_free = legacy_rpc_methods
+				.state_get_storage(&hrmp_channel_digests_key(para_id), Some(block_hash))
+				.await?
+				.map(|bytes| decode_hrmp_channel_digests(&bytes))
+				.transpose()
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode HrmpChannelDigests (metadata-free): {e}")))?
+				.unwrap_or_default();
+			shadow::compare(block_hash, "hrmp_channel_digests", &digests, &metadata_free);
+		}
+
+		Ok(digests)
 	}
 
 	async fn get_hrmp_channels(
 		storage: StorageClient<PolkadotConfig, T>,
+		legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
+		shadow: bool,
 		block_hash: H256,
 		sender: u32,
 		recipient: u32,
 	) -> Result<Option<(u32, u32, HrmpChannel)>, subxt::Error> {
 		let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(id);
-		Ok(storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v)))
+		let channel = storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v));
+
+		if shadow {
+			let metadata_free: Option<SubxtHrmpChannel> = legacy_rpc_methods
+				.state_get_storage(&hrmp_channels_key(sender, recipient), Some(block_hash))
+				.await?
+				.map(|bytes| decode_hrmp_channel(&bytes))
+				.transpose()
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode HrmpChannels (metadata-free): {e}")))?;
+			let old = channel.as_ref().map(|(_, _, channel)| SubxtHrmpChannel::from(channel));
+			shadow::compare(block_hash, "hrmp_channel", &old, &metadata_free);
+		}
+
+		Ok(channel)
 	}
 
 	async fn get_inbound_hrmp_channel_pairs(
@@ -180,9 +229,15 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		block_hash: H256,
 		para_ids: Vec<u32>,
 	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
-		let inbound_ids_fut = para_ids
-			.iter()
-			.map(|&para_id| tokio::spawn(Self::get_hrmp_channel_digests(self.storage(), block_hash, para_id)));
+		let inbound_ids_fut = para_ids.iter().map(|&para_id| {
+			tokio::spawn(Self::get_hrmp_channel_digests(
+				self.storage(),
+				self.legacy_rpc_methods.clone(),
+				self.shadow,
+				block_hash,
+				para_id,
+			))
+		});
 		let inbound_ids: Vec<_> = join_requests(inbound_ids_fut)
 			.await?
 			.iter()
@@ -201,9 +256,15 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		block_hash: H256,
 		para_ids: Vec<u32>,
 	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
-		let outbound_ids_fut = para_ids
-			.iter()
-			.map(|&para_id| tokio::spawn(Self::get_hrmp_egress_channels_index(self.storage(), block_hash, para_id)));
+		let outbound_ids_fut = para_ids.iter().map(|&para_id| {
+			tokio::spawn(Self::get_hrmp_egress_channels_index(
+				self.storage(),
+				self.legacy_rpc_methods.clone(),
+				self.shadow,
+				block_hash,
+				para_id,
+			))
+		});
 		let outbound_ids: Vec<Vec<u32>> = join_requests(outbound_ids_fut).await?;
 
 		Ok(para_ids
@@ -491,7 +552,14 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	{
 		let inbound_pairs = self.get_inbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
 		let inbound_channels_fut = inbound_pairs.iter().map(|(sender, para_id)| {
-			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *sender, *para_id))
+			tokio::spawn(Self::get_hrmp_channels(
+				self.storage(),
+				self.legacy_rpc_methods.clone(),
+				self.shadow,
+				block_hash,
+				*sender,
+				*para_id,
+			))
 		});
 		let inbound_channels: Vec<_> = join_requests(inbound_channels_fut).await?.into_iter().flatten().collect();
 
@@ -503,7 +571,14 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 		let outbound_pairs = self.get_outbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
 		let outbound_channels_fut = outbound_pairs.iter().map(|(para_id, recipient)| {
-			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *para_id, *recipient))
+			tokio::spawn(Self::get_hrmp_channels(
+				self.storage(),
+				self.legacy_rpc_methods.clone(),
+				self.shadow,
+				block_hash,
+				*para_id,
+				*recipient,
+			))
 		});
 		let outbound_channels: Vec<_> = join_requests(outbound_channels_fut).await?.into_iter().flatten().collect();
 

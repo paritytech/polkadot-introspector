@@ -23,11 +23,11 @@
 
 use crate::{
 	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
-	types::{AccountId32, ClaimQueue, CoreOccupied, H256, PolkadotHash},
+	types::{AccountId32, ClaimQueue, CoreOccupied, H256, PolkadotHash, SubxtHrmpChannel},
 };
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError, Input};
-use sp_core_hashing::twox_128;
+use sp_core_hashing::{twox_64, twox_128};
 use subxt::config::Hasher;
 
 /// SCALE-encoded size of a `CandidateReceipt`: `CandidateDescriptor` (292 bytes) plus the
@@ -334,6 +334,54 @@ pub fn timestamp_now_key() -> Vec<u8> {
 /// trailing bytes.
 pub fn decode_timestamp(bytes: &[u8]) -> Result<u64> {
 	u64::decode_all(&mut &bytes[..]).map_err(|e| eyre!("timestamp: cannot decode: {e}"))
+}
+
+/// Builds a storage key for a `Twox64Concat` map entry: `twox_128(pallet) ++ twox_128(storage) ++
+/// twox_64(encoded_key) ++ encoded_key`. The concatenated raw key lets the value be found and, if
+/// needed, the key recovered from the storage trie.
+fn twox64_concat_key(pallet: &[u8], storage: &[u8], encoded_key: &[u8]) -> Vec<u8> {
+	let mut key = Vec::with_capacity(16 + 16 + 8 + encoded_key.len());
+	key.extend_from_slice(&twox_128(pallet));
+	key.extend_from_slice(&twox_128(storage));
+	key.extend_from_slice(&twox_64(encoded_key));
+	key.extend_from_slice(encoded_key);
+	key
+}
+
+/// Storage key for `Hrmp::HrmpEgressChannelsIndex[para_id]` (a `Twox64Concat` map keyed by `ParaId`).
+pub fn hrmp_egress_channels_index_key(para_id: u32) -> Vec<u8> {
+	twox64_concat_key(b"Hrmp", b"HrmpEgressChannelsIndex", &para_id.encode())
+}
+
+/// Storage key for `Hrmp::HrmpChannelDigests[para_id]` (a `Twox64Concat` map keyed by `ParaId`).
+pub fn hrmp_channel_digests_key(para_id: u32) -> Vec<u8> {
+	twox64_concat_key(b"Hrmp", b"HrmpChannelDigests", &para_id.encode())
+}
+
+/// Storage key for `Hrmp::HrmpChannels[(sender, recipient)]` (a `Twox64Concat` map keyed by
+/// `HrmpChannelId`, which encodes as `sender ++ recipient`).
+pub fn hrmp_channels_key(sender: u32, recipient: u32) -> Vec<u8> {
+	twox64_concat_key(b"Hrmp", b"HrmpChannels", &(sender, recipient).encode())
+}
+
+/// Decodes a `Vec<ParaId>` (each `ParaId` a transparent `u32`), as stored at
+/// `HrmpEgressChannelsIndex`. `decode_all` fails loud on trailing bytes.
+pub fn decode_para_ids(bytes: &[u8]) -> Result<Vec<u32>> {
+	Vec::<u32>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("para_ids: cannot decode: {e}"))
+}
+
+/// Decodes `HrmpChannelDigests` values: `Vec<(BlockNumber, Vec<ParaId>)>`, all transparent `u32`s.
+/// `decode_all` fails loud on trailing bytes.
+pub fn decode_hrmp_channel_digests(bytes: &[u8]) -> Result<Vec<(u32, Vec<u32>)>> {
+	Vec::<(u32, Vec<u32>)>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel_digests: cannot decode: {e}"))
+}
+
+/// Decodes an `HrmpChannel` value. `SubxtHrmpChannel` mirrors the runtime struct field-for-field
+/// (`max_capacity ++ max_total_size ++ max_message_size ++ msg_count ++ total_size ++ mqc_head ++
+/// sender_deposit ++ recipient_deposit`), so codec decodes it directly; `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_hrmp_channel(bytes: &[u8]) -> Result<SubxtHrmpChannel> {
+	SubxtHrmpChannel::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel: cannot decode: {e}"))
 }
 
 #[cfg(test)]
@@ -696,5 +744,55 @@ mod tests {
 		let mut blob = 1u64.encode();
 		blob.push(0xFF);
 		assert!(decode_timestamp(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_twox64_concat_hrmp_keys() {
+		// ParaId-keyed map: prefix + twox_64(index) + raw index.
+		let key = hrmp_egress_channels_index_key(2004);
+		assert_eq!(key.len(), 16 + 16 + 8 + 4);
+		assert_eq!(&key[..16], &twox_128(b"Hrmp"));
+		assert_eq!(&key[16..32], &twox_128(b"HrmpEgressChannelsIndex"));
+		assert_eq!(&key[32..40], &twox_64(&2004u32.encode()));
+		assert_eq!(&key[40..], &2004u32.encode());
+
+		// HrmpChannelId-keyed map: the key encodes as sender ++ recipient (8 bytes).
+		let channel_key = hrmp_channels_key(2004, 2000);
+		let id = (2004u32, 2000u32).encode();
+		assert_eq!(channel_key.len(), 16 + 16 + 8 + 8);
+		assert_eq!(&channel_key[16..32], &twox_128(b"HrmpChannels"));
+		assert_eq!(&channel_key[32..40], &twox_64(&id));
+		assert_eq!(&channel_key[40..], &id);
+	}
+
+	#[test]
+	fn decodes_para_ids_and_digests() {
+		let para_ids: Vec<u32> = vec![2004, 2000, 3369];
+		assert_eq!(decode_para_ids(&para_ids.encode()).unwrap(), para_ids);
+
+		let digests: Vec<(u32, Vec<u32>)> = vec![(100, vec![2004, 2000]), (105, vec![])];
+		assert_eq!(decode_hrmp_channel_digests(&digests.encode()).unwrap(), digests);
+	}
+
+	#[test]
+	fn decodes_hrmp_channel() {
+		let channel = SubxtHrmpChannel {
+			max_capacity: 8,
+			max_total_size: 8192,
+			max_message_size: 1024,
+			msg_count: 3,
+			total_size: 512,
+			mqc_head: Some(H256::from([0x11; 32])),
+			sender_deposit: 1_000_000_000_000,
+			recipient_deposit: 2_000_000_000_000,
+		};
+		assert_eq!(decode_hrmp_channel(&channel.encode()).unwrap(), channel);
+	}
+
+	#[test]
+	fn rejects_hrmp_channel_trailing_bytes() {
+		let mut blob = SubxtHrmpChannel::default().encode();
+		blob.push(0xFF);
+		assert!(decode_hrmp_channel(&blob).is_err());
 	}
 }
