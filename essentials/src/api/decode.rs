@@ -23,10 +23,11 @@
 
 use crate::{
 	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
-	types::{ClaimQueue, CoreOccupied, H256, PolkadotHash},
+	types::{AccountId32, ClaimQueue, CoreOccupied, H256, PolkadotHash},
 };
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError, Input};
+use sp_core_hashing::twox_128;
 use subxt::config::Hasher;
 
 /// SCALE-encoded size of a `CandidateReceipt`: `CandidateDescriptor` (292 bytes) plus the
@@ -256,6 +257,30 @@ pub fn decode_validator_groups(bytes: &[u8]) -> Result<Vec<Vec<u32>>> {
 	let (groups, _rotation) = <(Vec<Vec<u32>>, (u32, u32, u32))>::decode_all(&mut &bytes[..])
 		.map_err(|e| eyre!("validator_groups: cannot decode: {e}"))?;
 	Ok(groups)
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_session_index_for_child` runtime call: a
+/// bare `SessionIndex` (`u32`). `decode_all` fails loud on trailing bytes.
+pub fn decode_session_index(bytes: &[u8]) -> Result<u32> {
+	u32::decode_all(&mut &bytes[..]).map_err(|e| eyre!("session_index: cannot decode: {e}"))
+}
+
+/// Builds the storage key for `ParaSessionInfo::AccountKeys[session_index]`. The map uses the
+/// `Identity` hasher (the session index is sequential, not attacker-controlled), so the key is the
+/// SCALE-encoded index appended raw to the `twox_128` pallet/storage prefix — no per-key hash.
+pub fn para_session_account_keys_key(session_index: u32) -> Vec<u8> {
+	let mut key = Vec::with_capacity(36);
+	key.extend_from_slice(&twox_128(b"ParaSessionInfo"));
+	key.extend_from_slice(&twox_128(b"AccountKeys"));
+	key.extend_from_slice(&session_index.encode());
+	key
+}
+
+/// Decodes the value stored at `ParaSessionInfo::AccountKeys[session_index]`: the session's validator
+/// stash accounts (`Vec<AccountId32>`), indexed by validator index. `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_account_keys(bytes: &[u8]) -> Result<Vec<AccountId32>> {
+	Vec::<AccountId32>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("account_keys: cannot decode: {e}"))
 }
 
 #[cfg(test)]
@@ -512,5 +537,39 @@ mod tests {
 		let mut blob = (vec![vec![0u32]], (1u32, 2u32, 3u32)).encode();
 		blob.push(0xFF); // one byte too many
 		assert!(decode_validator_groups(&blob).is_err());
+	}
+
+	#[test]
+	fn decodes_session_index() {
+		assert_eq!(decode_session_index(&13391u32.encode()).unwrap(), 13391);
+	}
+
+	#[test]
+	fn rejects_session_index_trailing_bytes() {
+		let mut blob = 1u32.encode();
+		blob.push(0xFF);
+		assert!(decode_session_index(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_identity_account_keys_key() {
+		let key = para_session_account_keys_key(13391);
+		assert_eq!(key.len(), 36); // 16 (pallet) + 16 (storage) + 4 (raw u32 index, Identity hasher)
+		assert_eq!(&key[..16], &twox_128(b"ParaSessionInfo"));
+		assert_eq!(&key[16..32], &twox_128(b"AccountKeys"));
+		assert_eq!(&key[32..], &13391u32.encode());
+	}
+
+	#[test]
+	fn decodes_account_keys() {
+		let accounts = vec![AccountId32::from([1u8; 32]), AccountId32::from([2u8; 32]), AccountId32::from([3u8; 32])];
+		assert_eq!(decode_account_keys(&accounts.encode()).unwrap(), accounts);
+	}
+
+	#[test]
+	fn rejects_account_keys_trailing_bytes() {
+		let mut blob = vec![AccountId32::from([0u8; 32])].encode();
+		blob.push(0xFF);
+		assert!(decode_account_keys(&blob).is_err());
 	}
 }

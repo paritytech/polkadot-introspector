@@ -18,8 +18,9 @@
 use crate::{
 	api::{
 		decode::{
-			DecodedDispute, decode_availability_cores, decode_candidate_events, decode_claim_queue, decode_disputes,
-			decode_validator_groups,
+			DecodedDispute, decode_account_keys, decode_availability_cores, decode_candidate_events,
+			decode_claim_queue, decode_disputes, decode_session_index, decode_validator_groups,
+			para_session_account_keys_key,
 		},
 		dynamic::{
 			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
@@ -363,7 +364,19 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {
 		let addr = polkadot::storage().session().current_index();
-		self.storage().at(hash).fetch(&addr).await
+		let index = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let bytes = self
+				.legacy_rpc_methods
+				.state_call("ParachainHost_session_index_for_child", None, Some(hash))
+				.await?;
+			let metadata_free = decode_session_index(&bytes)
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode session_index_for_child: {e}")))?;
+			shadow::compare(hash, "session_index", &index.unwrap_or_default(), &metadata_free);
+		}
+
+		Ok(index)
 	}
 
 	pub async fn get_session_index_now(&self) -> Result<Option<u32>, subxt::Error> {
@@ -382,7 +395,24 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let storage =
 			if let Some(hash) = maybe_hash { self.storage().at(hash) } else { self.storage().at_latest().await? };
 
-		storage.fetch(&addr).await
+		let keys = storage.fetch(&addr).await?;
+
+		// Shadow only at a concrete hash; at latest the typed and raw reads could race to different blocks.
+		if self.shadow &&
+			let Some(hash) = maybe_hash
+		{
+			let key = para_session_account_keys_key(session_index);
+			let metadata_free = self
+				.legacy_rpc_methods
+				.state_get_storage(&key, Some(hash))
+				.await?
+				.map(|bytes| decode_account_keys(&bytes))
+				.transpose()
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode account_keys (metadata-free): {e}")))?;
+			shadow::compare(hash, "session_account_keys", &keys, &metadata_free);
+		}
+
+		Ok(keys)
 	}
 
 	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
