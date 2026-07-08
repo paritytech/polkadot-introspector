@@ -20,10 +20,10 @@ use crate::{
 		decode::{
 			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
 			decode_availability_cores, decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes,
-			decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids, decode_queued_authority_discovery_keys,
-			decode_session_index, decode_slot, decode_timestamp, decode_validator_groups, hrmp_channel_digests_key,
-			hrmp_channels_key, hrmp_egress_channels_index_key, para_session_account_keys_key, queued_keys_key,
-			session_key_owner_key, timestamp_now_key,
+			decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids, decode_parainherent_bitfields,
+			decode_queued_authority_discovery_keys, decode_session_index, decode_slot, decode_timestamp,
+			decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
+			para_session_account_keys_key, queued_keys_key, session_key_owner_key, timestamp_now_key,
 		},
 		dynamic::{
 			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
@@ -52,7 +52,7 @@ use crate::{
 	},
 };
 use clap::ValueEnum;
-use parity_scale_codec::Decode;
+use parity_scale_codec::{Decode, Encode};
 use std::collections::BTreeMap;
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -664,10 +664,32 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.take(2)
 			.last()
 			.ok_or_else(|| "`ParaInherent` data is always at index #1".to_string())?;
-		ex.field_values()
+		let inherent = ex
+			.field_values()
 			.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
 			.and_then(|v| decode_inherent_data(&v).map_err(|e| format!("Failed to decode ParaInherent: {e}")))
-			.map_err(subxt::Error::Other)
+			.map_err(subxt::Error::Other)?;
+
+		if self.shadow {
+			let hash = block.hash();
+			let details = self
+				.legacy_rpc_methods
+				.chain_get_block(Some(hash))
+				.await?
+				.ok_or_else(|| subxt::Error::Other(format!("block {hash:?} not found via chain_getBlock")))?;
+			let para_inherent = details
+				.block
+				.extrinsics
+				.get(1)
+				.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
+			let metadata_free = decode_parainherent_bitfields(&para_inherent.0).map_err(|e| {
+				subxt::Error::Other(format!("Failed to decode ParaInherent bitfields (metadata-free): {e}"))
+			})?;
+			let old: Vec<Vec<u8>> = inherent.bitfields.iter().map(|bitfield| bitfield.0.encode()).collect();
+			shadow::compare(hash, "parainherent_bitfields", &old, &metadata_free);
+		}
+
+		Ok(inherent)
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes

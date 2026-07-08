@@ -434,6 +434,61 @@ pub fn decode_hrmp_channel(bytes: &[u8]) -> Result<SubxtHrmpChannel> {
 	SubxtHrmpChannel::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel: cannot decode: {e}"))
 }
 
+/// Decodes the availability bitfields from a `ParaInherent` (`paras_inherent::enter`) extrinsic, given
+/// its raw bytes as returned by `chain_getBlock` (index #1 of the block). The extrinsic envelope is
+/// stripped — the opaque-extrinsic length prefix, the version/type byte (which must be a bare/unsigned
+/// inherent, so no signature follows), and the two pallet/call index bytes — then the leading
+/// `bitfields: Vec<UncheckedSigned<AvailabilityBitfield>>` field of `ParachainsInherentData` is read.
+/// Each entry is `AvailabilityBitfield` (a SCALE bitvec) ++ `ValidatorIndex` (`u32`) ++
+/// `ValidatorSignature` (`[u8; 64]`); only the bitvec is kept, as its raw encoded bytes so it can be
+/// compared byte-for-byte against the metadata decode. The fields after `bitfields` (backed
+/// candidates, disputes, parent header) are left untouched, so nothing beyond them is decoded.
+pub fn decode_parainherent_bitfields(extrinsic: &[u8]) -> Result<Vec<Vec<u8>>> {
+	let mut input = extrinsic;
+	// Opaque-extrinsic length prefix.
+	Compact::<u32>::decode(&mut input).map_err(|e| eyre!("parainherent: cannot decode length prefix: {e}"))?;
+	// Extrinsic version/type byte: the top two bits are the type, `0b00` = bare (unsigned). An inherent
+	// is always bare, so there is no signature to skip.
+	let version = u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read version byte: {e}"))?;
+	if version >> 6 != 0 {
+		return Err(eyre!("parainherent: expected a bare inherent, got extrinsic type byte {version:#04x}"));
+	}
+	// `ParaInherent::enter` pallet + call index, trusted from the fixed extrinsic position (#1).
+	u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read pallet index: {e}"))?;
+	u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read call index: {e}"))?;
+
+	let count = Compact::<u32>::decode(&mut input)
+		.map_err(|e| eyre!("parainherent: cannot decode bitfields length: {e}"))?
+		.0;
+	let mut bitfields = Vec::with_capacity(count as usize);
+	for i in 0..count {
+		let bitvec = take_encoded_bitvec(&mut input)
+			.map_err(|e| eyre!("parainherent: cannot read bitfield {i} payload: {e}"))?;
+		u32::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read bitfield {i} validator index: {e}"))?;
+		<[u8; 64]>::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read bitfield {i} signature: {e}"))?;
+		bitfields.push(bitvec);
+	}
+
+	Ok(bitfields)
+}
+
+/// Consumes a SCALE-encoded `BitVec<u8, Lsb0>` and returns its raw bytes (compact bit length followed
+/// by `ceil(bits / 8)` packed bytes), matching what `Encode` produces for the metadata bitfield.
+fn take_encoded_bitvec(input: &mut &[u8]) -> Result<Vec<u8>> {
+	let start = *input;
+	let bit_len = Compact::<u32>::decode(input)
+		.map_err(|e| eyre!("cannot decode bitvec length: {e}"))?
+		.0 as usize;
+	let byte_len = bit_len.div_ceil(8);
+	if input.len() < byte_len {
+		return Err(eyre!("bitvec payload too short: need {byte_len} bytes, have {}", input.len()));
+	}
+	let (_, rest) = input.split_at(byte_len);
+	*input = rest;
+	let consumed = start.len() - input.len();
+	Ok(start[..consumed].to_vec())
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -904,5 +959,68 @@ mod tests {
 	fn decodes_account_id() {
 		let account = AccountId32::from([0x11u8; 32]);
 		assert_eq!(decode_account_id(&account.encode()).unwrap(), account);
+	}
+
+	// A SCALE `BitVec<u8, Lsb0>` over the given bits: compact bit count then packed bytes.
+	fn encode_availability_bitvec(bits: &[bool]) -> Vec<u8> {
+		let mut bytes = vec![0u8; bits.len().div_ceil(8)];
+		for (i, &b) in bits.iter().enumerate() {
+			if b {
+				bytes[i / 8] |= 1 << (i % 8);
+			}
+		}
+		let mut out = Compact(bits.len() as u32).encode();
+		out.extend(bytes);
+		out
+	}
+
+	// Wraps a `ParachainsInherentData` body (starting at `bitfields`) into a bare ParaInherent
+	// extrinsic: length prefix + version byte + pallet/call index + body.
+	fn wrap_parainherent(body: Vec<u8>) -> Vec<u8> {
+		let mut inner = vec![0x04u8]; // bare extrinsic v4
+		inner.push(60); // pallet index (ParaInherent) — value irrelevant, skipped positionally
+		inner.push(0); // call index (enter)
+		inner.extend(body);
+		let mut out = Compact(inner.len() as u32).encode();
+		out.extend(inner);
+		out
+	}
+
+	#[test]
+	fn decodes_parainherent_bitfields() {
+		let bitvec0 = encode_availability_bitvec(&[true, false, true, true]);
+		let bitvec1 = encode_availability_bitvec(&[false, false, true]);
+
+		let mut body = Compact(2u32).encode(); // two signed bitfields
+		body.extend(bitvec0.clone());
+		body.extend(5u32.encode()); // validator_index
+		body.extend([0x11u8; 64]); // signature
+		body.extend(bitvec1.clone());
+		body.extend(9u32.encode());
+		body.extend([0x22u8; 64]);
+		// Trailing bytes standing in for backed_candidates/disputes/parent_header — must be ignored.
+		body.extend([0xDE, 0xAD, 0xBE, 0xEF]);
+
+		let extrinsic = wrap_parainherent(body);
+		let decoded = decode_parainherent_bitfields(&extrinsic).unwrap();
+		assert_eq!(decoded, vec![bitvec0, bitvec1]);
+	}
+
+	#[test]
+	fn rejects_parainherent_signed_extrinsic() {
+		let mut inner = vec![0x84u8]; // signed v4 (top bit set) — not a bare inherent
+		inner.extend([0u8; 4]);
+		let mut extrinsic = Compact(inner.len() as u32).encode();
+		extrinsic.extend(inner);
+		assert!(decode_parainherent_bitfields(&extrinsic).is_err());
+	}
+
+	#[test]
+	fn rejects_parainherent_truncated_bitfield() {
+		let mut body = Compact(1u32).encode(); // claims one bitfield
+		body.extend(encode_availability_bitvec(&[true, true]));
+		body.extend(5u32.encode()); // validator_index, then no signature
+		let extrinsic = wrap_parainherent(body);
+		assert!(decode_parainherent_bitfields(&extrinsic).is_err());
 	}
 }
