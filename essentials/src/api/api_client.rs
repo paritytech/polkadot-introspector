@@ -278,11 +278,38 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error> {
-		Ok(self.block_at(maybe_hash).await?.header().clone())
+		let block = self.block_at(maybe_hash).await?;
+		let header = block.header().clone();
+
+		if self.shadow {
+			// Resolve the concrete hash so the metadata-free read hits the same block as the primary.
+			let hash = block.hash();
+			let metadata_free = self
+				.legacy_rpc_methods
+				.chain_get_header(Some(hash))
+				.await?
+				.ok_or_else(|| subxt::Error::Other(format!("header {hash:?} not found via chain_getHeader")))?;
+			shadow::compare(hash, "block_header", &header, &metadata_free);
+		}
+
+		Ok(header)
 	}
 
 	pub async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error> {
-		Ok(self.block_at(maybe_hash).await?.number())
+		let block = self.block_at(maybe_hash).await?;
+		let number = block.number();
+
+		if self.shadow {
+			let hash = block.hash();
+			let metadata_free = self
+				.legacy_rpc_methods
+				.chain_get_header(Some(hash))
+				.await?
+				.ok_or_else(|| subxt::Error::Other(format!("header {hash:?} not found via chain_getHeader")))?;
+			shadow::compare(hash, "block_number", &number, &metadata_free.number);
+		}
+
+		Ok(number)
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
