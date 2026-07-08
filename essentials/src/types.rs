@@ -117,12 +117,4 @@ pub enum CoreOccupied {
 	Occupied,
 }
 
-// TODO: Take it from runtime types v5
-/// Temporary abstraction to cover `Event::OnDemandAssignmentProvider`
-#[derive(Debug, Decode, Encode, Default, Clone, PartialEq)]
-pub struct OnDemandOrder {
-	pub para_id: u32,
-	pub spot_price: u128,
-}
-
 pub type InboundOutBoundHrmpChannels = Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>;

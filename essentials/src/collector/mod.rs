@@ -29,7 +29,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, H256, Header, InherentData, PolkadotHasher, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -116,8 +116,6 @@ pub enum CollectorPrefixType {
 	InherentData,
 	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
 	Dispute(u32),
-	/// On-demand order information by parachain id
-	OnDemandOrder(u32),
 	/// Inbound/Outbound HRMP channel configuration
 	InboundOutboundHrmpChannels(u32),
 }
@@ -484,8 +482,6 @@ impl Collector {
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
 				self.process_dispute_concluded(dispute_event, dispute_outcome).await,
-			ChainEvent::OnDemandOrderPlaced(block_hash, order) =>
-				self.process_on_demand_order_placed(block_hash, order).await,
 			_ => Ok(()),
 		}
 	}
@@ -1310,23 +1306,6 @@ impl Collector {
 			StorageEntry::new_onchain(record_time, candidate),
 		)
 		.await;
-		Ok(())
-	}
-
-	async fn process_on_demand_order_placed(
-		&self,
-		block_hash: &H256,
-		order: &OnDemandOrder,
-	) -> Result<(), CollectorError> {
-		self.storage_write_prefixed(
-			CollectorPrefixType::OnDemandOrder(order.para_id),
-			*block_hash,
-			StorageEntry::new_onchain(
-				RecordTime::with_ts(self.state.current_relay_chain_block_number, get_unix_time_unwrap()),
-				order,
-			),
-		)
-		.await?;
 		Ok(())
 	}
 

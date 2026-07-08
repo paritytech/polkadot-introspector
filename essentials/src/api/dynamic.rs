@@ -23,7 +23,7 @@ use crate::{
 			ValidatorIndex,
 		},
 	},
-	types::{CoreOccupied, DisputeStatementSet, H256, InherentData, OnDemandOrder},
+	types::{CoreOccupied, DisputeStatementSet, H256, InherentData},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -159,20 +159,6 @@ fn variant_inner_value<'a>(variant: &'a Variant<u32>, context: &str) -> Result<&
 	variant.values.values().next().ok_or_else(|| {
 		DynamicError::DecodeDynamicError(format!("inner value for {}", context), ValueDef::Variant(variant.clone()))
 	})
-}
-
-pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrder, DynamicError> {
-	match raw {
-		Composite::Named(v) => {
-			let raw_para_id = find_named_field(v, "para_id", raw)?;
-			let raw_spot_price = find_named_field(v, "spot_price", raw)?;
-			Ok(OnDemandOrder {
-				para_id: decode_composite_u128_value(raw_para_id)? as u32,
-				spot_price: decode_u128_value(raw_spot_price)?,
-			})
-		},
-		_ => Err(DynamicError::DecodeDynamicError("named composite".to_string(), ValueDef::Composite(raw.clone()))),
-	}
 }
 
 fn decode_unnamed_composite(value: &Value<u32>) -> Result<&Vec<Value<u32>>, DynamicError> {

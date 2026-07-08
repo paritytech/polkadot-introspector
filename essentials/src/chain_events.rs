@@ -16,12 +16,12 @@
 //
 
 use crate::{
-	api::dynamic::{decode_candidate_event, decode_on_demand_order},
+	api::dynamic::decode_candidate_event,
 	metadata::polkadot::{
 		para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
 		paras_disputes::events::{DisputeConcluded, DisputeInitiated},
 	},
-	types::{H256, Header, OnDemandOrder, PolkadotHash, PolkadotHasher},
+	types::{H256, Header, PolkadotHash, PolkadotHasher},
 };
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Decode, Encode};
@@ -40,8 +40,6 @@ pub enum ChainEvent<T: subxt::Config> {
 	DisputeConcluded(SubxtDispute, SubxtDisputeResult),
 	/// Backing, inclusion, time out for a parachain candidate
 	CandidateChanged(Box<SubxtCandidateEvent>),
-	/// On-demand parachain placed its order
-	OnDemandOrderPlaced(PolkadotHash, OnDemandOrder),
 	/// Anything undecoded
 	RawEvent(PolkadotHash, subxt::events::EventDetails<T>),
 }
@@ -140,12 +138,6 @@ pub async fn decode_chain_event(
 			SubxtCandidateEventType::TimedOut,
 			hasher,
 		)?)))
-	}
-
-	// TODO: Use `is_specific_event` as soon as shows up in types
-	if event.pallet_name() == "OnDemandAssignmentProvider" && event.variant_name() == "OnDemandOrderPlaced" {
-		let decoded = decode_on_demand_order(&event.field_values()?)?;
-		return Ok(ChainEvent::OnDemandOrderPlaced(block_hash, decoded))
 	}
 
 	Ok(ChainEvent::RawEvent(block_hash, event))
