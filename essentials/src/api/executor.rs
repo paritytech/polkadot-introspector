@@ -18,7 +18,7 @@ use crate::{
 	api::{
 		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
 		decode::DecodedDispute,
-		dynamic::{self, DynamicHostConfiguration, fetch_dynamic_storage},
+		dynamic,
 	},
 	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -73,7 +73,6 @@ pub enum Request {
 	GetSessionQueuedKeys(Option<H256>),
 	GetInboundOutBoundHrmpChannels(H256, Vec<u32>),
 	GetSessionIndexNow,
-	GetHostConfiguration,
 	GetBestBlockSubscription,
 	GetFinalizedBlockSubscription,
 	GetChainName,
@@ -119,8 +118,6 @@ enum Response {
 	SessionQueuedKeys(Option<QueuedKeys>),
 	/// HRMP channels for given parachain (e.g. who are sending messages to us)
 	InboundOutBoundHrmpChannels(InboundOutBoundHrmpChannels),
-	/// The current host configuration
-	HostConfiguration(DynamicHostConfiguration),
 	/// Chain subscription
 	ChainSubscription(HeaderStream),
 	/// Chain name
@@ -263,9 +260,6 @@ impl RequestExecutorBackend {
 			GetSessionIndexNow => SessionIndex(client.get_session_index_now().await?.unwrap_or_default()),
 			GetInboundOutBoundHrmpChannels(hash, para_ids) =>
 				InboundOutBoundHrmpChannels(client.get_inbound_outbound_hrmp_channels(hash, para_ids).await?),
-			GetHostConfiguration => HostConfiguration(DynamicHostConfiguration::new(
-				fetch_dynamic_storage(client, None, "Configuration", "ActiveConfig").await?,
-			)),
 			GetBestBlockSubscription => ChainSubscription(client.stream_best_block_headers().await?),
 			GetFinalizedBlockSubscription => ChainSubscription(client.stream_finalized_block_headers().await?),
 			GetBabeRandomness(hash) => BabeRandomness(client.get_babe_randomness(hash).await?),
@@ -526,13 +520,6 @@ impl RequestExecutor {
 		RequestExecutorError,
 	> {
 		wrap_backend_call!(self, url, GetInboundOutBoundHrmpChannels, InboundOutBoundHrmpChannels, hash, para_ids)
-	}
-
-	pub async fn get_host_configuration(
-		&mut self,
-		url: &str,
-	) -> color_eyre::Result<DynamicHostConfiguration, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetHostConfiguration, HostConfiguration)
 	}
 
 	pub async fn get_best_block_subscription(

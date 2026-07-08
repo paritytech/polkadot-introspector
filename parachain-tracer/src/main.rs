@@ -33,7 +33,7 @@ use colored::Colorize;
 use crossterm::style::Stylize;
 use futures::{StreamExt, future, stream::FuturesUnordered};
 use itertools::Itertools;
-use log::{error, info, warn};
+use log::{error, info};
 use polkadot_introspector_essentials::{
 	api::{api_client::ApiClientMode, executor::RequestExecutor},
 	chain_head_subscription::ChainHeadSubscription,
@@ -163,10 +163,6 @@ impl ParachainTracer {
 			&self.node,
 			self.opts.api_client_mode,
 		);
-		if let Err(e) = print_host_configuration(self.opts.node.as_str(), executor).await {
-			warn!("Cannot get host configuration");
-			return Err(e)
-		}
 		println!(
 			"{}",
 			"-----------------------------------------------------------------------"
@@ -496,13 +492,6 @@ fn evict_stalled(trackers: &mut HashMap<u32, Sender<CollectorUpdateEvent>>, last
 	}
 }
 
-async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> color_eyre::Result<()> {
-	let conf = executor.get_host_configuration(url).await?;
-	println!("Host configuration for {}:", url.to_owned().bold());
-	println!("{}", conf);
-	Ok(())
-}
-
 fn historical_bounds(opts: &ParachainTracerOptions) -> color_eyre::Result<(u32, u32)> {
 	let from_block_number = opts.from_block_number.expect("`--from` must exist in historical mode");
 	let to_block_number = opts.to_block_number.expect("`--to` must exist in historical mode");
@@ -530,15 +519,14 @@ async fn main() -> color_eyre::Result<()> {
 
 	let tracer = ParachainTracer::new(opts.clone(), metrics)?;
 	let shutdown_tx = init::init_shutdown();
-	let mut executor =
-		RequestExecutor::build(
-			opts.node.clone(),
-			opts.api_client_mode,
-			&opts.retry,
-			&shutdown_tx,
-			opts.shadow_decode_without_metadata,
-		)
-		.await?;
+	let mut executor = RequestExecutor::build(
+		opts.node.clone(),
+		opts.api_client_mode,
+		&opts.retry,
+		&shutdown_tx,
+		opts.shadow_decode_without_metadata,
+	)
+	.await?;
 
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
