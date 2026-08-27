@@ -23,8 +23,8 @@
 //!
 //! A checklist tallies clean comparisons per read, distinguishing "ran clean" from "never ran": a
 //! quiet run proves only the reads it exercised, and rare paths (a real dispute, a skipped slot)
-//! stay `pending` until a run actually hits them. It is logged periodically and, via
-//! [`log_checklist`], at shutdown.
+//! stay `pending` until a run actually hits them. It is logged periodically as a logfmt line
+//! (graphable from collected logs) and, via [`log_checklist`], at shutdown.
 
 use crate::types::H256;
 use log::{error, info, warn};
@@ -61,8 +61,9 @@ const EXPECTED_READS: &[&str] = &[
 	"parainherent_bitfields",
 ];
 
-/// How often the checklist is logged while comparisons keep coming in.
-const LOG_INTERVAL: Duration = Duration::from_secs(600);
+/// How often the checklist is logged while comparisons keep coming in. Short enough to give a
+/// usable resolution when the logfmt lines are graphed from collected logs.
+const LOG_INTERVAL: Duration = Duration::from_secs(60);
 
 struct Checklist {
 	/// Clean-comparison count per read, indexed like [`EXPECTED_READS`].
@@ -86,8 +87,19 @@ fn mark(read: &str) {
 	}
 	if list.last_logged.elapsed() >= LOG_INTERVAL {
 		list.last_logged = Instant::now();
-		info!("{}", render_checklist(&list.counts));
+		info!("{}", render_logfmt(&list.counts));
 	}
+}
+
+/// Renders the checklist as one logfmt line (`key=value` pairs) so a log collector (e.g.
+/// Loki/promtail into Grafana) can parse it into per-read time series without custom rules.
+fn render_logfmt(counts: &[u64]) -> String {
+	let exercised = counts.iter().filter(|&&count| count > 0).count();
+	let mut out = format!("shadow_checklist exercised={exercised} total={}", counts.len());
+	for (read, count) in EXPECTED_READS.iter().zip(counts) {
+		out.push_str(&format!(" {read}={count}"));
+	}
+	out
 }
 
 fn render_checklist(counts: &[u64]) -> String {
@@ -103,12 +115,14 @@ fn render_checklist(counts: &[u64]) -> String {
 	out
 }
 
-/// Logs the checklist unconditionally. Call at shutdown so a shadow run ends with a coverage
-/// verdict: which reads it proved (with clean-comparison counts) and which are still pending.
+/// Logs the checklist unconditionally, both as a human-readable table and as a final logfmt line.
+/// Call at shutdown so a shadow run ends with a coverage verdict: which reads it proved (with
+/// clean-comparison counts) and which are still pending.
 pub fn log_checklist() {
 	let list = checklist()
 		.lock()
 		.expect("no panic can occur while the checklist is locked; qed");
+	info!("{}", render_logfmt(&list.counts));
 	info!("{}", render_checklist(&list.counts));
 }
 
@@ -161,6 +175,17 @@ mod tests {
 		assert!(out.starts_with(&format!("shadow-decode checklist: 1/{} reads exercised", EXPECTED_READS.len())));
 		assert!(out.contains("ok      block_header (3)"));
 		assert!(out.contains("pending block_number"));
+	}
+
+	#[test]
+	fn renders_logfmt_line() {
+		let mut counts = [0u64; EXPECTED_READS.len()];
+		counts[0] = 3;
+		let out = render_logfmt(&counts);
+		assert!(out.starts_with(&format!("shadow_checklist exercised=1 total={}", EXPECTED_READS.len())));
+		assert!(out.contains(" block_header=3"));
+		assert!(out.contains(" block_number=0"));
+		assert!(!out.contains('\n'));
 	}
 
 	#[test]
