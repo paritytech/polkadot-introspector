@@ -22,6 +22,7 @@ use polkadot_introspector_essentials::{
 	api::{
 		api_client::ApiClientMode,
 		executor::{RequestExecutor, RequestExecutorError},
+		shadow,
 	},
 	init,
 	types::{AccountId32, H256},
@@ -542,6 +543,10 @@ async fn main() -> color_eyre::Result<()> {
 	futures.extend(whois.run(executor).await?);
 
 	future::try_join_all(futures).await?;
+
+	if opts.shadow_decode_without_metadata {
+		shadow::log_checklist();
+	}
 
 	Ok(())
 }

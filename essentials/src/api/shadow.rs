@@ -20,10 +20,97 @@
 //! (the value the tool returns) and once through the new metadata-free path. The two are compared
 //! here. A mismatch is a decoder defect, so it aborts the process loudly rather than being tallied
 //! and passed over. The harness is temporary: it is gone once metadata is deleted.
+//!
+//! A checklist tallies clean comparisons per read, distinguishing "ran clean" from "never ran": a
+//! quiet run proves only the reads it exercised, and rare paths (a real dispute, a skipped slot)
+//! stay `pending` until a run actually hits them. It is logged periodically and, via
+//! [`log_checklist`], at shutdown.
 
 use crate::types::H256;
-use log::error;
-use std::{collections::BTreeMap, fmt::Debug};
+use log::{error, info, warn};
+use std::{
+	collections::BTreeMap,
+	fmt::Debug,
+	sync::{Mutex, OnceLock},
+	time::{Duration, Instant},
+};
+
+/// Every shadowed read, in display order. The checklist is seeded with the full list so a read that
+/// never fired shows as `pending` instead of being silently absent — a quiet run only proves the
+/// reads it actually exercised.
+const EXPECTED_READS: &[&str] = &[
+	"block_header",
+	"block_number",
+	"block_timestamp",
+	"candidate_events",
+	"disputes_initiated",
+	"disputes_concluded",
+	"availability_cores",
+	"claim_queue",
+	"validator_groups",
+	"session_index",
+	"session_account_keys",
+	"session_queued_keys",
+	"session_key_owner",
+	"babe_randomness",
+	"babe_authorities",
+	"babe_current_slot",
+	"hrmp_egress_channels_index",
+	"hrmp_channel_digests",
+	"hrmp_channel",
+	"parainherent_bitfields",
+];
+
+/// How often the checklist is logged while comparisons keep coming in.
+const LOG_INTERVAL: Duration = Duration::from_secs(600);
+
+struct Checklist {
+	/// Clean-comparison count per read, indexed like [`EXPECTED_READS`].
+	counts: [u64; EXPECTED_READS.len()],
+	last_logged: Instant,
+}
+
+fn checklist() -> &'static Mutex<Checklist> {
+	static CHECKLIST: OnceLock<Mutex<Checklist>> = OnceLock::new();
+	CHECKLIST.get_or_init(|| Mutex::new(Checklist { counts: [0; EXPECTED_READS.len()], last_logged: Instant::now() }))
+}
+
+/// Records a clean comparison for `read` and logs the checklist at most every [`LOG_INTERVAL`].
+fn mark(read: &str) {
+	let mut list = checklist()
+		.lock()
+		.expect("no panic can occur while the checklist is locked; qed");
+	match EXPECTED_READS.iter().position(|&expected| expected == read) {
+		Some(idx) => list.counts[idx] += 1,
+		None => warn!("shadow read `{read}` is missing from the checklist's EXPECTED_READS"),
+	}
+	if list.last_logged.elapsed() >= LOG_INTERVAL {
+		list.last_logged = Instant::now();
+		info!("{}", render_checklist(&list.counts));
+	}
+}
+
+fn render_checklist(counts: &[u64]) -> String {
+	let exercised = counts.iter().filter(|&&count| count > 0).count();
+	let mut out = format!("shadow-decode checklist: {exercised}/{} reads exercised", counts.len());
+	for (read, count) in EXPECTED_READS.iter().zip(counts) {
+		if *count > 0 {
+			out.push_str(&format!("\n  ok      {read} ({count})"));
+		} else {
+			out.push_str(&format!("\n  pending {read}"));
+		}
+	}
+	out
+}
+
+/// Logs the checklist unconditionally. Call at shutdown so a shadow run ends with a coverage
+/// verdict: which reads it proved (with clean-comparison counts) and which are still pending.
+pub fn log_checklist() {
+	let list = checklist()
+		.lock()
+		.expect("no panic can occur while the checklist is locked; qed");
+	info!("{}", render_checklist(&list.counts));
+}
 
 /// Compares the metadata decode (`old`) against the metadata-free decode (`new`) for a single
 /// scalar read at `block`. Aborts the process on any mismatch, reporting `(block, read, old, new)`.
@@ -31,6 +118,7 @@ pub fn compare<T: PartialEq + Debug>(block: H256, read: &str, old: &T, new: &T) 
 	if old != new {
 		report_and_abort(block, read, &format!("{old:?}"), &format!("{new:?}"));
 	}
+	mark(read);
 }
 
 /// Compares two collections as sets keyed by identity, so order differences between the metadata
@@ -47,6 +135,11 @@ where
 	if old_map != new_map {
 		report_and_abort(block, read, &format!("{old_map:?}"), &format!("{new_map:?}"));
 	}
+	// Two empty sets compare equal without proving the decoder, so only a populated comparison
+	// counts as exercising the read.
+	if !old.is_empty() || !new.is_empty() {
+		mark(read);
+	}
 }
 
 fn report_and_abort(block: H256, read: &str, old: &str, new: &str) -> ! {
@@ -54,4 +147,34 @@ fn report_and_abort(block: H256, read: &str, old: &str, new: &str) -> ! {
 		"shadow-decode mismatch at block {block:?} for read `{read}`:\n  metadata      = {old}\n  metadata-free = {new}"
 	);
 	std::process::exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn renders_ok_and_pending_reads() {
+		let mut counts = [0u64; EXPECTED_READS.len()];
+		counts[0] = 3;
+		let out = render_checklist(&counts);
+		assert!(out.starts_with(&format!("shadow-decode checklist: 1/{} reads exercised", EXPECTED_READS.len())));
+		assert!(out.contains("ok      block_header (3)"));
+		assert!(out.contains("pending block_number"));
+	}
+
+	#[test]
+	fn marks_only_meaningful_comparisons() {
+		let block = H256::from([0u8; 32]);
+		let empty: [u32; 0] = [];
+		compare_set(block, "candidate_events", &empty, &empty, |v| *v);
+		compare(block, "block_timestamp", &1u64, &1u64);
+		compare_set(block, "disputes_initiated", &[7u32], &[7u32], |v| *v);
+
+		let list = checklist().lock().unwrap();
+		let idx = |read: &str| EXPECTED_READS.iter().position(|&expected| expected == read).unwrap();
+		assert_eq!(list.counts[idx("candidate_events")], 0);
+		assert!(list.counts[idx("block_timestamp")] > 0);
+		assert!(list.counts[idx("disputes_initiated")] > 0);
+	}
 }

@@ -35,7 +35,7 @@ use futures::{StreamExt, future, stream::FuturesUnordered};
 use itertools::Itertools;
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	api::{api_client::ApiClientMode, executor::RequestExecutor},
+	api::{api_client::ApiClientMode, executor::RequestExecutor, shadow},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector::{self, Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent, TerminationReason},
@@ -541,6 +541,10 @@ async fn main() -> color_eyre::Result<()> {
 	futures.extend(sub.run(&shutdown_tx).await?);
 	init::run(futures, &shutdown_tx).await?;
 	executor.close().await;
+
+	if opts.shadow_decode_without_metadata {
+		shadow::log_checklist();
+	}
 
 	Ok(())
 }
