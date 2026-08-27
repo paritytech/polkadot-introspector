@@ -135,15 +135,50 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		}
 	}
 
+	/// Fetches a header via `chain_getHeader` — the metadata-free counterpart of the blocks API.
+	async fn header_via_rpc(&self, hash: H256) -> Result<Header, subxt::Error> {
+		self.legacy_rpc_methods
+			.chain_get_header(Some(hash))
+			.await?
+			.ok_or_else(|| subxt::Error::Other(format!("header {hash:?} not found via chain_getHeader")))
+	}
+
+	/// Reads a raw storage value via `state_getStorage` and decodes it with the given metadata-free
+	/// decoder — the shadow counterpart of a typed storage read.
+	async fn shadow_storage<R>(
+		&self,
+		hash: H256,
+		key: &[u8],
+		read: &str,
+		decode: impl Fn(&[u8]) -> color_eyre::Result<R>,
+	) -> Result<Option<R>, subxt::Error> {
+		self.legacy_rpc_methods
+			.state_get_storage(key, Some(hash))
+			.await?
+			.map(|bytes| decode(&bytes))
+			.transpose()
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode {read} (metadata-free): {e}")))
+	}
+
+	/// Calls a runtime API via `state_call` and decodes the result with the given metadata-free decoder.
+	async fn state_call_decoded<R>(
+		&self,
+		hash: H256,
+		method: &str,
+		decode: impl Fn(&[u8]) -> color_eyre::Result<R>,
+	) -> Result<R, subxt::Error> {
+		let bytes = self.legacy_rpc_methods.state_call(method, None, Some(hash)).await?;
+		decode(&bytes).map_err(|e| subxt::Error::Other(format!("Failed to decode {method}: {e}")))
+	}
+
 	async fn get_hrmp_egress_channels_index(
-		storage: StorageClient<PolkadotConfig, T>,
-		legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
-		shadow: bool,
+		client: ApiClient<T>,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<u32>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
-		let index: Vec<u32> = storage
+		let index: Vec<u32> = client
+			.storage()
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
@@ -152,15 +187,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.map(|id| id.0)
 			.collect();
 
-		if shadow {
-			let metadata_free = legacy_rpc_methods
-				.state_get_storage(&hrmp_egress_channels_index_key(para_id), Some(block_hash))
+		if client.shadow {
+			let key = hrmp_egress_channels_index_key(para_id);
+			let metadata_free = client
+				.shadow_storage(block_hash, &key, "HrmpEgressChannelsIndex", decode_para_ids)
 				.await?
-				.map(|bytes| decode_para_ids(&bytes))
-				.transpose()
-				.map_err(|e| {
-					subxt::Error::Other(format!("Failed to decode HrmpEgressChannelsIndex (metadata-free): {e}"))
-				})?
 				.unwrap_or_default();
 			shadow::compare(block_hash, "hrmp_egress_channels_index", &index, &metadata_free);
 		}
@@ -169,14 +200,13 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	async fn get_hrmp_channel_digests(
-		storage: StorageClient<PolkadotConfig, T>,
-		legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
-		shadow: bool,
+		client: ApiClient<T>,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<(u32, Vec<u32>)>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
-		let digests: Vec<(u32, Vec<u32>)> = storage
+		let digests: Vec<(u32, Vec<u32>)> = client
+			.storage()
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
@@ -185,13 +215,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
 			.collect();
 
-		if shadow {
-			let metadata_free = legacy_rpc_methods
-				.state_get_storage(&hrmp_channel_digests_key(para_id), Some(block_hash))
+		if client.shadow {
+			let key = hrmp_channel_digests_key(para_id);
+			let metadata_free = client
+				.shadow_storage(block_hash, &key, "HrmpChannelDigests", decode_hrmp_channel_digests)
 				.await?
-				.map(|bytes| decode_hrmp_channel_digests(&bytes))
-				.transpose()
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode HrmpChannelDigests (metadata-free): {e}")))?
 				.unwrap_or_default();
 			shadow::compare(block_hash, "hrmp_channel_digests", &digests, &metadata_free);
 		}
@@ -200,24 +228,25 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	async fn get_hrmp_channels(
-		storage: StorageClient<PolkadotConfig, T>,
-		legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
-		shadow: bool,
+		client: ApiClient<T>,
 		block_hash: H256,
 		sender: u32,
 		recipient: u32,
 	) -> Result<Option<(u32, u32, HrmpChannel)>, subxt::Error> {
 		let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(id);
-		let channel = storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v));
+		let channel = client
+			.storage()
+			.at(block_hash)
+			.fetch(&addr)
+			.await?
+			.map(|v| (sender, recipient, v));
 
-		if shadow {
-			let metadata_free: Option<SubxtHrmpChannel> = legacy_rpc_methods
-				.state_get_storage(&hrmp_channels_key(sender, recipient), Some(block_hash))
-				.await?
-				.map(|bytes| decode_hrmp_channel(&bytes))
-				.transpose()
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode HrmpChannels (metadata-free): {e}")))?;
+		if client.shadow {
+			let key = hrmp_channels_key(sender, recipient);
+			let metadata_free = client
+				.shadow_storage(block_hash, &key, "HrmpChannels", decode_hrmp_channel)
+				.await?;
 			let old = channel.as_ref().map(|(_, _, channel)| SubxtHrmpChannel::from(channel));
 			shadow::compare(block_hash, "hrmp_channel", &old, &metadata_free);
 		}
@@ -230,15 +259,9 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		block_hash: H256,
 		para_ids: Vec<u32>,
 	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
-		let inbound_ids_fut = para_ids.iter().map(|&para_id| {
-			tokio::spawn(Self::get_hrmp_channel_digests(
-				self.storage(),
-				self.legacy_rpc_methods.clone(),
-				self.shadow,
-				block_hash,
-				para_id,
-			))
-		});
+		let inbound_ids_fut = para_ids
+			.iter()
+			.map(|&para_id| tokio::spawn(Self::get_hrmp_channel_digests(self.clone(), block_hash, para_id)));
 		let inbound_ids: Vec<_> = join_requests(inbound_ids_fut)
 			.await?
 			.iter()
@@ -257,15 +280,9 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		block_hash: H256,
 		para_ids: Vec<u32>,
 	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
-		let outbound_ids_fut = para_ids.iter().map(|&para_id| {
-			tokio::spawn(Self::get_hrmp_egress_channels_index(
-				self.storage(),
-				self.legacy_rpc_methods.clone(),
-				self.shadow,
-				block_hash,
-				para_id,
-			))
-		});
+		let outbound_ids_fut = para_ids
+			.iter()
+			.map(|&para_id| tokio::spawn(Self::get_hrmp_egress_channels_index(self.clone(), block_hash, para_id)));
 		let outbound_ids: Vec<Vec<u32>> = join_requests(outbound_ids_fut).await?;
 
 		Ok(para_ids
@@ -284,11 +301,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		if self.shadow {
 			// Resolve the concrete hash so the metadata-free read hits the same block as the primary.
 			let hash = block.hash();
-			let metadata_free = self
-				.legacy_rpc_methods
-				.chain_get_header(Some(hash))
-				.await?
-				.ok_or_else(|| subxt::Error::Other(format!("header {hash:?} not found via chain_getHeader")))?;
+			let metadata_free = self.header_via_rpc(hash).await?;
 			shadow::compare(hash, "block_header", &header, &metadata_free);
 		}
 
@@ -301,11 +314,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 		if self.shadow {
 			let hash = block.hash();
-			let metadata_free = self
-				.legacy_rpc_methods
-				.chain_get_header(Some(hash))
-				.await?
-				.ok_or_else(|| subxt::Error::Other(format!("header {hash:?} not found via chain_getHeader")))?;
+			let metadata_free = self.header_via_rpc(hash).await?;
 			shadow::compare(hash, "block_number", &number, &metadata_free.number);
 		}
 
@@ -318,12 +327,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 		if self.shadow {
 			let metadata_free = self
-				.legacy_rpc_methods
-				.state_get_storage(&timestamp_now_key(), Some(hash))
-				.await?
-				.map(|bytes| decode_timestamp(&bytes))
-				.transpose()
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode Timestamp.Now (metadata-free): {e}")))?;
+				.shadow_storage(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
+				.await?;
 			shadow::compare(hash, "block_timestamp", &timestamp, &metadata_free);
 		}
 
@@ -337,33 +342,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	/// Reads candidate (backed/included/timed-out) events for a block through the
 	/// `ParachainHost_candidate_events` runtime call and decodes them without metadata.
 	pub async fn get_candidate_events(&self, hash: H256) -> Result<Vec<SubxtCandidateEvent>, subxt::Error> {
-		let bytes = self
-			.legacy_rpc_methods
-			.state_call("ParachainHost_candidate_events", None, Some(hash))
-			.await?;
-		decode_candidate_events(&bytes, self.hasher)
-			.map_err(|e| subxt::Error::Other(format!("Failed to decode candidate_events: {e}")))
+		let hasher = self.hasher;
+		self.state_call_decoded(hash, "ParachainHost_candidate_events", |bytes| decode_candidate_events(bytes, hasher))
+			.await
 	}
 
 	/// Reads the recent disputes for a block through the `ParachainHost_disputes` runtime call and
 	/// decodes them without metadata.
 	pub async fn get_disputes(&self, hash: H256) -> Result<Vec<DecodedDispute>, subxt::Error> {
-		let bytes = self
-			.legacy_rpc_methods
-			.state_call("ParachainHost_disputes", None, Some(hash))
-			.await?;
-		decode_disputes(&bytes).map_err(|e| subxt::Error::Other(format!("Failed to decode disputes: {e}")))
+		self.state_call_decoded(hash, "ParachainHost_disputes", decode_disputes).await
 	}
 
 	/// Reads the current Babe epoch through the `BabeApi_current_epoch` runtime call, decoded without
 	/// metadata. Used to shadow the `Babe.Randomness` and `Babe.Authorities` storage reads.
 	async fn babe_current_epoch(&self, hash: H256) -> Result<DecodedBabeEpoch, subxt::Error> {
-		let bytes = self
-			.legacy_rpc_methods
-			.state_call("BabeApi_current_epoch", None, Some(hash))
-			.await?;
-		decode_babe_epoch(&bytes)
-			.map_err(|e| subxt::Error::Other(format!("Failed to decode BabeApi_current_epoch: {e}")))
+		self.state_call_decoded(hash, "BabeApi_current_epoch", decode_babe_epoch).await
 	}
 
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
@@ -406,12 +399,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 		if self.shadow {
 			let metadata_free = self
-				.legacy_rpc_methods
-				.state_get_storage(&babe_current_slot_key(), Some(hash))
-				.await?
-				.map(|bytes| decode_slot(&bytes))
-				.transpose()
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode Babe.CurrentSlot (metadata-free): {e}")))?;
+				.shadow_storage(hash, &babe_current_slot_key(), "Babe.CurrentSlot", decode_slot)
+				.await?;
 			shadow::compare(hash, "babe_current_slot", &slot.as_ref().map(|slot| slot.0), &metadata_free);
 		}
 
@@ -437,13 +426,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let owner = self.storage().at(hash).fetch(&addr).await?;
 
 		if self.shadow {
-			let metadata_free = self
-				.legacy_rpc_methods
-				.state_get_storage(&session_key_owner_key(*b"babe", public), Some(hash))
-				.await?
-				.map(|bytes| decode_account_id(&bytes))
-				.transpose()
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode Session.KeyOwner (metadata-free): {e}")))?;
+			let key = session_key_owner_key(*b"babe", public);
+			let metadata_free = self.shadow_storage(hash, &key, "Session.KeyOwner", decode_account_id).await?;
 			shadow::compare(hash, "session_key_owner", &owner, &metadata_free);
 		}
 
@@ -457,13 +441,9 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))?;
 
 		if self.shadow {
-			let bytes = self
-				.legacy_rpc_methods
-				.state_call("ParachainHost_availability_cores", None, Some(hash))
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_availability_cores", decode_availability_cores)
 				.await?;
-			let metadata_free = decode_availability_cores(&bytes).map_err(|e| {
-				subxt::Error::Other(format!("Failed to decode availability_cores (metadata-free): {e}"))
-			})?;
 			shadow::compare(hash, "availability_cores", &cores, &metadata_free);
 		}
 
@@ -484,12 +464,9 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		})?;
 
 		if self.shadow {
-			let bytes = self
-				.legacy_rpc_methods
-				.state_call("ParachainHost_claim_queue", None, Some(hash))
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_claim_queue", decode_claim_queue)
 				.await?;
-			let metadata_free = decode_claim_queue(&bytes)
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode claim_queue (metadata-free): {e}")))?;
 			shadow::compare(hash, "claim_queue", &queue, &metadata_free);
 		}
 
@@ -505,12 +482,9 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.map_err(|e| subxt::Error::Other(format!("Failed to decode validator groups: {e}")))?;
 
 		if self.shadow {
-			let bytes = self
-				.legacy_rpc_methods
-				.state_call("ParachainHost_validator_groups", None, Some(hash))
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_validator_groups", decode_validator_groups)
 				.await?;
-			let metadata_free = decode_validator_groups(&bytes)
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode validator_groups (metadata-free): {e}")))?;
 			let old: Vec<Vec<u32>> = groups.iter().map(|group| group.iter().map(|idx| idx.0).collect()).collect();
 			shadow::compare(hash, "validator_groups", &old, &metadata_free);
 		}
@@ -523,12 +497,9 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let index = self.storage().at(hash).fetch(&addr).await?;
 
 		if self.shadow {
-			let bytes = self
-				.legacy_rpc_methods
-				.state_call("ParachainHost_session_index_for_child", None, Some(hash))
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_session_index_for_child", decode_session_index)
 				.await?;
-			let metadata_free = decode_session_index(&bytes)
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode session_index_for_child: {e}")))?;
 			shadow::compare(hash, "session_index", &index.unwrap_or_default(), &metadata_free);
 		}
 
@@ -558,13 +529,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			let Some(hash) = maybe_hash
 		{
 			let key = para_session_account_keys_key(session_index);
-			let metadata_free = self
-				.legacy_rpc_methods
-				.state_get_storage(&key, Some(hash))
-				.await?
-				.map(|bytes| decode_account_keys(&bytes))
-				.transpose()
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode account_keys (metadata-free): {e}")))?;
+			let metadata_free = self.shadow_storage(hash, &key, "account_keys", decode_account_keys).await?;
 			shadow::compare(hash, "session_account_keys", &keys, &metadata_free);
 		}
 
@@ -597,12 +562,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				})
 				.unwrap_or_default();
 			let metadata_free = self
-				.legacy_rpc_methods
-				.state_get_storage(&queued_keys_key(), Some(hash))
+				.shadow_storage(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
 				.await?
-				.map(|bytes| decode_queued_authority_discovery_keys(&bytes))
-				.transpose()
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode Session.QueuedKeys (metadata-free): {e}")))?
 				.unwrap_or_default();
 			shadow::compare(hash, "session_queued_keys", &old, &metadata_free);
 		}
@@ -618,14 +579,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	{
 		let inbound_pairs = self.get_inbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
 		let inbound_channels_fut = inbound_pairs.iter().map(|(sender, para_id)| {
-			tokio::spawn(Self::get_hrmp_channels(
-				self.storage(),
-				self.legacy_rpc_methods.clone(),
-				self.shadow,
-				block_hash,
-				*sender,
-				*para_id,
-			))
+			tokio::spawn(Self::get_hrmp_channels(self.clone(), block_hash, *sender, *para_id))
 		});
 		let inbound_channels: Vec<_> = join_requests(inbound_channels_fut).await?.into_iter().flatten().collect();
 
@@ -637,14 +591,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 		let outbound_pairs = self.get_outbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
 		let outbound_channels_fut = outbound_pairs.iter().map(|(para_id, recipient)| {
-			tokio::spawn(Self::get_hrmp_channels(
-				self.storage(),
-				self.legacy_rpc_methods.clone(),
-				self.shadow,
-				block_hash,
-				*para_id,
-				*recipient,
-			))
+			tokio::spawn(Self::get_hrmp_channels(self.clone(), block_hash, *para_id, *recipient))
 		});
 		let outbound_channels: Vec<_> = join_requests(outbound_channels_fut).await?.into_iter().flatten().collect();
 

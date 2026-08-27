@@ -406,7 +406,7 @@ impl Collector {
 			.collect();
 		let metadata_free = self.executor.get_candidate_events(self.endpoint.as_str(), hash).await?;
 		shadow::compare_set(hash, "candidate_events", &scraped, &metadata_free, |event| {
-			(event.candidate_hash, candidate_event_type_key(event.event_type))
+			(event.candidate_hash, event.event_type)
 		});
 
 		Ok(())
@@ -1362,15 +1362,6 @@ fn get_unix_time_unwrap() -> Duration {
 struct ConcludedDispute {
 	candidate_hash: H256,
 	outcome: SubxtDisputeResult,
-}
-
-/// A stable per-variant key so candidate events can be compared as a set by `(hash, type)`.
-fn candidate_event_type_key(event_type: SubxtCandidateEventType) -> u8 {
-	match event_type {
-		SubxtCandidateEventType::Backed => 0,
-		SubxtCandidateEventType::Included => 1,
-		SubxtCandidateEventType::TimedOut => 2,
-	}
 }
 
 pub fn new_head_hash(event: &ChainSubscriptionEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {

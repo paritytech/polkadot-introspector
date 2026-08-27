@@ -30,10 +30,13 @@ use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError
 use sp_core_hashing::{twox_64, twox_128};
 use subxt::config::Hasher;
 
+/// SCALE-encoded size of a `CandidateDescriptor`. Stable across descriptor versions: V1's fields
+/// are re-interpreted, never resized.
+const CANDIDATE_DESCRIPTOR_SIZE: usize = 292;
 /// SCALE-encoded size of a `CandidateReceipt`: `CandidateDescriptor` (292 bytes) plus the
 /// `commitments_hash` (32 bytes). The size is stable across descriptor versions (V1's fields are
 /// re-interpreted, never resized), so decoding this fixed window handles every version alike.
-const CANDIDATE_RECEIPT_SIZE: usize = 324;
+const CANDIDATE_RECEIPT_SIZE: usize = CANDIDATE_DESCRIPTOR_SIZE + 32;
 /// Bytes of the receipt after `para_id` (`u32`) and `relay_parent` (`H256`), kept opaque.
 const RECEIPT_TAIL_SIZE: usize = CANDIDATE_RECEIPT_SIZE - 4 - 32;
 
@@ -107,65 +110,55 @@ pub struct DecodedDispute {
 	pub concluded_at: Option<u32>,
 }
 
-/// Decodes the SCALE-encoded result of the `ParachainHost_disputes` runtime call. The layout of each
-/// element is `SessionIndex ++ CandidateHash ++ DisputeState`, and `DisputeState` is
-/// `validators_for ++ validators_against ++ start ++ concluded_at` — the two bitsets come first, so
-/// their variable length is consumed before the fixed `start` / `concluded_at` fields. Fails loud on
-/// truncation or trailing bytes, so a layout change never yields a silently wrong value.
-pub fn decode_disputes(bytes: &[u8]) -> Result<Vec<DecodedDispute>> {
-	let mut input = bytes;
-	let len = Compact::<u32>::decode(&mut input)
-		.map_err(|e| eyre!("disputes: cannot decode length prefix: {e}"))?
-		.0;
-
-	let mut disputes = Vec::with_capacity(len as usize);
-	for i in 0..len {
-		let session =
-			u32::decode(&mut input).map_err(|e| eyre!("disputes: cannot decode session for dispute {i}: {e}"))?;
-		let candidate_hash = <[u8; 32]>::decode(&mut input)
-			.map_err(|e| eyre!("disputes: cannot decode candidate_hash for dispute {i}: {e}"))?;
-		let validators_for = decode_bitset_indices(&mut input)
-			.map_err(|e| eyre!("disputes: cannot decode validators_for for dispute {i}: {e}"))?;
-		let validators_against = decode_bitset_indices(&mut input)
-			.map_err(|e| eyre!("disputes: cannot decode validators_against for dispute {i}: {e}"))?;
-		let start = u32::decode(&mut input).map_err(|e| eyre!("disputes: cannot decode start for dispute {i}: {e}"))?;
-		let concluded_at = Option::<u32>::decode(&mut input)
-			.map_err(|e| eyre!("disputes: cannot decode concluded_at for dispute {i}: {e}"))?;
-
-		disputes.push(DecodedDispute {
-			session,
-			candidate_hash: H256::from(candidate_hash),
-			validators_for,
-			validators_against,
-			start,
-			concluded_at,
-		});
-	}
-
-	if !input.is_empty() {
-		return Err(eyre!("disputes: {} trailing bytes after {len} disputes", input.len()));
-	}
-
-	Ok(disputes)
-}
-
-/// Decodes a SCALE-encoded `BitVec<u8, Lsb0>` into the indices of its set bits. The encoding is a
+/// A SCALE-encoded `BitVec<u8, Lsb0>` decoded into the indices of its set bits. The encoding is a
 /// compact bit count followed by `ceil(bits / 8)` bytes, least-significant bit first within each
 /// byte. Errors rather than guesses if the byte payload is shorter than the declared bit count.
-fn decode_bitset_indices(input: &mut &[u8]) -> Result<Vec<u32>> {
-	let bit_len = Compact::<u32>::decode(input)
-		.map_err(|e| eyre!("cannot decode bitset length: {e}"))?
-		.0 as usize;
-	let byte_len = bit_len.div_ceil(8);
-	if input.len() < byte_len {
-		return Err(eyre!("bitset payload too short: need {byte_len} bytes, have {}", input.len()));
-	}
-	let (bytes, rest) = input.split_at(byte_len);
-	*input = rest;
+struct BitsetIndices(Vec<u32>);
 
-	Ok((0..bit_len)
-		.filter(|&i| bytes[i / 8] & (1 << (i % 8)) != 0)
-		.map(|i| i as u32)
+impl Decode for BitsetIndices {
+	fn decode<I: Input>(input: &mut I) -> core::result::Result<Self, CodecError> {
+		let bit_len = Compact::<u32>::decode(input)?.0 as usize;
+		let mut bytes = vec![0u8; bit_len.div_ceil(8)];
+		input.read(&mut bytes)?;
+		Ok(Self(
+			(0..bit_len)
+				.filter(|&i| bytes[i / 8] & (1 << (i % 8)) != 0)
+				.map(|i| i as u32)
+				.collect(),
+		))
+	}
+}
+
+/// One element of the `ParachainHost_disputes` result: `SessionIndex ++ CandidateHash ++
+/// DisputeState`, where `DisputeState` is `validators_for ++ validators_against ++ start ++
+/// concluded_at` — the two bitsets come first, so their variable length is consumed before the
+/// fixed `start` / `concluded_at` fields.
+#[derive(Decode)]
+struct RawDispute {
+	session: u32,
+	candidate_hash: [u8; 32],
+	validators_for: BitsetIndices,
+	validators_against: BitsetIndices,
+	start: u32,
+	concluded_at: Option<u32>,
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_disputes` runtime call. Codec drives the
+/// traversal and `decode_all` fails loud on truncation or trailing bytes, so a layout change never
+/// yields a silently wrong value.
+pub fn decode_disputes(bytes: &[u8]) -> Result<Vec<DecodedDispute>> {
+	let raw = Vec::<RawDispute>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("disputes: cannot decode: {e}"))?;
+
+	Ok(raw
+		.into_iter()
+		.map(|dispute| DecodedDispute {
+			session: dispute.session,
+			candidate_hash: H256::from(dispute.candidate_hash),
+			validators_for: dispute.validators_for.0,
+			validators_against: dispute.validators_against.0,
+			start: dispute.start,
+			concluded_at: dispute.concluded_at,
+		})
 		.collect())
 }
 
@@ -194,7 +187,7 @@ struct RawScheduledCore {
 
 /// `polkadot_primitives::OccupiedCore`, decoded in full only to advance the cursor past an occupied
 /// core — the tools keep just the `CoreState` variant. `candidate_descriptor` is the fixed 292-byte
-/// `CandidateDescriptorV2` window (see [`CANDIDATE_RECEIPT_SIZE`]); pinning its length makes a
+/// `CandidateDescriptorV2` window (see [`CANDIDATE_DESCRIPTOR_SIZE`]); pinning its length makes a
 /// resized descriptor fail to decode rather than silently desync the surrounding vector.
 #[derive(Decode)]
 #[allow(dead_code)]
@@ -206,7 +199,7 @@ struct RawOccupiedCore {
 	availability: SkipBitVec,
 	group_responsible: u32,
 	candidate_hash: [u8; 32],
-	candidate_descriptor: [u8; CANDIDATE_RECEIPT_SIZE - 32],
+	candidate_descriptor: [u8; CANDIDATE_DESCRIPTOR_SIZE],
 }
 
 /// One element of the `ParachainHost_availability_cores` result, keyed by the runtime's own variant
@@ -265,13 +258,20 @@ pub fn decode_session_index(bytes: &[u8]) -> Result<u32> {
 	u32::decode_all(&mut &bytes[..]).map_err(|e| eyre!("session_index: cannot decode: {e}"))
 }
 
+/// Builds the key prefix shared by every entry of a storage item: `twox_128(pallet) ++
+/// twox_128(storage)`. For a `StorageValue` this is the whole key.
+fn storage_prefix(pallet: &[u8], storage: &[u8]) -> Vec<u8> {
+	let mut key = Vec::with_capacity(32);
+	key.extend_from_slice(&twox_128(pallet));
+	key.extend_from_slice(&twox_128(storage));
+	key
+}
+
 /// Builds the storage key for `ParaSessionInfo::AccountKeys[session_index]`. The map uses the
 /// `Identity` hasher (the session index is sequential, not attacker-controlled), so the key is the
 /// SCALE-encoded index appended raw to the `twox_128` pallet/storage prefix — no per-key hash.
 pub fn para_session_account_keys_key(session_index: u32) -> Vec<u8> {
-	let mut key = Vec::with_capacity(36);
-	key.extend_from_slice(&twox_128(b"ParaSessionInfo"));
-	key.extend_from_slice(&twox_128(b"AccountKeys"));
+	let mut key = storage_prefix(b"ParaSessionInfo", b"AccountKeys");
 	key.extend_from_slice(&session_index.encode());
 	key
 }
@@ -292,28 +292,31 @@ pub struct DecodedBabeEpoch {
 	pub randomness: [u8; 32],
 }
 
+/// Babe's `Epoch` decoded only as far as the fields the tools use; the leading three fields are
+/// decoded to advance the cursor.
+#[derive(Decode)]
+#[allow(dead_code)]
+struct RawBabeEpoch {
+	epoch_index: u64,
+	start_slot: u64,
+	duration: u64,
+	authorities: Vec<([u8; 32], u64)>,
+	randomness: [u8; 32],
+}
+
 /// Decodes the SCALE-encoded result of the `BabeApi_current_epoch` runtime call. `Epoch` is
 /// `epoch_index ++ start_slot ++ duration ++ authorities ++ randomness ++ config`; we read positionally
-/// through `randomness` and ignore the trailing `config`, so fields appended in an upgrade are
-/// tolerated. Fails loud if the bytes are too short for the fields we read.
+/// through `randomness` (plain `decode`, not `decode_all`) and ignore the trailing `config`, so fields
+/// appended in an upgrade are tolerated. Fails loud if the bytes are too short for the fields we read.
 pub fn decode_babe_epoch(bytes: &[u8]) -> Result<DecodedBabeEpoch> {
-	let mut input = bytes;
-	let _epoch_index = u64::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode epoch_index: {e}"))?;
-	let _start_slot = u64::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode start_slot: {e}"))?;
-	let _duration = u64::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode duration: {e}"))?;
-	let authorities =
-		Vec::<([u8; 32], u64)>::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode authorities: {e}"))?;
-	let randomness = <[u8; 32]>::decode(&mut input).map_err(|e| eyre!("babe epoch: cannot decode randomness: {e}"))?;
-	Ok(DecodedBabeEpoch { authorities, randomness })
+	let raw = RawBabeEpoch::decode(&mut &bytes[..]).map_err(|e| eyre!("babe epoch: cannot decode: {e}"))?;
+	Ok(DecodedBabeEpoch { authorities: raw.authorities, randomness: raw.randomness })
 }
 
 /// Builds the storage key for the `Babe::CurrentSlot` value. It is a `StorageValue`, so the key is the
 /// bare `twox_128` pallet/storage prefix with no per-key hash.
 pub fn babe_current_slot_key() -> Vec<u8> {
-	let mut key = Vec::with_capacity(32);
-	key.extend_from_slice(&twox_128(b"Babe"));
-	key.extend_from_slice(&twox_128(b"CurrentSlot"));
-	key
+	storage_prefix(b"Babe", b"CurrentSlot")
 }
 
 /// Decodes the `Slot` (`u64`) stored at `Babe::CurrentSlot`. `decode_all` fails loud on trailing bytes.
@@ -324,10 +327,7 @@ pub fn decode_slot(bytes: &[u8]) -> Result<u64> {
 /// Builds the storage key for the `Timestamp::Now` value. It is a `StorageValue`, so the key is the
 /// bare `twox_128` pallet/storage prefix with no per-key hash.
 pub fn timestamp_now_key() -> Vec<u8> {
-	let mut key = Vec::with_capacity(32);
-	key.extend_from_slice(&twox_128(b"Timestamp"));
-	key.extend_from_slice(&twox_128(b"Now"));
-	key
+	storage_prefix(b"Timestamp", b"Now")
 }
 
 /// Decodes the millisecond timestamp (`u64`) stored at `Timestamp::Now`. `decode_all` fails loud on
@@ -340,9 +340,7 @@ pub fn decode_timestamp(bytes: &[u8]) -> Result<u64> {
 /// twox_64(encoded_key) ++ encoded_key`. The concatenated raw key lets the value be found and, if
 /// needed, the key recovered from the storage trie.
 fn twox64_concat_key(pallet: &[u8], storage: &[u8], encoded_key: &[u8]) -> Vec<u8> {
-	let mut key = Vec::with_capacity(16 + 16 + 8 + encoded_key.len());
-	key.extend_from_slice(&twox_128(pallet));
-	key.extend_from_slice(&twox_128(storage));
+	let mut key = storage_prefix(pallet, storage);
 	key.extend_from_slice(&twox_64(encoded_key));
 	key.extend_from_slice(encoded_key);
 	key
@@ -394,10 +392,7 @@ struct RawSessionKeys {
 /// Builds the storage key for the `Session::QueuedKeys` value (a `StorageValue`, so the key is the
 /// bare `twox_128` pallet/storage prefix with no per-key hash).
 pub fn queued_keys_key() -> Vec<u8> {
-	let mut key = Vec::with_capacity(32);
-	key.extend_from_slice(&twox_128(b"Session"));
-	key.extend_from_slice(&twox_128(b"QueuedKeys"));
-	key
+	storage_prefix(b"Session", b"QueuedKeys")
 }
 
 /// Decodes `Session::QueuedKeys` (`Vec<(ValidatorId, SessionKeys)>`) into `(account,
@@ -658,7 +653,7 @@ mod tests {
 		bytes.extend(vec![0xFFu8; (availability_bits as usize).div_ceil(8)]); // availability payload
 		bytes.extend(7u32.encode()); // group_responsible
 		bytes.extend([0xAAu8; 32]); // candidate_hash
-		bytes.extend([0xBBu8; CANDIDATE_RECEIPT_SIZE - 32]); // candidate_descriptor
+		bytes.extend([0xBBu8; CANDIDATE_DESCRIPTOR_SIZE]); // candidate_descriptor
 		bytes
 	}
 

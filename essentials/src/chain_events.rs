@@ -44,7 +44,7 @@ pub enum ChainEvent<T: subxt::Config> {
 	RawEvent(PolkadotHash, subxt::events::EventDetails<T>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SubxtCandidateEventType {
 	/// Candidate has been backed
 	Backed,

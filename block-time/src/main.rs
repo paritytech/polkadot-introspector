@@ -374,7 +374,8 @@ async fn main() -> color_eyre::Result<()> {
 	init::init_cli(&opts.verbose)?;
 
 	let shutdown_tx = init::init_shutdown();
-	let executor = RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &shutdown_tx, false).await?;
+	let executor =
+		RequestExecutor::build(opts.nodes.clone(), ApiClientMode::RPC, &opts.retry, &shutdown_tx, false).await?;
 	let monitor = BlockTimeMonitor::new(opts.clone(), executor.clone())?;
 	let shutdown_tx = init::init_shutdown();
 	let mut futures = vec![];
