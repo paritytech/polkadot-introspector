@@ -43,7 +43,7 @@ use polkadot_introspector_priority_channel::{
 use sp_core_hashing::blake2_256;
 use std::{
 	cmp::Ordering,
-	collections::BTreeMap,
+	collections::{BTreeMap, BTreeSet},
 	default::Default,
 	hash::Hash,
 	net::SocketAddr,
@@ -419,6 +419,11 @@ impl Collector {
 	/// block, `concluded_at == Some(block_number)` the ones concluded in it. Both are compared as sets
 	/// keyed by candidate hash; the concluded outcome is derived from which validator side prevailed.
 	/// Aborts on any mismatch; the scraped events remain what the tool returns while shadowing.
+	///
+	/// A dispute can conclude twice, in opposite directions, when f+1 validators vote both ways. The
+	/// pallet emits a second `DisputeConcluded` event but keeps the first `concluded_at`, so the
+	/// runtime call cannot express the second conclusion at all. Those candidates are excluded from
+	/// the comparison rather than reported as a decoder mismatch.
 	async fn shadow_disputes(
 		&mut self,
 		hash: H256,
@@ -442,6 +447,30 @@ impl Collector {
 			.collect();
 
 		let disputes = self.executor.get_disputes(self.endpoint.as_str(), hash).await?;
+
+		let mut scraped_counts: BTreeMap<H256, usize> = BTreeMap::new();
+		for dispute in &scraped_concluded {
+			*scraped_counts.entry(dispute.candidate_hash).or_default() += 1;
+		}
+		let concluded_twice: BTreeSet<H256> = scraped_counts
+			.into_iter()
+			.filter(|(candidate_hash, count)| {
+				*count > 1 ||
+					disputes.iter().any(|dispute| {
+						dispute.candidate_hash == *candidate_hash &&
+							dispute.concluded_at.is_some_and(|at| at < block_number)
+					})
+			})
+			.map(|(candidate_hash, _)| candidate_hash)
+			.collect();
+		if !concluded_twice.is_empty() {
+			warn!("Disputes concluded twice at block {hash:?}, excluded from the comparison: {concluded_twice:?}");
+		}
+
+		let scraped_concluded: Vec<ConcludedDispute> = scraped_concluded
+			.into_iter()
+			.filter(|dispute| !concluded_twice.contains(&dispute.candidate_hash))
+			.collect();
 		let metadata_free_initiated: Vec<H256> = disputes
 			.iter()
 			.filter(|dispute| dispute.start == block_number)
@@ -449,7 +478,9 @@ impl Collector {
 			.collect();
 		let metadata_free_concluded: Vec<ConcludedDispute> = disputes
 			.iter()
-			.filter(|dispute| dispute.concluded_at == Some(block_number))
+			.filter(|dispute| {
+				dispute.concluded_at == Some(block_number) && !concluded_twice.contains(&dispute.candidate_hash)
+			})
 			.map(|dispute| ConcludedDispute {
 				candidate_hash: dispute.candidate_hash,
 				// A dispute concludes when one side reaches a supermajority, so the larger tally is
