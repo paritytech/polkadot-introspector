@@ -100,11 +100,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.hasher
 	}
 
-	/// Whether the shadow-decode harness is enabled for this client.
-	pub fn shadow_enabled(&self) -> bool {
-		self.shadow
-	}
-
 	fn storage(&self) -> StorageClient<PolkadotConfig, T> {
 		self.client.storage()
 	}
