@@ -338,7 +338,8 @@ impl SubxtTracker {
 	}
 
 	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) {
-		for core in self.cores.clone().into_keys() {
+		let cores: Vec<u32> = self.cores.keys().copied().collect();
+		for core in cores {
 			let Some(candidate) = self.current_candidate_mut(core) else { continue };
 			if candidate.is_backed() {
 				candidate.core_occupied = matches!(
