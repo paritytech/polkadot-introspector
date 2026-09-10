@@ -21,6 +21,7 @@ use crate::{
 	api::{
 		ApiService,
 		executor::{RequestExecutor, RequestExecutorError},
+		shadow,
 	},
 	chain_events::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
@@ -28,7 +29,7 @@ use crate::{
 	chain_subscription::ChainSubscriptionEvent,
 	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, H256, Header, InherentData, OnDemandOrder, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, H256, Header, InherentData, PolkadotHasher, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -42,7 +43,7 @@ use polkadot_introspector_priority_channel::{
 use sp_core_hashing::blake2_256;
 use std::{
 	cmp::Ordering,
-	collections::BTreeMap,
+	collections::{BTreeMap, BTreeSet},
 	default::Default,
 	hash::Hash,
 	net::SocketAddr,
@@ -115,8 +116,6 @@ pub enum CollectorPrefixType {
 	InherentData,
 	/// Dispute information indexed by Parachain-Id; data is DisputeInfo
 	Dispute(u32),
-	/// On-demand order information by parachain id
-	OnDemandOrder(u32),
 	/// Inbound/Outbound HRMP channel configuration
 	InboundOutboundHrmpChannels(u32),
 }
@@ -354,10 +353,11 @@ impl Collector {
 		&mut self,
 		event: &ChainSubscriptionEvent,
 	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
-		let new_head_event = match event {
-			ChainSubscriptionEvent::NewBestHead((hash, header)) => ChainEvent::NewBestHead((*hash, header.clone())),
+		let (new_head_event, block_number) = match event {
+			ChainSubscriptionEvent::NewBestHead((hash, header)) =>
+				(ChainEvent::NewBestHead((*hash, header.clone())), header.number),
 			ChainSubscriptionEvent::NewFinalizedBlock((hash, header)) =>
-				ChainEvent::NewFinalizedHead((*hash, header.clone())),
+				(ChainEvent::NewFinalizedHead((*hash, header.clone())), header.number),
 			_ => return Ok(vec![]),
 		};
 		let mut chain_events = vec![new_head_event];
@@ -378,9 +378,127 @@ impl Collector {
 			if skipped_events > 0 {
 				log::error!("Skipped {skipped_events} undecoded events in block {hash:?}");
 			}
+
+			if self.executor.shadow_enabled() {
+				self.shadow_candidate_events(*hash, &chain_events).await?;
+				self.shadow_disputes(*hash, block_number, &chain_events).await?;
+			}
 		};
 
 		Ok(chain_events)
+	}
+
+	/// Shadow-decodes candidate events for a block through the metadata-free
+	/// `ParachainHost_candidate_events` runtime call and compares them, as a set keyed by
+	/// `(candidate_hash, event_type)`, against the ones scraped from `System.Events`. Aborts on any
+	/// mismatch; the scraped events remain what the tool returns while shadowing.
+	async fn shadow_candidate_events(
+		&mut self,
+		hash: H256,
+		chain_events: &[ChainEvent<PolkadotConfig>],
+	) -> color_eyre::Result<()> {
+		let scraped: Vec<SubxtCandidateEvent> = chain_events
+			.iter()
+			.filter_map(|event| match event {
+				ChainEvent::CandidateChanged(candidate) => Some((**candidate).clone()),
+				_ => None,
+			})
+			.collect();
+		let metadata_free = self.executor.get_candidate_events(self.endpoint.as_str(), hash).await?;
+		shadow::compare_set(hash, "candidate_events", &scraped, &metadata_free, |event| {
+			(event.candidate_hash, event.event_type)
+		});
+
+		Ok(())
+	}
+
+	/// Shadow-decodes disputes for a block through the metadata-free `ParachainHost_disputes` runtime
+	/// call and compares them against the ones scraped from `System.Events`. The runtime call returns
+	/// the rolling window of recent disputes, so it is sliced by relay block number to the per-block
+	/// deltas the scraped events represent: `start == block_number` are the ones initiated in this
+	/// block, `concluded_at == Some(block_number)` the ones concluded in it. Both are compared as sets
+	/// keyed by candidate hash; the concluded outcome is derived from which validator side prevailed.
+	/// Aborts on any mismatch; the scraped events remain what the tool returns while shadowing.
+	///
+	/// A dispute can conclude twice, in opposite directions, when f+1 validators vote both ways. The
+	/// pallet emits a second `DisputeConcluded` event but keeps the first `concluded_at`, so the
+	/// runtime call cannot express the second conclusion at all. Those candidates are excluded from
+	/// the comparison rather than reported as a decoder mismatch.
+	async fn shadow_disputes(
+		&mut self,
+		hash: H256,
+		block_number: u32,
+		chain_events: &[ChainEvent<PolkadotConfig>],
+	) -> color_eyre::Result<()> {
+		let scraped_initiated: Vec<H256> = chain_events
+			.iter()
+			.filter_map(|event| match event {
+				ChainEvent::DisputeInitiated(dispute) => Some(dispute.candidate_hash),
+				_ => None,
+			})
+			.collect();
+		let scraped_concluded: Vec<ConcludedDispute> = chain_events
+			.iter()
+			.filter_map(|event| match event {
+				ChainEvent::DisputeConcluded(dispute, outcome) =>
+					Some(ConcludedDispute { candidate_hash: dispute.candidate_hash, outcome: *outcome }),
+				_ => None,
+			})
+			.collect();
+
+		let disputes = self.executor.get_disputes(self.endpoint.as_str(), hash).await?;
+
+		let mut scraped_counts: BTreeMap<H256, usize> = BTreeMap::new();
+		for dispute in &scraped_concluded {
+			*scraped_counts.entry(dispute.candidate_hash).or_default() += 1;
+		}
+		let concluded_twice: BTreeSet<H256> = scraped_counts
+			.into_iter()
+			.filter(|(candidate_hash, count)| {
+				*count > 1 ||
+					disputes.iter().any(|dispute| {
+						dispute.candidate_hash == *candidate_hash &&
+							dispute.concluded_at.is_some_and(|at| at < block_number)
+					})
+			})
+			.map(|(candidate_hash, _)| candidate_hash)
+			.collect();
+		if !concluded_twice.is_empty() {
+			warn!("Disputes concluded twice at block {hash:?}, excluded from the comparison: {concluded_twice:?}");
+		}
+
+		let scraped_concluded: Vec<ConcludedDispute> = scraped_concluded
+			.into_iter()
+			.filter(|dispute| !concluded_twice.contains(&dispute.candidate_hash))
+			.collect();
+		let metadata_free_initiated: Vec<H256> = disputes
+			.iter()
+			.filter(|dispute| dispute.start == block_number)
+			.map(|dispute| dispute.candidate_hash)
+			.collect();
+		let metadata_free_concluded: Vec<ConcludedDispute> = disputes
+			.iter()
+			.filter(|dispute| {
+				dispute.concluded_at == Some(block_number) && !concluded_twice.contains(&dispute.candidate_hash)
+			})
+			.map(|dispute| ConcludedDispute {
+				candidate_hash: dispute.candidate_hash,
+				// A dispute concludes when one side reaches a supermajority, so the larger tally is
+				// the prevailing side. `TimedOut` never concludes, so it never reaches this branch.
+				outcome: if dispute.validators_for.len() >= dispute.validators_against.len() {
+					SubxtDisputeResult::Valid
+				} else {
+					SubxtDisputeResult::Invalid
+				},
+			})
+			.collect();
+
+		shadow::compare_set(hash, "disputes_initiated", &scraped_initiated, &metadata_free_initiated, |hash| *hash);
+		shadow::compare_set(hash, "disputes_concluded", &scraped_concluded, &metadata_free_concluded, |dispute| {
+			dispute.candidate_hash
+		});
+
+		Ok(())
 	}
 
 	/// Process a next chain event
@@ -395,8 +513,6 @@ impl Collector {
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
 				self.process_dispute_concluded(dispute_event, dispute_outcome).await,
-			ChainEvent::OnDemandOrderPlaced(block_hash, order) =>
-				self.process_on_demand_order_placed(block_hash, order).await,
 			_ => Ok(()),
 		}
 	}
@@ -1224,23 +1340,6 @@ impl Collector {
 		Ok(())
 	}
 
-	async fn process_on_demand_order_placed(
-		&self,
-		block_hash: &H256,
-		order: &OnDemandOrder,
-	) -> Result<(), CollectorError> {
-		self.storage_write_prefixed(
-			CollectorPrefixType::OnDemandOrder(order.para_id),
-			*block_hash,
-			StorageEntry::new_onchain(
-				RecordTime::with_ts(self.state.current_relay_chain_block_number, get_unix_time_unwrap()),
-				order,
-			),
-		)
-		.await?;
-		Ok(())
-	}
-
 	async fn read_or_fetch_header(&self, block_hash: H256) -> Result<Option<Header>, CollectorError> {
 		if let Some(storage_entry) = self
 			.storage_read_prefixed(CollectorPrefixType::RelayBlockHeader, block_hash)
@@ -1286,6 +1385,14 @@ impl Collector {
 
 fn get_unix_time_unwrap() -> Duration {
 	SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+}
+
+/// A concluded dispute reduced to its identity and outcome, so the scraped and metadata-free paths
+/// can be compared as a set keyed by candidate hash while still catching an outcome mismatch.
+#[derive(Debug, PartialEq, Eq)]
+struct ConcludedDispute {
+	candidate_hash: H256,
+	outcome: SubxtDisputeResult,
 }
 
 pub fn new_head_hash(event: &ChainSubscriptionEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {

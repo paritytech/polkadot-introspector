@@ -21,9 +21,7 @@ use polkadot_introspector_essentials::{
 		polkadot::runtime_types::polkadot_parachain_primitives::primitives,
 		polkadot_primitives::{CoreIndex, ValidatorIndex},
 	},
-	types::{
-		AccountId32, CoreOccupied, H256, InherentData, OnDemandOrder, PolkadotHasher, SubxtHrmpChannel, Timestamp,
-	},
+	types::{AccountId32, CoreOccupied, H256, InherentData, PolkadotHasher, SubxtHrmpChannel, Timestamp},
 };
 use std::collections::BTreeMap;
 use subxt::config::Hasher;
@@ -53,14 +51,6 @@ impl TrackerStorage {
 	pub async fn inherent_data(&self, block_hash: H256) -> Option<InherentData> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::InherentData, block_hash)
-			.await
-			.map(|v| v.into_inner().unwrap())
-	}
-
-	/// Reads on-demand order information by para id and block hash when it was placed
-	pub async fn on_demand_order(&self, block_hash: H256) -> Option<OnDemandOrder> {
-		self.storage
-			.storage_read_prefixed(CollectorPrefixType::OnDemandOrder(self.para_id), block_hash)
 			.await
 			.map(|v| v.into_inner().unwrap())
 	}
@@ -197,29 +187,6 @@ mod tests {
 
 		let storage_data = storage.inherent_data(hash).await.unwrap();
 		assert_eq!(storage_data.encode(), encoded);
-	}
-
-	#[tokio::test]
-	async fn test_reads_on_demand_order() {
-		let (storage, api) = setup_client().await;
-		let hash = H256::random();
-		assert!(storage.on_demand_order(hash).await.is_none());
-
-		api.storage()
-			.storage_write_prefixed(
-				CollectorPrefixType::OnDemandOrder(100),
-				hash,
-				StorageEntry::new_onchain(
-					RecordTime::with_ts(0, Duration::from_secs(0)),
-					OnDemandOrder { para_id: 100, spot_price: 1 },
-				),
-			)
-			.await
-			.unwrap();
-
-		let storage_order = storage.on_demand_order(hash).await.unwrap();
-		assert_eq!(storage_order.para_id, 100);
-		assert_eq!(storage_order.spot_price, 1);
 	}
 
 	#[tokio::test]

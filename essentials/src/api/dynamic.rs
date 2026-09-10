@@ -23,7 +23,7 @@ use crate::{
 			ValidatorIndex,
 		},
 	},
-	types::{CoreOccupied, DisputeStatementSet, H256, InherentData, OnDemandOrder},
+	types::{CoreOccupied, DisputeStatementSet, H256, InherentData},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -159,20 +159,6 @@ fn variant_inner_value<'a>(variant: &'a Variant<u32>, context: &str) -> Result<&
 	variant.values.values().next().ok_or_else(|| {
 		DynamicError::DecodeDynamicError(format!("inner value for {}", context), ValueDef::Variant(variant.clone()))
 	})
-}
-
-pub(crate) fn decode_on_demand_order(raw: &Composite<u32>) -> Result<OnDemandOrder, DynamicError> {
-	match raw {
-		Composite::Named(v) => {
-			let raw_para_id = find_named_field(v, "para_id", raw)?;
-			let raw_spot_price = find_named_field(v, "spot_price", raw)?;
-			Ok(OnDemandOrder {
-				para_id: decode_composite_u128_value(raw_para_id)? as u32,
-				spot_price: decode_u128_value(raw_spot_price)?,
-			})
-		},
-		_ => Err(DynamicError::DecodeDynamicError("named composite".to_string(), ValueDef::Composite(raw.clone()))),
-	}
 }
 
 fn decode_unnamed_composite(value: &Value<u32>) -> Result<&Vec<Value<u32>>, DynamicError> {
@@ -396,41 +382,4 @@ pub async fn fetch_dynamic_storage(
 		.fetch_dynamic_storage(maybe_hash, pallet_name, entry_name)
 		.await?
 		.ok_or(DynamicError::EmptyResponseFromDynamicStorage(format!("{pallet_name}.{entry_name}")))
-}
-
-#[derive(Debug)]
-pub struct DynamicHostConfiguration(Value<u32>);
-
-impl DynamicHostConfiguration {
-	pub fn new(value: Value<u32>) -> Self {
-		Self(value)
-	}
-
-	pub fn at(&self, field: &str) -> String {
-		match self.0.at(field) {
-			Some(value) if matches!(value, Value { value: ValueDef::Variant(_), .. }) => match value.at(0) {
-				Some(inner) => format!("{}", inner),
-				None => format!("{}", 0),
-			},
-			Some(value) => format!("{}", value),
-			None => format!("{}", 0),
-		}
-	}
-}
-
-impl std::fmt::Display for DynamicHostConfiguration {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(
-			f,
-			"\t👀 Max validators: {} / {} per core
-\t👍 Needed approvals: {}
-\t🥔 No show slots: {}
-\t⏳ Delay tranches: {}",
-			self.at("max_validators"),
-			self.at("max_validators_per_core"),
-			self.at("needed_approvals"),
-			self.at("no_show_slots"),
-			self.at("n_delay_tranches"),
-		)
-	}
 }

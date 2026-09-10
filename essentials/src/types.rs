@@ -53,7 +53,7 @@ pub struct DisputeStatementSet {
 }
 
 /// A wrapper over subxt HRMP channel configuration
-#[derive(Debug, Clone, Default, Encode, Decode)]
+#[derive(Debug, Clone, Default, Encode, Decode, PartialEq, Eq)]
 pub struct SubxtHrmpChannel {
 	pub max_capacity: u32,
 	pub max_total_size: u32,
@@ -65,8 +65,8 @@ pub struct SubxtHrmpChannel {
 	pub recipient_deposit: u128,
 }
 
-impl From<subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
-	fn from(channel: subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
+impl From<&subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
+	fn from(channel: &subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
 		SubxtHrmpChannel {
 			max_capacity: channel.max_capacity,
 			max_total_size: channel.max_total_size,
@@ -77,6 +77,12 @@ impl From<subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> f
 			sender_deposit: channel.sender_deposit,
 			recipient_deposit: channel.recipient_deposit,
 		}
+	}
+}
+
+impl From<subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
+	fn from(channel: subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
+		Self::from(&channel)
 	}
 }
 
@@ -101,7 +107,7 @@ pub struct Assignment {
 }
 
 /// Abstraction to cover core states
-#[derive(Debug, Decode, Encode)]
+#[derive(Debug, Decode, Encode, PartialEq, Eq)]
 pub enum CoreOccupied {
 	/// The core is not occupied.
 	Free,
@@ -109,14 +115,6 @@ pub enum CoreOccupied {
 	Scheduled,
 	/// The core is occupied by a para
 	Occupied,
-}
-
-// TODO: Take it from runtime types v5
-/// Temporary abstraction to cover `Event::OnDemandAssignmentProvider`
-#[derive(Debug, Decode, Encode, Default, Clone, PartialEq)]
-pub struct OnDemandOrder {
-	pub para_id: u32,
-	pub spot_price: u128,
 }
 
 pub type InboundOutBoundHrmpChannels = Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>;

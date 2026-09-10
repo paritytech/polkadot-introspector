@@ -28,7 +28,7 @@ use log::{error, info};
 use polkadot_introspector_essentials::{
 	collector::{BackedCandidateInfo, DisputeInfo, NewHeadEvent},
 	metadata::polkadot_primitives::{AvailabilityBitfield, ValidatorIndex},
-	types::{BlockNumber, CoreOccupied, DisputeStatementSet, H256, OnDemandOrder, Timestamp},
+	types::{BlockNumber, CoreOccupied, DisputeStatementSet, H256, Timestamp},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
 
@@ -77,13 +77,6 @@ pub struct SubxtTracker {
 	/// Last observed finality lag.
 	finality_lag: Option<u32>,
 
-	/// Current on-demand order.
-	on_demand_order: Option<OnDemandOrder>,
-	/// Yhe relay chain block at which last on-demand order was placed.
-	on_demand_order_at: Option<BlockWithoutHash>,
-	/// On-demand parachain was scheduled in current relay block.
-	is_on_demand_scheduled_in_current_block: bool,
-
 	/// Disputes information.
 	disputes: Vec<DisputesTracker>,
 	/// Messages queues
@@ -101,9 +94,6 @@ impl SubxtTracker {
 			new_session: None,
 			current_relay_block: None,
 			previous_relay_block: None,
-			on_demand_order: None,
-			on_demand_order_at: None,
-			is_on_demand_scheduled_in_current_block: false,
 			finality_lag: None,
 			disputes: Vec::new(),
 			last_backed_at_block_number: None,
@@ -148,7 +138,6 @@ impl SubxtTracker {
 			self.set_disputes(inherent.disputes.as_slice(), new_head.disputes_concluded.as_slice(), storage)
 				.await;
 			self.set_hrmp_channels(block_hash, storage).await?;
-			self.set_on_demand_order(block_hash, storage).await;
 			self.set_pending_availability(block_hash, &inherent.bitfields, storage).await?;
 			self.set_dropped_candidates();
 		} else {
@@ -192,7 +181,6 @@ impl SubxtTracker {
 			self.notify_active_message_queues(&mut progress);
 			self.notify_current_block_time(stats);
 			self.notify_finality_lag(metrics);
-			self.notify_on_demand_order(metrics);
 
 			Some(progress)
 		} else {
@@ -202,14 +190,7 @@ impl SubxtTracker {
 
 	/// Resets state
 	pub fn maybe_reset_state(&mut self) {
-		for &core in self.cores.keys() {
-			if self.is_current_candidate_backed(core) {
-				self.on_demand_order_at = None;
-			}
-		}
 		self.new_session = None;
-		self.on_demand_order = None;
-		self.is_on_demand_scheduled_in_current_block = false;
 		self.disputes.clear();
 		self.candidates.values_mut().for_each(|v| {
 			v.retain(|v| {
@@ -249,13 +230,6 @@ impl SubxtTracker {
 			.map(|num| block_number - num);
 
 		Ok(())
-	}
-
-	async fn set_on_demand_order(&mut self, block_hash: H256, storage: &TrackerStorage) {
-		self.on_demand_order = storage.on_demand_order(block_hash).await;
-		if self.on_demand_order.is_some() {
-			self.on_demand_order_at = self.current_relay_block.map(|v| v.into());
-		}
 	}
 
 	fn set_forks(&mut self, block_hash: H256, block_number: BlockNumber) {
@@ -364,10 +338,8 @@ impl SubxtTracker {
 	}
 
 	async fn set_core_assignment(&mut self, block_hash: H256, storage: &TrackerStorage) {
-		for (core, scheduled_ids) in self.cores.clone() {
-			self.is_on_demand_scheduled_in_current_block =
-				self.on_demand_order.is_some() && scheduled_ids[0] == self.para_id;
-
+		let cores: Vec<u32> = self.cores.keys().copied().collect();
+		for core in cores {
 			let Some(candidate) = self.current_candidate_mut(core) else { continue };
 			if candidate.is_backed() {
 				candidate.core_occupied = matches!(
@@ -480,32 +452,6 @@ impl SubxtTracker {
 	fn notify_finality_lag(&self, metrics: &impl PrometheusMetrics) {
 		if let Some(finality_lag) = self.finality_lag {
 			metrics.on_finality_lag(finality_lag);
-		}
-	}
-
-	fn notify_on_demand_order(&self, metrics: &impl PrometheusMetrics) {
-		if let Some(ref order) = self.on_demand_order {
-			metrics.handle_on_demand_order(order);
-		}
-		if let Some(delay) = self.on_demand_delay() {
-			if self.is_on_demand_scheduled_in_current_block {
-				metrics.handle_on_demand_delay(delay, self.para_id, "scheduled");
-			}
-			for &core in self.cores.keys() {
-				if self.is_current_candidate_backed(core) {
-					metrics.handle_on_demand_delay(delay, self.para_id, "backed");
-				}
-			}
-		}
-		if let Some(delay_sec) = self.on_demand_delay_sec() {
-			if self.is_on_demand_scheduled_in_current_block {
-				metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "scheduled");
-			}
-			for &core in self.cores.keys() {
-				if self.is_current_candidate_backed(core) {
-					metrics.handle_on_demand_delay_sec(delay_sec, self.para_id, "backed");
-				}
-			}
 		}
 	}
 
@@ -638,18 +584,6 @@ impl SubxtTracker {
 		}
 	}
 
-	fn on_demand_delay(&self) -> Option<u32> {
-		if let (Some(on_demand), Some(relay)) = (self.on_demand_order_at, self.current_relay_block) {
-			Some(relay.num.saturating_sub(on_demand.num))
-		} else {
-			None
-		}
-	}
-
-	fn on_demand_delay_sec(&self) -> Option<Duration> {
-		time_diff(self.current_relay_block.map(|v| v.ts), self.on_demand_order_at.map(|v| v.ts))
-	}
-
 	fn has_backed_candidate(&self, core: u32) -> bool {
 		self.candidates.get(&core).is_some_and(|v| {
 			v.iter()
@@ -730,16 +664,12 @@ mod test_maybe_reset_state {
 		candidate.set_included();
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
-		tracker.on_demand_order = Some(OnDemandOrder::default());
-		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
 		tracker.cores.entry(0).or_default().push(100);
 
 		tracker.maybe_reset_state();
 
 		assert!(tracker.new_session.is_none());
-		assert!(tracker.on_demand_order.is_none());
-		assert!(!tracker.is_on_demand_scheduled_in_current_block);
 		assert!(tracker.disputes.is_empty());
 		for (_, candidates) in tracker.candidates {
 			assert!(candidates.is_empty());
@@ -753,19 +683,13 @@ mod test_maybe_reset_state {
 		let candidate = create_para_block_info(100, hasher);
 		tracker.candidates.entry(0).or_default().push(Some(candidate));
 		tracker.new_session = Some(42);
-		tracker.on_demand_order = Some(OnDemandOrder::default());
-		tracker.on_demand_order_at = Some(BlockWithoutHash::default());
-		tracker.is_on_demand_scheduled_in_current_block = true;
 		tracker.disputes = vec![DisputesTracker::default()];
 		tracker.cores.entry(0).or_default().push(100);
 
 		assert!(tracker.is_current_candidate_backed(0));
 		tracker.maybe_reset_state();
 
-		assert!(tracker.on_demand_order_at.is_none());
 		assert!(tracker.new_session.is_none());
-		assert!(tracker.on_demand_order.is_none());
-		assert!(!tracker.is_on_demand_scheduled_in_current_block);
 		assert!(tracker.disputes.is_empty());
 	}
 }
@@ -801,9 +725,6 @@ mod test_inject_block {
 		assert!(tracker.last_included_at.is_none());
 		assert!(tracker.previous_included_at.is_none());
 		assert!(tracker.finality_lag.is_none());
-		assert!(tracker.on_demand_order.is_none());
-		assert!(tracker.on_demand_order_at.is_none());
-		assert!(!tracker.is_on_demand_scheduled_in_current_block);
 		assert!(tracker.disputes.is_empty());
 		assert!(!tracker.message_queues.has_hrmp_messages());
 		assert!(tracker.relay_forks.is_empty());
@@ -1336,62 +1257,6 @@ mod test_progress {
 				.iter()
 				.any(|e| matches!(e, ParachainConsensusEvent::Disputed(_)))
 		);
-	}
-
-	#[tokio::test]
-	async fn test_includes_on_demand_order() {
-		let hasher = create_hasher().await;
-		let mut tracker = SubxtTracker::new(100);
-		let tracker_storage = TrackerStorage::new(100, create_storage().await, hasher);
-		let mut stats = ParachainStats::default();
-		let mut mock_metrics = MockPrometheusMetrics::default();
-		mock_metrics.expect_on_bitfields().returning(|_, _, _| ());
-		mock_metrics.expect_on_skipped_slot().returning(|_| ());
-		mock_metrics.expect_on_backed().returning(|_| ());
-
-		// With on-demand order
-		tracker.current_relay_block = Some(Block { num: 42, ts: 1694095332000, hash: H256::random() });
-		let order = OnDemandOrder { para_id: 100, spot_price: 10000 };
-		tracker.on_demand_order = Some(order.clone());
-		mock_metrics
-			.expect_handle_on_demand_order()
-			.with(eq(order))
-			.once()
-			.returning(|_| ());
-		let _progress = tracker.progress(&mut stats, &mock_metrics, &tracker_storage).await.unwrap();
-		tracker.on_demand_order = None;
-
-		// With on-demand order at block
-		tracker.on_demand_order_at = Some(BlockWithoutHash { num: 41, ts: 1694095326000 });
-		// If scheduled
-		tracker.is_on_demand_scheduled_in_current_block = true;
-		mock_metrics
-			.expect_handle_on_demand_delay()
-			.with(eq(1), eq(100), eq("scheduled"))
-			.once()
-			.returning(|_, _, _| ());
-		mock_metrics
-			.expect_handle_on_demand_delay_sec()
-			.with(eq(Duration::from_secs(6)), eq(100), eq("scheduled"))
-			.once()
-			.returning(|_, _, _| ());
-		let _progress = tracker.progress(&mut stats, &mock_metrics, &tracker_storage).await.unwrap();
-		tracker.is_on_demand_scheduled_in_current_block = false;
-		// If backed
-		let candidate = create_para_block_info(100, hasher);
-		tracker.candidates.entry(0).or_default().push(Some(candidate));
-		tracker.cores.entry(0).or_default().push(100);
-		mock_metrics
-			.expect_handle_on_demand_delay()
-			.with(eq(1), eq(100), eq("backed"))
-			.once()
-			.returning(|_, _, _| ());
-		mock_metrics
-			.expect_handle_on_demand_delay_sec()
-			.with(eq(Duration::from_secs(6)), eq(100), eq("backed"))
-			.once()
-			.returning(|_, _, _| ());
-		let _progress = tracker.progress(&mut stats, &mock_metrics, &tracker_storage).await.unwrap();
 	}
 
 	#[tokio::test]

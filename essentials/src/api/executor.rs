@@ -17,8 +17,10 @@
 use crate::{
 	api::{
 		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
-		dynamic::{self, DynamicHostConfiguration, decode_validator_groups, fetch_dynamic_storage},
+		decode::DecodedDispute,
+		dynamic,
 	},
+	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	metadata::{
 		polkadot::{
@@ -59,6 +61,8 @@ pub enum Request {
 	GetBlockNumber(Option<H256>),
 	GetBlockHash(Option<BlockNumber>),
 	GetEvents(H256),
+	GetCandidateEvents(H256),
+	GetDisputes(H256),
 	ExtractParaInherent(Option<H256>),
 	GetClaimQueue(H256),
 	GetOccupiedCores(H256),
@@ -69,7 +73,6 @@ pub enum Request {
 	GetSessionQueuedKeys(Option<H256>),
 	GetInboundOutBoundHrmpChannels(H256, Vec<u32>),
 	GetSessionIndexNow,
-	GetHostConfiguration,
 	GetBestBlockSubscription,
 	GetFinalizedBlockSubscription,
 	GetChainName,
@@ -93,6 +96,10 @@ enum Response {
 	MaybeBlockHash(Option<H256>),
 	/// Block events
 	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
+	/// Candidate (backed/included/timed-out) events for a block, decoded without metadata.
+	CandidateEvents(Vec<SubxtCandidateEvent>),
+	/// Recent disputes for a block, decoded without metadata.
+	Disputes(Vec<DecodedDispute>),
 	/// `ParaInherent` data.
 	ParaInherentData(InherentData),
 	/// Claim queue for parachains.
@@ -111,8 +118,6 @@ enum Response {
 	SessionQueuedKeys(Option<QueuedKeys>),
 	/// HRMP channels for given parachain (e.g. who are sending messages to us)
 	InboundOutBoundHrmpChannels(InboundOutBoundHrmpChannels),
-	/// The current host configuration
-	HostConfiguration(DynamicHostConfiguration),
 	/// Chain subscription
 	ChainSubscription(HeaderStream),
 	/// Chain name
@@ -176,8 +181,9 @@ impl RequestExecutorBackend {
 		retry: RetryOptions,
 		url: String,
 		api_client_mode: ApiClientMode,
+		shadow: bool,
 	) -> color_eyre::Result<Self, RequestExecutorError> {
-		let client = build_online_client(&url, api_client_mode).await.map_err(|err| {
+		let client = build_online_client(&url, api_client_mode, shadow).await.map_err(|err| {
 			error!("[{}] RpcClient error: {:?}", url, err);
 			RequestExecutorError::ClientBuildFailed(url.clone())
 		})?;
@@ -240,13 +246,12 @@ impl RequestExecutorBackend {
 			GetBlockHash(maybe_block_number) => MaybeBlockHash(client.legacy_get_block_hash(maybe_block_number).await?),
 			GetChainName => ChainName(client.legacy_get_chain_name().await?),
 			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
+			GetCandidateEvents(hash) => CandidateEvents(client.get_candidate_events(hash).await?),
+			GetDisputes(hash) => Disputes(client.get_disputes(hash).await?),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
 			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
 			GetOccupiedCores(hash) => OccupiedCores(client.get_occupied_cores(hash).await?),
-			GetBackingGroups(hash) => {
-				let value = fetch_dynamic_storage(client, Some(hash), "ParaScheduler", "ValidatorGroups").await?;
-				BackingGroups(decode_validator_groups(&value)?)
-			},
+			GetBackingGroups(hash) => BackingGroups(client.get_backing_groups(hash).await?),
 			GetSessionIndex(hash) => SessionIndex(client.get_session_index(hash).await?.unwrap_or_default()),
 			GetSessionAccountKeys(session_index, maybe_hash) =>
 				SessionAccountKeys(client.get_session_account_keys(session_index, maybe_hash).await?),
@@ -255,9 +260,6 @@ impl RequestExecutorBackend {
 			GetSessionIndexNow => SessionIndex(client.get_session_index_now().await?.unwrap_or_default()),
 			GetInboundOutBoundHrmpChannels(hash, para_ids) =>
 				InboundOutBoundHrmpChannels(client.get_inbound_outbound_hrmp_channels(hash, para_ids).await?),
-			GetHostConfiguration => HostConfiguration(DynamicHostConfiguration::new(
-				fetch_dynamic_storage(client, None, "Configuration", "ActiveConfig").await?,
-			)),
 			GetBestBlockSubscription => ChainSubscription(client.stream_best_block_headers().await?),
 			GetFinalizedBlockSubscription => ChainSubscription(client.stream_finalized_block_headers().await?),
 			GetBabeRandomness(hash) => BabeRandomness(client.get_babe_randomness(hash).await?),
@@ -298,11 +300,16 @@ impl RequestExecutorNodes for &str {
 }
 
 #[derive(Clone)]
-pub struct RequestExecutor(HashMap<String, (PrioritySender<ExecutorMessage>, PolkadotHasher)>);
+pub struct RequestExecutor {
+	clients: HashMap<String, (PrioritySender<ExecutorMessage>, PolkadotHasher)>,
+	/// Whether reads are shadow-decoded through the metadata-free path and compared. See
+	/// [`crate::api::shadow`].
+	shadow: bool,
+}
 
 macro_rules! wrap_backend_call {
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
-		if let Some((to_backend, _)) = $self.0.get_mut($url) {
+		if let Some((to_backend, _)) = $self.clients.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty;
 			to_backend.send(ExecutorMessage::Rpc(tx, Request::$request_ty)).await?;
@@ -318,7 +325,7 @@ macro_rules! wrap_backend_call {
 		}
 	};
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
-		if let Some((to_backend, _)) = $self.0.get_mut($url) {
+		if let Some((to_backend, _)) = $self.clients.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty($($arg),*);
 			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
@@ -342,11 +349,13 @@ impl RequestExecutor {
 		api_client_mode: ApiClientMode,
 		retry: &RetryOptions,
 		shutdown_tx: &BroadcastSender<()>,
+		shadow: bool,
 	) -> color_eyre::Result<RequestExecutor, RequestExecutorError> {
 		let mut clients = HashMap::new();
 		for node in nodes.unique_nodes() {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
-			let mut backend = RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode).await?;
+			let mut backend =
+				RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode, shadow).await?;
 			let _ = clients.insert(node, (to_backend, backend.hasher()));
 			let shutdown_tx = shutdown_tx.clone();
 			tokio::spawn(async move {
@@ -357,16 +366,21 @@ impl RequestExecutor {
 			});
 		}
 
-		Ok(RequestExecutor(clients))
+		Ok(RequestExecutor { clients, shadow })
 	}
 
 	pub fn hasher(&self, url: &str) -> Option<PolkadotHasher> {
-		self.0.get(url).map(|(_, hasher)| *hasher)
+		self.clients.get(url).map(|(_, hasher)| *hasher)
+	}
+
+	/// Whether reads should be shadow-decoded through the metadata-free path and compared.
+	pub fn shadow_enabled(&self) -> bool {
+		self.shadow
 	}
 
 	/// Closes all RPC clients
 	pub async fn close(&mut self) {
-		for (to_backend, _) in self.0.values_mut() {
+		for (to_backend, _) in self.clients.values_mut() {
 			let _ = to_backend.send(ExecutorMessage::Close).await;
 		}
 	}
@@ -413,6 +427,22 @@ impl RequestExecutor {
 		hash: H256,
 	) -> color_eyre::Result<Option<subxt::events::Events<PolkadotConfig>>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetEvents, MaybeEvents, hash)
+	}
+
+	pub async fn get_candidate_events(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Vec<SubxtCandidateEvent>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetCandidateEvents, CandidateEvents, hash)
+	}
+
+	pub async fn get_disputes(
+		&mut self,
+		url: &str,
+		hash: H256,
+	) -> color_eyre::Result<Vec<DecodedDispute>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetDisputes, Disputes, hash)
 	}
 
 	pub async fn extract_parainherent_data(
@@ -490,13 +520,6 @@ impl RequestExecutor {
 		RequestExecutorError,
 	> {
 		wrap_backend_call!(self, url, GetInboundOutBoundHrmpChannels, InboundOutBoundHrmpChannels, hash, para_ids)
-	}
-
-	pub async fn get_host_configuration(
-		&mut self,
-		url: &str,
-	) -> color_eyre::Result<DynamicHostConfiguration, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetHostConfiguration, HostConfiguration)
 	}
 
 	pub async fn get_best_block_subscription(
