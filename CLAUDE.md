@@ -18,11 +18,13 @@ The project follows a shared library pattern:
 
 **essentials/src/api/** - Unified API client layer supporting both legacy JSON-RPC and new RPC methods, with dynamic runtime support. Key files: `executor.rs` (request execution), `storage.rs` (storage access), `dynamic.rs` (dynamic runtime metadata).
 
-**essentials/src/collector/** - WebSocket-based data collection from substrate telemetry endpoints.
+**essentials/src/collector/** - Collects chain data per block and stores it, then broadcasts updates to subscribers over a WebSocket endpoint (`collector/ws.rs`). Telemetry is separate: `telemetry_feed.rs` and `telemetry_subscription.rs`.
 
-**essentials/src/chain_*_subscription.rs** - Blockchain event subscription patterns: `chain_head_subscription.rs` (live chain head), `chain_events.rs` (decoded events), `historical_subscription.rs` (block range queries).
+**essentials/src/chain_*.rs** - Blockchain subscription patterns: `chain_subscription.rs` and `chain_head_subscription.rs` (live chain head), `historical_subscription.rs` (block range queries), `chain_events.rs` (decoded events).
 
 **Metadata System** - Tools rely on precompiled Polkadot metadata (`essentials/assets/polkadot_metadata.scale`) for decoding chain data. Auto-updated via CI every 12 hours.
+
+**Shadow decoding** - `--shadow-decode-without-metadata` (parachain-tracer, whois) decodes each migrated read a second time without metadata and aborts on any difference from the metadata result. See `essentials/src/api/shadow.rs` and `decode.rs`; the metadata path stays primary while the flag only observes.
 
 ### CLI Pattern
 
@@ -85,4 +87,3 @@ cargo run -p polkadot-kvdb -- --db /path/to/rocksdb usage
 - **Network dependency** - Most tools require live RPC endpoints to Polkadot/Substrate chains
 - **Metadata updates** - `subxt metadata --format bytes --url wss://rpc.polkadot.io:443 > essentials/assets/polkadot_metadata.scale`
 - **Docker** - `scripts/ci/dockerfiles/polkadot-introspector_injected.Dockerfile`
-- **Provisional types** - Some types not yet in Polkadot metadata are implemented locally and should be removed once upstream catches up
