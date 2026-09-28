@@ -33,9 +33,9 @@ use colored::Colorize;
 use crossterm::style::Stylize;
 use futures::{StreamExt, future, stream::FuturesUnordered};
 use itertools::Itertools;
-use log::{error, info, warn};
+use log::{error, info};
 use polkadot_introspector_essentials::{
-	api::{api_client::ApiClientMode, executor::RequestExecutor},
+	api::{api_client::ApiClientMode, executor::RequestExecutor, shadow},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector::{self, Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent, TerminationReason},
@@ -102,6 +102,10 @@ pub(crate) struct ParachainTracerOptions {
 	/// Defines client to communicate with rpc node.
 	#[clap(long = "client", default_value_t, value_enum)]
 	pub api_client_mode: ApiClientMode,
+	/// Shadow-decode each migrated read through the metadata-free path and abort on any mismatch.
+	/// Temporary aid for removing the metadata dependency; doubles RPC load, off by default.
+	#[clap(name = "shadow-decode-without-metadata", long, default_value = "false")]
+	pub shadow_decode_without_metadata: bool,
 	/// Run in historical mode to trace parachains between specific blocks instead of following live chain progress
 	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
 	is_historical: bool,
@@ -159,10 +163,6 @@ impl ParachainTracer {
 			&self.node,
 			self.opts.api_client_mode,
 		);
-		if let Err(e) = print_host_configuration(self.opts.node.as_str(), executor).await {
-			warn!("Cannot get host configuration");
-			return Err(e)
-		}
 		println!(
 			"{}",
 			"-----------------------------------------------------------------------"
@@ -492,13 +492,6 @@ fn evict_stalled(trackers: &mut HashMap<u32, Sender<CollectorUpdateEvent>>, last
 	}
 }
 
-async fn print_host_configuration(url: &str, executor: &mut RequestExecutor) -> color_eyre::Result<()> {
-	let conf = executor.get_host_configuration(url).await?;
-	println!("Host configuration for {}:", url.to_owned().bold());
-	println!("{}", conf);
-	Ok(())
-}
-
 fn historical_bounds(opts: &ParachainTracerOptions) -> color_eyre::Result<(u32, u32)> {
 	let from_block_number = opts.from_block_number.expect("`--from` must exist in historical mode");
 	let to_block_number = opts.to_block_number.expect("`--to` must exist in historical mode");
@@ -526,8 +519,14 @@ async fn main() -> color_eyre::Result<()> {
 
 	let tracer = ParachainTracer::new(opts.clone(), metrics)?;
 	let shutdown_tx = init::init_shutdown();
-	let mut executor =
-		RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &shutdown_tx).await?;
+	let mut executor = RequestExecutor::build(
+		opts.node.clone(),
+		opts.api_client_mode,
+		&opts.retry,
+		&shutdown_tx,
+		opts.shadow_decode_without_metadata,
+	)
+	.await?;
 
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
@@ -542,6 +541,10 @@ async fn main() -> color_eyre::Result<()> {
 	futures.extend(sub.run(&shutdown_tx).await?);
 	init::run(futures, &shutdown_tx).await?;
 	executor.close().await;
+
+	if opts.shadow_decode_without_metadata {
+		shadow::log_checklist();
+	}
 
 	Ok(())
 }
