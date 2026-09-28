@@ -21,12 +21,10 @@ use crate::{
 use clap::Parser;
 use color_eyre::Result;
 use mockall::automock;
-use polkadot_introspector_essentials::{
-	chain_events::SubxtDisputeResult, constants::STANDARD_BLOCK_TIME, types::OnDemandOrder,
-};
+use polkadot_introspector_essentials::{chain_events::SubxtDisputeResult, constants::STANDARD_BLOCK_TIME};
 use prometheus_endpoint::{
 	Registry,
-	prometheus::{Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
+	prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts},
 };
 use std::{net::ToSocketAddrs, time::Duration};
 
@@ -90,12 +88,6 @@ struct MetricsInner {
 	para_backing_times: HistogramVec,
 	/// Average candidate inclusion time measured in seconds.
 	para_block_times_sec: HistogramVec,
-	/// Parachain's on-demand orders
-	para_on_demand_orders: GaugeVec,
-	/// Latency between ordering a slot by a parachain and its last backed candidate in relay blocks
-	para_on_demand_delay: GaugeVec,
-	/// Latency between ordering a slot by a parachain and its last backed candidate in seconds
-	para_on_demand_delay_sec: GaugeVec,
 	/// Finality lag
 	finality_lag: Gauge,
 	/// Session number
@@ -138,12 +130,6 @@ pub trait PrometheusMetrics {
 		para_block_time_sec: Option<Duration>,
 		para_id: u32,
 	);
-	/// Update on-demand orders
-	fn handle_on_demand_order(&self, order: &OnDemandOrder);
-	/// Update on-demand latency in blocks
-	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str);
-	/// Update on-demand latency in seconds
-	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str);
 	/// Update finality lag
 	fn on_finality_lag(&self, lag: u32);
 	/// Update session number
@@ -356,36 +342,6 @@ impl PrometheusMetrics for Metrics {
 		}
 	}
 
-	fn handle_on_demand_order(&self, order: &OnDemandOrder) {
-		if let Some(metrics) = &self.0 {
-			let para_str: String = order.para_id.to_string();
-			metrics
-				.para_on_demand_orders
-				.with_label_values(&[&para_str[..]])
-				.set(order.spot_price as f64);
-		}
-	}
-
-	fn handle_on_demand_delay(&self, delay_blocks: u32, para_id: u32, until: &str) {
-		if let Some(metrics) = &self.0 {
-			let para_str: String = para_id.to_string();
-			metrics
-				.para_on_demand_delay
-				.with_label_values(&[&para_str[..], until])
-				.set(delay_blocks as f64);
-		}
-	}
-
-	fn handle_on_demand_delay_sec(&self, delay_sec: Duration, para_id: u32, until: &str) {
-		if let Some(metrics) = &self.0 {
-			let para_str: String = para_id.to_string();
-			metrics
-				.para_on_demand_delay_sec
-				.with_label_values(&[&para_str[..], until])
-				.set(delay_sec.as_secs_f64().round());
-		}
-	}
-
 	fn on_finality_lag(&self, lag: u32) {
 		if let Some(metrics) = &self.0 {
 			metrics.finality_lag.set(lag.into());
@@ -565,30 +521,6 @@ fn register_metrics(registry: &Registry) -> Result<Metrics> {
 				HistogramOpts::new("pc_para_backing_time", "Parachain backing time measured in relay chain blocks.")
 					.buckets(HISTOGRAM_TIME_BUCKETS_BLOCKS.into()),
 				&["parachain_id"],
-			)?,
-			registry,
-		)?,
-		para_on_demand_orders: prometheus_endpoint::register(
-			GaugeVec::new(Opts::new("pc_para_on_demand_orders", "Parachain's on demand orders"), &["parachain_id"])?,
-			registry,
-		)?,
-		para_on_demand_delay: prometheus_endpoint::register(
-			GaugeVec::new(
-				Opts::new(
-					"pc_para_on_demand_delay",
-					"Latency (in relay chain blocks) between when the parachain orders a core and when first candidate is scheduled or backed on that core.",
-				),
-				&["parachain_id", "until"],
-			)?,
-			registry,
-		)?,
-		para_on_demand_delay_sec: prometheus_endpoint::register(
-			GaugeVec::new(
-				Opts::new(
-					"pc_para_on_demand_delay_sec",
-					"Latency (in seconds) between when the parachain orders a core and when first candidate is scheduled or backed on that core.",
-				),
-				&["parachain_id", "until"],
 			)?,
 			registry,
 		)?,

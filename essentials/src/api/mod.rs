@@ -16,8 +16,10 @@
 //
 
 pub mod api_client;
+pub mod decode;
 pub mod dynamic;
 pub mod executor;
+pub mod shadow;
 pub mod storage;
 
 use crate::{api::executor::RequestExecutor, constants::MAX_MSG_QUEUE_SIZE, storage::RecordsStorageConfig};
@@ -95,7 +97,7 @@ mod tests {
 
 	async fn request_executor() -> RequestExecutor {
 		let shutdown_tx = init::init_shutdown();
-		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx)
+		RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx, false)
 			.await
 			.unwrap()
 	}

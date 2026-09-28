@@ -1,0 +1,1021 @@
+// Copyright 2024 Parity Technologies (UK) Ltd.
+// This file is part of polkadot-introspector.
+//
+// polkadot-introspector is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// polkadot-introspector is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
+
+//! Metadata-free decoders for the chain data the tools read.
+//!
+//! Each decoder reads the leading fields we use, positionally, and ignores the rest. This tolerates
+//! fields appended in a runtime upgrade but fails loud on a field inserted-before or retyped, so a
+//! layout change never yields a silently wrong value. Decoders are free functions kept independent
+//! of the transport, so a later transport refactor deletes call sites rather than rewriting logic.
+
+use crate::{
+	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
+	types::{AccountId32, ClaimQueue, CoreOccupied, H256, PolkadotHash, SubxtHrmpChannel},
+};
+use color_eyre::{Result, eyre::eyre};
+use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError, Input};
+use sp_core_hashing::{twox_64, twox_128};
+use subxt::config::Hasher;
+
+/// SCALE-encoded size of a `CandidateDescriptor`. Stable across descriptor versions: V1's fields
+/// are re-interpreted, never resized.
+const CANDIDATE_DESCRIPTOR_SIZE: usize = 292;
+/// SCALE-encoded size of a `CandidateReceipt`: `CandidateDescriptor` (292 bytes) plus the
+/// `commitments_hash` (32 bytes). The size is stable across descriptor versions (V1's fields are
+/// re-interpreted, never resized), so decoding this fixed window handles every version alike.
+const CANDIDATE_RECEIPT_SIZE: usize = CANDIDATE_DESCRIPTOR_SIZE + 32;
+/// Bytes of the receipt after `para_id` (`u32`) and `relay_parent` (`H256`), kept opaque.
+const RECEIPT_TAIL_SIZE: usize = CANDIDATE_RECEIPT_SIZE - 4 - 32;
+
+/// A `CandidateReceipt` decoded only as far as the fields we use. `para_id` and `relay_parent` lead
+/// every descriptor version; the remaining bytes are opaque and re-encoded solely to recompute the
+/// candidate hash. Fixing the tail length makes a resized receipt fail to decode rather than pass.
+#[derive(Encode, Decode)]
+struct RawCandidateReceipt {
+	para_id: u32,
+	relay_parent: [u8; 32],
+	tail: [u8; RECEIPT_TAIL_SIZE],
+}
+
+/// One element of the `ParachainHost_candidate_events` result:
+/// `(CandidateReceipt, HeadData, CoreIndex[, GroupIndex])`, keyed by the same variant indices the
+/// runtime uses. `HeadData` (`Vec<u8>`), `CoreIndex` and `GroupIndex` (`u32`) are decoded through
+/// their SCALE shapes so codec advances past them; only `CoreIndex` is kept.
+#[derive(Decode)]
+enum RawCandidateEvent {
+	#[codec(index = 0)]
+	Backed(RawCandidateReceipt, Vec<u8>, u32, u32),
+	#[codec(index = 1)]
+	Included(RawCandidateReceipt, Vec<u8>, u32, u32),
+	#[codec(index = 2)]
+	TimedOut(RawCandidateReceipt, Vec<u8>, u32),
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_candidate_events` runtime call into the
+/// candidate events the tools track. Codec drives the traversal (vec length, variant tags, the
+/// variable-length `HeadData`); `decode_all` fails loud on any trailing bytes or unknown variant,
+/// and the candidate hash is `blake2_256` of the re-encoded receipt, as the runtime computes it.
+pub fn decode_candidate_events<H: Hasher<Output = PolkadotHash>>(
+	bytes: &[u8],
+	hasher: H,
+) -> Result<Vec<SubxtCandidateEvent>> {
+	let raw = Vec::<RawCandidateEvent>::decode_all(&mut &bytes[..])
+		.map_err(|e| eyre!("candidate_events: cannot decode: {e}"))?;
+
+	Ok(raw
+		.into_iter()
+		.map(|event| {
+			let (receipt, event_type, core_idx) = match event {
+				RawCandidateEvent::Backed(receipt, _head, core, _group) =>
+					(receipt, SubxtCandidateEventType::Backed, core),
+				RawCandidateEvent::Included(receipt, _head, core, _group) =>
+					(receipt, SubxtCandidateEventType::Included, core),
+				RawCandidateEvent::TimedOut(receipt, _head, core) => (receipt, SubxtCandidateEventType::TimedOut, core),
+			};
+			SubxtCandidateEvent {
+				candidate_hash: hasher.hash(&receipt.encode()),
+				relay_parent: H256::from(receipt.relay_parent),
+				parachain_id: receipt.para_id,
+				event_type,
+				core_idx,
+			}
+		})
+		.collect())
+}
+
+/// One recent dispute from the `ParachainHost_disputes` runtime call, decoded only as far as the
+/// fields the tools use: `(SessionIndex, CandidateHash, DisputeState)`. The two validator bitsets are
+/// kept as the indices of their set bits — enough to tally each side and derive the outcome — and
+/// `start` / `concluded_at` give the relay block the dispute was recorded and (if any) concluded at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedDispute {
+	pub session: u32,
+	pub candidate_hash: PolkadotHash,
+	pub validators_for: Vec<u32>,
+	pub validators_against: Vec<u32>,
+	pub start: u32,
+	pub concluded_at: Option<u32>,
+}
+
+/// A SCALE-encoded `BitVec<u8, Lsb0>` decoded into the indices of its set bits. The encoding is a
+/// compact bit count followed by `ceil(bits / 8)` bytes, least-significant bit first within each
+/// byte. Errors rather than guesses if the byte payload is shorter than the declared bit count.
+struct BitsetIndices(Vec<u32>);
+
+impl Decode for BitsetIndices {
+	fn decode<I: Input>(input: &mut I) -> core::result::Result<Self, CodecError> {
+		let bit_len = Compact::<u32>::decode(input)?.0 as usize;
+		let mut bytes = vec![0u8; bit_len.div_ceil(8)];
+		input.read(&mut bytes)?;
+		Ok(Self(
+			(0..bit_len)
+				.filter(|&i| bytes[i / 8] & (1 << (i % 8)) != 0)
+				.map(|i| i as u32)
+				.collect(),
+		))
+	}
+}
+
+/// One element of the `ParachainHost_disputes` result: `SessionIndex ++ CandidateHash ++
+/// DisputeState`, where `DisputeState` is `validators_for ++ validators_against ++ start ++
+/// concluded_at` — the two bitsets come first, so their variable length is consumed before the
+/// fixed `start` / `concluded_at` fields.
+#[derive(Decode)]
+struct RawDispute {
+	session: u32,
+	candidate_hash: [u8; 32],
+	validators_for: BitsetIndices,
+	validators_against: BitsetIndices,
+	start: u32,
+	concluded_at: Option<u32>,
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_disputes` runtime call. Codec drives the
+/// traversal and `decode_all` fails loud on truncation or trailing bytes, so a layout change never
+/// yields a silently wrong value.
+pub fn decode_disputes(bytes: &[u8]) -> Result<Vec<DecodedDispute>> {
+	let raw = Vec::<RawDispute>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("disputes: cannot decode: {e}"))?;
+
+	Ok(raw
+		.into_iter()
+		.map(|dispute| DecodedDispute {
+			session: dispute.session,
+			candidate_hash: H256::from(dispute.candidate_hash),
+			validators_for: dispute.validators_for.0,
+			validators_against: dispute.validators_against.0,
+			start: dispute.start,
+			concluded_at: dispute.concluded_at,
+		})
+		.collect())
+}
+
+/// Consumes a SCALE-encoded `BitVec<u8, Lsb0>` (compact bit length followed by `ceil(bits / 8)`
+/// packed bytes) without retaining it, so the decoder advances past `OccupiedCore::availability` —
+/// a field the tools don't read. parity-scale-codec offers no derive for bitvecs, hence this manual
+/// `Decode` used as a field type below.
+struct SkipBitVec;
+
+impl Decode for SkipBitVec {
+	fn decode<I: Input>(input: &mut I) -> core::result::Result<Self, CodecError> {
+		let bit_len = Compact::<u32>::decode(input)?.0 as usize;
+		let mut buf = vec![0u8; bit_len.div_ceil(8)];
+		input.read(&mut buf)?;
+		Ok(SkipBitVec)
+	}
+}
+
+/// `polkadot_primitives::ScheduledCore`. Only decoded to advance the cursor; fields go unread.
+#[derive(Decode)]
+#[allow(dead_code)]
+struct RawScheduledCore {
+	para_id: u32,
+	collator: Option<[u8; 32]>,
+}
+
+/// `polkadot_primitives::OccupiedCore`, decoded in full only to advance the cursor past an occupied
+/// core — the tools keep just the `CoreState` variant. `candidate_descriptor` is the fixed 292-byte
+/// `CandidateDescriptorV2` window (see [`CANDIDATE_DESCRIPTOR_SIZE`]); pinning its length makes a
+/// resized descriptor fail to decode rather than silently desync the surrounding vector.
+#[derive(Decode)]
+#[allow(dead_code)]
+struct RawOccupiedCore {
+	next_up_on_available: Option<RawScheduledCore>,
+	occupied_since: u32,
+	time_out_at: u32,
+	next_up_on_time_out: Option<RawScheduledCore>,
+	availability: SkipBitVec,
+	group_responsible: u32,
+	candidate_hash: [u8; 32],
+	candidate_descriptor: [u8; CANDIDATE_DESCRIPTOR_SIZE],
+}
+
+/// One element of the `ParachainHost_availability_cores` result, keyed by the runtime's own variant
+/// indices. Payloads are decoded through their SCALE shapes so the cursor advances; only the variant
+/// is kept.
+#[derive(Decode)]
+#[allow(dead_code)] // payloads are decoded to advance the cursor, then discarded; only the tag is read
+enum RawCoreState {
+	#[codec(index = 0)]
+	Occupied(Box<RawOccupiedCore>),
+	#[codec(index = 1)]
+	Scheduled(RawScheduledCore),
+	#[codec(index = 2)]
+	Free,
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_availability_cores` runtime call into the
+/// per-core states the tools track, preserving order (cores are addressed by index). Codec drives
+/// the traversal and `decode_all` fails loud on trailing bytes or an unknown variant.
+pub fn decode_availability_cores(bytes: &[u8]) -> Result<Vec<CoreOccupied>> {
+	let raw = Vec::<RawCoreState>::decode_all(&mut &bytes[..])
+		.map_err(|e| eyre!("availability_cores: cannot decode: {e}"))?;
+
+	Ok(raw
+		.into_iter()
+		.map(|core| match core {
+			RawCoreState::Occupied(_) => CoreOccupied::Occupied,
+			RawCoreState::Scheduled(_) => CoreOccupied::Scheduled,
+			RawCoreState::Free => CoreOccupied::Free,
+		})
+		.collect())
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_claim_queue` runtime call. The runtime
+/// returns `BTreeMap<CoreIndex, VecDeque<Id>>`, whose wire format — a compact entry count followed by
+/// key-sorted `(u32, Vec<u32>)` pairs — matches [`ClaimQueue`] directly, so codec decodes it whole.
+/// `decode_all` fails loud on trailing bytes. Order follows the map's key order (by core index).
+pub fn decode_claim_queue(bytes: &[u8]) -> Result<ClaimQueue> {
+	Vec::<(u32, Vec<u32>)>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("claim_queue: cannot decode: {e}"))
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_validator_groups` runtime call. The call
+/// returns `(Vec<Vec<ValidatorIndex>>, GroupRotationInfo)`; only the groups are kept, and each
+/// `ValidatorIndex` / `GroupRotationInfo` field is a transparent `u32`. `decode_all` drives the
+/// traversal and fails loud on trailing bytes. Group order is preserved (groups are indexed).
+pub fn decode_validator_groups(bytes: &[u8]) -> Result<Vec<Vec<u32>>> {
+	// `GroupRotationInfo` is `(session_start_block, group_rotation_frequency, now)`, all `u32`.
+	let (groups, _rotation) = <(Vec<Vec<u32>>, (u32, u32, u32))>::decode_all(&mut &bytes[..])
+		.map_err(|e| eyre!("validator_groups: cannot decode: {e}"))?;
+	Ok(groups)
+}
+
+/// Decodes the SCALE-encoded result of the `ParachainHost_session_index_for_child` runtime call: a
+/// bare `SessionIndex` (`u32`). `decode_all` fails loud on trailing bytes.
+pub fn decode_session_index(bytes: &[u8]) -> Result<u32> {
+	u32::decode_all(&mut &bytes[..]).map_err(|e| eyre!("session_index: cannot decode: {e}"))
+}
+
+/// Builds the key prefix shared by every entry of a storage item: `twox_128(pallet) ++
+/// twox_128(storage)`. For a `StorageValue` this is the whole key.
+fn storage_prefix(pallet: &[u8], storage: &[u8]) -> Vec<u8> {
+	let mut key = Vec::with_capacity(32);
+	key.extend_from_slice(&twox_128(pallet));
+	key.extend_from_slice(&twox_128(storage));
+	key
+}
+
+/// Builds the storage key for `ParaSessionInfo::AccountKeys[session_index]`. The map uses the
+/// `Identity` hasher (the session index is sequential, not attacker-controlled), so the key is the
+/// SCALE-encoded index appended raw to the `twox_128` pallet/storage prefix — no per-key hash.
+pub fn para_session_account_keys_key(session_index: u32) -> Vec<u8> {
+	let mut key = storage_prefix(b"ParaSessionInfo", b"AccountKeys");
+	key.extend_from_slice(&session_index.encode());
+	key
+}
+
+/// Decodes the value stored at `ParaSessionInfo::AccountKeys[session_index]`: the session's validator
+/// stash accounts (`Vec<AccountId32>`), indexed by validator index. `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_account_keys(bytes: &[u8]) -> Result<Vec<AccountId32>> {
+	Vec::<AccountId32>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("account_keys: cannot decode: {e}"))
+}
+
+/// The fields of the `BabeApi_current_epoch` result the tools use: the epoch `randomness` and the
+/// `(authority public key, weight)` list. `epoch_index`, `start_slot` and `duration` precede them and
+/// are skipped; `config` (and anything appended later) trails `randomness` and is ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedBabeEpoch {
+	pub authorities: Vec<([u8; 32], u64)>,
+	pub randomness: [u8; 32],
+}
+
+/// Babe's `Epoch` decoded only as far as the fields the tools use; the leading three fields are
+/// decoded to advance the cursor.
+#[derive(Decode)]
+#[allow(dead_code)]
+struct RawBabeEpoch {
+	epoch_index: u64,
+	start_slot: u64,
+	duration: u64,
+	authorities: Vec<([u8; 32], u64)>,
+	randomness: [u8; 32],
+}
+
+/// Decodes the SCALE-encoded result of the `BabeApi_current_epoch` runtime call. `Epoch` is
+/// `epoch_index ++ start_slot ++ duration ++ authorities ++ randomness ++ config`; we read positionally
+/// through `randomness` (plain `decode`, not `decode_all`) and ignore the trailing `config`, so fields
+/// appended in an upgrade are tolerated. Fails loud if the bytes are too short for the fields we read.
+pub fn decode_babe_epoch(bytes: &[u8]) -> Result<DecodedBabeEpoch> {
+	let raw = RawBabeEpoch::decode(&mut &bytes[..]).map_err(|e| eyre!("babe epoch: cannot decode: {e}"))?;
+	Ok(DecodedBabeEpoch { authorities: raw.authorities, randomness: raw.randomness })
+}
+
+/// Builds the storage key for the `Babe::CurrentSlot` value. It is a `StorageValue`, so the key is the
+/// bare `twox_128` pallet/storage prefix with no per-key hash.
+pub fn babe_current_slot_key() -> Vec<u8> {
+	storage_prefix(b"Babe", b"CurrentSlot")
+}
+
+/// Decodes the `Slot` (`u64`) stored at `Babe::CurrentSlot`. `decode_all` fails loud on trailing bytes.
+pub fn decode_slot(bytes: &[u8]) -> Result<u64> {
+	u64::decode_all(&mut &bytes[..]).map_err(|e| eyre!("slot: cannot decode: {e}"))
+}
+
+/// Builds the storage key for the `Timestamp::Now` value. It is a `StorageValue`, so the key is the
+/// bare `twox_128` pallet/storage prefix with no per-key hash.
+pub fn timestamp_now_key() -> Vec<u8> {
+	storage_prefix(b"Timestamp", b"Now")
+}
+
+/// Decodes the millisecond timestamp (`u64`) stored at `Timestamp::Now`. `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_timestamp(bytes: &[u8]) -> Result<u64> {
+	u64::decode_all(&mut &bytes[..]).map_err(|e| eyre!("timestamp: cannot decode: {e}"))
+}
+
+/// Builds a storage key for a `Twox64Concat` map entry: `twox_128(pallet) ++ twox_128(storage) ++
+/// twox_64(encoded_key) ++ encoded_key`. The concatenated raw key lets the value be found and, if
+/// needed, the key recovered from the storage trie.
+fn twox64_concat_key(pallet: &[u8], storage: &[u8], encoded_key: &[u8]) -> Vec<u8> {
+	let mut key = storage_prefix(pallet, storage);
+	key.extend_from_slice(&twox_64(encoded_key));
+	key.extend_from_slice(encoded_key);
+	key
+}
+
+/// Storage key for `Hrmp::HrmpEgressChannelsIndex[para_id]` (a `Twox64Concat` map keyed by `ParaId`).
+pub fn hrmp_egress_channels_index_key(para_id: u32) -> Vec<u8> {
+	twox64_concat_key(b"Hrmp", b"HrmpEgressChannelsIndex", &para_id.encode())
+}
+
+/// Storage key for `Hrmp::HrmpChannelDigests[para_id]` (a `Twox64Concat` map keyed by `ParaId`).
+pub fn hrmp_channel_digests_key(para_id: u32) -> Vec<u8> {
+	twox64_concat_key(b"Hrmp", b"HrmpChannelDigests", &para_id.encode())
+}
+
+/// Storage key for `Hrmp::HrmpChannels[(sender, recipient)]` (a `Twox64Concat` map keyed by
+/// `HrmpChannelId`, which encodes as `sender ++ recipient`).
+pub fn hrmp_channels_key(sender: u32, recipient: u32) -> Vec<u8> {
+	twox64_concat_key(b"Hrmp", b"HrmpChannels", &(sender, recipient).encode())
+}
+
+/// Decodes a `Vec<ParaId>` (each `ParaId` a transparent `u32`), as stored at
+/// `HrmpEgressChannelsIndex`. `decode_all` fails loud on trailing bytes.
+pub fn decode_para_ids(bytes: &[u8]) -> Result<Vec<u32>> {
+	Vec::<u32>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("para_ids: cannot decode: {e}"))
+}
+
+/// Decodes `HrmpChannelDigests` values: `Vec<(BlockNumber, Vec<ParaId>)>`, all transparent `u32`s.
+/// `decode_all` fails loud on trailing bytes.
+pub fn decode_hrmp_channel_digests(bytes: &[u8]) -> Result<Vec<(u32, Vec<u32>)>> {
+	Vec::<(u32, Vec<u32>)>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel_digests: cannot decode: {e}"))
+}
+
+/// `SessionKeys` decoded only to advance the cursor and pull out `authority_discovery` (the one key
+/// the tools read). The order matches the runtime's `impl_opaque_keys!`: five sr25519/ed25519 keys
+/// (`[u8; 32]`) followed by the ECDSA `beefy` key (`[u8; 33]`), 193 bytes total. Pinning each length
+/// makes a resized or reordered key set fail to decode rather than silently shift the field.
+#[derive(Decode)]
+#[allow(dead_code)] // only `authority_discovery` is read; the rest advance the cursor
+struct RawSessionKeys {
+	grandpa: [u8; 32],
+	babe: [u8; 32],
+	para_validator: [u8; 32],
+	para_assignment: [u8; 32],
+	authority_discovery: [u8; 32],
+	beefy: [u8; 33],
+}
+
+/// Builds the storage key for the `Session::QueuedKeys` value (a `StorageValue`, so the key is the
+/// bare `twox_128` pallet/storage prefix with no per-key hash).
+pub fn queued_keys_key() -> Vec<u8> {
+	storage_prefix(b"Session", b"QueuedKeys")
+}
+
+/// Decodes `Session::QueuedKeys` (`Vec<(ValidatorId, SessionKeys)>`) into `(account,
+/// authority_discovery key)` per validator — the projection the tools consume. `decode_all` fails
+/// loud on trailing bytes, and the fixed `SessionKeys` layout means a wrong key set desyncs the
+/// vector and is caught rather than yielding a shifted key.
+pub fn decode_queued_authority_discovery_keys(bytes: &[u8]) -> Result<Vec<(AccountId32, [u8; 32])>> {
+	let raw = Vec::<(AccountId32, RawSessionKeys)>::decode_all(&mut &bytes[..])
+		.map_err(|e| eyre!("queued_keys: cannot decode: {e}"))?;
+	Ok(raw
+		.into_iter()
+		.map(|(account, keys)| (account, keys.authority_discovery))
+		.collect())
+}
+
+/// Builds the storage key for `Session::KeyOwner[(key_type_id, public)]`, a `Twox64Concat` map keyed
+/// by `(KeyTypeId, Vec<u8>)` — the id encodes as its four raw bytes, the key as compact-length-prefixed
+/// bytes.
+pub fn session_key_owner_key(key_type_id: [u8; 4], public: &[u8]) -> Vec<u8> {
+	twox64_concat_key(b"Session", b"KeyOwner", &(key_type_id, public.to_vec()).encode())
+}
+
+/// Decodes a single `AccountId32` value (a transparent `[u8; 32]`). `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_account_id(bytes: &[u8]) -> Result<AccountId32> {
+	AccountId32::decode_all(&mut &bytes[..]).map_err(|e| eyre!("account_id: cannot decode: {e}"))
+}
+
+/// Decodes an `HrmpChannel` value. `SubxtHrmpChannel` mirrors the runtime struct field-for-field
+/// (`max_capacity ++ max_total_size ++ max_message_size ++ msg_count ++ total_size ++ mqc_head ++
+/// sender_deposit ++ recipient_deposit`), so codec decodes it directly; `decode_all` fails loud on
+/// trailing bytes.
+pub fn decode_hrmp_channel(bytes: &[u8]) -> Result<SubxtHrmpChannel> {
+	SubxtHrmpChannel::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel: cannot decode: {e}"))
+}
+
+/// Decodes the availability bitfields from a `ParaInherent` (`paras_inherent::enter`) extrinsic, given
+/// its raw bytes as returned by `chain_getBlock` (index #1 of the block). The extrinsic envelope is
+/// stripped — the opaque-extrinsic length prefix, the version/type byte (which must be a bare/unsigned
+/// inherent, so no signature follows), and the two pallet/call index bytes — then the leading
+/// `bitfields: Vec<UncheckedSigned<AvailabilityBitfield>>` field of `ParachainsInherentData` is read.
+/// Each entry is `AvailabilityBitfield` (a SCALE bitvec) ++ `ValidatorIndex` (`u32`) ++
+/// `ValidatorSignature` (`[u8; 64]`); only the bitvec is kept, as its raw encoded bytes so it can be
+/// compared byte-for-byte against the metadata decode. The fields after `bitfields` (backed
+/// candidates, disputes, parent header) are left untouched, so nothing beyond them is decoded.
+pub fn decode_parainherent_bitfields(extrinsic: &[u8]) -> Result<Vec<Vec<u8>>> {
+	let mut input = extrinsic;
+	// Opaque-extrinsic length prefix.
+	Compact::<u32>::decode(&mut input).map_err(|e| eyre!("parainherent: cannot decode length prefix: {e}"))?;
+	// Extrinsic version/type byte: the top two bits are the type, `0b00` = bare (unsigned). An inherent
+	// is always bare, so there is no signature to skip.
+	let version = u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read version byte: {e}"))?;
+	if version >> 6 != 0 {
+		return Err(eyre!("parainherent: expected a bare inherent, got extrinsic type byte {version:#04x}"));
+	}
+	// `ParaInherent::enter` pallet + call index, trusted from the fixed extrinsic position (#1).
+	u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read pallet index: {e}"))?;
+	u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read call index: {e}"))?;
+
+	let count = Compact::<u32>::decode(&mut input)
+		.map_err(|e| eyre!("parainherent: cannot decode bitfields length: {e}"))?
+		.0;
+	let mut bitfields = Vec::with_capacity(count as usize);
+	for i in 0..count {
+		let bitvec = take_encoded_bitvec(&mut input)
+			.map_err(|e| eyre!("parainherent: cannot read bitfield {i} payload: {e}"))?;
+		u32::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read bitfield {i} validator index: {e}"))?;
+		<[u8; 64]>::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read bitfield {i} signature: {e}"))?;
+		bitfields.push(bitvec);
+	}
+
+	Ok(bitfields)
+}
+
+/// Consumes a SCALE-encoded `BitVec<u8, Lsb0>` and returns its raw bytes (compact bit length followed
+/// by `ceil(bits / 8)` packed bytes), matching what `Encode` produces for the metadata bitfield.
+fn take_encoded_bitvec(input: &mut &[u8]) -> Result<Vec<u8>> {
+	let start = *input;
+	let bit_len = Compact::<u32>::decode(input)
+		.map_err(|e| eyre!("cannot decode bitvec length: {e}"))?
+		.0 as usize;
+	let byte_len = bit_len.div_ceil(8);
+	if input.len() < byte_len {
+		return Err(eyre!("bitvec payload too short: need {byte_len} bytes, have {}", input.len()));
+	}
+	let (_, rest) = input.split_at(byte_len);
+	*input = rest;
+	let consumed = start.len() - input.len();
+	Ok(start[..consumed].to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use parity_scale_codec::Compact;
+	use subxt::config::substrate::BlakeTwo256;
+
+	// Builds one SCALE-encoded `CandidateEvent` with the given variant, para id, relay parent and
+	// core index, mirroring `(CandidateReceipt, HeadData, CoreIndex[, GroupIndex])`.
+	fn encode_event(variant: u8, para_id: u32, relay_parent: [u8; 32], core_idx: u32) -> (Vec<u8>, [u8; 324]) {
+		let mut receipt = [0u8; CANDIDATE_RECEIPT_SIZE];
+		receipt[..4].copy_from_slice(&para_id.to_le_bytes());
+		receipt[4..36].copy_from_slice(&relay_parent);
+
+		let mut bytes = vec![variant];
+		bytes.extend_from_slice(&receipt);
+		bytes.extend(vec![1u8, 2, 3].encode()); // HeadData
+		bytes.extend(core_idx.encode());
+		if variant != 2 {
+			bytes.extend(42u32.encode()); // GroupIndex, absent for TimedOut
+		}
+		(bytes, receipt)
+	}
+
+	#[test]
+	fn decodes_leading_fields_and_hashes_the_receipt_window() {
+		let (backed, receipt0) = encode_event(0, 1000, [0xAB; 32], 5);
+		let (timed_out, receipt1) = encode_event(2, 2000, [0xCD; 32], 9);
+
+		let mut blob = Compact(2u32).encode();
+		blob.extend(backed);
+		blob.extend(timed_out);
+
+		let events = decode_candidate_events(&blob, BlakeTwo256).unwrap();
+		assert_eq!(events.len(), 2);
+
+		assert_eq!(events[0].parachain_id, 1000);
+		assert_eq!(events[0].relay_parent, H256::from([0xAB; 32]));
+		assert_eq!(events[0].core_idx, 5);
+		assert_eq!(events[0].event_type, SubxtCandidateEventType::Backed);
+		assert_eq!(events[0].candidate_hash, BlakeTwo256.hash(&receipt0));
+
+		assert_eq!(events[1].parachain_id, 2000);
+		assert_eq!(events[1].core_idx, 9);
+		assert_eq!(events[1].event_type, SubxtCandidateEventType::TimedOut);
+		assert_eq!(events[1].candidate_hash, BlakeTwo256.hash(&receipt1));
+	}
+
+	#[test]
+	fn rejects_trailing_bytes() {
+		let (backed, _) = encode_event(0, 1, [0; 32], 0);
+		let mut blob = Compact(1u32).encode();
+		blob.extend(backed);
+		blob.push(0xFF); // one byte too many
+		assert!(decode_candidate_events(&blob, BlakeTwo256).is_err());
+	}
+
+	#[test]
+	fn rejects_truncated_receipt() {
+		let mut blob = Compact(1u32).encode();
+		blob.push(0); // variant, then nothing
+		assert!(decode_candidate_events(&blob, BlakeTwo256).is_err());
+	}
+
+	#[test]
+	fn rejects_unknown_variant() {
+		let (mut bogus, _) = encode_event(0, 1, [0; 32], 0);
+		bogus[0] = 7; // unknown CandidateEvent variant
+		let mut blob = Compact(1u32).encode();
+		blob.extend(bogus);
+		assert!(decode_candidate_events(&blob, BlakeTwo256).is_err());
+	}
+
+	// SCALE-encodes a `BitVec<u8, Lsb0>` over the given set-bit indices: compact bit count then the
+	// packed bytes, least-significant bit first.
+	fn encode_bitset(set_indices: &[u32], bit_len: usize) -> Vec<u8> {
+		let byte_len = bit_len.div_ceil(8);
+		let mut bytes = vec![0u8; byte_len];
+		for &i in set_indices {
+			bytes[i as usize / 8] |= 1 << (i as usize % 8);
+		}
+		let mut out = Compact(bit_len as u32).encode();
+		out.extend(bytes);
+		out
+	}
+
+	// Encodes one `(SessionIndex, CandidateHash, DisputeState)` element.
+	fn encode_dispute(
+		session: u32,
+		candidate_hash: [u8; 32],
+		validators_for: &[u32],
+		validators_against: &[u32],
+		bit_len: usize,
+		start: u32,
+		concluded_at: Option<u32>,
+	) -> Vec<u8> {
+		let mut out = session.encode();
+		out.extend(candidate_hash);
+		out.extend(encode_bitset(validators_for, bit_len));
+		out.extend(encode_bitset(validators_against, bit_len));
+		out.extend(start.encode());
+		out.extend(concluded_at.encode());
+		out
+	}
+
+	#[test]
+	fn decodes_disputes_positionally() {
+		let ongoing = encode_dispute(100, [0xAA; 32], &[0, 2, 5], &[1], 8, 42, None);
+		let concluded = encode_dispute(101, [0xBB; 32], &[3], &[0, 1, 2, 4], 8, 40, Some(50));
+
+		let mut blob = Compact(2u32).encode();
+		blob.extend(ongoing);
+		blob.extend(concluded);
+
+		let disputes = decode_disputes(&blob).unwrap();
+		assert_eq!(disputes.len(), 2);
+
+		assert_eq!(disputes[0].session, 100);
+		assert_eq!(disputes[0].candidate_hash, H256::from([0xAA; 32]));
+		assert_eq!(disputes[0].validators_for, vec![0, 2, 5]);
+		assert_eq!(disputes[0].validators_against, vec![1]);
+		assert_eq!(disputes[0].start, 42);
+		assert_eq!(disputes[0].concluded_at, None);
+
+		assert_eq!(disputes[1].session, 101);
+		assert_eq!(disputes[1].candidate_hash, H256::from([0xBB; 32]));
+		assert_eq!(disputes[1].validators_against, vec![0, 1, 2, 4]);
+		assert_eq!(disputes[1].concluded_at, Some(50));
+	}
+
+	#[test]
+	fn decodes_empty_disputes() {
+		let blob = Compact(0u32).encode();
+		assert!(decode_disputes(&blob).unwrap().is_empty());
+	}
+
+	#[test]
+	fn rejects_disputes_trailing_bytes() {
+		let mut blob = Compact(1u32).encode();
+		blob.extend(encode_dispute(1, [0; 32], &[0], &[], 8, 1, None));
+		blob.push(0xFF); // one byte too many
+		assert!(decode_disputes(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_disputes_truncated_bitset() {
+		let mut blob = Compact(1u32).encode();
+		blob.extend(1u32.encode()); // session
+		blob.extend([0u8; 32]); // candidate_hash
+		blob.extend(Compact(64u32).encode()); // claims 64 bits, but no payload bytes follow
+		assert!(decode_disputes(&blob).is_err());
+	}
+
+	// Encodes a `ScheduledCore { para_id, collator: None }`.
+	fn encode_scheduled_core(para_id: u32) -> Vec<u8> {
+		let mut bytes = para_id.encode();
+		bytes.push(0x00); // collator: None
+		bytes
+	}
+
+	// Encodes an `OccupiedCore` with the given availability bit count, exercising `SkipBitVec`.
+	fn encode_occupied_core(availability_bits: u32) -> Vec<u8> {
+		let mut bytes = vec![0x00]; // next_up_on_available: None
+		bytes.extend(10u32.encode()); // occupied_since
+		bytes.extend(20u32.encode()); // time_out_at
+		bytes.push(0x00); // next_up_on_time_out: None
+		bytes.extend(Compact(availability_bits).encode());
+		bytes.extend(vec![0xFFu8; (availability_bits as usize).div_ceil(8)]); // availability payload
+		bytes.extend(7u32.encode()); // group_responsible
+		bytes.extend([0xAAu8; 32]); // candidate_hash
+		bytes.extend([0xBBu8; CANDIDATE_DESCRIPTOR_SIZE]); // candidate_descriptor
+		bytes
+	}
+
+	#[test]
+	fn decodes_core_states_in_order() {
+		let mut blob = Compact(4u32).encode();
+		blob.push(2); // Free
+		blob.push(1);
+		blob.extend(encode_scheduled_core(1000)); // Scheduled
+		blob.push(0);
+		blob.extend(encode_occupied_core(0)); // Occupied, empty availability
+		blob.push(0);
+		blob.extend(encode_occupied_core(20)); // Occupied, 20-bit availability (3 bytes)
+
+		let cores = decode_availability_cores(&blob).unwrap();
+		assert_eq!(
+			cores,
+			vec![CoreOccupied::Free, CoreOccupied::Scheduled, CoreOccupied::Occupied, CoreOccupied::Occupied]
+		);
+	}
+
+	#[test]
+	fn rejects_core_states_trailing_bytes() {
+		let mut blob = Compact(1u32).encode();
+		blob.push(2); // Free
+		blob.push(0xFF); // one byte too many
+		assert!(decode_availability_cores(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_core_states_unknown_variant() {
+		let mut blob = Compact(1u32).encode();
+		blob.push(3); // unknown CoreState variant
+		assert!(decode_availability_cores(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_core_states_truncated_occupied_core() {
+		let mut blob = Compact(1u32).encode();
+		blob.push(0); // Occupied variant, then a truncated payload
+		blob.push(0x00); // next_up_on_available: None, nothing after
+		assert!(decode_availability_cores(&blob).is_err());
+	}
+
+	#[test]
+	fn decodes_claim_queue() {
+		// BTreeMap<CoreIndex, VecDeque<Id>> wire format: compact entry count then sorted pairs.
+		let queue: Vec<(u32, Vec<u32>)> = vec![(0, vec![2004, 2000]), (1, vec![]), (2, vec![3369])];
+		let blob = queue.encode();
+		assert_eq!(decode_claim_queue(&blob).unwrap(), queue);
+	}
+
+	#[test]
+	fn decodes_empty_claim_queue() {
+		let blob = Compact(0u32).encode();
+		assert!(decode_claim_queue(&blob).unwrap().is_empty());
+	}
+
+	#[test]
+	fn rejects_claim_queue_trailing_bytes() {
+		let mut blob = vec![(0u32, vec![1u32])].encode();
+		blob.push(0xFF); // one byte too many
+		assert!(decode_claim_queue(&blob).is_err());
+	}
+
+	#[test]
+	fn decodes_validator_groups_and_drops_rotation_info() {
+		let groups: Vec<Vec<u32>> = vec![vec![0, 1, 2], vec![3, 4], vec![]];
+		let rotation = (100u32, 10u32, 105u32); // GroupRotationInfo
+		let blob = (groups.clone(), rotation).encode();
+		assert_eq!(decode_validator_groups(&blob).unwrap(), groups);
+	}
+
+	#[test]
+	fn rejects_validator_groups_missing_rotation_info() {
+		let blob = vec![vec![0u32, 1]].encode(); // groups only, no GroupRotationInfo tuple
+		assert!(decode_validator_groups(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_validator_groups_trailing_bytes() {
+		let mut blob = (vec![vec![0u32]], (1u32, 2u32, 3u32)).encode();
+		blob.push(0xFF); // one byte too many
+		assert!(decode_validator_groups(&blob).is_err());
+	}
+
+	#[test]
+	fn decodes_session_index() {
+		assert_eq!(decode_session_index(&13391u32.encode()).unwrap(), 13391);
+	}
+
+	#[test]
+	fn rejects_session_index_trailing_bytes() {
+		let mut blob = 1u32.encode();
+		blob.push(0xFF);
+		assert!(decode_session_index(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_identity_account_keys_key() {
+		let key = para_session_account_keys_key(13391);
+		assert_eq!(key.len(), 36); // 16 (pallet) + 16 (storage) + 4 (raw u32 index, Identity hasher)
+		assert_eq!(&key[..16], &twox_128(b"ParaSessionInfo"));
+		assert_eq!(&key[16..32], &twox_128(b"AccountKeys"));
+		assert_eq!(&key[32..], &13391u32.encode());
+	}
+
+	#[test]
+	fn decodes_account_keys() {
+		let accounts = vec![AccountId32::from([1u8; 32]), AccountId32::from([2u8; 32]), AccountId32::from([3u8; 32])];
+		assert_eq!(decode_account_keys(&accounts.encode()).unwrap(), accounts);
+	}
+
+	#[test]
+	fn rejects_account_keys_trailing_bytes() {
+		let mut blob = vec![AccountId32::from([0u8; 32])].encode();
+		blob.push(0xFF);
+		assert!(decode_account_keys(&blob).is_err());
+	}
+
+	// Encodes a Babe `Epoch` with the given authorities and randomness, including the trailing config.
+	fn encode_babe_epoch(authorities: &[([u8; 32], u64)], randomness: [u8; 32]) -> Vec<u8> {
+		let mut bytes = 5u64.encode(); // epoch_index
+		bytes.extend(100u64.encode()); // start_slot
+		bytes.extend(600u64.encode()); // duration
+		bytes.extend(authorities.to_vec().encode());
+		bytes.extend(randomness);
+		bytes.extend((1u64, 4u64).encode()); // config.c
+		bytes.push(0u8); // config.allowed_slots
+		bytes
+	}
+
+	#[test]
+	fn decodes_babe_epoch_and_ignores_trailing_config() {
+		let authorities = vec![([0xAAu8; 32], 1u64), ([0xBBu8; 32], 1u64)];
+		let randomness = [0xCDu8; 32];
+		let blob = encode_babe_epoch(&authorities, randomness);
+
+		let epoch = decode_babe_epoch(&blob).unwrap();
+		assert_eq!(epoch.authorities, authorities);
+		assert_eq!(epoch.randomness, randomness);
+	}
+
+	#[test]
+	fn rejects_babe_epoch_truncated_before_randomness() {
+		let mut blob = 5u64.encode(); // epoch_index
+		blob.extend(100u64.encode()); // start_slot
+		blob.extend(600u64.encode()); // duration
+		blob.extend(vec![([0u8; 32], 1u64)].encode()); // authorities, then no randomness
+		assert!(decode_babe_epoch(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_babe_current_slot_key() {
+		let key = babe_current_slot_key();
+		assert_eq!(key.len(), 32);
+		assert_eq!(&key[..16], &twox_128(b"Babe"));
+		assert_eq!(&key[16..], &twox_128(b"CurrentSlot"));
+	}
+
+	#[test]
+	fn decodes_slot() {
+		assert_eq!(decode_slot(&123456789u64.encode()).unwrap(), 123456789);
+	}
+
+	#[test]
+	fn rejects_slot_trailing_bytes() {
+		let mut blob = 1u64.encode();
+		blob.push(0xFF);
+		assert!(decode_slot(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_timestamp_now_key() {
+		let key = timestamp_now_key();
+		assert_eq!(key.len(), 32);
+		assert_eq!(&key[..16], &twox_128(b"Timestamp"));
+		assert_eq!(&key[16..], &twox_128(b"Now"));
+	}
+
+	#[test]
+	fn decodes_timestamp() {
+		assert_eq!(decode_timestamp(&1_700_000_000_000u64.encode()).unwrap(), 1_700_000_000_000);
+	}
+
+	#[test]
+	fn rejects_timestamp_trailing_bytes() {
+		let mut blob = 1u64.encode();
+		blob.push(0xFF);
+		assert!(decode_timestamp(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_twox64_concat_hrmp_keys() {
+		// ParaId-keyed map: prefix + twox_64(index) + raw index.
+		let key = hrmp_egress_channels_index_key(2004);
+		assert_eq!(key.len(), 16 + 16 + 8 + 4);
+		assert_eq!(&key[..16], &twox_128(b"Hrmp"));
+		assert_eq!(&key[16..32], &twox_128(b"HrmpEgressChannelsIndex"));
+		assert_eq!(&key[32..40], &twox_64(&2004u32.encode()));
+		assert_eq!(&key[40..], &2004u32.encode());
+
+		// HrmpChannelId-keyed map: the key encodes as sender ++ recipient (8 bytes).
+		let channel_key = hrmp_channels_key(2004, 2000);
+		let id = (2004u32, 2000u32).encode();
+		assert_eq!(channel_key.len(), 16 + 16 + 8 + 8);
+		assert_eq!(&channel_key[16..32], &twox_128(b"HrmpChannels"));
+		assert_eq!(&channel_key[32..40], &twox_64(&id));
+		assert_eq!(&channel_key[40..], &id);
+	}
+
+	#[test]
+	fn decodes_para_ids_and_digests() {
+		let para_ids: Vec<u32> = vec![2004, 2000, 3369];
+		assert_eq!(decode_para_ids(&para_ids.encode()).unwrap(), para_ids);
+
+		let digests: Vec<(u32, Vec<u32>)> = vec![(100, vec![2004, 2000]), (105, vec![])];
+		assert_eq!(decode_hrmp_channel_digests(&digests.encode()).unwrap(), digests);
+	}
+
+	#[test]
+	fn decodes_hrmp_channel() {
+		let channel = SubxtHrmpChannel {
+			max_capacity: 8,
+			max_total_size: 8192,
+			max_message_size: 1024,
+			msg_count: 3,
+			total_size: 512,
+			mqc_head: Some(H256::from([0x11; 32])),
+			sender_deposit: 1_000_000_000_000,
+			recipient_deposit: 2_000_000_000_000,
+		};
+		assert_eq!(decode_hrmp_channel(&channel.encode()).unwrap(), channel);
+	}
+
+	#[test]
+	fn rejects_hrmp_channel_trailing_bytes() {
+		let mut blob = SubxtHrmpChannel::default().encode();
+		blob.push(0xFF);
+		assert!(decode_hrmp_channel(&blob).is_err());
+	}
+
+	// Encodes one `SessionKeys` (5 × [u8;32] + beefy [u8;33] = 193 bytes) with a marked
+	// authority_discovery key.
+	fn encode_session_keys(authority_discovery: [u8; 32]) -> Vec<u8> {
+		let mut bytes = Vec::with_capacity(193);
+		bytes.extend([0x01u8; 32]); // grandpa
+		bytes.extend([0x02u8; 32]); // babe
+		bytes.extend([0x03u8; 32]); // para_validator
+		bytes.extend([0x04u8; 32]); // para_assignment
+		bytes.extend(authority_discovery);
+		bytes.extend([0x06u8; 33]); // beefy (ecdsa, 33 bytes)
+		bytes
+	}
+
+	#[test]
+	fn builds_queued_keys_key() {
+		let key = queued_keys_key();
+		assert_eq!(key.len(), 32);
+		assert_eq!(&key[..16], &twox_128(b"Session"));
+		assert_eq!(&key[16..], &twox_128(b"QueuedKeys"));
+	}
+
+	#[test]
+	fn decodes_queued_authority_discovery_keys() {
+		let a0 = AccountId32::from([0xA0u8; 32]);
+		let a1 = AccountId32::from([0xA1u8; 32]);
+		let mut blob = Compact(2u32).encode();
+		blob.extend(a0.encode());
+		blob.extend(encode_session_keys([0xD0u8; 32]));
+		blob.extend(a1.encode());
+		blob.extend(encode_session_keys([0xD1u8; 32]));
+
+		let decoded = decode_queued_authority_discovery_keys(&blob).unwrap();
+		assert_eq!(decoded, vec![(a0, [0xD0u8; 32]), (a1, [0xD1u8; 32])]);
+	}
+
+	#[test]
+	fn rejects_queued_keys_truncated_session_keys() {
+		let mut blob = Compact(1u32).encode();
+		blob.extend(AccountId32::from([0u8; 32]).encode());
+		blob.extend([0u8; 160]); // only 5×32 bytes: missing the 33-byte beefy key
+		assert!(decode_queued_authority_discovery_keys(&blob).is_err());
+	}
+
+	#[test]
+	fn builds_key_owner_key() {
+		let public = [0x07u8; 32];
+		let key = session_key_owner_key(*b"babe", &public);
+		let encoded_key = (*b"babe", public.to_vec()).encode();
+		assert_eq!(&key[..16], &twox_128(b"Session"));
+		assert_eq!(&key[16..32], &twox_128(b"KeyOwner"));
+		assert_eq!(&key[32..40], &twox_64(&encoded_key));
+		assert_eq!(&key[40..], &encoded_key[..]);
+	}
+
+	#[test]
+	fn decodes_account_id() {
+		let account = AccountId32::from([0x11u8; 32]);
+		assert_eq!(decode_account_id(&account.encode()).unwrap(), account);
+	}
+
+	// A SCALE `BitVec<u8, Lsb0>` over the given bits: compact bit count then packed bytes.
+	fn encode_availability_bitvec(bits: &[bool]) -> Vec<u8> {
+		let mut bytes = vec![0u8; bits.len().div_ceil(8)];
+		for (i, &b) in bits.iter().enumerate() {
+			if b {
+				bytes[i / 8] |= 1 << (i % 8);
+			}
+		}
+		let mut out = Compact(bits.len() as u32).encode();
+		out.extend(bytes);
+		out
+	}
+
+	// Wraps a `ParachainsInherentData` body (starting at `bitfields`) into a bare ParaInherent
+	// extrinsic: length prefix + version byte + pallet/call index + body.
+	fn wrap_parainherent(body: Vec<u8>) -> Vec<u8> {
+		let mut inner = vec![0x04u8]; // bare extrinsic v4
+		inner.push(60); // pallet index (ParaInherent) — value irrelevant, skipped positionally
+		inner.push(0); // call index (enter)
+		inner.extend(body);
+		let mut out = Compact(inner.len() as u32).encode();
+		out.extend(inner);
+		out
+	}
+
+	#[test]
+	fn decodes_parainherent_bitfields() {
+		let bitvec0 = encode_availability_bitvec(&[true, false, true, true]);
+		let bitvec1 = encode_availability_bitvec(&[false, false, true]);
+
+		let mut body = Compact(2u32).encode(); // two signed bitfields
+		body.extend(bitvec0.clone());
+		body.extend(5u32.encode()); // validator_index
+		body.extend([0x11u8; 64]); // signature
+		body.extend(bitvec1.clone());
+		body.extend(9u32.encode());
+		body.extend([0x22u8; 64]);
+		// Trailing bytes standing in for backed_candidates/disputes/parent_header — must be ignored.
+		body.extend([0xDE, 0xAD, 0xBE, 0xEF]);
+
+		let extrinsic = wrap_parainherent(body);
+		let decoded = decode_parainherent_bitfields(&extrinsic).unwrap();
+		assert_eq!(decoded, vec![bitvec0, bitvec1]);
+	}
+
+	#[test]
+	fn rejects_parainherent_signed_extrinsic() {
+		let mut inner = vec![0x84u8]; // signed v4 (top bit set) — not a bare inherent
+		inner.extend([0u8; 4]);
+		let mut extrinsic = Compact(inner.len() as u32).encode();
+		extrinsic.extend(inner);
+		assert!(decode_parainherent_bitfields(&extrinsic).is_err());
+	}
+
+	#[test]
+	fn rejects_parainherent_truncated_bitfield() {
+		let mut body = Compact(1u32).encode(); // claims one bitfield
+		body.extend(encode_availability_bitvec(&[true, true]));
+		body.extend(5u32.encode()); // validator_index, then no signature
+		let extrinsic = wrap_parainherent(body);
+		assert!(decode_parainherent_bitfields(&extrinsic).is_err());
+	}
+}
