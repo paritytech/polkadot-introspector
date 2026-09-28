@@ -16,17 +16,35 @@
 //
 
 use crate::{
-	api::dynamic::{decode_availability_cores, decode_inherent_data},
-	metadata::polkadot::{
-		self,
-		runtime_types::{
-			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-			polkadot_runtime_parachains::hrmp::HrmpChannel,
-			sp_consensus_babe::{self, digests::PreDigest},
-			sp_consensus_slots::Slot,
-			sp_core::crypto::KeyTypeId,
-			sp_runtime::generic::digest::DigestItem,
+	api::{
+		decode::{
+			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
+			decode_availability_cores, decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes,
+			decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids, decode_parainherent_bitfields,
+			decode_queued_authority_discovery_keys, decode_session_index, decode_slot, decode_timestamp,
+			decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
+			para_session_account_keys_key, queued_keys_key, session_key_owner_key, timestamp_now_key,
 		},
+		dynamic::{
+			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
+			decode_validator_groups as decode_validator_groups_dynamic,
+		},
+		shadow,
+	},
+	chain_events::SubxtCandidateEvent,
+	metadata::{
+		polkadot::{
+			self,
+			runtime_types::{
+				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+				polkadot_runtime_parachains::hrmp::HrmpChannel,
+				sp_consensus_babe::{self, digests::PreDigest},
+				sp_consensus_slots::Slot,
+				sp_core::crypto::KeyTypeId,
+				sp_runtime::generic::digest::DigestItem,
+			},
+		},
+		polkadot_primitives::ValidatorIndex,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
@@ -34,7 +52,7 @@ use crate::{
 	},
 };
 use clap::ValueEnum;
-use parity_scale_codec::Decode;
+use parity_scale_codec::{Decode, Encode};
 use std::collections::BTreeMap;
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -71,6 +89,10 @@ where
 	client: T,
 	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
 	hasher: PolkadotHasher,
+	/// When set, each migrated read is also decoded through the metadata-free path and the two
+	/// results are compared, aborting on any mismatch. The comparison harness itself lands with
+	/// the first migrated read.
+	shadow: bool,
 }
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
@@ -108,47 +130,123 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		}
 	}
 
+	/// Fetches a header via `chain_getHeader` — the metadata-free counterpart of the blocks API.
+	async fn header_via_rpc(&self, hash: H256) -> Result<Header, subxt::Error> {
+		self.legacy_rpc_methods
+			.chain_get_header(Some(hash))
+			.await?
+			.ok_or_else(|| subxt::Error::Other(format!("header {hash:?} not found via chain_getHeader")))
+	}
+
+	/// Reads a raw storage value via `state_getStorage` and decodes it with the given metadata-free
+	/// decoder — the shadow counterpart of a typed storage read.
+	async fn shadow_storage<R>(
+		&self,
+		hash: H256,
+		key: &[u8],
+		read: &str,
+		decode: impl Fn(&[u8]) -> color_eyre::Result<R>,
+	) -> Result<Option<R>, subxt::Error> {
+		self.legacy_rpc_methods
+			.state_get_storage(key, Some(hash))
+			.await?
+			.map(|bytes| decode(&bytes))
+			.transpose()
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode {read} (metadata-free): {e}")))
+	}
+
+	/// Calls a runtime API via `state_call` and decodes the result with the given metadata-free decoder.
+	async fn state_call_decoded<R>(
+		&self,
+		hash: H256,
+		method: &str,
+		decode: impl Fn(&[u8]) -> color_eyre::Result<R>,
+	) -> Result<R, subxt::Error> {
+		let bytes = self.legacy_rpc_methods.state_call(method, None, Some(hash)).await?;
+		decode(&bytes).map_err(|e| subxt::Error::Other(format!("Failed to decode {method}: {e}")))
+	}
+
 	async fn get_hrmp_egress_channels_index(
-		storage: StorageClient<PolkadotConfig, T>,
+		client: ApiClient<T>,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<u32>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
-		Ok(storage
+		let index: Vec<u32> = client
+			.storage()
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.unwrap_or_default()
 			.iter()
 			.map(|id| id.0)
-			.collect())
+			.collect();
+
+		if client.shadow {
+			let key = hrmp_egress_channels_index_key(para_id);
+			let metadata_free = client
+				.shadow_storage(block_hash, &key, "HrmpEgressChannelsIndex", decode_para_ids)
+				.await?
+				.unwrap_or_default();
+			shadow::compare(block_hash, "hrmp_egress_channels_index", &index, &metadata_free);
+		}
+
+		Ok(index)
 	}
 
 	async fn get_hrmp_channel_digests(
-		storage: StorageClient<PolkadotConfig, T>,
+		client: ApiClient<T>,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<(u32, Vec<u32>)>, subxt::Error> {
 		let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
-		Ok(storage
+		let digests: Vec<(u32, Vec<u32>)> = client
+			.storage()
 			.at(block_hash)
 			.fetch(&addr)
 			.await?
 			.unwrap_or_default()
 			.into_iter()
 			.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
-			.collect())
+			.collect();
+
+		if client.shadow {
+			let key = hrmp_channel_digests_key(para_id);
+			let metadata_free = client
+				.shadow_storage(block_hash, &key, "HrmpChannelDigests", decode_hrmp_channel_digests)
+				.await?
+				.unwrap_or_default();
+			shadow::compare(block_hash, "hrmp_channel_digests", &digests, &metadata_free);
+		}
+
+		Ok(digests)
 	}
 
 	async fn get_hrmp_channels(
-		storage: StorageClient<PolkadotConfig, T>,
+		client: ApiClient<T>,
 		block_hash: H256,
 		sender: u32,
 		recipient: u32,
 	) -> Result<Option<(u32, u32, HrmpChannel)>, subxt::Error> {
 		let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
 		let addr = polkadot::storage().hrmp().hrmp_channels(id);
-		Ok(storage.at(block_hash).fetch(&addr).await?.map(|v| (sender, recipient, v)))
+		let channel = client
+			.storage()
+			.at(block_hash)
+			.fetch(&addr)
+			.await?
+			.map(|v| (sender, recipient, v));
+
+		if client.shadow {
+			let key = hrmp_channels_key(sender, recipient);
+			let metadata_free = client
+				.shadow_storage(block_hash, &key, "HrmpChannels", decode_hrmp_channel)
+				.await?;
+			let old = channel.as_ref().map(|(_, _, channel)| SubxtHrmpChannel::from(channel));
+			shadow::compare(block_hash, "hrmp_channel", &old, &metadata_free);
+		}
+
+		Ok(channel)
 	}
 
 	async fn get_inbound_hrmp_channel_pairs(
@@ -158,7 +256,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
 		let inbound_ids_fut = para_ids
 			.iter()
-			.map(|&para_id| tokio::spawn(Self::get_hrmp_channel_digests(self.storage(), block_hash, para_id)));
+			.map(|&para_id| tokio::spawn(Self::get_hrmp_channel_digests(self.clone(), block_hash, para_id)));
 		let inbound_ids: Vec<_> = join_requests(inbound_ids_fut)
 			.await?
 			.iter()
@@ -179,7 +277,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	) -> color_eyre::Result<Vec<(u32, u32)>, subxt::Error> {
 		let outbound_ids_fut = para_ids
 			.iter()
-			.map(|&para_id| tokio::spawn(Self::get_hrmp_egress_channels_index(self.storage(), block_hash, para_id)));
+			.map(|&para_id| tokio::spawn(Self::get_hrmp_egress_channels_index(self.clone(), block_hash, para_id)));
 		let outbound_ids: Vec<Vec<u32>> = join_requests(outbound_ids_fut).await?;
 
 		Ok(para_ids
@@ -192,25 +290,80 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error> {
-		Ok(self.block_at(maybe_hash).await?.header().clone())
+		let block = self.block_at(maybe_hash).await?;
+		let header = block.header().clone();
+
+		if self.shadow {
+			// Resolve the concrete hash so the metadata-free read hits the same block as the primary.
+			let hash = block.hash();
+			let metadata_free = self.header_via_rpc(hash).await?;
+			shadow::compare(hash, "block_header", &header, &metadata_free);
+		}
+
+		Ok(header)
 	}
 
 	pub async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error> {
-		Ok(self.block_at(maybe_hash).await?.number())
+		let block = self.block_at(maybe_hash).await?;
+		let number = block.number();
+
+		if self.shadow {
+			let hash = block.hash();
+			let metadata_free = self.header_via_rpc(hash).await?;
+			shadow::compare(hash, "block_number", &number, &metadata_free.number);
+		}
+
+		Ok(number)
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
-		let timestamp = polkadot::storage().timestamp().now();
-		self.storage().at(hash).fetch(&timestamp).await
+		let addr = polkadot::storage().timestamp().now();
+		let timestamp = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let metadata_free = self
+				.shadow_storage(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
+				.await?;
+			shadow::compare(hash, "block_timestamp", &timestamp, &metadata_free);
+		}
+
+		Ok(timestamp)
 	}
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
 		self.events().at(hash).await
 	}
 
+	/// Reads candidate (backed/included/timed-out) events for a block through the
+	/// `ParachainHost_candidate_events` runtime call and decodes them without metadata.
+	pub async fn get_candidate_events(&self, hash: H256) -> Result<Vec<SubxtCandidateEvent>, subxt::Error> {
+		let hasher = self.hasher;
+		self.state_call_decoded(hash, "ParachainHost_candidate_events", |bytes| decode_candidate_events(bytes, hasher))
+			.await
+	}
+
+	/// Reads the recent disputes for a block through the `ParachainHost_disputes` runtime call and
+	/// decodes them without metadata.
+	pub async fn get_disputes(&self, hash: H256) -> Result<Vec<DecodedDispute>, subxt::Error> {
+		self.state_call_decoded(hash, "ParachainHost_disputes", decode_disputes).await
+	}
+
+	/// Reads the current Babe epoch through the `BabeApi_current_epoch` runtime call, decoded without
+	/// metadata. Used to shadow the `Babe.Randomness` and `Babe.Authorities` storage reads.
+	async fn babe_current_epoch(&self, hash: H256) -> Result<DecodedBabeEpoch, subxt::Error> {
+		self.state_call_decoded(hash, "BabeApi_current_epoch", decode_babe_epoch).await
+	}
+
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
 		let addr = polkadot::storage().babe().randomness();
-		self.storage().at(hash).fetch(&addr).await
+		let randomness = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let epoch = self.babe_current_epoch(hash).await?;
+			shadow::compare(hash, "babe_randomness", &randomness, &Some(epoch.randomness));
+		}
+
+		Ok(randomness)
 	}
 
 	pub async fn get_babe_authorities(
@@ -218,16 +371,35 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		hash: H256,
 	) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
 		let addr = polkadot::storage().babe().authorities();
-		self.storage()
+		let authorities = self
+			.storage()
 			.at(hash)
 			.fetch(&addr)
 			.await
-			.map(|res| res.map(|res| res.0).unwrap_or_default())
+			.map(|res| res.map(|res| res.0).unwrap_or_default())?;
+
+		if self.shadow {
+			let epoch = self.babe_current_epoch(hash).await?;
+			// `app::Public` wraps the 32 raw key bytes, matching the metadata-free `[u8; 32]`.
+			let old: Vec<([u8; 32], u64)> = authorities.iter().map(|(public, weight)| (public.0, *weight)).collect();
+			shadow::compare(hash, "babe_authorities", &old, &epoch.authorities);
+		}
+
+		Ok(authorities)
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
 		let addr = polkadot::storage().babe().current_slot();
-		self.storage().at(hash).fetch(&addr).await
+		let slot = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let metadata_free = self
+				.shadow_storage(hash, &babe_current_slot_key(), "Babe.CurrentSlot", decode_slot)
+				.await?;
+			shadow::compare(hash, "babe_current_slot", &slot.as_ref().map(|slot| slot.0), &metadata_free);
+		}
+
+		Ok(slot)
 	}
 
 	pub async fn get_system_digest(&self, hash: H256) -> Result<Option<PreDigest>, subxt::Error> {
@@ -246,19 +418,36 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
 		let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
-		self.storage().at(hash).fetch(&addr).await
+		let owner = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let key = session_key_owner_key(*b"babe", public);
+			let metadata_free = self.shadow_storage(hash, &key, "Session.KeyOwner", decode_account_id).await?;
+			shadow::compare(hash, "session_key_owner", &owner, &metadata_free);
+		}
+
+		Ok(owner)
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
 		let addr = subxt::runtime_api::dynamic("ParachainHost", "availability_cores", Vec::<Value<()>>::new());
 		let value = self.runtime_api_at(Some(hash)).await?.call(addr).await?.to_value()?;
-		decode_availability_cores(&value)
-			.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))
+		let cores = decode_availability_cores_dynamic(&value)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))?;
+
+		if self.shadow {
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_availability_cores", decode_availability_cores)
+				.await?;
+			shadow::compare(hash, "availability_cores", &cores, &metadata_free);
+		}
+
+		Ok(cores)
 	}
 
 	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
 		let addr = polkadot::apis().parachain_host().claim_queue();
-		self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
+		let queue: ClaimQueue = self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
 			queue
 				.iter()
 				.map(|(core, ids)| {
@@ -267,12 +456,49 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 					(core, ids)
 				})
 				.collect::<Vec<_>>()
-		})
+		})?;
+
+		if self.shadow {
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_claim_queue", decode_claim_queue)
+				.await?;
+			shadow::compare(hash, "claim_queue", &queue, &metadata_free);
+		}
+
+		Ok(queue)
+	}
+
+	pub async fn get_backing_groups(&self, hash: H256) -> Result<Vec<Vec<ValidatorIndex>>, subxt::Error> {
+		let value = self
+			.fetch_dynamic_storage(Some(hash), "ParaScheduler", "ValidatorGroups")
+			.await?
+			.ok_or_else(|| subxt::Error::Other("ParaScheduler.ValidatorGroups not found".to_string()))?;
+		let groups = decode_validator_groups_dynamic(&value)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode validator groups: {e}")))?;
+
+		if self.shadow {
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_validator_groups", decode_validator_groups)
+				.await?;
+			let old: Vec<Vec<u32>> = groups.iter().map(|group| group.iter().map(|idx| idx.0).collect()).collect();
+			shadow::compare(hash, "validator_groups", &old, &metadata_free);
+		}
+
+		Ok(groups)
 	}
 
 	pub async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {
 		let addr = polkadot::storage().session().current_index();
-		self.storage().at(hash).fetch(&addr).await
+		let index = self.storage().at(hash).fetch(&addr).await?;
+
+		if self.shadow {
+			let metadata_free = self
+				.state_call_decoded(hash, "ParachainHost_session_index_for_child", decode_session_index)
+				.await?;
+			shadow::compare(hash, "session_index", &index.unwrap_or_default(), &metadata_free);
+		}
+
+		Ok(index)
 	}
 
 	pub async fn get_session_index_now(&self) -> Result<Option<u32>, subxt::Error> {
@@ -291,7 +517,18 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let storage =
 			if let Some(hash) = maybe_hash { self.storage().at(hash) } else { self.storage().at_latest().await? };
 
-		storage.fetch(&addr).await
+		let keys = storage.fetch(&addr).await?;
+
+		// Shadow only at a concrete hash; at latest the typed and raw reads could race to different blocks.
+		if self.shadow &&
+			let Some(hash) = maybe_hash
+		{
+			let key = para_session_account_keys_key(session_index);
+			let metadata_free = self.shadow_storage(hash, &key, "account_keys", decode_account_keys).await?;
+			shadow::compare(hash, "session_account_keys", &keys, &metadata_free);
+		}
+
+		Ok(keys)
 	}
 
 	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
@@ -301,11 +538,32 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_session_queued_keys(&self, hash: Option<H256>) -> Result<Option<QueuedKeys>, subxt::Error> {
 		let addr = polkadot::storage().session().queued_keys();
-		if let Some(hash) = hash {
-			self.storage().at(hash).fetch(&addr).await
+		let queued = if let Some(hash) = hash {
+			self.storage().at(hash).fetch(&addr).await?
 		} else {
-			self.storage().at_latest().await?.fetch(&addr).await
+			self.storage().at_latest().await?.fetch(&addr).await?
+		};
+
+		// Shadow only at a concrete hash; at latest the typed and raw reads could race to different blocks.
+		if self.shadow &&
+			let Some(hash) = hash
+		{
+			let old: Vec<(AccountId32, [u8; 32])> = queued
+				.as_ref()
+				.map(|keys| {
+					keys.iter()
+						.map(|(account, keys)| (account.clone(), keys.authority_discovery.0))
+						.collect()
+				})
+				.unwrap_or_default();
+			let metadata_free = self
+				.shadow_storage(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
+				.await?
+				.unwrap_or_default();
+			shadow::compare(hash, "session_queued_keys", &old, &metadata_free);
 		}
+
+		Ok(queued)
 	}
 
 	pub async fn get_inbound_outbound_hrmp_channels(
@@ -316,7 +574,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	{
 		let inbound_pairs = self.get_inbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
 		let inbound_channels_fut = inbound_pairs.iter().map(|(sender, para_id)| {
-			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *sender, *para_id))
+			tokio::spawn(Self::get_hrmp_channels(self.clone(), block_hash, *sender, *para_id))
 		});
 		let inbound_channels: Vec<_> = join_requests(inbound_channels_fut).await?.into_iter().flatten().collect();
 
@@ -328,7 +586,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 		let outbound_pairs = self.get_outbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
 		let outbound_channels_fut = outbound_pairs.iter().map(|(para_id, recipient)| {
-			tokio::spawn(Self::get_hrmp_channels(self.storage(), block_hash, *para_id, *recipient))
+			tokio::spawn(Self::get_hrmp_channels(self.clone(), block_hash, *para_id, *recipient))
 		});
 		let outbound_channels: Vec<_> = join_requests(outbound_channels_fut).await?.into_iter().flatten().collect();
 
@@ -375,10 +633,32 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.take(2)
 			.last()
 			.ok_or_else(|| "`ParaInherent` data is always at index #1".to_string())?;
-		ex.field_values()
+		let inherent = ex
+			.field_values()
 			.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
 			.and_then(|v| decode_inherent_data(&v).map_err(|e| format!("Failed to decode ParaInherent: {e}")))
-			.map_err(subxt::Error::Other)
+			.map_err(subxt::Error::Other)?;
+
+		if self.shadow {
+			let hash = block.hash();
+			let details = self
+				.legacy_rpc_methods
+				.chain_get_block(Some(hash))
+				.await?
+				.ok_or_else(|| subxt::Error::Other(format!("block {hash:?} not found via chain_getBlock")))?;
+			let para_inherent = details
+				.block
+				.extrinsics
+				.get(1)
+				.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
+			let metadata_free = decode_parainherent_bitfields(&para_inherent.0).map_err(|e| {
+				subxt::Error::Other(format!("Failed to decode ParaInherent bitfields (metadata-free): {e}"))
+			})?;
+			let old: Vec<Vec<u8>> = inherent.bitfields.iter().map(|bitfield| bitfield.0.encode()).collect();
+			shadow::compare(hash, "parainherent_bitfields", &old, &metadata_free);
+		}
+
+		Ok(inherent)
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes
@@ -406,6 +686,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 pub async fn build_online_client(
 	url: &str,
 	mode: ApiClientMode,
+	shadow: bool,
 ) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, String> {
 	let (client, rpc_client) = match mode {
 		ApiClientMode::RPC => {
@@ -432,7 +713,7 @@ pub async fn build_online_client(
 	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
 	let hasher = client.hasher();
 
-	Ok(ApiClient { client, legacy_rpc_methods, hasher })
+	Ok(ApiClient { client, legacy_rpc_methods, hasher, shadow })
 }
 
 async fn join_requests<I, T>(fut: I) -> Result<Vec<T>, subxt::Error>
