@@ -58,8 +58,8 @@ struct WhoIsOptions {
 	#[clap(long)]
 	pub at_block: Option<H256>,
 	/// Shadow-decode migrated reads through the metadata-free path and abort on any mismatch.
-	/// Temporary scaffold for the metadata-removal work; off by default.
-	#[clap(long, default_value_t = false)]
+	/// Temporary scaffold for the metadata-removal work; on by default.
+	#[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
 	pub shadow_decode_without_metadata: bool,
 	/// Tells if we should update the p2p cache.
 	///
