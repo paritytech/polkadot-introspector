@@ -59,6 +59,7 @@ const EXPECTED_READS: &[&str] = &[
 	"hrmp_channel_digests",
 	"hrmp_channel",
 	"parainherent_bitfields",
+	"parainherent_disputes",
 ];
 
 /// How often the checklist is logged while comparisons keep coming in. Short enough to give a

@@ -18,12 +18,13 @@
 use crate::{
 	api::{
 		decode::{
-			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
-			decode_availability_cores, decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes,
-			decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids, decode_parainherent_bitfields,
-			decode_queued_authority_discovery_keys, decode_session_index, decode_slot, decode_timestamp,
-			decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
-			para_session_account_keys_key, queued_keys_key, session_key_owner_key, timestamp_now_key,
+			DecodedBabeEpoch, DecodedDispute, DecodedDisputeStatementSet, babe_current_slot_key, decode_account_id,
+			decode_account_keys, decode_availability_cores, decode_babe_epoch, decode_candidate_events,
+			decode_claim_queue, decode_disputes, decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids,
+			decode_parainherent, decode_queued_authority_discovery_keys, decode_session_index, decode_slot,
+			decode_timestamp, decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key,
+			hrmp_egress_channels_index_key, para_session_account_keys_key, queued_keys_key, session_key_owner_key,
+			timestamp_now_key,
 		},
 		dynamic::{
 			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
@@ -631,11 +632,14 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				.extrinsics
 				.get(1)
 				.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
-			let metadata_free = decode_parainherent_bitfields(&para_inherent.0).map_err(|e| {
-				subxt::Error::Other(format!("Failed to decode ParaInherent bitfields (metadata-free): {e}"))
-			})?;
+			let metadata_free = decode_parainherent(&para_inherent.0)
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent (metadata-free): {e}")))?;
 			let old: Vec<Vec<u8>> = inherent.bitfields.iter().map(|bitfield| bitfield.0.encode()).collect();
-			shadow::compare(hash, "parainherent_bitfields", &old, &metadata_free);
+			shadow::compare(hash, "parainherent_bitfields", &old, &metadata_free.bitfields);
+			let old: Vec<DecodedDisputeStatementSet> = inherent.disputes.iter().map(Into::into).collect();
+			shadow::compare_set(hash, "parainherent_disputes", &old, &metadata_free.disputes, |set| {
+				(set.candidate_hash, set.session)
+			});
 		}
 
 		Ok(inherent)
