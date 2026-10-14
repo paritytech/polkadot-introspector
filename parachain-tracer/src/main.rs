@@ -103,8 +103,16 @@ pub(crate) struct ParachainTracerOptions {
 	#[clap(long = "client", default_value_t, value_enum)]
 	pub api_client_mode: ApiClientMode,
 	/// Shadow-decode each migrated read through the metadata-free path and abort on any mismatch.
-	/// Temporary aid for removing the metadata dependency; doubles RPC load, off by default.
-	#[clap(name = "shadow-decode-without-metadata", long, default_value = "false")]
+	/// Temporary aid for removing the metadata dependency; doubles RPC load, on by default.
+	#[clap(
+		name = "shadow-decode-without-metadata",
+		long,
+		default_value_t = true,
+		num_args = 0..=1,
+		default_missing_value = "true",
+		require_equals = true,
+		action = clap::ArgAction::Set
+	)]
 	pub shadow_decode_without_metadata: bool,
 	/// Run in historical mode to trace parachains between specific blocks instead of following live chain progress
 	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
