@@ -38,21 +38,20 @@ use crate::{
 			runtime_types::{
 				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
 				polkadot_runtime_parachains::hrmp::HrmpChannel,
-				sp_consensus_babe::{self, digests::PreDigest},
+				sp_consensus_babe,
 				sp_consensus_slots::Slot,
 				sp_core::crypto::KeyTypeId,
-				sp_runtime::generic::digest::DigestItem,
 			},
 		},
 		polkadot_primitives::ValidatorIndex,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
-		SessionKeys, SubxtHrmpChannel, Timestamp,
+		SubxtHrmpChannel, Timestamp,
 	},
 };
 use clap::ValueEnum;
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::Encode;
 use std::collections::BTreeMap;
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -402,20 +401,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		Ok(slot)
 	}
 
-	pub async fn get_system_digest(&self, hash: H256) -> Result<Option<PreDigest>, subxt::Error> {
-		let addr = polkadot::storage().system().digest();
-		let result = self.storage().at(hash).fetch(&addr).await.unwrap().unwrap();
-
-		for pre_digest in result.logs.into_iter() {
-			if let DigestItem::PreRuntime(_, bytes) = pre_digest {
-				let pre_digest: PreDigest = PreDigest::decode(&mut &bytes[..]).unwrap();
-				return Ok(Some(pre_digest));
-			}
-		}
-
-		Ok(None)
-	}
-
 	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
 		let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
 		let owner = self.storage().at(hash).fetch(&addr).await?;
@@ -529,11 +514,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		}
 
 		Ok(keys)
-	}
-
-	pub async fn get_session_next_keys(&self, account: &AccountId32) -> Result<Option<SessionKeys>, subxt::Error> {
-		let addr = polkadot::storage().session().next_keys(account.clone());
-		self.storage().at_latest().await?.fetch(&addr).await
 	}
 
 	pub async fn get_session_queued_keys(&self, hash: Option<H256>) -> Result<Option<QueuedKeys>, subxt::Error> {
