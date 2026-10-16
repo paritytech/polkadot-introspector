@@ -514,7 +514,7 @@ struct RawBackedCandidate {
 /// The parts of a `ParaInherent` (`paras_inherent::enter`) extrinsic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedParaInherent {
-	/// Raw SCALE bytes of each availability bitfield
+	/// Raw SCALE bytes of each availability bitfield.
 	pub bitfields: Vec<Vec<u8>>,
 	pub disputes: Vec<DecodedDisputeStatementSet>,
 }

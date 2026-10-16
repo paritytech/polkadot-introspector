@@ -188,8 +188,7 @@ mod tests {
 	/// mismatch aborts the process; the assertions then pin the disputes to the known candidates.
 	///
 	/// Disputes are rare and only archive nodes keep old state, so this is opt-in. Point
-	/// `ARCHIVE_WS_URL` at a Polkadot archive node, e.g. `wss://rpc.polkadot.io:443`, which serves
-	/// these blocks:
+	/// `ARCHIVE_WS_URL` at a Polkadot archive node. The public RPC serves these blocks:
 	/// `ARCHIVE_WS_URL=wss://rpc.polkadot.io:443 cargo test -p polkadot-introspector-essentials \
 	///  archive_inherent_disputes -- --ignored`
 	#[tokio::test]
