@@ -17,6 +17,7 @@
 
 use crate::{
 	api::{
+		convert,
 		decode::{
 			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
 			decode_availability_cores, decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes,
@@ -37,14 +38,12 @@ use crate::{
 		runtime_types::{
 			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
 			polkadot_runtime_parachains::hrmp::HrmpChannel,
-			sp_consensus_babe,
-			sp_consensus_slots::Slot,
 			sp_core::crypto::KeyTypeId,
 		},
 	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
-		SubxtHrmpChannel, Timestamp, ValidatorIndex,
+		AccountId32, BabeAuthorityId, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData,
+		PolkadotHasher, QueuedKeys, Slot, SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
 };
 use clap::ValueEnum;
@@ -362,10 +361,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		Ok(randomness)
 	}
 
-	pub async fn get_babe_authorities(
-		&self,
-		hash: H256,
-	) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
+	pub async fn get_babe_authorities(&self, hash: H256) -> Result<Vec<(BabeAuthorityId, u64)>, subxt::Error> {
 		let addr = polkadot::storage().babe().authorities();
 		let authorities = self
 			.storage()
@@ -381,7 +377,10 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			shadow::compare(hash, "babe_authorities", &old, &epoch.authorities);
 		}
 
-		Ok(authorities)
+		Ok(authorities
+			.iter()
+			.map(|(public, weight)| (BabeAuthorityId::from(public), *weight))
+			.collect())
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
@@ -395,7 +394,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			shadow::compare(hash, "babe_current_slot", &slot.as_ref().map(|slot| slot.0), &metadata_free);
 		}
 
-		Ok(slot)
+		Ok(slot.map(Slot::from))
 	}
 
 	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
@@ -540,7 +539,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			shadow::compare(hash, "session_queued_keys", &old, &metadata_free);
 		}
 
-		Ok(queued)
+		Ok(queued.as_ref().map(convert::queued_keys))
 	}
 
 	pub async fn get_inbound_outbound_hrmp_channels(

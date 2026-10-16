@@ -16,6 +16,7 @@
 //
 
 pub mod api_client;
+pub(crate) mod convert;
 pub mod decode;
 pub mod dynamic;
 pub mod executor;

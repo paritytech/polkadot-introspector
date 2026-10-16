@@ -247,10 +247,7 @@ impl SubxtTracker {
 		let assignments = storage.core_assignments(block_hash).await.expect("saved in the collector");
 		self.cores = assignments
 			.iter()
-			.filter_map(|(core, ids)| {
-				let ids = ids.iter().map(|v| v.0).collect::<Vec<_>>();
-				ids.contains(&self.para_id).then_some((core.0, ids))
-			})
+			.filter_map(|(core, ids)| ids.contains(&self.para_id).then(|| (*core, ids.clone())))
 			.collect();
 	}
 

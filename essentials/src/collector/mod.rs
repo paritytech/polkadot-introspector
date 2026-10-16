@@ -27,9 +27,8 @@ use crate::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
-	metadata::polkadot::runtime_types::sp_consensus_slots::Slot,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, DisputeStatement, H256, Header, InherentData, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, DisputeStatement, H256, Header, InherentData, PolkadotHasher, Slot, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};

@@ -15,14 +15,12 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::polkadot::runtime_types::{self as subxt_runtime_types};
 use parity_scale_codec::{Compact, Decode, Encode, Error as CodecError, Input, Output};
 use std::collections::BTreeMap;
 use subxt::{
 	config::substrate::{DynamicHasher256, SubstrateHeader},
 	utils,
 };
-use subxt_runtime_types::polkadot_runtime as runtime;
 
 pub type BlockNumber = u32;
 pub type H256 = utils::H256;
@@ -31,9 +29,6 @@ pub type Header = SubstrateHeader<u32, DynamicHasher256>;
 pub type PolkadotHash = subxt::config::HashFor<subxt::PolkadotConfig>;
 pub type PolkadotHasher = <subxt::PolkadotConfig as subxt::Config>::Hasher;
 pub type Timestamp = u64;
-pub type SessionKeys = runtime::SessionKeys;
-pub type QueuedKeys = crate::metadata::polkadot::session::storage::types::queued_keys::QueuedKeys;
-pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
 
 /// Index of a validator in the session's validator set. Same SCALE layout as the runtime's `ValidatorIndex`.
@@ -129,7 +124,7 @@ pub struct DisputeStatementSet {
 	pub statements: Vec<(DisputeStatement, ValidatorIndex)>,
 }
 
-/// A wrapper over subxt HRMP channel configuration
+/// HRMP channel configuration
 #[derive(Debug, Clone, Default, Encode, Decode, PartialEq, Eq)]
 pub struct SubxtHrmpChannel {
 	pub max_capacity: u32,
@@ -140,47 +135,6 @@ pub struct SubxtHrmpChannel {
 	pub mqc_head: Option<H256>,
 	pub sender_deposit: u128,
 	pub recipient_deposit: u128,
-}
-
-impl From<&subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
-	fn from(channel: &subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
-		SubxtHrmpChannel {
-			max_capacity: channel.max_capacity,
-			max_total_size: channel.max_total_size,
-			max_message_size: channel.max_message_size,
-			msg_count: channel.msg_count,
-			total_size: channel.total_size,
-			mqc_head: channel.mqc_head,
-			sender_deposit: channel.sender_deposit,
-			recipient_deposit: channel.recipient_deposit,
-		}
-	}
-}
-
-impl From<subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel> for SubxtHrmpChannel {
-	fn from(channel: subxt_runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel) -> Self {
-		Self::from(&channel)
-	}
-}
-
-// TODO: Take it from runtime types v5
-/// Polkadot v5 ParasEntry type
-#[derive(Debug)]
-pub struct ParasEntry {
-	/// The `Assignment`
-	pub assignment: Assignment,
-	/// The number of times the entry has timed out in availability.
-	pub availability_timeouts: u32,
-	/// The block height where this entry becomes invalid.
-	pub ttl: BlockNumber,
-}
-
-// TODO: Take it from runtime types v5
-/// Polkadot v5 Assignment type
-#[derive(Debug)]
-pub struct Assignment {
-	/// Assignment's ParaId
-	pub para_id: u32,
 }
 
 /// Abstraction to cover core states
@@ -195,3 +149,24 @@ pub enum CoreOccupied {
 }
 
 pub type InboundOutBoundHrmpChannels = Vec<(u32, BTreeMap<u32, SubxtHrmpChannel>, BTreeMap<u32, SubxtHrmpChannel>)>;
+
+/// Babe slot number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
+pub struct Slot(pub u64);
+
+/// Public key of a Babe authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BabeAuthorityId(pub [u8; 32]);
+
+/// Public key a validator uses for authority discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthorityDiscoveryId(pub [u8; 32]);
+
+/// The session keys the tools read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionKeys {
+	pub authority_discovery: AuthorityDiscoveryId,
+}
+
+/// Validators of the next session with their session keys.
+pub type QueuedKeys = Vec<(AccountId32, SessionKeys)>;

@@ -22,13 +22,9 @@ use crate::{
 	},
 	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
-	metadata::polkadot::{
-		runtime_apis::babe_api::types::generate_key_ownership_proof::Slot, runtime_types::sp_consensus_babe,
-		session::storage::types::queued_keys::QueuedKeys,
-	},
 	types::{
-		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		PolkadotHasher, SubxtHrmpChannel, Timestamp, ValidatorIndex,
+		AccountId32, BabeAuthorityId, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels,
+		InherentData, PolkadotHasher, QueuedKeys, Slot, SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -74,7 +70,7 @@ pub enum Request {
 	GetBabeRandomness(H256),
 	GetBabeAuthorithies(H256),
 	GetBabeCurrentSlot(H256),
-	GetBabeKeyOwner(H256, sp_consensus_babe::app::Public),
+	GetBabeKeyOwner(H256, BabeAuthorityId),
 }
 
 /// Response types for APIs.
@@ -117,7 +113,7 @@ enum Response {
 	/// Babe randomness
 	BabeRandomness(Option<[u8; 32]>),
 	/// Babe authorithies
-	BabeAuthorithies(Vec<(sp_consensus_babe::app::Public, u64)>),
+	BabeAuthorithies(Vec<(BabeAuthorityId, u64)>),
 	/// Babe current slot
 	BabeCurrentSlot(Option<Slot>),
 	/// Babe key owner
@@ -528,7 +524,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Vec<(sp_consensus_babe::app::Public, u64)>, RequestExecutorError> {
+	) -> color_eyre::Result<Vec<(BabeAuthorityId, u64)>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeAuthorithies, BabeAuthorithies, hash)
 	}
 
@@ -544,7 +540,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-		key: sp_consensus_babe::app::Public,
+		key: BabeAuthorityId,
 	) -> color_eyre::Result<Option<AccountId32>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeKeyOwner, BabeKeyOwner, hash, key)
 	}
