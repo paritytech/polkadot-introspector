@@ -187,16 +187,16 @@ mod tests {
 	/// on, so the metadata-free decode is compared against the metadata one for every read, and any
 	/// mismatch aborts the process; the assertions then pin the disputes to the known candidates.
 	///
-	/// Disputes are rare and only archive nodes keep old state, so this is opt-in:
-	/// `ARCHIVE_WS_URL=wss://<polkadot archive> cargo test -p polkadot-introspector-essentials \
-	///  archive_inherent_disputes -- --ignored`
-	///
-	/// For example, `wss://rpc.polkadot.io:443` serves these blocks:
+	/// Disputes are rare and only archive nodes keep old state, so this is opt-in. Point
+	/// `ARCHIVE_WS_URL` at a Polkadot archive node, e.g. `wss://rpc.polkadot.io:443`, which serves
+	/// these blocks:
 	/// `ARCHIVE_WS_URL=wss://rpc.polkadot.io:443 cargo test -p polkadot-introspector-essentials \
 	///  archive_inherent_disputes -- --ignored`
 	#[tokio::test]
 	#[ignore = "needs a Polkadot archive node in ARCHIVE_WS_URL"]
 	async fn archive_inherent_disputes_decode() {
+		// A shadow mismatch logs the diff and then exits, so the logger must be up to see it.
+		let _ = env_logger::try_init();
 		let url: &'static str = Box::leak(
 			std::env::var("ARCHIVE_WS_URL")
 				.expect("set ARCHIVE_WS_URL to a Polkadot archive node")

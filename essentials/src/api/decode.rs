@@ -23,7 +23,7 @@
 
 use crate::{
 	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
-	types::{AccountId32, ClaimQueue, CoreOccupied, H256, PolkadotHash, SubxtHrmpChannel},
+	types::{AccountId32, ClaimQueue, CoreOccupied, H256, Header, PolkadotHash, SubxtHrmpChannel},
 };
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError, Input};
@@ -429,7 +429,7 @@ pub fn decode_hrmp_channel(bytes: &[u8]) -> Result<SubxtHrmpChannel> {
 	SubxtHrmpChannel::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel: cannot decode: {e}"))
 }
 
-/// `ValidDisputeStatementKind`: Variant indices mirror runtime, the hashes are kept because a
+/// `ValidDisputeStatementKind`: variant indices mirror the runtime. The hashes are kept because a
 /// reader must consume them to advance, and they make comparison to metadata decoding precise.
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub enum DecodedValidKind {
@@ -521,14 +521,19 @@ pub struct DecodedParaInherent {
 
 /// Decodes a `ParaInherent` extrinsic, given its raw bytes as returned by
 /// `chain_getBlock` (index #1 of the block). The extrinsic envelope is stripped: the opaque-extrinsic
-/// length prefix, the version/type byte (which must be a unsigned inherent, so no signature
+/// length prefix, the version/type byte (which must be an unsigned inherent, so no signature
 /// follows), and the two pallet/call index bytes, then `ParachainsInherentData` is walked in order:
-/// `bitfields` (kept), `backed_candidates` (skipped), `disputes` (kept). `parent_header` comes last and
-/// is left untouched, so nothing beyond `disputes` is decoded.
+/// `bitfields` (kept), `backed_candidates` (skipped), `disputes` (kept), `parent_header` (skipped). The
+/// header closes the body, so requiring nothing after it anchors every section read before it.
 pub fn decode_parainherent(extrinsic: &[u8]) -> Result<DecodedParaInherent> {
 	let mut input = extrinsic;
-	// Opaque-extrinsic length prefix.
-	Compact::<u32>::decode(&mut input).map_err(|e| eyre!("parainherent: cannot decode length prefix: {e}"))?;
+	// Opaque-extrinsic length prefix, which must cover exactly the rest of the bytes.
+	let len = Compact::<u32>::decode(&mut input)
+		.map_err(|e| eyre!("parainherent: cannot decode length prefix: {e}"))?
+		.0 as usize;
+	if len != input.len() {
+		return Err(eyre!("parainherent: length prefix is {len} but {} bytes follow", input.len()));
+	}
 	// Extrinsic version/type byte: the top two bits are the type, `0b00` = bare (unsigned). An inherent
 	// is always bare, so there is no signature to skip.
 	let version = u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read version byte: {e}"))?;
@@ -567,6 +572,11 @@ pub fn decode_parainherent(extrinsic: &[u8]) -> Result<DecodedParaInherent> {
 				.collect(),
 		})
 		.collect();
+
+	Header::decode(&mut input).map_err(|e| eyre!("parainherent: cannot skip parent header: {e}"))?;
+	if !input.is_empty() {
+		return Err(eyre!("parainherent: {} trailing bytes after parent header", input.len()));
+	}
 
 	Ok(DecodedParaInherent { bitfields, disputes })
 }
@@ -1098,6 +1108,7 @@ mod tests {
 		},
 		types::DisputeStatementSet,
 	};
+	use subxt::config::substrate::{Digest, DigestItem};
 
 	// One `BackedCandidate` with a non-trivial commitments section and one explicit vote.
 	fn backed_candidate() -> Vec<u8> {
@@ -1141,20 +1152,19 @@ mod tests {
 		]
 	}
 
-	#[test]
-	fn decodes_parainherent_like_runtime_encoding() {
+	// A full inherent built through the runtime types, so its encoding is the layout we must read.
+	// Backed candidates are decoded from the hand-built bytes above so the descriptor window is also
+	// exercised, and the header carries digest logs so skipping it is not a fixed-size step.
+	fn runtime_inherent() -> InherentData<Header> {
 		let signed_bitfield = |bits: &[bool], index| UncheckedSigned {
 			payload: AvailabilityBitfield(bits.iter().copied().collect()),
 			validator_index: ValidatorIndex(index),
 			signature: Signature([0x11; 64]),
 			__ignore: Default::default(),
 		};
-
-		// The runtime type encodes the layout we must read; its backed candidates are decoded from the
-		// hand-built bytes above so the descriptor window is also exercised.
 		let mut backed = Compact(1u32).encode();
 		backed.extend(backed_candidate());
-		let inherent = InherentData::<H256> {
+		InherentData {
 			bitfields: vec![signed_bitfield(&[true, false, true, true], 5), signed_bitfield(&[false, false, true], 9)],
 			backed_candidates: Decode::decode(&mut &backed[..]).unwrap(),
 			disputes: dispute_sets()
@@ -1165,9 +1175,46 @@ mod tests {
 					statements: set.statements.into_iter().map(|(s, i)| (s, i, Signature([0x44; 64]))).collect(),
 				})
 				.collect(),
-			parent_header: H256::zero(),
-		};
+			parent_header: Header {
+				parent_hash: H256::from([0x55; 32]),
+				number: 1_000_000,
+				state_root: H256::from([0x66; 32]),
+				extrinsics_root: H256::from([0x77; 32]),
+				digest: Digest {
+					logs: vec![
+						DigestItem::PreRuntime(*b"BABE", vec![1, 2, 3]),
+						DigestItem::Seal(*b"BABE", vec![0x88; 64]),
+					],
+				},
+			},
+		}
+	}
 
+	// The encoded body of [`runtime_inherent`] with the offset where each section starts, so negative
+	// tests can corrupt a known spot.
+	struct Sections {
+		body: Vec<u8>,
+		backed: usize,
+		disputes: usize,
+		parent_header: usize,
+	}
+
+	fn sections() -> Sections {
+		let inherent = runtime_inherent();
+		let backed = inherent.bitfields.encode().len();
+		let disputes = backed + inherent.backed_candidates.encode().len();
+		let parent_header = disputes + inherent.disputes.encode().len();
+		Sections { body: inherent.encode(), backed, disputes, parent_header }
+	}
+
+	// Decodes `body` wrapped into an extrinsic and returns the error it must fail with.
+	fn decode_error(body: Vec<u8>) -> String {
+		decode_parainherent(&wrap_parainherent(body)).unwrap_err().to_string()
+	}
+
+	#[test]
+	fn decodes_parainherent_like_runtime_encoding() {
+		let inherent = runtime_inherent();
 		let decoded = decode_parainherent(&wrap_parainherent(inherent.encode())).unwrap();
 
 		let bitfields: Vec<Vec<u8>> = inherent.bitfields.iter().map(|b| b.payload.0.encode()).collect();
@@ -1186,9 +1233,78 @@ mod tests {
 
 	#[test]
 	fn rejects_parainherent_truncated_bitfield() {
-		let mut body = Compact(1u32).encode(); // claims one bitfield
-		body.extend(encode_availability_bitvec(&[true, true]));
-		body.extend(5u32.encode()); // validator_index, then no signature
-		assert!(decode_parainherent(&wrap_parainherent(body)).is_err());
+		let Sections { mut body, backed, .. } = sections();
+		body.truncate(backed - 10); // cuts into the last bitfield's signature
+		assert_eq!(
+			decode_error(body),
+			"parainherent: cannot read bitfield 1 signature: Not enough data to fill buffer"
+		);
+	}
+
+	#[test]
+	fn rejects_parainherent_resized_backed_candidate() {
+		// A descriptor one byte short shifts everything after it, so decoding must fail loud.
+		let Sections { mut body, backed, .. } = sections();
+		body.remove(backed + 1); // first descriptor byte, after the candidate count
+		assert!(decode_error(body).starts_with("parainherent: cannot skip backed candidates"));
+	}
+
+	#[test]
+	fn rejects_parainherent_unknown_dispute_statement_variant() {
+		// The first statement's `DisputeStatement` byte, after the set count, candidate hash, session
+		// and statement count.
+		let Sections { body, disputes, .. } = sections();
+		let statement = disputes + 1 + 32 + 4 + 1;
+
+		let mut unknown_statement = body.clone();
+		unknown_statement[statement] = 2;
+		assert!(decode_error(unknown_statement).starts_with("parainherent: cannot decode disputes"));
+
+		let mut unknown_valid_kind = body;
+		unknown_valid_kind[statement + 1] = 9;
+		assert!(decode_error(unknown_valid_kind).starts_with("parainherent: cannot decode disputes"));
+	}
+
+	#[test]
+	fn rejects_parainherent_truncated_dispute() {
+		let Sections { mut body, parent_header, .. } = sections();
+		body.truncate(parent_header - 10); // cuts into the last statement's signature
+		assert!(decode_error(body).starts_with("parainherent: cannot decode disputes"));
+	}
+
+	#[test]
+	fn rejects_parainherent_truncated_parent_header() {
+		let Sections { mut body, .. } = sections();
+		body.pop(); // cuts into the seal of the header's digest
+		assert!(decode_error(body).starts_with("parainherent: cannot skip parent header"));
+	}
+
+	#[test]
+	fn rejects_parainherent_trailing_bytes() {
+		let Sections { mut body, .. } = sections();
+		body.extend([0xDE, 0xAD]);
+		assert_eq!(decode_error(body), "parainherent: 2 trailing bytes after parent header");
+	}
+
+	#[test]
+	fn rejects_parainherent_length_mismatch() {
+		let extrinsic = wrap_parainherent(sections().body);
+		assert!(decode_parainherent(&extrinsic).is_ok());
+
+		let mut padded = extrinsic.clone();
+		padded.push(0);
+		assert!(
+			decode_parainherent(&padded)
+				.unwrap_err()
+				.to_string()
+				.starts_with("parainherent: length prefix")
+		);
+		let truncated = &extrinsic[..extrinsic.len() - 1];
+		assert!(
+			decode_parainherent(truncated)
+				.unwrap_err()
+				.to_string()
+				.starts_with("parainherent: length prefix")
+		);
 	}
 }
