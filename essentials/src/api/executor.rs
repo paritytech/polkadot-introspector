@@ -24,15 +24,14 @@ use crate::{
 	constants::MAX_MSG_QUEUE_SIZE,
 	metadata::{
 		polkadot::{
-			runtime_apis::babe_api::types::generate_key_ownership_proof::Slot,
-			runtime_types::sp_consensus_babe::{self, digests::PreDigest},
+			runtime_apis::babe_api::types::generate_key_ownership_proof::Slot, runtime_types::sp_consensus_babe,
 			session::storage::types::queued_keys::QueuedKeys,
 		},
 		polkadot_primitives,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		PolkadotHasher, SessionKeys, SubxtHrmpChannel, Timestamp,
+		PolkadotHasher, SubxtHrmpChannel, Timestamp,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -69,7 +68,6 @@ pub enum Request {
 	GetBackingGroups(H256),
 	GetSessionIndex(H256),
 	GetSessionAccountKeys(u32, Option<H256>),
-	GetSessionNextKeys(AccountId32),
 	GetSessionQueuedKeys(Option<H256>),
 	GetInboundOutBoundHrmpChannels(H256, Vec<u32>),
 	GetSessionIndexNow,
@@ -79,7 +77,6 @@ pub enum Request {
 	GetBabeRandomness(H256),
 	GetBabeAuthorithies(H256),
 	GetBabeCurrentSlot(H256),
-	GetSystemDigest(H256),
 	GetBabeKeyOwner(H256, sp_consensus_babe::app::Public),
 }
 
@@ -112,8 +109,6 @@ enum Response {
 	SessionIndex(u32),
 	/// Session keys
 	SessionAccountKeys(Option<Vec<AccountId32>>),
-	/// Session next keys for a validator
-	SessionNextKeys(Option<SessionKeys>),
 	/// Session queued keys.
 	SessionQueuedKeys(Option<QueuedKeys>),
 	/// HRMP channels for given parachain (e.g. who are sending messages to us)
@@ -128,8 +123,6 @@ enum Response {
 	BabeAuthorithies(Vec<(sp_consensus_babe::app::Public, u64)>),
 	/// Babe current slot
 	BabeCurrentSlot(Option<Slot>),
-	/// System digest
-	SystemDigest(Option<PreDigest>),
 	/// Babe key owner
 	BabeKeyOwner(Option<AccountId32>),
 }
@@ -255,7 +248,6 @@ impl RequestExecutorBackend {
 			GetSessionIndex(hash) => SessionIndex(client.get_session_index(hash).await?.unwrap_or_default()),
 			GetSessionAccountKeys(session_index, maybe_hash) =>
 				SessionAccountKeys(client.get_session_account_keys(session_index, maybe_hash).await?),
-			GetSessionNextKeys(ref account) => SessionNextKeys(client.get_session_next_keys(account).await?),
 			GetSessionQueuedKeys(at) => SessionQueuedKeys(client.get_session_queued_keys(at).await?),
 			GetSessionIndexNow => SessionIndex(client.get_session_index_now().await?.unwrap_or_default()),
 			GetInboundOutBoundHrmpChannels(hash, para_ids) =>
@@ -265,7 +257,6 @@ impl RequestExecutorBackend {
 			GetBabeRandomness(hash) => BabeRandomness(client.get_babe_randomness(hash).await?),
 			GetBabeAuthorithies(hash) => BabeAuthorithies(client.get_babe_authorities(hash).await?),
 			GetBabeCurrentSlot(hash) => BabeCurrentSlot(client.get_babe_current_slot(hash).await?),
-			GetSystemDigest(hash) => SystemDigest(client.get_system_digest(hash).await?),
 			GetBabeKeyOwner(hash, key) => BabeKeyOwner(client.get_babe_key_owner(hash, &key.0).await?),
 		};
 
@@ -494,14 +485,6 @@ impl RequestExecutor {
 		wrap_backend_call!(self, url, GetSessionAccountKeys, SessionAccountKeys, session_index, maybe_hash)
 	}
 
-	pub async fn get_session_next_keys(
-		&mut self,
-		url: &str,
-		account: AccountId32,
-	) -> color_eyre::Result<Option<SessionKeys>, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetSessionNextKeys, SessionNextKeys, account)
-	}
-
 	pub async fn get_session_queued_keys(
 		&mut self,
 		url: &str,
@@ -558,14 +541,6 @@ impl RequestExecutor {
 		hash: H256,
 	) -> color_eyre::Result<Option<Slot>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeCurrentSlot, BabeCurrentSlot, hash)
-	}
-
-	pub async fn get_system_digest(
-		&mut self,
-		url: &str,
-		hash: H256,
-	) -> color_eyre::Result<Option<PreDigest>, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetSystemDigest, SystemDigest, hash)
 	}
 
 	pub async fn get_babe_key_owner(

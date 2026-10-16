@@ -49,10 +49,7 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::{
-	PolkadotConfig,
-	config::{Hasher, polkadot::U256},
-};
+use subxt::config::{Hasher, polkadot::U256};
 use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
@@ -352,7 +349,7 @@ impl Collector {
 	pub async fn collect_chain_events(
 		&mut self,
 		event: &ChainSubscriptionEvent,
-	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
+	) -> color_eyre::Result<Vec<ChainEvent>> {
 		let (new_head_event, block_number) = match event {
 			ChainSubscriptionEvent::NewBestHead((hash, header)) =>
 				(ChainEvent::NewBestHead((*hash, header.clone())), header.number),
@@ -368,7 +365,10 @@ impl Collector {
 			let mut skipped_events = 0u32;
 			for block_event in block_events.iter() {
 				match block_event {
-					Ok(event) => chain_events.push(decode_chain_event(*hash, event, self.hasher).await?),
+					Ok(event) =>
+						if let Some(chain_event) = decode_chain_event(*hash, event, self.hasher).await? {
+							chain_events.push(chain_event);
+						},
 					Err(e) => {
 						log::warn!("Failed to decode block event at {hash:?}, skipping: {e}");
 						skipped_events += 1;
@@ -392,11 +392,7 @@ impl Collector {
 	/// `ParachainHost_candidate_events` runtime call and compares them, as a set keyed by
 	/// `(candidate_hash, event_type)`, against the ones scraped from `System.Events`. Aborts on any
 	/// mismatch; the scraped events remain what the tool returns while shadowing.
-	async fn shadow_candidate_events(
-		&mut self,
-		hash: H256,
-		chain_events: &[ChainEvent<PolkadotConfig>],
-	) -> color_eyre::Result<()> {
+	async fn shadow_candidate_events(&mut self, hash: H256, chain_events: &[ChainEvent]) -> color_eyre::Result<()> {
 		let scraped: Vec<SubxtCandidateEvent> = chain_events
 			.iter()
 			.filter_map(|event| match event {
@@ -428,7 +424,7 @@ impl Collector {
 		&mut self,
 		hash: H256,
 		block_number: u32,
-		chain_events: &[ChainEvent<PolkadotConfig>],
+		chain_events: &[ChainEvent],
 	) -> color_eyre::Result<()> {
 		let scraped_initiated: Vec<H256> = chain_events
 			.iter()
@@ -502,10 +498,7 @@ impl Collector {
 	}
 
 	/// Process a next chain event
-	pub async fn process_chain_event<T: subxt::Config>(
-		&mut self,
-		event: &ChainEvent<T>,
-	) -> color_eyre::Result<(), CollectorError> {
+	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<(), CollectorError> {
 		match event {
 			ChainEvent::NewBestHead((hash, header)) => self.process_new_best_head(*hash, header).await,
 			ChainEvent::NewFinalizedHead((hash, header)) => self.process_new_finalized_head(*hash, header).await,
@@ -513,7 +506,6 @@ impl Collector {
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
 				self.process_dispute_concluded(dispute_event, dispute_outcome).await,
-			_ => Ok(()),
 		}
 	}
 

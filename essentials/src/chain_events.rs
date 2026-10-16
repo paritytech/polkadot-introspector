@@ -29,7 +29,7 @@ use serde::Serialize;
 use subxt::{PolkadotConfig, config::Hasher};
 
 #[derive(Debug)]
-pub enum ChainEvent<T: subxt::Config> {
+pub enum ChainEvent {
 	/// New best relay chain head
 	NewBestHead((H256, Header)),
 	/// New finalized relay chain head
@@ -40,8 +40,6 @@ pub enum ChainEvent<T: subxt::Config> {
 	DisputeConcluded(SubxtDispute, SubxtDisputeResult),
 	/// Backing, inclusion, time out for a parachain candidate
 	CandidateChanged(Box<SubxtCandidateEvent>),
-	/// Anything undecoded
-	RawEvent(PolkadotHash, subxt::events::EventDetails<T>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -94,13 +92,13 @@ pub async fn decode_chain_event(
 	block_hash: PolkadotHash,
 	event: subxt::events::EventDetails<PolkadotConfig>,
 	hasher: PolkadotHasher,
-) -> Result<ChainEvent<PolkadotConfig>> {
+) -> Result<Option<ChainEvent>> {
 	if is_specific_event::<DisputeInitiated, PolkadotConfig>(&event) {
 		let decoded = decode_to_specific_event::<DisputeInitiated, PolkadotConfig>(&event)?;
-		return Ok(ChainEvent::DisputeInitiated(SubxtDispute {
+		return Ok(Some(ChainEvent::DisputeInitiated(SubxtDispute {
 			relay_parent_block: block_hash,
 			candidate_hash: decoded.0.0,
-		}))
+		})))
 	}
 
 	if is_specific_event::<DisputeConcluded, PolkadotConfig>(&event) {
@@ -110,37 +108,37 @@ pub async fn decode_chain_event(
 			disputes::DisputeResult::Valid => SubxtDisputeResult::Valid,
 			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
 		};
-		return Ok(ChainEvent::DisputeConcluded(
+		return Ok(Some(ChainEvent::DisputeConcluded(
 			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0.0 },
 			outcome,
-		))
+		)))
 	}
 
 	if is_specific_event::<CandidateBacked, PolkadotConfig>(&event) {
-		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+		return Ok(Some(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
 			&event,
 			SubxtCandidateEventType::Backed,
 			hasher,
-		)?)))
+		)?))))
 	}
 
 	if is_specific_event::<CandidateIncluded, PolkadotConfig>(&event) {
-		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+		return Ok(Some(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
 			&event,
 			SubxtCandidateEventType::Included,
 			hasher,
-		)?)))
+		)?))))
 	}
 
 	if is_specific_event::<CandidateTimedOut, PolkadotConfig>(&event) {
-		return Ok(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
+		return Ok(Some(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
 			&event,
 			SubxtCandidateEventType::TimedOut,
 			hasher,
-		)?)))
+		)?))))
 	}
 
-	Ok(ChainEvent::RawEvent(block_hash, event))
+	Ok(None)
 }
 
 fn is_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
