@@ -23,7 +23,7 @@
 
 use crate::{
 	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
-	types::{AccountId32, ClaimQueue, CoreOccupied, H256, PolkadotHash, SubxtHrmpChannel},
+	types::{AccountId32, ClaimQueue, CoreOccupied, H256, Header, PolkadotHash, SubxtHrmpChannel},
 };
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Compact, Decode, DecodeAll, Encode, Error as CodecError, Input};
@@ -429,19 +429,111 @@ pub fn decode_hrmp_channel(bytes: &[u8]) -> Result<SubxtHrmpChannel> {
 	SubxtHrmpChannel::decode_all(&mut &bytes[..]).map_err(|e| eyre!("hrmp_channel: cannot decode: {e}"))
 }
 
-/// Decodes the availability bitfields from a `ParaInherent` (`paras_inherent::enter`) extrinsic, given
-/// its raw bytes as returned by `chain_getBlock` (index #1 of the block). The extrinsic envelope is
-/// stripped — the opaque-extrinsic length prefix, the version/type byte (which must be a bare/unsigned
-/// inherent, so no signature follows), and the two pallet/call index bytes — then the leading
-/// `bitfields: Vec<UncheckedSigned<AvailabilityBitfield>>` field of `ParachainsInherentData` is read.
-/// Each entry is `AvailabilityBitfield` (a SCALE bitvec) ++ `ValidatorIndex` (`u32`) ++
-/// `ValidatorSignature` (`[u8; 64]`); only the bitvec is kept, as its raw encoded bytes so it can be
-/// compared byte-for-byte against the metadata decode. The fields after `bitfields` (backed
-/// candidates, disputes, parent header) are left untouched, so nothing beyond them is decoded.
-pub fn decode_parainherent_bitfields(extrinsic: &[u8]) -> Result<Vec<Vec<u8>>> {
+/// `ValidDisputeStatementKind`: variant indices mirror the runtime. The hashes are kept because a
+/// reader must consume them to advance, and they make comparison to metadata decoding precise.
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub enum DecodedValidKind {
+	#[codec(index = 0)]
+	Explicit,
+	#[codec(index = 1)]
+	BackingSeconded(H256),
+	#[codec(index = 2)]
+	BackingValid(H256),
+	#[codec(index = 3)]
+	ApprovalChecking,
+	#[codec(index = 4)]
+	ApprovalCheckingMultipleCandidates(Vec<H256>),
+}
+
+/// `InvalidDisputeStatementKind`.
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub enum DecodedInvalidKind {
+	#[codec(index = 0)]
+	Explicit,
+}
+
+/// `DisputeStatement`.
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub enum DecodedDisputeStatement {
+	#[codec(index = 0)]
+	Valid(DecodedValidKind),
+	#[codec(index = 1)]
+	Invalid(DecodedInvalidKind),
+}
+
+/// A `DisputeStatementSet` from the inherent: the candidate and session under dispute and each
+/// statement with its `ValidatorIndex`. Signatures are dropped, as in `types::DisputeStatementSet`.
+#[derive(Debug, Clone, PartialEq, Eq, Encode)]
+pub struct DecodedDisputeStatementSet {
+	pub candidate_hash: H256,
+	pub session: u32,
+	pub statements: Vec<(DecodedDisputeStatement, u32)>,
+}
+
+/// Wire form of a `DisputeStatementSet`: `CandidateHash ++ SessionIndex ++ Vec<(DisputeStatement,
+/// ValidatorIndex, ValidatorSignature)>`.
+#[derive(Decode)]
+struct RawDisputeStatementSet {
+	candidate_hash: H256,
+	session: u32,
+	statements: Vec<(DecodedDisputeStatement, u32, [u8; 64])>,
+}
+
+/// `CandidateCommitments`, decoded only to advance past it.
+#[derive(Decode)]
+struct RawCommitments {
+	_upward_messages: Vec<Vec<u8>>,
+	/// `OutboundHrmpMessage`: recipient para id and payload.
+	_horizontal_messages: Vec<(u32, Vec<u8>)>,
+	_new_validation_code: Option<Vec<u8>>,
+	_head_data: Vec<u8>,
+	_processed_downward_messages: u32,
+	_hrmp_watermark: u32,
+}
+
+/// `ValidityAttestation`: both variants carry a 64-byte signature, never read.
+#[derive(Decode)]
+#[allow(dead_code)]
+enum RawValidityAttestation {
+	#[codec(index = 1)]
+	Implicit([u8; 64]),
+	#[codec(index = 2)]
+	Explicit([u8; 64]),
+}
+
+/// `BackedCandidate`, decoded only to advance past it: the descriptor is a fixed-size window (see
+/// [`CANDIDATE_DESCRIPTOR_SIZE`]), followed by commitments, validity votes and the validator bitvec.
+#[derive(Decode)]
+struct RawBackedCandidate {
+	_descriptor: [u8; CANDIDATE_DESCRIPTOR_SIZE],
+	_commitments: RawCommitments,
+	_validity_votes: Vec<RawValidityAttestation>,
+	_validator_indices: SkipBitVec,
+}
+
+/// The parts of a `ParaInherent` (`paras_inherent::enter`) extrinsic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedParaInherent {
+	/// Raw SCALE bytes of each availability bitfield.
+	pub bitfields: Vec<Vec<u8>>,
+	pub disputes: Vec<DecodedDisputeStatementSet>,
+}
+
+/// Decodes a `ParaInherent` extrinsic, given its raw bytes as returned by
+/// `chain_getBlock` (index #1 of the block). The extrinsic envelope is stripped: the opaque-extrinsic
+/// length prefix, the version/type byte (which must be an unsigned inherent, so no signature
+/// follows), and the two pallet/call index bytes, then `ParachainsInherentData` is walked in order:
+/// `bitfields` (kept), `backed_candidates` (skipped), `disputes` (kept), `parent_header` (skipped). The
+/// header closes the body, so requiring nothing after it anchors every section read before it.
+pub fn decode_parainherent(extrinsic: &[u8]) -> Result<DecodedParaInherent> {
 	let mut input = extrinsic;
-	// Opaque-extrinsic length prefix.
-	Compact::<u32>::decode(&mut input).map_err(|e| eyre!("parainherent: cannot decode length prefix: {e}"))?;
+	// Opaque-extrinsic length prefix, which must cover exactly the rest of the bytes.
+	let len = Compact::<u32>::decode(&mut input)
+		.map_err(|e| eyre!("parainherent: cannot decode length prefix: {e}"))?
+		.0 as usize;
+	if len != input.len() {
+		return Err(eyre!("parainherent: length prefix is {len} but {} bytes follow", input.len()));
+	}
 	// Extrinsic version/type byte: the top two bits are the type, `0b00` = bare (unsigned). An inherent
 	// is always bare, so there is no signature to skip.
 	let version = u8::decode(&mut input).map_err(|e| eyre!("parainherent: cannot read version byte: {e}"))?;
@@ -464,7 +556,29 @@ pub fn decode_parainherent_bitfields(extrinsic: &[u8]) -> Result<Vec<Vec<u8>>> {
 		bitfields.push(bitvec);
 	}
 
-	Ok(bitfields)
+	Vec::<RawBackedCandidate>::decode(&mut input)
+		.map_err(|e| eyre!("parainherent: cannot skip backed candidates: {e}"))?;
+
+	let disputes = Vec::<RawDisputeStatementSet>::decode(&mut input)
+		.map_err(|e| eyre!("parainherent: cannot decode disputes: {e}"))?
+		.into_iter()
+		.map(|set| DecodedDisputeStatementSet {
+			candidate_hash: set.candidate_hash,
+			session: set.session,
+			statements: set
+				.statements
+				.into_iter()
+				.map(|(statement, index, _signature)| (statement, index))
+				.collect(),
+		})
+		.collect();
+
+	Header::decode(&mut input).map_err(|e| eyre!("parainherent: cannot skip parent header: {e}"))?;
+	if !input.is_empty() {
+		return Err(eyre!("parainherent: {} trailing bytes after parent header", input.len()));
+	}
+
+	Ok(DecodedParaInherent { bitfields, disputes })
 }
 
 /// Consumes a SCALE-encoded `BitVec<u8, Lsb0>` and returns its raw bytes (compact bit length followed
@@ -981,24 +1095,131 @@ mod tests {
 		out
 	}
 
+	use crate::{
+		metadata::{
+			polkadot::runtime_types::{
+				polkadot_core_primitives::CandidateHash, polkadot_primitives::vstaging::InherentData,
+			},
+			polkadot_primitives::{
+				AvailabilityBitfield, DisputeStatement, DisputeStatementSet as RuntimeDisputeStatementSet,
+				InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex, signed::UncheckedSigned,
+				validator_app::Signature,
+			},
+		},
+		types::DisputeStatementSet,
+	};
+	use subxt::config::substrate::{Digest, DigestItem};
+
+	// One `BackedCandidate` with a non-trivial commitments section and one explicit vote.
+	fn backed_candidate() -> Vec<u8> {
+		let mut out = vec![0xAAu8; CANDIDATE_DESCRIPTOR_SIZE];
+		out.extend(vec![vec![1u8, 2], vec![]].encode()); // upward_messages
+		out.extend(vec![(7u32, vec![9u8; 3])].encode()); // horizontal_messages
+		out.extend(Some(vec![5u8; 4]).encode()); // new_validation_code
+		out.extend(vec![6u8; 2].encode()); // head_data
+		out.extend(3u32.encode()); // processed_downward_messages
+		out.extend(11u32.encode()); // hrmp_watermark
+		out.extend(Compact(1u32).encode()); // validity_votes
+		out.push(2); // ValidityAttestation::Explicit
+		out.extend([0x33u8; 64]);
+		out.extend(encode_availability_bitvec(&[true, false, true])); // validator_indices
+		out
+	}
+
+	// The disputes of the test inherent: (candidate, session, statements), built fresh as the runtime
+	// types are not `Clone`.
+	fn dispute_sets() -> Vec<DisputeStatementSet> {
+		vec![
+			DisputeStatementSet {
+				candidate_hash: CandidateHash(H256::from([1; 32])),
+				session: 100,
+				statements: vec![
+					(
+						DisputeStatement::Valid(ValidDisputeStatementKind::BackingSeconded(H256::from([0x0A; 32]))),
+						ValidatorIndex(4),
+					),
+					(DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit), ValidatorIndex(8)),
+				],
+			},
+			DisputeStatementSet {
+				candidate_hash: CandidateHash(H256::from([2; 32])),
+				session: 101,
+				statements: vec![(
+					DisputeStatement::Valid(ValidDisputeStatementKind::ApprovalChecking),
+					ValidatorIndex(1),
+				)],
+			},
+		]
+	}
+
+	// A full inherent built through the runtime types, so its encoding is the layout we must read.
+	// Backed candidates are decoded from the hand-built bytes above so the descriptor window is also
+	// exercised, and the header carries digest logs so skipping it is not a fixed-size step.
+	fn runtime_inherent() -> InherentData<Header> {
+		let signed_bitfield = |bits: &[bool], index| UncheckedSigned {
+			payload: AvailabilityBitfield(bits.iter().copied().collect()),
+			validator_index: ValidatorIndex(index),
+			signature: Signature([0x11; 64]),
+			__ignore: Default::default(),
+		};
+		let mut backed = Compact(1u32).encode();
+		backed.extend(backed_candidate());
+		InherentData {
+			bitfields: vec![signed_bitfield(&[true, false, true, true], 5), signed_bitfield(&[false, false, true], 9)],
+			backed_candidates: Decode::decode(&mut &backed[..]).unwrap(),
+			disputes: dispute_sets()
+				.into_iter()
+				.map(|set| RuntimeDisputeStatementSet {
+					candidate_hash: set.candidate_hash,
+					session: set.session,
+					statements: set.statements.into_iter().map(|(s, i)| (s, i, Signature([0x44; 64]))).collect(),
+				})
+				.collect(),
+			parent_header: Header {
+				parent_hash: H256::from([0x55; 32]),
+				number: 1_000_000,
+				state_root: H256::from([0x66; 32]),
+				extrinsics_root: H256::from([0x77; 32]),
+				digest: Digest {
+					logs: vec![
+						DigestItem::PreRuntime(*b"BABE", vec![1, 2, 3]),
+						DigestItem::Seal(*b"BABE", vec![0x88; 64]),
+					],
+				},
+			},
+		}
+	}
+
+	// The encoded body of [`runtime_inherent`] with the offset where each section starts, so negative
+	// tests can corrupt a known spot.
+	struct Sections {
+		body: Vec<u8>,
+		backed: usize,
+		disputes: usize,
+		parent_header: usize,
+	}
+
+	fn sections() -> Sections {
+		let inherent = runtime_inherent();
+		let backed = inherent.bitfields.encode().len();
+		let disputes = backed + inherent.backed_candidates.encode().len();
+		let parent_header = disputes + inherent.disputes.encode().len();
+		Sections { body: inherent.encode(), backed, disputes, parent_header }
+	}
+
+	// Decodes `body` wrapped into an extrinsic and returns the error it must fail with.
+	fn decode_error(body: Vec<u8>) -> String {
+		decode_parainherent(&wrap_parainherent(body)).unwrap_err().to_string()
+	}
+
 	#[test]
-	fn decodes_parainherent_bitfields() {
-		let bitvec0 = encode_availability_bitvec(&[true, false, true, true]);
-		let bitvec1 = encode_availability_bitvec(&[false, false, true]);
+	fn decodes_parainherent_like_runtime_encoding() {
+		let inherent = runtime_inherent();
+		let decoded = decode_parainherent(&wrap_parainherent(inherent.encode())).unwrap();
 
-		let mut body = Compact(2u32).encode(); // two signed bitfields
-		body.extend(bitvec0.clone());
-		body.extend(5u32.encode()); // validator_index
-		body.extend([0x11u8; 64]); // signature
-		body.extend(bitvec1.clone());
-		body.extend(9u32.encode());
-		body.extend([0x22u8; 64]);
-		// Trailing bytes standing in for backed_candidates/disputes/parent_header — must be ignored.
-		body.extend([0xDE, 0xAD, 0xBE, 0xEF]);
-
-		let extrinsic = wrap_parainherent(body);
-		let decoded = decode_parainherent_bitfields(&extrinsic).unwrap();
-		assert_eq!(decoded, vec![bitvec0, bitvec1]);
+		let bitfields: Vec<Vec<u8>> = inherent.bitfields.iter().map(|b| b.payload.0.encode()).collect();
+		assert_eq!(decoded.bitfields, bitfields);
+		assert_eq!(decoded.disputes.encode(), dispute_sets().encode());
 	}
 
 	#[test]
@@ -1007,15 +1228,83 @@ mod tests {
 		inner.extend([0u8; 4]);
 		let mut extrinsic = Compact(inner.len() as u32).encode();
 		extrinsic.extend(inner);
-		assert!(decode_parainherent_bitfields(&extrinsic).is_err());
+		assert!(decode_parainherent(&extrinsic).is_err());
 	}
 
 	#[test]
 	fn rejects_parainherent_truncated_bitfield() {
-		let mut body = Compact(1u32).encode(); // claims one bitfield
-		body.extend(encode_availability_bitvec(&[true, true]));
-		body.extend(5u32.encode()); // validator_index, then no signature
-		let extrinsic = wrap_parainherent(body);
-		assert!(decode_parainherent_bitfields(&extrinsic).is_err());
+		let Sections { mut body, backed, .. } = sections();
+		body.truncate(backed - 10); // cuts into the last bitfield's signature
+		assert_eq!(
+			decode_error(body),
+			"parainherent: cannot read bitfield 1 signature: Not enough data to fill buffer"
+		);
+	}
+
+	#[test]
+	fn rejects_parainherent_resized_backed_candidate() {
+		// A descriptor one byte short shifts everything after it, so decoding must fail loud.
+		let Sections { mut body, backed, .. } = sections();
+		body.remove(backed + 1); // first descriptor byte, after the candidate count
+		assert!(decode_error(body).starts_with("parainherent: cannot skip backed candidates"));
+	}
+
+	#[test]
+	fn rejects_parainherent_unknown_dispute_statement_variant() {
+		// The first statement's `DisputeStatement` byte, after the set count, candidate hash, session
+		// and statement count.
+		let Sections { body, disputes, .. } = sections();
+		let statement = disputes + 1 + 32 + 4 + 1;
+
+		let mut unknown_statement = body.clone();
+		unknown_statement[statement] = 2;
+		assert!(decode_error(unknown_statement).starts_with("parainherent: cannot decode disputes"));
+
+		let mut unknown_valid_kind = body;
+		unknown_valid_kind[statement + 1] = 9;
+		assert!(decode_error(unknown_valid_kind).starts_with("parainherent: cannot decode disputes"));
+	}
+
+	#[test]
+	fn rejects_parainherent_truncated_dispute() {
+		let Sections { mut body, parent_header, .. } = sections();
+		body.truncate(parent_header - 10); // cuts into the last statement's signature
+		assert!(decode_error(body).starts_with("parainherent: cannot decode disputes"));
+	}
+
+	#[test]
+	fn rejects_parainherent_truncated_parent_header() {
+		let Sections { mut body, .. } = sections();
+		body.pop(); // cuts into the seal of the header's digest
+		assert!(decode_error(body).starts_with("parainherent: cannot skip parent header"));
+	}
+
+	#[test]
+	fn rejects_parainherent_trailing_bytes() {
+		let Sections { mut body, .. } = sections();
+		body.extend([0xDE, 0xAD]);
+		assert_eq!(decode_error(body), "parainherent: 2 trailing bytes after parent header");
+	}
+
+	#[test]
+	fn rejects_parainherent_length_mismatch() {
+		let extrinsic = wrap_parainherent(sections().body);
+		assert!(decode_parainherent(&extrinsic).is_ok());
+
+		let mut padded = extrinsic.clone();
+		padded.push(0);
+		assert!(
+			decode_parainherent(&padded)
+				.unwrap_err()
+				.to_string()
+				.starts_with("parainherent: length prefix")
+		);
+		let truncated = &extrinsic[..extrinsic.len() - 1];
+		assert!(
+			decode_parainherent(truncated)
+				.unwrap_err()
+				.to_string()
+				.starts_with("parainherent: length prefix")
+		);
 	}
 }
