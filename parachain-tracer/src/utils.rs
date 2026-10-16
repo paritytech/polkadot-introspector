@@ -14,9 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 
-use polkadot_introspector_essentials::{
-	metadata::polkadot_primitives::{AvailabilityBitfield, DisputeStatement},
-	types::{AccountId32, DisputeStatementSet, Timestamp},
+use polkadot_introspector_essentials::types::{
+	AccountId32, AvailabilityBitfield, DisputeStatement, DisputeStatementSet, Timestamp,
 };
 use std::time::Duration;
 
@@ -178,21 +177,17 @@ mod test_extract_votes {
 pub(crate) fn extract_availability_bits_count(bitfields: &[AvailabilityBitfield], core: u32) -> u32 {
 	bitfields
 		.iter()
-		.map(|v| v.0.as_bits().get(core as usize).expect("core index must be in the bitfield") as u32)
+		.map(|v| v.get(core as usize).expect("core index must be in the bitfield") as u32)
 		.sum()
 }
 
 #[cfg(test)]
 mod test_extract_availability_bits_count {
 	use super::*;
-	use subxt::utils::bits::DecodedBits;
 
 	#[test]
 	fn test_counts_availability_bits() {
-		assert_eq!(
-			extract_availability_bits_count(&[AvailabilityBitfield(DecodedBits::from_iter([true, false, true]))], 0),
-			1
-		);
+		assert_eq!(extract_availability_bits_count(&[AvailabilityBitfield(vec![true, false, true])], 0), 1);
 	}
 }
 

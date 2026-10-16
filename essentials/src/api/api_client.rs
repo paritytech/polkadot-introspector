@@ -32,22 +32,19 @@ use crate::{
 		shadow,
 	},
 	chain_events::SubxtCandidateEvent,
-	metadata::{
-		polkadot::{
-			self,
-			runtime_types::{
-				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-				polkadot_runtime_parachains::hrmp::HrmpChannel,
-				sp_consensus_babe,
-				sp_consensus_slots::Slot,
-				sp_core::crypto::KeyTypeId,
-			},
+	metadata::polkadot::{
+		self,
+		runtime_types::{
+			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+			polkadot_runtime_parachains::hrmp::HrmpChannel,
+			sp_consensus_babe,
+			sp_consensus_slots::Slot,
+			sp_core::crypto::KeyTypeId,
 		},
-		polkadot_primitives::ValidatorIndex,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
-		SubxtHrmpChannel, Timestamp,
+		SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
 };
 use clap::ValueEnum;
@@ -633,7 +630,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
 			let metadata_free = decode_parainherent(&para_inherent.0)
 				.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent (metadata-free): {e}")))?;
-			let old: Vec<Vec<u8>> = inherent.bitfields.iter().map(|bitfield| bitfield.0.encode()).collect();
+			let old: Vec<Vec<u8>> = inherent.bitfields.iter().map(Encode::encode).collect();
 			shadow::compare(hash, "parainherent_bitfields", &old, &metadata_free.bitfields);
 			shadow::compare(
 				hash,

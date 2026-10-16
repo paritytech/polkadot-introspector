@@ -17,11 +17,10 @@
 use polkadot_introspector_essentials::{
 	api::storage::RequestExecutor,
 	collector::{CollectorPrefixType, DisputeInfo, candidate_record::CandidateRecord},
-	metadata::{
-		polkadot::runtime_types::polkadot_parachain_primitives::primitives,
-		polkadot_primitives::{CoreIndex, ValidatorIndex},
+	metadata::{polkadot::runtime_types::polkadot_parachain_primitives::primitives, polkadot_primitives::CoreIndex},
+	types::{
+		AccountId32, CoreOccupied, H256, InherentData, PolkadotHasher, SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
-	types::{AccountId32, CoreOccupied, H256, InherentData, PolkadotHasher, SubxtHrmpChannel, Timestamp},
 };
 use std::collections::BTreeMap;
 use subxt::config::Hasher;

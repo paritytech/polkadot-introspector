@@ -22,16 +22,13 @@ use crate::{
 	},
 	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
-	metadata::{
-		polkadot::{
-			runtime_apis::babe_api::types::generate_key_ownership_proof::Slot, runtime_types::sp_consensus_babe,
-			session::storage::types::queued_keys::QueuedKeys,
-		},
-		polkadot_primitives,
+	metadata::polkadot::{
+		runtime_apis::babe_api::types::generate_key_ownership_proof::Slot, runtime_types::sp_consensus_babe,
+		session::storage::types::queued_keys::QueuedKeys,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		PolkadotHasher, SubxtHrmpChannel, Timestamp,
+		PolkadotHasher, SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -104,7 +101,7 @@ enum Response {
 	/// List of the occupied availability cores.
 	OccupiedCores(Vec<CoreOccupied>),
 	/// Backing validator groups.
-	BackingGroups(Vec<Vec<polkadot_primitives::ValidatorIndex>>),
+	BackingGroups(Vec<Vec<ValidatorIndex>>),
 	/// Returns a session index
 	SessionIndex(u32),
 	/// Session keys
@@ -464,7 +461,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Vec<Vec<polkadot_primitives::ValidatorIndex>>, RequestExecutorError> {
+	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBackingGroups, BackingGroups, hash)
 	}
 

@@ -1091,12 +1091,15 @@ mod tests {
 				polkadot_core_primitives::CandidateHash, polkadot_primitives::vstaging::InherentData,
 			},
 			polkadot_primitives::{
-				AvailabilityBitfield, DisputeStatement, DisputeStatementSet as RuntimeDisputeStatementSet,
-				InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex, signed::UncheckedSigned,
-				validator_app::Signature,
+				AvailabilityBitfield as RuntimeAvailabilityBitfield, DisputeStatement as RuntimeDisputeStatement,
+				DisputeStatementSet as RuntimeDisputeStatementSet, ValidatorIndex as RuntimeValidatorIndex,
+				signed::UncheckedSigned, validator_app::Signature,
 			},
 		},
-		types::DisputeStatementSet,
+		types::{
+			AvailabilityBitfield, CandidateHash as OwnCandidateHash, DisputeStatement, DisputeStatementSet,
+			InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
+		},
 	};
 
 	// One `BackedCandidate` with a non-trivial commitments section and one explicit vote.
@@ -1115,12 +1118,11 @@ mod tests {
 		out
 	}
 
-	// The disputes of the test inherent: (candidate, session, statements), built fresh as the runtime
-	// types are not `Clone`.
+	// The disputes of the test inherent: (candidate, session, statements).
 	fn dispute_sets() -> Vec<DisputeStatementSet> {
 		vec![
 			DisputeStatementSet {
-				candidate_hash: CandidateHash(H256::from([1; 32])),
+				candidate_hash: OwnCandidateHash(H256::from([1; 32])),
 				session: 100,
 				statements: vec![
 					(
@@ -1131,7 +1133,7 @@ mod tests {
 				],
 			},
 			DisputeStatementSet {
-				candidate_hash: CandidateHash(H256::from([2; 32])),
+				candidate_hash: OwnCandidateHash(H256::from([2; 32])),
 				session: 101,
 				statements: vec![(
 					DisputeStatement::Valid(ValidDisputeStatementKind::ApprovalChecking),
@@ -1144,8 +1146,8 @@ mod tests {
 	#[test]
 	fn decodes_parainherent_like_runtime_encoding() {
 		let signed_bitfield = |bits: &[bool], index| UncheckedSigned {
-			payload: AvailabilityBitfield(bits.iter().copied().collect()),
-			validator_index: ValidatorIndex(index),
+			payload: RuntimeAvailabilityBitfield(bits.iter().copied().collect()),
+			validator_index: RuntimeValidatorIndex(index),
 			signature: Signature([0x11; 64]),
 			__ignore: Default::default(),
 		};
@@ -1160,9 +1162,17 @@ mod tests {
 			disputes: dispute_sets()
 				.into_iter()
 				.map(|set| RuntimeDisputeStatementSet {
-					candidate_hash: set.candidate_hash,
+					candidate_hash: CandidateHash(set.candidate_hash.0),
 					session: set.session,
-					statements: set.statements.into_iter().map(|(s, i)| (s, i, Signature([0x44; 64]))).collect(),
+					// Decoding our own encoding as the runtime types also pins their SCALE layout.
+					statements: set
+						.statements
+						.into_iter()
+						.map(|(s, i)| {
+							let s = RuntimeDisputeStatement::decode(&mut &s.encode()[..]).unwrap();
+							(s, RuntimeValidatorIndex(i.0), Signature([0x44; 64]))
+						})
+						.collect(),
 				})
 				.collect(),
 			parent_header: H256::zero(),
@@ -1173,6 +1183,18 @@ mod tests {
 		let bitfields: Vec<Vec<u8>> = inherent.bitfields.iter().map(|b| b.payload.0.encode()).collect();
 		assert_eq!(decoded.bitfields, bitfields);
 		assert_eq!(decoded.disputes.encode(), dispute_sets().encode());
+	}
+
+	#[test]
+	fn own_availability_bitfield_matches_runtime_encoding() {
+		for bits in
+			[vec![], vec![true], vec![true, false, true, true, false, false, false, true, true], vec![false; 16]]
+		{
+			let own = AvailabilityBitfield(bits.clone());
+			let runtime = RuntimeAvailabilityBitfield(bits.iter().copied().collect());
+			assert_eq!(own.encode(), runtime.encode());
+			assert_eq!(AvailabilityBitfield::decode(&mut &runtime.encode()[..]).unwrap(), own);
+		}
 	}
 
 	#[test]

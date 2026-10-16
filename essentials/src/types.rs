@@ -15,11 +15,8 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::{
-	polkadot::runtime_types::{self as subxt_runtime_types, polkadot_core_primitives::CandidateHash},
-	polkadot_primitives,
-};
-use parity_scale_codec::{Decode, Encode};
+use crate::metadata::polkadot::runtime_types::{self as subxt_runtime_types};
+use parity_scale_codec::{Compact, Decode, Encode, Error as CodecError, Input, Output};
 use std::collections::BTreeMap;
 use subxt::{
 	config::substrate::{DynamicHasher256, SubstrateHeader},
@@ -39,17 +36,97 @@ pub type QueuedKeys = crate::metadata::polkadot::session::storage::types::queued
 pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
 
-#[derive(Debug, Encode, Decode)]
+/// Index of a validator in the session's validator set. Same SCALE layout as the runtime's `ValidatorIndex`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
+pub struct ValidatorIndex(pub u32);
+
+/// Hash of a candidate receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
+pub struct CandidateHash(pub H256);
+
+/// Availability bits of one validator, one bit per core.
+///
+/// SCALE-encoded like `BitVec<u8, Lsb0>`: a compact bit count followed by `ceil(bits / 8)` bytes,
+/// least-significant bit first within each byte.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AvailabilityBitfield(pub Vec<bool>);
+
+impl AvailabilityBitfield {
+	pub fn get(&self, index: usize) -> Option<bool> {
+		self.0.get(index).copied()
+	}
+}
+
+impl Encode for AvailabilityBitfield {
+	fn encode_to<T: Output + ?Sized>(&self, dest: &mut T) {
+		Compact(self.0.len() as u32).encode_to(dest);
+		for chunk in self.0.chunks(8) {
+			let byte = chunk
+				.iter()
+				.enumerate()
+				.fold(0u8, |acc, (bit, set)| acc | (u8::from(*set) << bit));
+			dest.push_byte(byte);
+		}
+	}
+}
+
+impl Decode for AvailabilityBitfield {
+	fn decode<I: Input>(input: &mut I) -> Result<Self, CodecError> {
+		let bits = Compact::<u32>::decode(input)?.0 as usize;
+		let mut out = Vec::with_capacity(bits.min(4096));
+		for _ in 0..bits.div_ceil(8) {
+			let byte = input.read_byte()?;
+			for bit in 0..8 {
+				if out.len() < bits {
+					out.push(byte >> bit & 1 == 1);
+				}
+			}
+		}
+		Ok(Self(out))
+	}
+}
+
+/// A dispute statement that supports the candidate.
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+pub enum ValidDisputeStatementKind {
+	#[codec(index = 0)]
+	Explicit,
+	#[codec(index = 1)]
+	BackingSeconded(H256),
+	#[codec(index = 2)]
+	BackingValid(H256),
+	#[codec(index = 3)]
+	ApprovalChecking,
+	#[codec(index = 4)]
+	ApprovalCheckingMultipleCandidates(Vec<CandidateHash>),
+}
+
+/// A dispute statement against the candidate.
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+pub enum InvalidDisputeStatementKind {
+	#[codec(index = 0)]
+	Explicit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+pub enum DisputeStatement {
+	#[codec(index = 0)]
+	Valid(ValidDisputeStatementKind),
+	#[codec(index = 1)]
+	Invalid(InvalidDisputeStatementKind),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct InherentData {
-	pub bitfields: Vec<polkadot_primitives::AvailabilityBitfield>,
+	pub bitfields: Vec<AvailabilityBitfield>,
 	pub disputes: Vec<DisputeStatementSet>,
 }
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct DisputeStatementSet {
 	pub candidate_hash: CandidateHash,
 	pub session: u32,
-	pub statements: Vec<(polkadot_primitives::DisputeStatement, polkadot_primitives::ValidatorIndex)>,
+	pub statements: Vec<(DisputeStatement, ValidatorIndex)>,
 }
 
 /// A wrapper over subxt HRMP channel configuration
