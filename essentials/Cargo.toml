@@ -10,6 +10,7 @@ publish = true
 [dependencies]
 sp-core-hashing = "16.0"
 async-trait = { workspace = true }
+bitvec = { workspace = true }
 clap = { workspace = true }
 
 parity-scale-codec = { workspace = true }

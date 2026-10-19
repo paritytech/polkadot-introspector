@@ -70,7 +70,7 @@ impl DisputesTracker {
 		session_info: Option<&Vec<AccountId32>>,
 		initiators_session_info: Option<&Vec<AccountId32>>,
 	) -> Self {
-		let candidate = dispute_info.candidate_hash.0;
+		let candidate = dispute_info.candidate_hash;
 		let (voted_for, voted_against) = extract_votes(dispute_info);
 		let initiators = extract_validator_addresses(initiators_session_info, initiator_indices);
 		let misbehaving_validators =

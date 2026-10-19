@@ -27,9 +27,8 @@ use crate::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
-	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, H256, Header, InherentData, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, DisputeStatement, H256, Header, InherentData, PolkadotHasher, Timestamp},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -550,18 +549,17 @@ impl Collector {
 			.await?;
 
 		match (current_slot, parent_slot) {
-			(Some(current_slot), Some(parent_slot)) if current_slot.0 - 1 > parent_slot.0 => {
+			(Some(current_slot), Some(parent_slot)) if current_slot.saturating_sub(1) > parent_slot => {
 				// We skipped a slot from our parent, so let's determine who should have build that block.
 				// This is the same logic as in babe secondary_slot_author, see:
 				// https://github.com/paritytech/polkadot-sdk/blob/0ae5c5bbd96a600aed81358339be2f16bade4a81/substrate/client/consensus/babe/src/authorship.rs#L102
 				let babe_randomness = self.executor.get_babe_randomness(self.endpoint.as_str(), block_hash).await?;
 				let authorities = self.executor.get_babe_authorities(self.endpoint.as_str(), block_hash).await?;
-				let mut missed_slots = current_slot.0 - 1;
+				let mut missed_slots = current_slot - 1;
 				let mut authors_missing_their_slots = Vec::new();
-				while missed_slots > parent_slot.0 {
-					let slot = Slot(missed_slots);
+				while missed_slots > parent_slot {
 					if let Some(babe_randomness) = babe_randomness {
-						let rand = U256::from_big_endian(&(babe_randomness, slot).using_encoded(blake2_256));
+						let rand = U256::from_big_endian(&(babe_randomness, missed_slots).using_encoded(blake2_256));
 						let authorities_len = U256::from(authorities.len());
 
 						let idx = rand % authorities_len;
@@ -574,8 +572,7 @@ impl Collector {
 								authorities
 									.get(idx as usize)
 									.expect("we computed the idx with modulo len; qed")
-									.0
-									.clone(),
+									.0,
 							)
 							.await?;
 
@@ -1244,11 +1241,7 @@ impl Collector {
 		};
 
 		let data: InherentData = entry.into_inner()?;
-		let statement_set = match data
-			.disputes
-			.iter()
-			.find(|&d| d.candidate_hash.0 == dispute_event.candidate_hash)
-		{
+		let statement_set = match data.disputes.iter().find(|&d| d.candidate_hash == dispute_event.candidate_hash) {
 			Some(v) => v,
 			None => return Ok(default_value),
 		};
