@@ -27,7 +27,7 @@ use crate::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
-	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
+	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{AccountId32, ClaimQueue, H256, Header, InherentData, PolkadotHasher, Timestamp},
 };
@@ -559,9 +559,8 @@ impl Collector {
 				let mut missed_slots = current_slot.0 - 1;
 				let mut authors_missing_their_slots = Vec::new();
 				while missed_slots > parent_slot.0 {
-					let slot = Slot(missed_slots);
 					if let Some(babe_randomness) = babe_randomness {
-						let rand = U256::from_big_endian(&(babe_randomness, slot).using_encoded(blake2_256));
+						let rand = U256::from_big_endian(&(babe_randomness, missed_slots).using_encoded(blake2_256));
 						let authorities_len = U256::from(authorities.len());
 
 						let idx = rand % authorities_len;

@@ -122,8 +122,6 @@ struct SessionOptions {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WhoisError {
-	#[error("Validator's next keys not found")]
-	NoNextKeys,
 	#[error("Could not fetch current session index")]
 	NoSessionIndex,
 	#[error("Could not determine the genesis hash")]

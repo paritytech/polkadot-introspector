@@ -34,7 +34,6 @@ pub type Header = SubstrateHeader<u32, DynamicHasher256>;
 pub type PolkadotHash = subxt::config::HashFor<subxt::PolkadotConfig>;
 pub type PolkadotHasher = <subxt::PolkadotConfig as subxt::Config>::Hasher;
 pub type Timestamp = u64;
-pub type SessionKeys = runtime::SessionKeys;
 pub type QueuedKeys = crate::metadata::polkadot::session::storage::types::queued_keys::QueuedKeys;
 pub type SubxtCall = runtime::RuntimeCall;
 pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
