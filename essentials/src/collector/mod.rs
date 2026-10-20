@@ -27,7 +27,7 @@ use crate::{
 		ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult, decode_chain_event,
 	},
 	chain_subscription::ChainSubscriptionEvent,
-	metadata::{polkadot::runtime_types::sp_consensus_slots::Slot, polkadot_primitives::DisputeStatement},
+	metadata::polkadot_primitives::DisputeStatement,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{AccountId32, ClaimQueue, H256, Header, InherentData, PolkadotHasher, Timestamp},
 };
@@ -49,10 +49,7 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::{
-	PolkadotConfig,
-	config::{Hasher, polkadot::U256},
-};
+use subxt::config::{Hasher, polkadot::U256};
 use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
@@ -352,7 +349,7 @@ impl Collector {
 	pub async fn collect_chain_events(
 		&mut self,
 		event: &ChainSubscriptionEvent,
-	) -> color_eyre::Result<Vec<ChainEvent<PolkadotConfig>>> {
+	) -> color_eyre::Result<Vec<ChainEvent>> {
 		let (new_head_event, block_number) = match event {
 			ChainSubscriptionEvent::NewBestHead((hash, header)) =>
 				(ChainEvent::NewBestHead((*hash, header.clone())), header.number),
@@ -368,7 +365,10 @@ impl Collector {
 			let mut skipped_events = 0u32;
 			for block_event in block_events.iter() {
 				match block_event {
-					Ok(event) => chain_events.push(decode_chain_event(*hash, event, self.hasher).await?),
+					Ok(event) =>
+						if let Some(chain_event) = decode_chain_event(*hash, event, self.hasher).await? {
+							chain_events.push(chain_event);
+						},
 					Err(e) => {
 						log::warn!("Failed to decode block event at {hash:?}, skipping: {e}");
 						skipped_events += 1;
@@ -392,11 +392,7 @@ impl Collector {
 	/// `ParachainHost_candidate_events` runtime call and compares them, as a set keyed by
 	/// `(candidate_hash, event_type)`, against the ones scraped from `System.Events`. Aborts on any
 	/// mismatch; the scraped events remain what the tool returns while shadowing.
-	async fn shadow_candidate_events(
-		&mut self,
-		hash: H256,
-		chain_events: &[ChainEvent<PolkadotConfig>],
-	) -> color_eyre::Result<()> {
+	async fn shadow_candidate_events(&mut self, hash: H256, chain_events: &[ChainEvent]) -> color_eyre::Result<()> {
 		let scraped: Vec<SubxtCandidateEvent> = chain_events
 			.iter()
 			.filter_map(|event| match event {
@@ -428,7 +424,7 @@ impl Collector {
 		&mut self,
 		hash: H256,
 		block_number: u32,
-		chain_events: &[ChainEvent<PolkadotConfig>],
+		chain_events: &[ChainEvent],
 	) -> color_eyre::Result<()> {
 		let scraped_initiated: Vec<H256> = chain_events
 			.iter()
@@ -502,10 +498,7 @@ impl Collector {
 	}
 
 	/// Process a next chain event
-	pub async fn process_chain_event<T: subxt::Config>(
-		&mut self,
-		event: &ChainEvent<T>,
-	) -> color_eyre::Result<(), CollectorError> {
+	pub async fn process_chain_event(&mut self, event: &ChainEvent) -> color_eyre::Result<(), CollectorError> {
 		match event {
 			ChainEvent::NewBestHead((hash, header)) => self.process_new_best_head(*hash, header).await,
 			ChainEvent::NewFinalizedHead((hash, header)) => self.process_new_finalized_head(*hash, header).await,
@@ -513,7 +506,6 @@ impl Collector {
 			ChainEvent::DisputeInitiated(dispute_event) => self.process_dispute_initiated(dispute_event).await,
 			ChainEvent::DisputeConcluded(dispute_event, dispute_outcome) =>
 				self.process_dispute_concluded(dispute_event, dispute_outcome).await,
-			_ => Ok(()),
 		}
 	}
 
@@ -567,9 +559,8 @@ impl Collector {
 				let mut missed_slots = current_slot.0 - 1;
 				let mut authors_missing_their_slots = Vec::new();
 				while missed_slots > parent_slot.0 {
-					let slot = Slot(missed_slots);
 					if let Some(babe_randomness) = babe_randomness {
-						let rand = U256::from_big_endian(&(babe_randomness, slot).using_encoded(blake2_256));
+						let rand = U256::from_big_endian(&(babe_randomness, missed_slots).using_encoded(blake2_256));
 						let authorities_len = U256::from(authorities.len());
 
 						let idx = rand % authorities_len;
