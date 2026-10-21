@@ -25,20 +25,19 @@ use polkadot_introspector_essentials::{
 			preimage::calls::types::request_preimage::Hash,
 			runtime_types::{
 				bounded_collections::bounded_vec::BoundedVec,
-				polkadot_core_primitives::CandidateHash,
 				polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
 			},
 		},
-		polkadot_primitives::{
-			AvailabilityBitfield, CandidateCommitments, DisputeStatement, InvalidDisputeStatementKind,
-			ValidDisputeStatementKind, ValidatorIndex,
-		},
+		polkadot_primitives::CandidateCommitments,
 		polkadot_staging_primitives::{
 			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InternalVersion,
 		},
 	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{DisputeStatementSet, H256, InherentData, PolkadotHasher, SubxtHrmpChannel},
+	types::{
+		AvailabilityBitfield, DisputeStatement, DisputeStatementSet, H256, InherentData, InvalidDisputeStatementKind,
+		PolkadotHasher, SubxtHrmpChannel, ValidDisputeStatementKind, ValidatorIndex,
+	},
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
@@ -87,7 +86,7 @@ pub fn create_backed_candidate(para_id: u32) -> BackedCandidate<H256> {
 
 pub fn create_dispute_statement_set() -> DisputeStatementSet {
 	DisputeStatementSet {
-		candidate_hash: CandidateHash(H256::random()),
+		candidate_hash: H256::random(),
 		session: 0,
 		statements: vec![
 			(DisputeStatement::Valid(ValidDisputeStatementKind::Explicit), ValidatorIndex(1)),
@@ -99,7 +98,7 @@ pub fn create_dispute_statement_set() -> DisputeStatementSet {
 
 pub fn create_inherent_data() -> InherentData {
 	InherentData {
-		bitfields: vec![AvailabilityBitfield(DecodedBits::from_iter([true]))],
+		bitfields: vec![AvailabilityBitfield::from_iter([true])],
 		disputes: vec![create_dispute_statement_set()],
 	}
 }

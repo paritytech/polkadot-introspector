@@ -239,9 +239,7 @@ impl Whois {
 				.map(|authority_discovery| {
 					let account = session_queued_keys
 						.iter()
-						.find(|(_, session_keys)| {
-							format!("0x{}", hex::encode(session_keys.authority_discovery.0)) == authority_discovery
-						})
+						.find(|(_, key)| format!("0x{}", hex::encode(key)) == authority_discovery)
 						.ok_or(WhoisError::InvalidAuthorityDiscovery(authority_discovery));
 					account.map(|(account, _)| {
 						let validator_index = para_session_account_keys.iter().position(|x| account == x);
@@ -260,7 +258,7 @@ impl Whois {
 					authority_key.and_then(|authority_key| {
 						let account_for_key = session_queued_keys
 							.iter()
-							.find(|(_, session_keys)| session_keys.authority_discovery.0 == authority_key)
+							.find(|(_, key)| *key == authority_key)
 							.ok_or(WhoisError::InvalidPeerIdNoAuthority(peer_id));
 
 						account_for_key.map(|(account, _)| {
@@ -279,10 +277,9 @@ impl Whois {
 
 		let mut current_authority_discovery_keys = HashSet::new();
 		for (validator, validator_index) in accounts_to_discover {
-			let session_keys_for_validator = &session_queued_keys.iter().find(|(account, _)| account == &validator);
+			let queued_key = session_queued_keys.iter().find(|(account, _)| account == &validator);
 
-			if let Some((_, session_keys_for_validator)) = session_keys_for_validator {
-				let authority_discovery_key = session_keys_for_validator.authority_discovery.0;
+			if let Some(&(_, authority_discovery_key)) = queued_key {
 				let (peer_details, info, peer_id) = network_cache_for_session.get_details(authority_discovery_key);
 				current_authority_discovery_keys.insert(authority_discovery_key);
 				println!(

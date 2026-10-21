@@ -17,11 +17,10 @@
 use polkadot_introspector_essentials::{
 	api::storage::RequestExecutor,
 	collector::{CollectorPrefixType, DisputeInfo, candidate_record::CandidateRecord},
-	metadata::{
-		polkadot::runtime_types::polkadot_parachain_primitives::primitives,
-		polkadot_primitives::{CoreIndex, ValidatorIndex},
+	types::{
+		AccountId32, ClaimQueue, CoreOccupied, H256, InherentData, PolkadotHasher, SubxtHrmpChannel, Timestamp,
+		ValidatorIndex,
 	},
-	types::{AccountId32, CoreOccupied, H256, InherentData, PolkadotHasher, SubxtHrmpChannel, Timestamp},
 };
 use std::collections::BTreeMap;
 use subxt::config::Hasher;
@@ -104,7 +103,7 @@ impl TrackerStorage {
 	}
 
 	/// Read the core assignments for the given relay block
-	pub async fn core_assignments(&self, block_hash: H256) -> Option<Vec<(CoreIndex, Vec<primitives::Id>)>> {
+	pub async fn core_assignments(&self, block_hash: H256) -> Option<ClaimQueue> {
 		self.storage
 			.storage_read_prefixed(CollectorPrefixType::CoreAssignments, block_hash)
 			.await

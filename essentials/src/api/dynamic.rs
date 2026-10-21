@@ -16,20 +16,15 @@
 
 use crate::{
 	api::api_client::ApiClient,
-	metadata::{
-		polkadot::runtime_types::polkadot_core_primitives::CandidateHash,
-		polkadot_primitives::{
-			AvailabilityBitfield, DisputeStatement, InvalidDisputeStatementKind, ValidDisputeStatementKind,
-			ValidatorIndex,
-		},
+	types::{
+		AvailabilityBitfield, CoreOccupied, DisputeStatement, DisputeStatementSet, H256, InherentData,
+		InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
 	},
-	types::{CoreOccupied, DisputeStatementSet, H256, InherentData},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
 	dynamic::{At, Value},
 	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
-	utils::bits::DecodedBits,
 };
 use thiserror::Error;
 
@@ -237,7 +232,7 @@ pub(crate) fn decode_inherent_data(raw: &Composite<u32>) -> Result<InherentData,
 
 fn decode_availability_bitfield(value: &Value<u32>) -> Result<AvailabilityBitfield, DynamicError> {
 	match &value.value {
-		ValueDef::BitSequence(bits) => Ok(AvailabilityBitfield(DecodedBits::from_iter(bits.iter()))),
+		ValueDef::BitSequence(bits) => Ok(bits.iter().collect()),
 		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_availability_bitfield(&inner[0]),
 		ValueDef::Composite(Composite::Unnamed(bits)) => {
 			let bools: Result<Vec<bool>, _> = bits
@@ -248,7 +243,7 @@ fn decode_availability_bitfield(value: &Value<u32>) -> Result<AvailabilityBitfie
 					other => Err(DynamicError::DecodeDynamicError("bool in bitfield".to_string(), other.clone())),
 				})
 				.collect();
-			Ok(AvailabilityBitfield(DecodedBits::from_iter(bools?)))
+			Ok(bools?.into_iter().collect())
 		},
 		other => Err(DynamicError::DecodeDynamicError("availability bitfield".to_string(), other.clone())),
 	}
@@ -349,10 +344,9 @@ fn decode_invalid_dispute_statement_kind(variant: &Variant<u32>) -> Result<Inval
 	}
 }
 
-fn decode_candidate_hash(value: &Value<u32>) -> Result<CandidateHash, DynamicError> {
+fn decode_candidate_hash(value: &Value<u32>) -> Result<H256, DynamicError> {
 	match &value.value {
-		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 =>
-			Ok(CandidateHash(decode_h256(&inner[0])?)),
+		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_h256(&inner[0]),
 		ValueDef::Composite(Composite::Named(fields)) => {
 			let hash_val = fields
 				.iter()
@@ -363,7 +357,7 @@ fn decode_candidate_hash(value: &Value<u32>) -> Result<CandidateHash, DynamicErr
 						value.value.clone(),
 					)
 				})?;
-			Ok(CandidateHash(decode_h256(hash_val)?))
+			decode_h256(hash_val)
 		},
 		other => Err(DynamicError::DecodeDynamicError(
 			"CandidateHash (unnamed 1-tuple or named composite with field '0')".to_string(),

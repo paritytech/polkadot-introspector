@@ -27,8 +27,7 @@ use crate::{
 use log::{error, info};
 use polkadot_introspector_essentials::{
 	collector::{BackedCandidateInfo, DisputeInfo, NewHeadEvent},
-	metadata::polkadot_primitives::{AvailabilityBitfield, ValidatorIndex},
-	types::{BlockNumber, CoreOccupied, DisputeStatementSet, H256, Timestamp},
+	types::{AvailabilityBitfield, BlockNumber, CoreOccupied, DisputeStatementSet, H256, Timestamp, ValidatorIndex},
 };
 use std::{collections::HashMap, default::Default, time::Duration};
 
@@ -246,13 +245,7 @@ impl SubxtTracker {
 
 	async fn set_cores(&mut self, block_hash: H256, storage: &TrackerStorage) {
 		let assignments = storage.core_assignments(block_hash).await.expect("saved in the collector");
-		self.cores = assignments
-			.iter()
-			.filter_map(|(core, ids)| {
-				let ids = ids.iter().map(|v| v.0).collect::<Vec<_>>();
-				ids.contains(&self.para_id).then_some((core.0, ids))
-			})
-			.collect();
+		self.cores = assignments.into_iter().filter(|(_, ids)| ids.contains(&self.para_id)).collect();
 	}
 
 	async fn set_included_candidates(
@@ -365,7 +358,7 @@ impl SubxtTracker {
 		for concluded_dispute in concluded_disputes {
 			let Some(dispute_info) = inherent_disputes
 				.iter()
-				.find(|&v| v.candidate_hash.0 == concluded_dispute.dispute.candidate_hash)
+				.find(|&v| v.candidate_hash == concluded_dispute.dispute.candidate_hash)
 			else {
 				log::warn!(
 					"Concluded dispute appeared in events but is not present in inherent data: {:?}",
@@ -374,7 +367,7 @@ impl SubxtTracker {
 				continue;
 			};
 			if let Some(DisputeInfo { outcome, session_index, initiated, initiator_indices, concluded, .. }) =
-				storage.dispute(dispute_info.candidate_hash.0).await
+				storage.dispute(dispute_info.candidate_hash).await
 			{
 				if let Some(outcome) = outcome {
 					self.disputes.push(DisputesTracker::new(
@@ -389,7 +382,7 @@ impl SubxtTracker {
 				} else {
 					info!(
 						"parachain {}: dispute for candidate {} has been seen in the block inherent but is not tracked to be resolved",
-						self.para_id, dispute_info.candidate_hash.0
+						self.para_id, dispute_info.candidate_hash
 					);
 				}
 			}

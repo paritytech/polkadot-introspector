@@ -22,16 +22,9 @@ use crate::{
 	},
 	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
-	metadata::{
-		polkadot::{
-			runtime_apis::babe_api::types::generate_key_ownership_proof::Slot, runtime_types::sp_consensus_babe,
-			session::storage::types::queued_keys::QueuedKeys,
-		},
-		polkadot_primitives,
-	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		PolkadotHasher, SubxtHrmpChannel, Timestamp,
+		PolkadotHasher, QueuedKeys, Slot, SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -77,7 +70,7 @@ pub enum Request {
 	GetBabeRandomness(H256),
 	GetBabeAuthorithies(H256),
 	GetBabeCurrentSlot(H256),
-	GetBabeKeyOwner(H256, sp_consensus_babe::app::Public),
+	GetBabeKeyOwner(H256, [u8; 32]),
 }
 
 /// Response types for APIs.
@@ -104,7 +97,7 @@ enum Response {
 	/// List of the occupied availability cores.
 	OccupiedCores(Vec<CoreOccupied>),
 	/// Backing validator groups.
-	BackingGroups(Vec<Vec<polkadot_primitives::ValidatorIndex>>),
+	BackingGroups(Vec<Vec<ValidatorIndex>>),
 	/// Returns a session index
 	SessionIndex(u32),
 	/// Session keys
@@ -120,7 +113,7 @@ enum Response {
 	/// Babe randomness
 	BabeRandomness(Option<[u8; 32]>),
 	/// Babe authorithies
-	BabeAuthorithies(Vec<(sp_consensus_babe::app::Public, u64)>),
+	BabeAuthorithies(Vec<([u8; 32], u64)>),
 	/// Babe current slot
 	BabeCurrentSlot(Option<Slot>),
 	/// Babe key owner
@@ -257,7 +250,7 @@ impl RequestExecutorBackend {
 			GetBabeRandomness(hash) => BabeRandomness(client.get_babe_randomness(hash).await?),
 			GetBabeAuthorithies(hash) => BabeAuthorithies(client.get_babe_authorities(hash).await?),
 			GetBabeCurrentSlot(hash) => BabeCurrentSlot(client.get_babe_current_slot(hash).await?),
-			GetBabeKeyOwner(hash, key) => BabeKeyOwner(client.get_babe_key_owner(hash, &key.0).await?),
+			GetBabeKeyOwner(hash, key) => BabeKeyOwner(client.get_babe_key_owner(hash, &key).await?),
 		};
 
 		Ok(response)
@@ -464,7 +457,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Vec<Vec<polkadot_primitives::ValidatorIndex>>, RequestExecutorError> {
+	) -> color_eyre::Result<Vec<Vec<ValidatorIndex>>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBackingGroups, BackingGroups, hash)
 	}
 
@@ -531,7 +524,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Vec<(sp_consensus_babe::app::Public, u64)>, RequestExecutorError> {
+	) -> color_eyre::Result<Vec<([u8; 32], u64)>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeAuthorithies, BabeAuthorithies, hash)
 	}
 
@@ -547,7 +540,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-		key: sp_consensus_babe::app::Public,
+		key: [u8; 32],
 	) -> color_eyre::Result<Option<AccountId32>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeKeyOwner, BabeKeyOwner, hash, key)
 	}

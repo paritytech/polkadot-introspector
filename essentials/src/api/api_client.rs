@@ -32,26 +32,20 @@ use crate::{
 		shadow,
 	},
 	chain_events::SubxtCandidateEvent,
-	metadata::{
-		polkadot::{
-			self,
-			runtime_types::{
-				polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-				polkadot_runtime_parachains::hrmp::HrmpChannel,
-				sp_consensus_babe,
-				sp_consensus_slots::Slot,
-				sp_core::crypto::KeyTypeId,
-			},
+	metadata::polkadot::{
+		self,
+		runtime_types::{
+			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
+			polkadot_runtime_parachains::hrmp::HrmpChannel,
+			sp_core::crypto::KeyTypeId,
 		},
-		polkadot_primitives::ValidatorIndex,
 	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
-		SubxtHrmpChannel, Timestamp,
+		Slot, SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
 };
 use clap::ValueEnum;
-use parity_scale_codec::Encode;
 use std::collections::BTreeMap;
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -365,23 +359,22 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		Ok(randomness)
 	}
 
-	pub async fn get_babe_authorities(
-		&self,
-		hash: H256,
-	) -> Result<Vec<(sp_consensus_babe::app::Public, u64)>, subxt::Error> {
+	pub async fn get_babe_authorities(&self, hash: H256) -> Result<Vec<([u8; 32], u64)>, subxt::Error> {
 		let addr = polkadot::storage().babe().authorities();
 		let authorities = self
 			.storage()
 			.at(hash)
 			.fetch(&addr)
 			.await
-			.map(|res| res.map(|res| res.0).unwrap_or_default())?;
+			.map(|res| res.map(|res| res.0).unwrap_or_default())?
+			.into_iter()
+			// `app::Public` wraps the 32 raw key bytes.
+			.map(|(public, weight)| (public.0, weight))
+			.collect::<Vec<_>>();
 
 		if self.shadow {
 			let epoch = self.babe_current_epoch(hash).await?;
-			// `app::Public` wraps the 32 raw key bytes, matching the metadata-free `[u8; 32]`.
-			let old: Vec<([u8; 32], u64)> = authorities.iter().map(|(public, weight)| (public.0, *weight)).collect();
-			shadow::compare(hash, "babe_authorities", &old, &epoch.authorities);
+			shadow::compare(hash, "babe_authorities", &authorities, &epoch.authorities);
 		}
 
 		Ok(authorities)
@@ -389,13 +382,13 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
 		let addr = polkadot::storage().babe().current_slot();
-		let slot = self.storage().at(hash).fetch(&addr).await?;
+		let slot = self.storage().at(hash).fetch(&addr).await?.map(|slot| slot.0);
 
 		if self.shadow {
 			let metadata_free = self
 				.shadow_storage(hash, &babe_current_slot_key(), "Babe.CurrentSlot", decode_slot)
 				.await?;
-			shadow::compare(hash, "babe_current_slot", &slot.as_ref().map(|slot| slot.0), &metadata_free);
+			shadow::compare(hash, "babe_current_slot", &slot, &metadata_free);
 		}
 
 		Ok(slot)
@@ -522,25 +515,27 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			self.storage().at(hash).fetch(&addr).await?
 		} else {
 			self.storage().at_latest().await?.fetch(&addr).await?
-		};
+		}
+		.map(|keys| {
+			keys.into_iter()
+				.map(|(account, keys)| (account, keys.authority_discovery.0))
+				.collect::<QueuedKeys>()
+		});
 
 		// Shadow only at a concrete hash; at latest the typed and raw reads could race to different blocks.
 		if self.shadow &&
 			let Some(hash) = hash
 		{
-			let old: Vec<(AccountId32, [u8; 32])> = queued
-				.as_ref()
-				.map(|keys| {
-					keys.iter()
-						.map(|(account, keys)| (account.clone(), keys.authority_discovery.0))
-						.collect()
-				})
-				.unwrap_or_default();
 			let metadata_free = self
 				.shadow_storage(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
 				.await?
 				.unwrap_or_default();
-			shadow::compare(hash, "session_queued_keys", &old, &metadata_free);
+			shadow::compare(
+				hash,
+				"session_queued_keys",
+				&queued.as_deref().unwrap_or_default(),
+				&metadata_free.as_slice(),
+			);
 		}
 
 		Ok(queued)
@@ -606,13 +601,14 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error> {
 		let block = self.block_at(maybe_hash).await?;
+
+		// do nth(1) instead of take(2).last(), this allows us to clearly return an error instead of panicking.
 		let ex = block
 			.extrinsics()
 			.await?
 			.iter()
-			.take(2)
-			.last()
-			.ok_or_else(|| "`ParaInherent` data is always at index #1".to_string())?;
+			.nth(1)
+			.ok_or_else(|| "`ParaInherent` extrinsic missing at index #1".to_string())?;
 		let inherent = ex
 			.field_values()
 			.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
@@ -633,14 +629,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
 			let metadata_free = decode_parainherent(&para_inherent.0)
 				.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent (metadata-free): {e}")))?;
-			let old: Vec<Vec<u8>> = inherent.bitfields.iter().map(|bitfield| bitfield.0.encode()).collect();
-			shadow::compare(hash, "parainherent_bitfields", &old, &metadata_free.bitfields);
-			shadow::compare(
-				hash,
-				"parainherent_disputes",
-				&inherent.disputes.encode(),
-				&metadata_free.disputes.encode(),
-			);
+			shadow::compare(hash, "parainherent_bitfields", &inherent.bitfields, &metadata_free.bitfields);
+			shadow::compare(hash, "parainherent_disputes", &inherent.disputes, &metadata_free.disputes);
 		}
 
 		Ok(inherent)
