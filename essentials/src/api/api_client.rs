@@ -601,6 +601,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error> {
 		let block = self.block_at(maybe_hash).await?;
+
+		// do nth(1) instead of take(2).last(), this allows us to clearly return an error instead of panicking.
 		let ex = block
 			.extrinsics()
 			.await?
