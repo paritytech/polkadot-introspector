@@ -605,9 +605,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.extrinsics()
 			.await?
 			.iter()
-			.take(2)
-			.last()
-			.ok_or_else(|| "`ParaInherent` data is always at index #1".to_string())?;
+			.nth(1)
+			.ok_or_else(|| "`ParaInherent` extrinsic missing at index #1".to_string())?;
 		let inherent = ex
 			.field_values()
 			.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))

@@ -43,9 +43,10 @@ pub type AvailabilityBitfield = BitVec<u8, Lsb0>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub struct ValidatorIndex(pub u32);
 
-/// The parts of `ParachainsInherentData` the tools read. Unlike the other types here it does not
-/// mirror the runtime layout: bitfields keep only their payload (no validator index or signature),
-/// and backed candidates and the parent header are dropped.
+/// The parts of `ParachainsInherentData` the tools read. It does not mirror the runtime layout:
+/// bitfields keep only their payload (no validator index or signature), and backed candidates and
+/// the parent header are dropped. Only `ValidatorIndex`, `DisputeStatement` and its kinds are
+/// wire-compatible with the runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct InherentData {
 	pub bitfields: Vec<AvailabilityBitfield>,

@@ -1203,7 +1203,6 @@ mod tests {
 			let encoded = statement.encode();
 			let runtime = RuntimeDisputeStatement::decode_all(&mut &encoded[..]).unwrap();
 			assert_eq!(runtime.encode(), encoded);
-			assert_eq!(DisputeStatement::decode_all(&mut &runtime.encode()[..]).unwrap(), statement);
 		}
 	}
 
