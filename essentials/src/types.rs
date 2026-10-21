@@ -34,14 +34,18 @@ pub type Timestamp = u64;
 pub type ClaimQueue = Vec<(u32, Vec<u32>)>;
 /// BABE slot. Must stay a `u64`: the author selection hashes its 8-byte SCALE encoding.
 pub type Slot = u64;
-/// Authority discovery key of every queued validator
+/// Authority discovery key of every queued validator.
 pub type QueuedKeys = Vec<(AccountId32, [u8; 32])>;
-/// One bit per core, set when the validator has the core's candidate available
+/// Payload of a signed bitfield in the `ParaInherent`: one bit per availability core, set when the
+/// signing validator has the core's candidate available.
 pub type AvailabilityBitfield = BitVec<u8, Lsb0>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub struct ValidatorIndex(pub u32);
 
+/// The parts of `ParachainsInherentData` the tools read. Unlike the other types here it does not
+/// mirror the runtime layout: bitfields keep only their payload (no validator index or signature),
+/// and backed candidates and the parent header are dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct InherentData {
 	pub bitfields: Vec<AvailabilityBitfield>,

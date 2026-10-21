@@ -28,6 +28,7 @@ use crate::{
 		Header, InherentData, PolkadotHash, SubxtHrmpChannel, ValidatorIndex,
 	},
 };
+use bitvec::{order::Lsb0, vec::BitVec};
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Compact, Decode, DecodeAll, Encode};
 use sp_core_hashing::{twox_64, twox_128};
@@ -121,8 +122,8 @@ pub struct DecodedDispute {
 struct RawDispute {
 	session: u32,
 	candidate_hash: [u8; 32],
-	validators_for: AvailabilityBitfield,
-	validators_against: AvailabilityBitfield,
+	validators_for: BitVec<u8, Lsb0>,
+	validators_against: BitVec<u8, Lsb0>,
 	start: u32,
 	concluded_at: Option<u32>,
 }
@@ -165,7 +166,7 @@ struct RawOccupiedCore {
 	occupied_since: u32,
 	time_out_at: u32,
 	next_up_on_time_out: Option<RawScheduledCore>,
-	availability: AvailabilityBitfield,
+	availability: BitVec<u8, Lsb0>,
 	group_responsible: u32,
 	candidate_hash: [u8; 32],
 	candidate_descriptor: [u8; CANDIDATE_DESCRIPTOR_SIZE],
@@ -436,7 +437,7 @@ struct RawBackedCandidate {
 	_descriptor: [u8; CANDIDATE_DESCRIPTOR_SIZE],
 	_commitments: RawCommitments,
 	_validity_votes: Vec<RawValidityAttestation>,
-	_validator_indices: AvailabilityBitfield,
+	_validator_indices: BitVec<u8, Lsb0>,
 }
 
 /// Decodes a `ParaInherent` extrinsic, given its raw bytes as returned by
@@ -974,7 +975,7 @@ mod tests {
 		assert_eq!(decode_account_id(&account.encode()).unwrap(), account);
 	}
 
-	// A SCALE `BitVec<u8, Lsb0>` over the given bits.
+	// A `BitVec<u8, Lsb0>` over the given bits.
 	fn availability_bitfield(bits: &[bool]) -> AvailabilityBitfield {
 		bits.iter().copied().collect()
 	}
@@ -998,8 +999,8 @@ mod tests {
 				polkadot_primitives::vstaging::InherentData as RuntimeInherentData,
 			},
 			polkadot_primitives::{
-				DisputeStatementSet as RuntimeDisputeStatementSet, ValidatorIndex as RuntimeValidatorIndex,
-				signed::UncheckedSigned, validator_app::Signature,
+				DisputeStatement as RuntimeDisputeStatement, DisputeStatementSet as RuntimeDisputeStatementSet,
+				ValidatorIndex as RuntimeValidatorIndex, signed::UncheckedSigned, validator_app::Signature,
 			},
 		},
 		types::{InvalidDisputeStatementKind, ValidDisputeStatementKind},
@@ -1067,7 +1068,7 @@ mod tests {
 				.map(|set| RuntimeDisputeStatementSet {
 					candidate_hash: CandidateHash(set.candidate_hash),
 					session: set.session,
-					// Our statement types share the runtime format, so encode -> decode allows us to map them
+					// Our statement types share the runtime format, so map them by encode -> decode
 					statements: set
 						.statements
 						.into_iter()
@@ -1183,6 +1184,27 @@ mod tests {
 		let Sections { mut body, .. } = sections();
 		body.pop(); // cuts into the seal of the header's digest
 		assert!(decode_error(body).starts_with("parainherent: cannot skip parent header"));
+	}
+
+	#[test]
+	fn dispute_statement_matches_runtime_encoding() {
+		let statements = [
+			DisputeStatement::Valid(ValidDisputeStatementKind::Explicit),
+			DisputeStatement::Valid(ValidDisputeStatementKind::BackingSeconded(H256::from([0x01; 32]))),
+			DisputeStatement::Valid(ValidDisputeStatementKind::BackingValid(H256::from([0x02; 32]))),
+			DisputeStatement::Valid(ValidDisputeStatementKind::ApprovalChecking),
+			DisputeStatement::Valid(ValidDisputeStatementKind::ApprovalCheckingMultipleCandidates(vec![
+				H256::from([0x03; 32]),
+				H256::from([0x04; 32]),
+			])),
+			DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
+		];
+		for statement in statements {
+			let encoded = statement.encode();
+			let runtime = RuntimeDisputeStatement::decode_all(&mut &encoded[..]).unwrap();
+			assert_eq!(runtime.encode(), encoded);
+			assert_eq!(DisputeStatement::decode_all(&mut &runtime.encode()[..]).unwrap(), statement);
+		}
 	}
 
 	#[test]

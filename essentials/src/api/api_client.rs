@@ -46,7 +46,6 @@ use crate::{
 	},
 };
 use clap::ValueEnum;
-use parity_scale_codec::Encode;
 use std::collections::BTreeMap;
 use subxt::{
 	OnlineClient, PolkadotConfig,
@@ -369,6 +368,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.await
 			.map(|res| res.map(|res| res.0).unwrap_or_default())?
 			.into_iter()
+			// `app::Public` wraps the 32 raw key bytes.
 			.map(|(public, weight)| (public.0, weight))
 			.collect::<Vec<_>>();
 
@@ -628,13 +628,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
 			let metadata_free = decode_parainherent(&para_inherent.0)
 				.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent (metadata-free): {e}")))?;
-			// Compare the encoded bytes: `BitVec` equality ignores the padding bits of the last byte.
-			shadow::compare(
-				hash,
-				"parainherent_bitfields",
-				&inherent.bitfields.encode(),
-				&metadata_free.bitfields.encode(),
-			);
+			shadow::compare(hash, "parainherent_bitfields", &inherent.bitfields, &metadata_free.bitfields);
 			shadow::compare(hash, "parainherent_disputes", &inherent.disputes, &metadata_free.disputes);
 		}
 
