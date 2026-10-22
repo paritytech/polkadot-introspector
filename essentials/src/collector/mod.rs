@@ -358,53 +358,63 @@ impl Collector {
 		};
 		let mut chain_events = vec![new_head_event];
 
-		if let Some(hash) = new_head_hash(event, self.subscribe_mode) &&
-			let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await?
-		{
-			let mut skipped_events = 0u32;
-			for block_event in block_events.iter() {
-				match block_event {
-					Ok(event) =>
-						if let Some(chain_event) = decode_chain_event(*hash, event, self.hasher).await? {
-							chain_events.push(chain_event);
-						},
-					Err(e) => {
-						log::warn!("Failed to decode block event at {hash:?}, skipping: {e}");
-						skipped_events += 1;
-					},
-				}
-			}
-			if skipped_events > 0 {
-				log::error!("Skipped {skipped_events} undecoded events in block {hash:?}");
-			}
+		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
+			// Candidate events come from the metadata-free runtime call, unconditionally.
+			let candidate_events = self.executor.get_candidate_events(self.endpoint.as_str(), *hash).await?;
+			chain_events.extend(
+				candidate_events
+					.iter()
+					.cloned()
+					.map(|candidate| ChainEvent::CandidateChanged(Box::new(candidate))),
+			);
 
-			if self.executor.shadow_enabled() {
-				self.shadow_candidate_events(*hash, &chain_events).await?;
-				self.shadow_disputes(*hash, block_number, &chain_events).await?;
+			// Disputes are still scraped from `System.Events`.
+			if let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await? {
+				let mut scraped = Vec::new();
+				let mut skipped_events = 0u32;
+				for block_event in block_events.iter() {
+					match block_event {
+						Ok(event) =>
+							if let Some(chain_event) = decode_chain_event(*hash, event, self.hasher).await? {
+								scraped.push(chain_event);
+							},
+						Err(e) => {
+							log::warn!("Failed to decode block event at {hash:?}, skipping: {e}");
+							skipped_events += 1;
+						},
+					}
+				}
+				if skipped_events > 0 {
+					log::error!("Skipped {skipped_events} undecoded events in block {hash:?}");
+				}
+
+				if self.executor.shadow_enabled() {
+					self.shadow_candidate_events(*hash, &scraped, &candidate_events);
+					self.shadow_disputes(*hash, block_number, &scraped).await?;
+				}
+
+				chain_events.extend(scraped.into_iter().filter(|e| !matches!(e, ChainEvent::CandidateChanged(_))));
 			}
 		};
 
 		Ok(chain_events)
 	}
 
-	/// Shadow-decodes candidate events for a block through the metadata-free
-	/// `ParachainHost_candidate_events` runtime call and compares them, as a set keyed by
-	/// `(candidate_hash, event_type)`, against the ones scraped from `System.Events`. Aborts on any
-	/// mismatch; the scraped events remain what the tool returns while shadowing.
-	async fn shadow_candidate_events(&mut self, hash: H256, chain_events: &[ChainEvent]) -> color_eyre::Result<()> {
-		let scraped: Vec<SubxtCandidateEvent> = chain_events
+	/// Reverse-shadows candidate events: the ones from the metadata-free
+	/// `ParachainHost_candidate_events` runtime call (what the tool returns) are compared, as a set keyed
+	/// by `(candidate_hash, event_type)`, against the ones scraped from `System.Events` through the
+	/// metadata. Aborts on any mismatch.
+	fn shadow_candidate_events(&self, hash: H256, scraped: &[ChainEvent], candidate_events: &[SubxtCandidateEvent]) {
+		let scraped: Vec<SubxtCandidateEvent> = scraped
 			.iter()
 			.filter_map(|event| match event {
 				ChainEvent::CandidateChanged(candidate) => Some((**candidate).clone()),
 				_ => None,
 			})
 			.collect();
-		let metadata_free = self.executor.get_candidate_events(self.endpoint.as_str(), hash).await?;
-		shadow::compare_set(hash, "candidate_events", &scraped, &metadata_free, |event| {
+		shadow::compare_set(hash, "candidate_events", &scraped, candidate_events, |event| {
 			(event.candidate_hash, event.event_type)
 		});
-
-		Ok(())
 	}
 
 	/// Shadow-decodes disputes for a block through the metadata-free `ParachainHost_disputes` runtime
