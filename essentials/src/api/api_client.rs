@@ -128,7 +128,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.legacy_rpc_methods
 			.chain_get_header(Some(hash))
 			.await?
-			.ok_or_else(|| subxt::Error::Other(format!("header {hash:?} not found via chain_getHeader")))
+			.ok_or_else(|| subxt::Error::Block(subxt::error::BlockError::not_found(hash)))
+	}
+
+	/// Resolves `None` to the latest finalized block hash
+	async fn resolve_hash(&self, maybe_hash: Option<H256>) -> Result<H256, subxt::Error> {
+		match maybe_hash {
+			Some(hash) => Ok(hash),
+			None => Ok(self.legacy_rpc_methods.chain_get_finalized_head().await?),
+		}
+	}
+
+	/// Resolves a header and its hash via `chain_getHeader`, at the latest finalized block for `None`.
+	async fn resolve_header(&self, maybe_hash: Option<H256>) -> Result<(H256, Header), subxt::Error> {
+		let hash = self.resolve_hash(maybe_hash).await?;
+		Ok((hash, self.header_via_rpc(hash).await?))
 	}
 
 	/// Reads a raw storage value via `state_getStorage` and decodes it with the given metadata-free
@@ -283,30 +297,25 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error> {
-		let block = self.block_at(maybe_hash).await?;
-		let header = block.header().clone();
+		let (hash, metadata_free) = self.resolve_header(maybe_hash).await?;
 
 		if self.shadow {
-			// Resolve the concrete hash so the metadata-free read hits the same block as the primary.
-			let hash = block.hash();
-			let metadata_free = self.header_via_rpc(hash).await?;
-			shadow::compare(hash, "block_header", &header, &metadata_free);
+			let block = self.block_at(Some(hash)).await?;
+			shadow::compare(hash, "block_header", block.header(), &metadata_free);
 		}
 
-		Ok(header)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error> {
-		let block = self.block_at(maybe_hash).await?;
-		let number = block.number();
+		let (hash, metadata_free) = self.resolve_header(maybe_hash).await?;
 
 		if self.shadow {
-			let hash = block.hash();
-			let metadata_free = self.header_via_rpc(hash).await?;
+			let number = self.block_at(Some(hash)).await?.number();
 			shadow::compare(hash, "block_number", &number, &metadata_free.number);
 		}
 
-		Ok(number)
+		Ok(metadata_free.number)
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
