@@ -20,6 +20,7 @@ mod ws;
 use crate::{
 	api::{
 		ApiService,
+		decode::DecodedDispute,
 		executor::{RequestExecutor, RequestExecutorError},
 		shadow,
 	},
@@ -360,147 +361,99 @@ impl Collector {
 
 		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
 			let candidate_events = self.executor.get_candidate_events(self.endpoint.as_str(), *hash).await?;
+			let disputes = self.executor.get_disputes(self.endpoint.as_str(), *hash).await?;
 			chain_events.extend(
 				candidate_events
-					.iter()
-					.cloned()
+					.into_iter()
 					.map(|candidate| ChainEvent::CandidateChanged(Box::new(candidate))),
 			);
+			chain_events.extend(disputes_to_chain_events(*hash, block_number, &disputes));
 
-			// Disputes are still scraped from `System.Events`.
-			if let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), *hash).await? {
-				let mut scraped = Vec::new();
-				let mut skipped_events = 0u32;
-				for block_event in block_events.iter() {
-					match block_event {
-						Ok(event) =>
-							if let Some(chain_event) = decode_chain_event(*hash, event, self.hasher).await? {
-								scraped.push(chain_event);
-							},
-						Err(e) => {
-							log::warn!("Failed to decode block event at {hash:?}, skipping: {e}");
-							skipped_events += 1;
-						},
-					}
-				}
-				if skipped_events > 0 {
-					log::error!("Skipped {skipped_events} undecoded events in block {hash:?}");
-				}
-
-				if self.executor.shadow_enabled() {
-					self.shadow_candidate_events(*hash, &scraped, &candidate_events);
-					self.shadow_disputes(*hash, block_number, &scraped).await?;
-				}
-
-				chain_events.extend(scraped.into_iter().filter(|e| !matches!(e, ChainEvent::CandidateChanged(_))));
+			if self.executor.shadow_enabled() {
+				self.shadow_events(*hash, block_number, &chain_events, &disputes).await?;
 			}
 		};
 
 		Ok(chain_events)
 	}
 
-	/// Reverse-shadows candidate events: the ones from the metadata-free
-	/// `ParachainHost_candidate_events` runtime call (what the tool returns) are compared, as a set keyed
-	/// by `(candidate_hash, event_type)`, against the ones scraped from `System.Events` through the
-	/// metadata. Aborts on any mismatch.
-	fn shadow_candidate_events(&self, hash: H256, scraped: &[ChainEvent], candidate_events: &[SubxtCandidateEvent]) {
-		let scraped: Vec<SubxtCandidateEvent> = scraped
-			.iter()
-			.filter_map(|event| match event {
-				ChainEvent::CandidateChanged(candidate) => Some((**candidate).clone()),
-				_ => None,
-			})
-			.collect();
-		shadow::compare_set(hash, "candidate_events", &scraped, candidate_events, |event| {
-			(event.candidate_hash, event.event_type)
-		});
-	}
-
-	/// Shadow-decodes disputes for a block through the metadata-free `ParachainHost_disputes` runtime
-	/// call and compares them against the ones scraped from `System.Events`. The runtime call returns
-	/// the rolling window of recent disputes, so it is sliced by relay block number to the per-block
-	/// deltas the scraped events represent: `start == block_number` are the ones initiated in this
-	/// block, `concluded_at == Some(block_number)` the ones concluded in it. Both are compared as sets
-	/// keyed by candidate hash; the concluded outcome is derived from which validator side prevailed.
-	/// Aborts on any mismatch; the scraped events remain what the tool returns while shadowing.
+	/// Reverse-shadows the events built from the `ParachainHost_candidate_events` and
+	/// `ParachainHost_disputes` runtime calls by scraping the same block's `System.Events` through the
+	/// metadata and comparing the two. Candidate events are compared as a set keyed by
+	/// `(candidate_hash, event_type)`, initiated disputes as a set keyed by candidate hash and concluded
+	/// ones keyed by `(candidate_hash, outcome)`. Aborts on any mismatch.
 	///
 	/// A dispute can conclude twice, in opposite directions, when f+1 validators vote both ways. The
-	/// pallet emits a second `DisputeConcluded` event but keeps the first `concluded_at`, so the
-	/// runtime call cannot express the second conclusion at all. Those candidates are excluded from
-	/// the comparison rather than reported as a decoder mismatch.
-	async fn shadow_disputes(
+	/// pallet keeps only the first `concluded_at`, so a second conclusion in a later block cannot be
+	/// expressed by the runtime call. Those candidates are excluded from the comparison and are not counted
+	/// as a mismatch.
+	async fn shadow_events(
 		&mut self,
 		hash: H256,
 		block_number: u32,
 		chain_events: &[ChainEvent],
+		disputes: &[DecodedDispute],
 	) -> color_eyre::Result<()> {
-		let scraped_initiated: Vec<H256> = chain_events
-			.iter()
-			.filter_map(|event| match event {
-				ChainEvent::DisputeInitiated(dispute) => Some(dispute.candidate_hash),
-				_ => None,
-			})
-			.collect();
-		let scraped_concluded: Vec<ConcludedDispute> = chain_events
-			.iter()
-			.filter_map(|event| match event {
-				ChainEvent::DisputeConcluded(dispute, outcome) =>
-					Some(ConcludedDispute { candidate_hash: dispute.candidate_hash, outcome: *outcome }),
-				_ => None,
-			})
-			.collect();
-
-		let disputes = self.executor.get_disputes(self.endpoint.as_str(), hash).await?;
-
-		let mut scraped_counts: BTreeMap<H256, usize> = BTreeMap::new();
-		for dispute in &scraped_concluded {
-			*scraped_counts.entry(dispute.candidate_hash).or_default() += 1;
+		let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), hash).await? else { return Ok(()) };
+		let mut scraped = Vec::new();
+		for block_event in block_events.iter() {
+			match block_event {
+				Ok(event) =>
+					if let Some(chain_event) = decode_chain_event(hash, event, self.hasher).await? {
+						scraped.push(chain_event);
+					},
+				Err(e) => warn!("Failed to decode block event at {hash:?}, skipping: {e}"),
+			}
 		}
-		let concluded_twice: BTreeSet<H256> = scraped_counts
-			.into_iter()
-			.filter(|(candidate_hash, count)| {
-				*count > 1 ||
-					disputes.iter().any(|dispute| {
-						dispute.candidate_hash == *candidate_hash &&
-							dispute.concluded_at.is_some_and(|at| at < block_number)
-					})
+
+		shadow::compare_set(
+			hash,
+			"candidate_events",
+			&candidate_events(&scraped),
+			&candidate_events(chain_events),
+			|event| (event.candidate_hash, event.event_type),
+		);
+
+		let scraped_concluded = concluded_disputes(&scraped);
+		// A second conclusion in a later block than the recorded `concluded_at` cannot be expressed by
+		// the runtime call, so such candidates are excluded. A double conclusion within one block is
+		// reproduced by `disputes_to_chain_events` and compared normally.
+		let concluded_twice: BTreeSet<H256> = scraped_concluded
+			.iter()
+			.map(|dispute| dispute.candidate_hash)
+			.filter(|candidate_hash| {
+				disputes.iter().any(|dispute| {
+					dispute.candidate_hash == *candidate_hash &&
+						dispute.concluded_at.is_some_and(|at| at < block_number)
+				})
 			})
-			.map(|(candidate_hash, _)| candidate_hash)
 			.collect();
 		if !concluded_twice.is_empty() {
-			warn!("Disputes concluded twice at block {hash:?}, excluded from the comparison: {concluded_twice:?}");
+			warn!(
+				"Disputes concluded in an earlier block at {hash:?}, excluded from the comparison: {concluded_twice:?}"
+			);
 		}
+		let without_twice = |concluded: Vec<ConcludedDispute>| -> Vec<ConcludedDispute> {
+			concluded
+				.into_iter()
+				.filter(|dispute| !concluded_twice.contains(&dispute.candidate_hash))
+				.collect()
+		};
 
-		let scraped_concluded: Vec<ConcludedDispute> = scraped_concluded
-			.into_iter()
-			.filter(|dispute| !concluded_twice.contains(&dispute.candidate_hash))
-			.collect();
-		let metadata_free_initiated: Vec<H256> = disputes
-			.iter()
-			.filter(|dispute| dispute.start == block_number)
-			.map(|dispute| dispute.candidate_hash)
-			.collect();
-		let metadata_free_concluded: Vec<ConcludedDispute> = disputes
-			.iter()
-			.filter(|dispute| {
-				dispute.concluded_at == Some(block_number) && !concluded_twice.contains(&dispute.candidate_hash)
-			})
-			.map(|dispute| ConcludedDispute {
-				candidate_hash: dispute.candidate_hash,
-				// A dispute concludes when one side reaches a supermajority, so the larger tally is
-				// the prevailing side. `TimedOut` never concludes, so it never reaches this branch.
-				outcome: if dispute.validators_for.len() >= dispute.validators_against.len() {
-					SubxtDisputeResult::Valid
-				} else {
-					SubxtDisputeResult::Invalid
-				},
-			})
-			.collect();
-
-		shadow::compare_set(hash, "disputes_initiated", &scraped_initiated, &metadata_free_initiated, |hash| *hash);
-		shadow::compare_set(hash, "disputes_concluded", &scraped_concluded, &metadata_free_concluded, |dispute| {
-			dispute.candidate_hash
-		});
+		shadow::compare_set(
+			hash,
+			"disputes_initiated",
+			&initiated_disputes(&scraped),
+			&initiated_disputes(chain_events),
+			|hash| *hash,
+		);
+		shadow::compare_set(
+			hash,
+			"disputes_concluded",
+			&without_twice(scraped_concluded),
+			&without_twice(concluded_disputes(chain_events)),
+			|dispute| (dispute.candidate_hash, matches!(dispute.outcome, SubxtDisputeResult::Valid)),
+		);
 
 		Ok(())
 	}
@@ -1266,6 +1219,9 @@ impl Collector {
 		))
 	}
 
+	/// Only the first conclusion of a dispute is ever delivered here: `ParachainHost_disputes` keeps a
+	/// single `concluded_at`, so a second conclusion in the opposite direction in a later block is not
+	/// observable. See `disputes_to_chain_events`.
 	async fn process_dispute_concluded(
 		&mut self,
 		dispute_event: &SubxtDispute,
@@ -1389,10 +1345,185 @@ struct ConcludedDispute {
 	outcome: SubxtDisputeResult,
 }
 
+fn candidate_events(chain_events: &[ChainEvent]) -> Vec<SubxtCandidateEvent> {
+	chain_events
+		.iter()
+		.filter_map(|event| match event {
+			ChainEvent::CandidateChanged(candidate) => Some((**candidate).clone()),
+			_ => None,
+		})
+		.collect()
+}
+
+fn initiated_disputes(chain_events: &[ChainEvent]) -> Vec<H256> {
+	chain_events
+		.iter()
+		.filter_map(|event| match event {
+			ChainEvent::DisputeInitiated(dispute) => Some(dispute.candidate_hash),
+			_ => None,
+		})
+		.collect()
+}
+
+fn concluded_disputes(chain_events: &[ChainEvent]) -> Vec<ConcludedDispute> {
+	chain_events
+		.iter()
+		.filter_map(|event| match event {
+			ChainEvent::DisputeConcluded(dispute, outcome) =>
+				Some(ConcludedDispute { candidate_hash: dispute.candidate_hash, outcome: *outcome }),
+			_ => None,
+		})
+		.collect()
+}
+
+/// The number of votes a side needs to conclude a dispute among `n` validators, based on
+/// pallet's `supermajority_threshold`:
+/// <https://github.com/paritytech/polkadot-sdk/blob/master/polkadot/primitives/src/v9/mod.rs>
+fn supermajority_threshold(n: u32) -> u32 {
+	n - n.saturating_sub(1) / 3
+}
+
+/// Turns the disputes returned by `ParachainHost_disputes` into the events for this block:
+/// `DisputeInitiated` for disputes that started in it, `DisputeConcluded` for those that concluded in it.
+///
+/// Note: the pallet only stores the first `concluded_at`, so if a dispute later concludes the other way
+/// (needs f+1 validators voting on both sides), we miss that second conclusion.
+///
+/// TODO(playX18): track which sides were already emitted per candidate, so we can emit the second one.
+fn disputes_to_chain_events(hash: H256, block_number: u32, disputes: &[DecodedDispute]) -> Vec<ChainEvent> {
+	let dispute = |candidate_hash| SubxtDispute { relay_parent_block: hash, candidate_hash };
+	let initiated = disputes
+		.iter()
+		.filter(|disputed| disputed.start == block_number)
+		.map(|disputed| ChainEvent::DisputeInitiated(dispute(disputed.candidate_hash)));
+	let concluded = disputes
+		.iter()
+		.filter(|disputed| disputed.concluded_at == Some(block_number))
+		.flat_map(move |disputed| {
+			let threshold = supermajority_threshold(disputed.validator_count) as usize;
+			let valid = disputed.validators_for.len() >= threshold;
+			let invalid = disputed.validators_against.len() >= threshold;
+			if valid && invalid {
+				warn!(
+					"Dispute {:?} reached a supermajority on both sides at block {hash:?}, emitting both conclusions",
+					disputed.candidate_hash
+				);
+			} else if !valid && !invalid {
+				warn!(
+					"Dispute {:?} concluded at block {hash:?} without a supermajority on either side, skipping",
+					disputed.candidate_hash
+				);
+			}
+			[(valid, SubxtDisputeResult::Valid), (invalid, SubxtDisputeResult::Invalid)]
+				.into_iter()
+				.filter(|(reached, _)| *reached)
+				.map(|(_, outcome)| ChainEvent::DisputeConcluded(dispute(disputed.candidate_hash), outcome))
+				.collect::<Vec<_>>()
+		});
+	initiated.chain(concluded).collect()
+}
+
 pub fn new_head_hash(event: &ChainSubscriptionEvent, subscribe_mode: CollectorSubscribeMode) -> Option<&H256> {
 	match (event, subscribe_mode) {
 		(ChainSubscriptionEvent::NewBestHead((hash, _)), CollectorSubscribeMode::Best) => Some(hash),
 		(ChainSubscriptionEvent::NewFinalizedBlock((hash, _)), CollectorSubscribeMode::Finalized) => Some(hash),
 		_ => None,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const BLOCK: u32 = 100;
+
+	const VALIDATORS: u32 = 9; // supermajority threshold of 7
+
+	fn dispute(
+		id: u8,
+		start: u32,
+		concluded_at: Option<u32>,
+		votes_for: usize,
+		votes_against: usize,
+	) -> DecodedDispute {
+		DecodedDispute {
+			session: 1,
+			candidate_hash: H256::from([id; 32]),
+			validators_for: (0..votes_for as u32).collect(),
+			validators_against: (0..votes_against as u32).collect(),
+			validator_count: VALIDATORS,
+			start,
+			concluded_at,
+		}
+	}
+
+	fn slice(disputes: &[DecodedDispute]) -> Vec<ChainEvent> {
+		disputes_to_chain_events(H256::from([9; 32]), BLOCK, disputes)
+	}
+
+	#[test]
+	fn initiates_only_disputes_started_in_this_block() {
+		let events = slice(&[dispute(1, BLOCK, None, 1, 1), dispute(2, BLOCK - 1, None, 1, 1)]);
+		assert_eq!(initiated_disputes(&events), vec![H256::from([1; 32])]);
+		assert!(concluded_disputes(&events).is_empty());
+	}
+
+	#[test]
+	fn concludes_with_the_prevailing_side() {
+		let events = slice(&[dispute(1, 90, Some(BLOCK), 7, 1), dispute(2, 90, Some(BLOCK), 1, 7)]);
+		assert_eq!(
+			concluded_disputes(&events),
+			vec![
+				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Valid },
+				ConcludedDispute { candidate_hash: H256::from([2; 32]), outcome: SubxtDisputeResult::Invalid },
+			]
+		);
+	}
+
+	#[test]
+	fn ignores_disputes_concluded_in_other_blocks() {
+		let events = slice(&[dispute(1, 90, Some(BLOCK - 1), 7, 1), dispute(2, 90, Some(BLOCK + 1), 7, 1)]);
+		assert!(events.is_empty());
+	}
+
+	#[test]
+	fn initiates_before_concluding_within_one_block() {
+		let events = slice(&[dispute(1, BLOCK, Some(BLOCK), 7, 1), dispute(2, 90, Some(BLOCK), 1, 7)]);
+		assert!(matches!(events[0], ChainEvent::DisputeInitiated(_)));
+		assert!(
+			events[1..]
+				.iter()
+				.all(|event| matches!(event, ChainEvent::DisputeConcluded(..)))
+		);
+		assert_eq!(events.len(), 3);
+	}
+
+	#[test]
+	fn outcome_follows_the_supermajority_not_the_larger_tally() {
+		let events = slice(&[dispute(1, 90, Some(BLOCK), 5, 7), dispute(2, 90, Some(BLOCK), 7, 6)]);
+		assert_eq!(
+			concluded_disputes(&events),
+			vec![
+				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Invalid },
+				ConcludedDispute { candidate_hash: H256::from([2; 32]), outcome: SubxtDisputeResult::Valid },
+			]
+		);
+	}
+
+	#[test]
+	fn emits_both_conclusions_when_both_sides_reach_supermajority() {
+		let events = slice(&[dispute(1, 90, Some(BLOCK), 7, 7)]);
+		assert_eq!(
+			concluded_disputes(&events),
+			vec![
+				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Valid },
+				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Invalid },
+			]
+		);
+	}
+
+	#[test]
+	fn skips_a_conclusion_without_a_supermajority() {
+		assert!(slice(&[dispute(1, 90, Some(BLOCK), 3, 3)]).is_empty());
 	}
 }
