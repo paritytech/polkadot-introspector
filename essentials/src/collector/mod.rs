@@ -359,7 +359,6 @@ impl Collector {
 		let mut chain_events = vec![new_head_event];
 
 		if let Some(hash) = new_head_hash(event, self.subscribe_mode) {
-			// Candidate events come from the metadata-free runtime call, unconditionally.
 			let candidate_events = self.executor.get_candidate_events(self.endpoint.as_str(), *hash).await?;
 			chain_events.extend(
 				candidate_events
