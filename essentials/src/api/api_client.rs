@@ -417,61 +417,64 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
-		let addr = subxt::runtime_api::dynamic("ParachainHost", "availability_cores", Vec::<Value<()>>::new());
-		let value = self.runtime_api_at(Some(hash)).await?.call(addr).await?.to_value()?;
-		let cores = decode_availability_cores_dynamic(&value)
-			.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))?;
+		let metadata_free = self
+			.state_call_decoded(hash, "ParachainHost_availability_cores", decode_availability_cores)
+			.await?;
 
 		if self.shadow {
-			let metadata_free = self
-				.state_call_decoded(hash, "ParachainHost_availability_cores", decode_availability_cores)
-				.await?;
+			let addr = subxt::runtime_api::dynamic("ParachainHost", "availability_cores", Vec::<Value<()>>::new());
+			let value = self.runtime_api_at(Some(hash)).await?.call(addr).await?.to_value()?;
+			let cores = decode_availability_cores_dynamic(&value)
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))?;
 			shadow::compare(hash, "availability_cores", &cores, &metadata_free);
 		}
 
-		Ok(cores)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
-		let addr = polkadot::apis().parachain_host().claim_queue();
-		let queue: ClaimQueue = self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
-			queue
-				.iter()
-				.map(|(core, ids)| {
-					let core = core.0;
-					let ids = ids.iter().map(|id| id.0).collect::<Vec<_>>();
-					(core, ids)
-				})
-				.collect::<Vec<_>>()
-		})?;
+		let metadata_free = self
+			.state_call_decoded(hash, "ParachainHost_claim_queue", decode_claim_queue)
+			.await?;
 
 		if self.shadow {
-			let metadata_free = self
-				.state_call_decoded(hash, "ParachainHost_claim_queue", decode_claim_queue)
-				.await?;
+			let addr = polkadot::apis().parachain_host().claim_queue();
+			let queue: ClaimQueue = self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
+				queue
+					.iter()
+					.map(|(core, ids)| {
+						let core = core.0;
+						let ids = ids.iter().map(|id| id.0).collect::<Vec<_>>();
+						(core, ids)
+					})
+					.collect::<Vec<_>>()
+			})?;
 			shadow::compare(hash, "claim_queue", &queue, &metadata_free);
 		}
 
-		Ok(queue)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_backing_groups(&self, hash: H256) -> Result<Vec<Vec<ValidatorIndex>>, subxt::Error> {
-		let value = self
-			.fetch_dynamic_storage(Some(hash), "ParaScheduler", "ValidatorGroups")
-			.await?
-			.ok_or_else(|| subxt::Error::Other("ParaScheduler.ValidatorGroups not found".to_string()))?;
-		let groups = decode_validator_groups_dynamic(&value)
-			.map_err(|e| subxt::Error::Other(format!("Failed to decode validator groups: {e}")))?;
+		let metadata_free = self
+			.state_call_decoded(hash, "ParachainHost_validator_groups", decode_validator_groups)
+			.await?;
 
 		if self.shadow {
-			let metadata_free = self
-				.state_call_decoded(hash, "ParachainHost_validator_groups", decode_validator_groups)
-				.await?;
+			let value = self
+				.fetch_dynamic_storage(Some(hash), "ParaScheduler", "ValidatorGroups")
+				.await?
+				.ok_or_else(|| subxt::Error::Other("ParaScheduler.ValidatorGroups not found".to_string()))?;
+			let groups = decode_validator_groups_dynamic(&value)
+				.map_err(|e| subxt::Error::Other(format!("Failed to decode validator groups: {e}")))?;
 			let old: Vec<Vec<u32>> = groups.iter().map(|group| group.iter().map(|idx| idx.0).collect()).collect();
 			shadow::compare(hash, "validator_groups", &old, &metadata_free);
 		}
 
-		Ok(groups)
+		Ok(metadata_free
+			.into_iter()
+			.map(|group| group.into_iter().map(ValidatorIndex).collect())
+			.collect())
 	}
 
 	pub async fn get_session_index(&self, hash: H256) -> Result<u32, subxt::Error> {
