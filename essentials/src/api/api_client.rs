@@ -586,40 +586,40 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error> {
-		let block = self.block_at(maybe_hash).await?;
-
-		// do nth(1) instead of take(2).last(), this allows us to clearly return an error instead of panicking.
-		let ex = block
-			.extrinsics()
+		let hash = self.resolve_hash(maybe_hash).await?;
+		let details = self
+			.legacy_rpc_methods
+			.chain_get_block(Some(hash))
 			.await?
-			.iter()
-			.nth(1)
-			.ok_or_else(|| "`ParaInherent` extrinsic missing at index #1".to_string())?;
-		let inherent = ex
-			.field_values()
-			.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
-			.and_then(|v| decode_inherent_data(&v).map_err(|e| format!("Failed to decode ParaInherent: {e}")))
-			.map_err(subxt::Error::Other)?;
+			.ok_or_else(|| subxt::Error::Other(format!("block {hash:?} not found via chain_getBlock")))?;
+		let para_inherent = details
+			.block
+			.extrinsics
+			.get(1)
+			.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
+		let metadata_free = decode_parainherent(&para_inherent.0)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent: {e}")))?;
 
 		if self.shadow {
-			let hash = block.hash();
-			let details = self
-				.legacy_rpc_methods
-				.chain_get_block(Some(hash))
+			// do nth(1) instead of take(2).last(), this allows us to clearly return an error instead of panicking.
+			let ex = self
+				.block_at(Some(hash))
 				.await?
-				.ok_or_else(|| subxt::Error::Other(format!("block {hash:?} not found via chain_getBlock")))?;
-			let para_inherent = details
-				.block
-				.extrinsics
-				.get(1)
-				.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
-			let metadata_free = decode_parainherent(&para_inherent.0)
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent (metadata-free): {e}")))?;
+				.extrinsics()
+				.await?
+				.iter()
+				.nth(1)
+				.ok_or_else(|| "`ParaInherent` extrinsic missing at index #1".to_string())?;
+			let inherent = ex
+				.field_values()
+				.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
+				.and_then(|v| decode_inherent_data(&v).map_err(|e| format!("Failed to decode ParaInherent: {e}")))
+				.map_err(subxt::Error::Other)?;
 			shadow::compare(hash, "parainherent_bitfields", &inherent.bitfields, &metadata_free.bitfields);
 			shadow::compare(hash, "parainherent_disputes", &inherent.disputes, &metadata_free.disputes);
 		}
 
-		Ok(inherent)
+		Ok(metadata_free)
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes
