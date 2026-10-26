@@ -101,15 +101,17 @@ pub fn decode_candidate_events<H: Hasher<Output = PolkadotHash>>(
 }
 
 /// One recent dispute from the `ParachainHost_disputes` runtime call, decoded only as far as the
-/// fields the tools use: `(SessionIndex, CandidateHash, DisputeState)`. The two validator bitsets are
-/// kept as the indices of their set bits — enough to tally each side and derive the outcome — and
-/// `start` / `concluded_at` give the relay block the dispute was recorded and (if any) concluded at.
+/// fields the tools use: `(SessionIndex, CandidateHash, DisputeState)`. The per-side lists are the
+/// indices of the set bits of the two validator bitsets. `validator_count` is the bitset length, i.e.
+/// the session's validator-set size, which the supermajority rule needs. `start` / `concluded_at` give
+/// the relay block the dispute was recorded and (if any) concluded at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedDispute {
 	pub session: u32,
 	pub candidate_hash: PolkadotHash,
 	pub validators_for: Vec<u32>,
 	pub validators_against: Vec<u32>,
+	pub validator_count: u32,
 	pub start: u32,
 	pub concluded_at: Option<u32>,
 }
@@ -141,6 +143,7 @@ pub fn decode_disputes(bytes: &[u8]) -> Result<Vec<DecodedDispute>> {
 			candidate_hash: H256::from(dispute.candidate_hash),
 			validators_for: dispute.validators_for.iter_ones().map(|i| i as u32).collect(),
 			validators_against: dispute.validators_against.iter_ones().map(|i| i as u32).collect(),
+			validator_count: dispute.validators_for.len().max(dispute.validators_against.len()) as u32,
 			start: dispute.start,
 			concluded_at: dispute.concluded_at,
 		})
@@ -623,6 +626,7 @@ mod tests {
 		assert_eq!(disputes[0].candidate_hash, H256::from([0xAA; 32]));
 		assert_eq!(disputes[0].validators_for, vec![0, 2, 5]);
 		assert_eq!(disputes[0].validators_against, vec![1]);
+		assert_eq!(disputes[0].validator_count, 8);
 		assert_eq!(disputes[0].start, 42);
 		assert_eq!(disputes[0].concluded_at, None);
 
