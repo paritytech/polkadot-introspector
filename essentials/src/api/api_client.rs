@@ -146,8 +146,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	/// Reads a raw storage value via `state_getStorage` and decodes it with the given metadata-free
-	/// decoder — the shadow counterpart of a typed storage read.
-	async fn shadow_storage<R>(
+	/// decoder.
+	async fn storage_via_rpc<R>(
 		&self,
 		hash: H256,
 		key: &[u8],
@@ -192,7 +192,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		if client.shadow {
 			let key = hrmp_egress_channels_index_key(para_id);
 			let metadata_free = client
-				.shadow_storage(block_hash, &key, "HrmpEgressChannelsIndex", decode_para_ids)
+				.storage_via_rpc(block_hash, &key, "HrmpEgressChannelsIndex", decode_para_ids)
 				.await?
 				.unwrap_or_default();
 			shadow::compare(block_hash, "hrmp_egress_channels_index", &index, &metadata_free);
@@ -220,7 +220,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		if client.shadow {
 			let key = hrmp_channel_digests_key(para_id);
 			let metadata_free = client
-				.shadow_storage(block_hash, &key, "HrmpChannelDigests", decode_hrmp_channel_digests)
+				.storage_via_rpc(block_hash, &key, "HrmpChannelDigests", decode_hrmp_channel_digests)
 				.await?
 				.unwrap_or_default();
 			shadow::compare(block_hash, "hrmp_channel_digests", &digests, &metadata_free);
@@ -247,7 +247,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		if client.shadow {
 			let key = hrmp_channels_key(sender, recipient);
 			let metadata_free = client
-				.shadow_storage(block_hash, &key, "HrmpChannels", decode_hrmp_channel)
+				.storage_via_rpc(block_hash, &key, "HrmpChannels", decode_hrmp_channel)
 				.await?;
 			let old = channel.as_ref().map(|(_, _, channel)| SubxtHrmpChannel::from(channel));
 			shadow::compare(block_hash, "hrmp_channel", &old, &metadata_free);
@@ -319,17 +319,17 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
-		let addr = polkadot::storage().timestamp().now();
-		let timestamp = self.storage().at(hash).fetch(&addr).await?;
+		let metadata_free = self
+			.storage_via_rpc(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
+			.await?;
 
 		if self.shadow {
-			let metadata_free = self
-				.shadow_storage(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
-				.await?;
+			let addr = polkadot::storage().timestamp().now();
+			let timestamp = self.storage().at(hash).fetch(&addr).await?;
 			shadow::compare(hash, "block_timestamp", &timestamp, &metadata_free);
 		}
 
-		Ok(timestamp)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
@@ -390,30 +390,30 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
-		let addr = polkadot::storage().babe().current_slot();
-		let slot = self.storage().at(hash).fetch(&addr).await?.map(|slot| slot.0);
+		let metadata_free = self
+			.storage_via_rpc(hash, &babe_current_slot_key(), "Babe.CurrentSlot", decode_slot)
+			.await?;
 
 		if self.shadow {
-			let metadata_free = self
-				.shadow_storage(hash, &babe_current_slot_key(), "Babe.CurrentSlot", decode_slot)
-				.await?;
+			let addr = polkadot::storage().babe().current_slot();
+			let slot = self.storage().at(hash).fetch(&addr).await?.map(|slot| slot.0);
 			shadow::compare(hash, "babe_current_slot", &slot, &metadata_free);
 		}
 
-		Ok(slot)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
-		let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
-		let owner = self.storage().at(hash).fetch(&addr).await?;
+		let key = session_key_owner_key(*b"babe", public);
+		let metadata_free = self.storage_via_rpc(hash, &key, "Session.KeyOwner", decode_account_id).await?;
 
 		if self.shadow {
-			let key = session_key_owner_key(*b"babe", public);
-			let metadata_free = self.shadow_storage(hash, &key, "Session.KeyOwner", decode_account_id).await?;
+			let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
+			let owner = self.storage().at(hash).fetch(&addr).await?;
 			shadow::compare(hash, "session_key_owner", &owner, &metadata_free);
 		}
 
-		Ok(owner)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
@@ -511,7 +511,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			let Some(hash) = maybe_hash
 		{
 			let key = para_session_account_keys_key(session_index);
-			let metadata_free = self.shadow_storage(hash, &key, "account_keys", decode_account_keys).await?;
+			let metadata_free = self.storage_via_rpc(hash, &key, "account_keys", decode_account_keys).await?;
 			shadow::compare(hash, "session_account_keys", &keys, &metadata_free);
 		}
 
@@ -536,7 +536,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			let Some(hash) = hash
 		{
 			let metadata_free = self
-				.shadow_storage(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
+				.storage_via_rpc(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
 				.await?
 				.unwrap_or_default();
 			shadow::compare(
