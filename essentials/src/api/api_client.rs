@@ -351,42 +351,42 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	/// Reads the current Babe epoch through the `BabeApi_current_epoch` runtime call, decoded without
-	/// metadata. Used to shadow the `Babe.Randomness` and `Babe.Authorities` storage reads.
+	/// metadata. Primary source of the Babe randomness and authorities.
 	async fn babe_current_epoch(&self, hash: H256) -> Result<DecodedBabeEpoch, subxt::Error> {
 		self.state_call_decoded(hash, "BabeApi_current_epoch", decode_babe_epoch).await
 	}
 
 	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
-		let addr = polkadot::storage().babe().randomness();
-		let randomness = self.storage().at(hash).fetch(&addr).await?;
+		let metadata_free = Some(self.babe_current_epoch(hash).await?.randomness);
 
 		if self.shadow {
-			let epoch = self.babe_current_epoch(hash).await?;
-			shadow::compare(hash, "babe_randomness", &randomness, &Some(epoch.randomness));
+			let addr = polkadot::storage().babe().randomness();
+			let randomness = self.storage().at(hash).fetch(&addr).await?;
+			shadow::compare(hash, "babe_randomness", &randomness, &metadata_free);
 		}
 
-		Ok(randomness)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_babe_authorities(&self, hash: H256) -> Result<Vec<([u8; 32], u64)>, subxt::Error> {
-		let addr = polkadot::storage().babe().authorities();
-		let authorities = self
-			.storage()
-			.at(hash)
-			.fetch(&addr)
-			.await
-			.map(|res| res.map(|res| res.0).unwrap_or_default())?
-			.into_iter()
-			// `app::Public` wraps the 32 raw key bytes.
-			.map(|(public, weight)| (public.0, weight))
-			.collect::<Vec<_>>();
+		let metadata_free = self.babe_current_epoch(hash).await?.authorities;
 
 		if self.shadow {
-			let epoch = self.babe_current_epoch(hash).await?;
-			shadow::compare(hash, "babe_authorities", &authorities, &epoch.authorities);
+			let addr = polkadot::storage().babe().authorities();
+			let authorities = self
+				.storage()
+				.at(hash)
+				.fetch(&addr)
+				.await
+				.map(|res| res.map(|res| res.0).unwrap_or_default())?
+				.into_iter()
+				// `app::Public` wraps the 32 raw key bytes.
+				.map(|(public, weight)| (public.0, weight))
+				.collect::<Vec<_>>();
+			shadow::compare(hash, "babe_authorities", &authorities, &metadata_free);
 		}
 
-		Ok(authorities)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
@@ -474,23 +474,23 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		Ok(groups)
 	}
 
-	pub async fn get_session_index(&self, hash: H256) -> Result<Option<u32>, subxt::Error> {
-		let addr = polkadot::storage().session().current_index();
-		let index = self.storage().at(hash).fetch(&addr).await?;
+	pub async fn get_session_index(&self, hash: H256) -> Result<u32, subxt::Error> {
+		let metadata_free = self
+			.state_call_decoded(hash, "ParachainHost_session_index_for_child", decode_session_index)
+			.await?;
 
 		if self.shadow {
-			let metadata_free = self
-				.state_call_decoded(hash, "ParachainHost_session_index_for_child", decode_session_index)
-				.await?;
+			let addr = polkadot::storage().session().current_index();
+			let index = self.storage().at(hash).fetch(&addr).await?;
 			shadow::compare(hash, "session_index", &index.unwrap_or_default(), &metadata_free);
 		}
 
-		Ok(index)
+		Ok(metadata_free)
 	}
 
-	pub async fn get_session_index_now(&self) -> Result<Option<u32>, subxt::Error> {
-		let addr = polkadot::storage().session().current_index();
-		self.storage().at_latest().await?.fetch(&addr).await
+	pub async fn get_session_index_now(&self) -> Result<u32, subxt::Error> {
+		let hash = self.resolve_hash(None).await?;
+		self.get_session_index(hash).await
 	}
 
 	pub async fn get_session_account_keys(
@@ -498,56 +498,36 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		session_index: u32,
 		maybe_hash: Option<H256>,
 	) -> Result<Option<Vec<AccountId32>>, subxt::Error> {
-		let addr = polkadot::storage().para_session_info().account_keys(session_index);
+		let hash = self.resolve_hash(maybe_hash).await?;
+		let key = para_session_account_keys_key(session_index);
+		let metadata_free = self.storage_via_rpc(hash, &key, "account_keys", decode_account_keys).await?;
 
-		// Query session keys at a specific block hash.
-		let storage =
-			if let Some(hash) = maybe_hash { self.storage().at(hash) } else { self.storage().at_latest().await? };
-
-		let keys = storage.fetch(&addr).await?;
-
-		// Shadow only at a concrete hash; at latest the typed and raw reads could race to different blocks.
-		if self.shadow &&
-			let Some(hash) = maybe_hash
-		{
-			let key = para_session_account_keys_key(session_index);
-			let metadata_free = self.storage_via_rpc(hash, &key, "account_keys", decode_account_keys).await?;
+		if self.shadow {
+			let addr = polkadot::storage().para_session_info().account_keys(session_index);
+			let keys = self.storage().at(hash).fetch(&addr).await?;
 			shadow::compare(hash, "session_account_keys", &keys, &metadata_free);
 		}
 
-		Ok(keys)
+		Ok(metadata_free)
 	}
 
-	pub async fn get_session_queued_keys(&self, hash: Option<H256>) -> Result<Option<QueuedKeys>, subxt::Error> {
-		let addr = polkadot::storage().session().queued_keys();
-		let queued = if let Some(hash) = hash {
-			self.storage().at(hash).fetch(&addr).await?
-		} else {
-			self.storage().at_latest().await?.fetch(&addr).await?
-		}
-		.map(|keys| {
-			keys.into_iter()
-				.map(|(account, keys)| (account, keys.authority_discovery.0))
-				.collect::<QueuedKeys>()
-		});
+	pub async fn get_session_queued_keys(&self, maybe_hash: Option<H256>) -> Result<Option<QueuedKeys>, subxt::Error> {
+		let hash = self.resolve_hash(maybe_hash).await?;
+		let metadata_free = self
+			.storage_via_rpc(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
+			.await?;
 
-		// Shadow only at a concrete hash; at latest the typed and raw reads could race to different blocks.
-		if self.shadow &&
-			let Some(hash) = hash
-		{
-			let metadata_free = self
-				.storage_via_rpc(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
-				.await?
-				.unwrap_or_default();
-			shadow::compare(
-				hash,
-				"session_queued_keys",
-				&queued.as_deref().unwrap_or_default(),
-				&metadata_free.as_slice(),
-			);
+		if self.shadow {
+			let addr = polkadot::storage().session().queued_keys();
+			let queued = self.storage().at(hash).fetch(&addr).await?.map(|keys| {
+				keys.into_iter()
+					.map(|(account, keys)| (account, keys.authority_discovery.0))
+					.collect::<QueuedKeys>()
+			});
+			shadow::compare(hash, "session_queued_keys", &queued, &metadata_free);
 		}
 
-		Ok(queued)
+		Ok(metadata_free)
 	}
 
 	pub async fn get_inbound_outbound_hrmp_channels(
