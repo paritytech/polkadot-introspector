@@ -382,11 +382,6 @@ impl Collector {
 	/// metadata and comparing the two. Candidate events are compared as a set keyed by
 	/// `(candidate_hash, event_type)`, initiated disputes as a set keyed by candidate hash and concluded
 	/// ones keyed by `(candidate_hash, outcome)`. Aborts on any mismatch.
-	///
-	/// A dispute can conclude twice, in opposite directions, when f+1 validators vote both ways. The
-	/// pallet keeps only the first `concluded_at`, so a second conclusion in a later block cannot be
-	/// expressed by the runtime call. Those candidates are excluded from the comparison and are not counted
-	/// as a mismatch.
 	async fn shadow_events(
 		&mut self,
 		hash: H256,
@@ -394,7 +389,11 @@ impl Collector {
 		chain_events: &[ChainEvent],
 		disputes: &[DecodedDispute],
 	) -> color_eyre::Result<()> {
-		let Some(block_events) = self.executor.get_events(self.endpoint.as_str(), hash).await? else { return Ok(()) };
+		let block_events = self
+			.executor
+			.get_events(self.endpoint.as_str(), hash)
+			.await?
+			.ok_or_else(|| eyre!("No System.Events for block {hash:?} to shadow against"))?;
 		let mut scraped = Vec::new();
 		for block_event in block_events.iter() {
 			match block_event {
@@ -414,31 +413,28 @@ impl Collector {
 			|event| (event.candidate_hash, event.event_type),
 		);
 
-		let scraped_concluded = concluded_disputes(&scraped);
 		// A second conclusion in a later block than the recorded `concluded_at` cannot be expressed by
-		// the runtime call, so such candidates are excluded. A double conclusion within one block is
+		// the runtime call, so such candidates are excluded from the scraped side. A real one means both
+		// sides have reached the threshold by this block. A double conclusion within one block is
 		// reproduced by `disputes_to_chain_events` and compared normally.
-		let concluded_twice: BTreeSet<H256> = scraped_concluded
+		let concluded_twice: BTreeSet<H256> = disputes
 			.iter()
-			.map(|dispute| dispute.candidate_hash)
-			.filter(|candidate_hash| {
-				disputes.iter().any(|dispute| {
-					dispute.candidate_hash == *candidate_hash &&
-						dispute.concluded_at.is_some_and(|at| at < block_number)
-				})
+			.filter(|dispute| dispute.concluded_at.is_some_and(|at| at < block_number))
+			.filter(|dispute| {
+				let threshold = supermajority_threshold(dispute.validator_count) as usize;
+				dispute.validators_for.len() >= threshold && dispute.validators_against.len() >= threshold
 			})
+			.map(|dispute| dispute.candidate_hash)
+			.collect();
+		let scraped_concluded: Vec<ConcludedDispute> = concluded_disputes(&scraped)
+			.into_iter()
+			.filter(|dispute| !concluded_twice.contains(&dispute.candidate_hash))
 			.collect();
 		if !concluded_twice.is_empty() {
 			warn!(
-				"Disputes concluded in an earlier block at {hash:?}, excluded from the comparison: {concluded_twice:?}"
+				"Disputes concluded a second time at block {hash:?}, first conclusion in an earlier block, excluded from the comparison: {concluded_twice:?}"
 			);
 		}
-		let without_twice = |concluded: Vec<ConcludedDispute>| -> Vec<ConcludedDispute> {
-			concluded
-				.into_iter()
-				.filter(|dispute| !concluded_twice.contains(&dispute.candidate_hash))
-				.collect()
-		};
 
 		shadow::compare_set(
 			hash,
@@ -450,8 +446,8 @@ impl Collector {
 		shadow::compare_set(
 			hash,
 			"disputes_concluded",
-			&without_twice(scraped_concluded),
-			&without_twice(concluded_disputes(chain_events)),
+			&scraped_concluded,
+			&concluded_disputes(chain_events),
 			|dispute| (dispute.candidate_hash, matches!(dispute.outcome, SubxtDisputeResult::Valid)),
 		);
 
@@ -1219,9 +1215,6 @@ impl Collector {
 		))
 	}
 
-	/// Only the first conclusion of a dispute is ever delivered here: `ParachainHost_disputes` keeps a
-	/// single `concluded_at`, so a second conclusion in the opposite direction in a later block is not
-	/// observable. See `disputes_to_chain_events`.
 	async fn process_dispute_concluded(
 		&mut self,
 		dispute_event: &SubxtDispute,
@@ -1376,9 +1369,9 @@ fn concluded_disputes(chain_events: &[ChainEvent]) -> Vec<ConcludedDispute> {
 		.collect()
 }
 
-/// The number of votes a side needs to conclude a dispute among `n` validators, based on
-/// pallet's `supermajority_threshold`:
-/// <https://github.com/paritytech/polkadot-sdk/blob/master/polkadot/primitives/src/v9/mod.rs>
+/// The number of votes a side needs to conclude a dispute among `n` validators, as
+/// `supermajority_threshold` in `polkadot-primitives`:
+/// <https://github.com/paritytech/polkadot-sdk/blob/polkadot-stable2412/polkadot/primitives/src/v8/mod.rs>
 fn supermajority_threshold(n: u32) -> u32 {
 	n - n.saturating_sub(1) / 3
 }
@@ -1386,10 +1379,14 @@ fn supermajority_threshold(n: u32) -> u32 {
 /// Turns the disputes returned by `ParachainHost_disputes` into the events for this block:
 /// `DisputeInitiated` for disputes that started in it, `DisputeConcluded` for those that concluded in it.
 ///
-/// Note: the pallet only stores the first `concluded_at`, so if a dispute later concludes the other way
-/// (needs f+1 validators voting on both sides), we miss that second conclusion.
+/// The runtime call carries no outcome, so a side concludes when its tally reaches the supermajority
+/// threshold. Hence a dispute yields two events when both sides reach it, or none if neither does.
 ///
-/// TODO(playX18): track which sides were already emitted per candidate, so we can emit the second one.
+/// The pallet keeps only the first `concluded_at`, so a dispute that later concludes the other way (f+1
+/// validators voting on both sides) has its second conclusion in a later block missed.
+///
+/// TODO(playX18): emit the second conclusion. This needs per-candidate state across blocks, so it
+/// cannot be done here and belongs in the `Collector`.
 fn disputes_to_chain_events(hash: H256, block_number: u32, disputes: &[DecodedDispute]) -> Vec<ChainEvent> {
 	let dispute = |candidate_hash| SubxtDispute { relay_parent_block: hash, candidate_hash };
 	let initiated = disputes
@@ -1400,6 +1397,13 @@ fn disputes_to_chain_events(hash: H256, block_number: u32, disputes: &[DecodedDi
 		.iter()
 		.filter(|disputed| disputed.concluded_at == Some(block_number))
 		.flat_map(move |disputed| {
+			if disputed.validator_count == 0 {
+				error!(
+					"Dispute {:?} concluded at block {hash:?} with validator_count 0, skipping",
+					disputed.candidate_hash
+				);
+				return Vec::new();
+			}
 			let threshold = supermajority_threshold(disputed.validator_count) as usize;
 			let valid = disputed.validators_for.len() >= threshold;
 			let invalid = disputed.validators_against.len() >= threshold;
@@ -1409,9 +1413,13 @@ fn disputes_to_chain_events(hash: H256, block_number: u32, disputes: &[DecodedDi
 					disputed.candidate_hash
 				);
 			} else if !valid && !invalid {
-				warn!(
-					"Dispute {:?} concluded at block {hash:?} without a supermajority on either side, skipping",
-					disputed.candidate_hash
+				error!(
+					"Dispute {:?} concluded at block {hash:?} without a supermajority on either side \
+					(for {}, against {}, threshold {threshold}, validator_count {}), decoder defect, skipping",
+					disputed.candidate_hash,
+					disputed.validators_for.len(),
+					disputed.validators_against.len(),
+					disputed.validator_count
 				);
 			}
 			[(valid, SubxtDisputeResult::Valid), (invalid, SubxtDisputeResult::Invalid)]
@@ -1436,8 +1444,12 @@ mod tests {
 	use super::*;
 
 	const BLOCK: u32 = 100;
+	const BLOCK_HASH: [u8; 32] = [9; 32];
 
-	const VALIDATORS: u32 = 9; // supermajority threshold of 7
+	const VALIDATORS: u32 = 9;
+	/// `supermajority_threshold(VALIDATORS)`.
+	const THRESHOLD: usize = 7;
+	const BELOW: usize = THRESHOLD - 1;
 
 	fn dispute(
 		id: u8,
@@ -1457,73 +1469,109 @@ mod tests {
 		}
 	}
 
-	fn slice(disputes: &[DecodedDispute]) -> Vec<ChainEvent> {
-		disputes_to_chain_events(H256::from([9; 32]), BLOCK, disputes)
+	fn events_in_block(disputes: &[DecodedDispute]) -> Vec<ChainEvent> {
+		disputes_to_chain_events(H256::from(BLOCK_HASH), BLOCK, disputes)
+	}
+
+	fn concluded(id: u8, outcome: SubxtDisputeResult) -> ConcludedDispute {
+		ConcludedDispute { candidate_hash: H256::from([id; 32]), outcome }
+	}
+
+	#[test]
+	fn supermajority_threshold_values() {
+		let thresholds: Vec<u32> = [0, 1, 2, 3, 4, 6, 9, 10, 100]
+			.into_iter()
+			.map(supermajority_threshold)
+			.collect();
+		assert_eq!(thresholds, vec![0, 1, 2, 3, 3, 5, 7, 7, 67]);
+	}
+
+	#[test]
+	fn events_carry_the_block_hash_as_relay_parent() {
+		let events = events_in_block(&[dispute(1, BLOCK, Some(BLOCK), THRESHOLD, 1)]);
+		assert_eq!(events.len(), 2);
+		for event in &events {
+			match event {
+				ChainEvent::DisputeInitiated(d) | ChainEvent::DisputeConcluded(d, _) =>
+					assert_eq!(d.relay_parent_block, H256::from(BLOCK_HASH)),
+				_ => panic!("unexpected event"),
+			}
+		}
 	}
 
 	#[test]
 	fn initiates_only_disputes_started_in_this_block() {
-		let events = slice(&[dispute(1, BLOCK, None, 1, 1), dispute(2, BLOCK - 1, None, 1, 1)]);
+		let events = events_in_block(&[dispute(1, BLOCK, None, 1, 1), dispute(2, BLOCK - 1, None, 1, 1)]);
 		assert_eq!(initiated_disputes(&events), vec![H256::from([1; 32])]);
 		assert!(concluded_disputes(&events).is_empty());
 	}
 
 	#[test]
 	fn concludes_with_the_prevailing_side() {
-		let events = slice(&[dispute(1, 90, Some(BLOCK), 7, 1), dispute(2, 90, Some(BLOCK), 1, 7)]);
+		let events =
+			events_in_block(&[dispute(1, 90, Some(BLOCK), THRESHOLD, 1), dispute(2, 90, Some(BLOCK), 1, THRESHOLD)]);
 		assert_eq!(
 			concluded_disputes(&events),
-			vec![
-				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Valid },
-				ConcludedDispute { candidate_hash: H256::from([2; 32]), outcome: SubxtDisputeResult::Invalid },
-			]
+			vec![concluded(1, SubxtDisputeResult::Valid), concluded(2, SubxtDisputeResult::Invalid)]
 		);
 	}
 
 	#[test]
 	fn ignores_disputes_concluded_in_other_blocks() {
-		let events = slice(&[dispute(1, 90, Some(BLOCK - 1), 7, 1), dispute(2, 90, Some(BLOCK + 1), 7, 1)]);
+		let events = events_in_block(&[
+			dispute(1, 90, Some(BLOCK - 1), THRESHOLD, 1),
+			dispute(2, 90, Some(BLOCK + 1), THRESHOLD, 1),
+		]);
 		assert!(events.is_empty());
 	}
 
 	#[test]
 	fn initiates_before_concluding_within_one_block() {
-		let events = slice(&[dispute(1, BLOCK, Some(BLOCK), 7, 1), dispute(2, 90, Some(BLOCK), 1, 7)]);
+		let events = events_in_block(&[
+			dispute(1, BLOCK, Some(BLOCK), THRESHOLD, THRESHOLD),
+			dispute(2, 90, Some(BLOCK), 1, THRESHOLD),
+		]);
+		assert_eq!(events.len(), 4);
+		assert_eq!(initiated_disputes(&events), vec![H256::from([1; 32])]);
 		assert!(matches!(events[0], ChainEvent::DisputeInitiated(_)));
-		assert!(
-			events[1..]
-				.iter()
-				.all(|event| matches!(event, ChainEvent::DisputeConcluded(..)))
-		);
-		assert_eq!(events.len(), 3);
-	}
-
-	#[test]
-	fn outcome_follows_the_supermajority_not_the_larger_tally() {
-		let events = slice(&[dispute(1, 90, Some(BLOCK), 5, 7), dispute(2, 90, Some(BLOCK), 7, 6)]);
 		assert_eq!(
 			concluded_disputes(&events),
 			vec![
-				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Invalid },
-				ConcludedDispute { candidate_hash: H256::from([2; 32]), outcome: SubxtDisputeResult::Valid },
+				concluded(1, SubxtDisputeResult::Valid),
+				concluded(1, SubxtDisputeResult::Invalid),
+				concluded(2, SubxtDisputeResult::Invalid),
 			]
 		);
+	}
+
+	#[test]
+	fn outcome_follows_the_supermajority_threshold() {
+		// 6 for and 2 against has the larger tally but reaches no supermajority, so concludes nothing.
+		let events = events_in_block(&[
+			dispute(1, 90, Some(BLOCK), BELOW, BELOW - 4),
+			dispute(2, 90, Some(BLOCK), THRESHOLD, BELOW),
+		]);
+		assert_eq!(concluded_disputes(&events), vec![concluded(2, SubxtDisputeResult::Valid)]);
 	}
 
 	#[test]
 	fn emits_both_conclusions_when_both_sides_reach_supermajority() {
-		let events = slice(&[dispute(1, 90, Some(BLOCK), 7, 7)]);
+		let events = events_in_block(&[dispute(1, 90, Some(BLOCK), THRESHOLD, THRESHOLD)]);
 		assert_eq!(
 			concluded_disputes(&events),
-			vec![
-				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Valid },
-				ConcludedDispute { candidate_hash: H256::from([1; 32]), outcome: SubxtDisputeResult::Invalid },
-			]
+			vec![concluded(1, SubxtDisputeResult::Valid), concluded(1, SubxtDisputeResult::Invalid)]
 		);
 	}
 
 	#[test]
 	fn skips_a_conclusion_without_a_supermajority() {
-		assert!(slice(&[dispute(1, 90, Some(BLOCK), 3, 3)]).is_empty());
+		assert!(events_in_block(&[dispute(1, 90, Some(BLOCK), 3, 3)]).is_empty());
+	}
+
+	#[test]
+	fn skips_a_conclusion_with_no_validators() {
+		let mut empty = dispute(1, 90, Some(BLOCK), 0, 0);
+		empty.validator_count = 0;
+		assert!(events_in_block(&[empty]).is_empty());
 	}
 }

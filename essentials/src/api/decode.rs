@@ -101,10 +101,10 @@ pub fn decode_candidate_events<H: Hasher<Output = PolkadotHash>>(
 }
 
 /// One recent dispute from the `ParachainHost_disputes` runtime call, decoded only as far as the
-/// fields the tools use: `(SessionIndex, CandidateHash, DisputeState)`. The two validator bitsets are
-/// kept as the indices of their set bits, which records each side, together with `validator_count`,
-/// the bitset length (the session's validator-set size), which the supermajority rule needs.
-/// `start` / `concluded_at` give the relay block the dispute was recorded and (if any) concluded at.
+/// fields the tools use: `(SessionIndex, CandidateHash, DisputeState)`. The per-side lists are the
+/// indices of the set bits of the two validator bitsets. `validator_count` is the bitset length, i.e.
+/// the session's validator-set size, which the supermajority rule needs. `start` / `concluded_at` give
+/// the relay block the dispute was recorded and (if any) concluded at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedDispute {
 	pub session: u32,
