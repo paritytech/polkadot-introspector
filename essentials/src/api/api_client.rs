@@ -36,7 +36,6 @@ use crate::{
 		self,
 		runtime_types::{
 			polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-			polkadot_runtime_parachains::hrmp::HrmpChannel,
 			sp_core::crypto::KeyTypeId,
 		},
 	},
@@ -178,27 +177,27 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<u32>, subxt::Error> {
-		let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
-		let index: Vec<u32> = client
-			.storage()
-			.at(block_hash)
-			.fetch(&addr)
+		let key = hrmp_egress_channels_index_key(para_id);
+		let metadata_free = client
+			.storage_via_rpc(block_hash, &key, "HrmpEgressChannelsIndex", decode_para_ids)
 			.await?
-			.unwrap_or_default()
-			.iter()
-			.map(|id| id.0)
-			.collect();
+			.unwrap_or_default();
 
 		if client.shadow {
-			let key = hrmp_egress_channels_index_key(para_id);
-			let metadata_free = client
-				.storage_via_rpc(block_hash, &key, "HrmpEgressChannelsIndex", decode_para_ids)
+			let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
+			let index: Vec<u32> = client
+				.storage()
+				.at(block_hash)
+				.fetch(&addr)
 				.await?
-				.unwrap_or_default();
+				.unwrap_or_default()
+				.iter()
+				.map(|id| id.0)
+				.collect();
 			shadow::compare(block_hash, "hrmp_egress_channels_index", &index, &metadata_free);
 		}
 
-		Ok(index)
+		Ok(metadata_free)
 	}
 
 	async fn get_hrmp_channel_digests(
@@ -206,27 +205,27 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<(u32, Vec<u32>)>, subxt::Error> {
-		let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
-		let digests: Vec<(u32, Vec<u32>)> = client
-			.storage()
-			.at(block_hash)
-			.fetch(&addr)
+		let key = hrmp_channel_digests_key(para_id);
+		let metadata_free = client
+			.storage_via_rpc(block_hash, &key, "HrmpChannelDigests", decode_hrmp_channel_digests)
 			.await?
-			.unwrap_or_default()
-			.into_iter()
-			.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
-			.collect();
+			.unwrap_or_default();
 
 		if client.shadow {
-			let key = hrmp_channel_digests_key(para_id);
-			let metadata_free = client
-				.storage_via_rpc(block_hash, &key, "HrmpChannelDigests", decode_hrmp_channel_digests)
+			let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
+			let digests: Vec<(u32, Vec<u32>)> = client
+				.storage()
+				.at(block_hash)
+				.fetch(&addr)
 				.await?
-				.unwrap_or_default();
+				.unwrap_or_default()
+				.into_iter()
+				.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
+				.collect();
 			shadow::compare(block_hash, "hrmp_channel_digests", &digests, &metadata_free);
 		}
 
-		Ok(digests)
+		Ok(metadata_free)
 	}
 
 	async fn get_hrmp_channels(
@@ -234,26 +233,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		block_hash: H256,
 		sender: u32,
 		recipient: u32,
-	) -> Result<Option<(u32, u32, HrmpChannel)>, subxt::Error> {
-		let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
-		let addr = polkadot::storage().hrmp().hrmp_channels(id);
-		let channel = client
-			.storage()
-			.at(block_hash)
-			.fetch(&addr)
-			.await?
-			.map(|v| (sender, recipient, v));
+	) -> Result<Option<(u32, u32, SubxtHrmpChannel)>, subxt::Error> {
+		let key = hrmp_channels_key(sender, recipient);
+		let metadata_free = client
+			.storage_via_rpc(block_hash, &key, "HrmpChannels", decode_hrmp_channel)
+			.await?;
 
 		if client.shadow {
-			let key = hrmp_channels_key(sender, recipient);
-			let metadata_free = client
-				.storage_via_rpc(block_hash, &key, "HrmpChannels", decode_hrmp_channel)
-				.await?;
-			let old = channel.as_ref().map(|(_, _, channel)| SubxtHrmpChannel::from(channel));
+			let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
+			let addr = polkadot::storage().hrmp().hrmp_channels(id);
+			let channel = client.storage().at(block_hash).fetch(&addr).await?;
+			let old = channel.as_ref().map(SubxtHrmpChannel::from);
 			shadow::compare(block_hash, "hrmp_channel", &old, &metadata_free);
 		}
 
-		Ok(channel)
+		Ok(metadata_free.map(|channel| (sender, recipient, channel)))
 	}
 
 	async fn get_inbound_hrmp_channel_pairs(
@@ -548,7 +542,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let mut inbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
 		for (sender, para_id, channel) in inbound_channels {
 			let channels = inbound_by_para_id.entry(para_id).or_default();
-			channels.insert(sender, channel.into());
+			channels.insert(sender, channel);
 		}
 
 		let outbound_pairs = self.get_outbound_hrmp_channel_pairs(block_hash, para_ids.clone()).await?;
@@ -560,7 +554,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		let mut outbound_by_para_id: BTreeMap<u32, BTreeMap<u32, SubxtHrmpChannel>> = BTreeMap::new();
 		for (para_id, recipient, channel) in outbound_channels {
 			let channels = outbound_by_para_id.entry(para_id).or_default();
-			channels.insert(recipient, channel.into());
+			channels.insert(recipient, channel);
 		}
 
 		Ok(para_ids
