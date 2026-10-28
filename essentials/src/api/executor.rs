@@ -107,7 +107,7 @@ enum Response {
 	/// Chain name
 	ChainName(String),
 	/// Babe randomness
-	BabeRandomness(Option<[u8; 32]>),
+	BabeRandomness([u8; 32]),
 	/// Babe authorithies
 	BabeAuthorithies(Vec<([u8; 32], u64)>),
 	/// Babe current slot
@@ -493,7 +493,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Option<[u8; 32]>, RequestExecutorError> {
+	) -> color_eyre::Result<[u8; 32], RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeRandomness, BabeRandomness, hash)
 	}
 

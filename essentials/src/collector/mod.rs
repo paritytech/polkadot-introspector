@@ -432,26 +432,24 @@ impl Collector {
 				let mut missed_slots = current_slot - 1;
 				let mut authors_missing_their_slots = Vec::new();
 				while missed_slots > parent_slot {
-					if let Some(babe_randomness) = babe_randomness {
-						let rand = U256::from_big_endian(&(babe_randomness, missed_slots).using_encoded(blake2_256));
-						let authorities_len = U256::from(authorities.len());
+					let rand = U256::from_big_endian(&(babe_randomness, missed_slots).using_encoded(blake2_256));
+					let authorities_len = U256::from(authorities.len());
 
-						let idx = rand % authorities_len;
-						let idx = idx.as_u32();
-						let account_ids = self
-							.executor
-							.get_babe_key_owner(
-								self.endpoint.as_str(),
-								block_parent_hash,
-								authorities
-									.get(idx as usize)
-									.expect("we computed the idx with modulo len; qed")
-									.0,
-							)
-							.await?;
+					let idx = rand % authorities_len;
+					let idx = idx.as_u32();
+					let account_ids = self
+						.executor
+						.get_babe_key_owner(
+							self.endpoint.as_str(),
+							block_parent_hash,
+							authorities
+								.get(idx as usize)
+								.expect("we computed the idx with modulo len; qed")
+								.0,
+						)
+						.await?;
 
-						authors_missing_their_slots.extend(account_ids.into_iter());
-					}
+					authors_missing_their_slots.extend(account_ids.into_iter());
 					missed_slots -= 1;
 				}
 				Ok(authors_missing_their_slots)
