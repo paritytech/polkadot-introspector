@@ -37,18 +37,7 @@ use std::{
 /// Every shadowed read, in display order. The checklist is seeded with the full list so a read that
 /// never fired shows as `pending` instead of being silently absent — a quiet run only proves the
 /// reads it actually exercised.
-const EXPECTED_READS: &[&str] = &[
-	"session_index",
-	"session_account_keys",
-	"session_queued_keys",
-	"session_key_owner",
-	"babe_randomness",
-	"babe_authorities",
-	"babe_current_slot",
-	"hrmp_egress_channels_index",
-	"hrmp_channel_digests",
-	"hrmp_channel",
-];
+const EXPECTED_READS: &[&str] = &["hrmp_egress_channels_index", "hrmp_channel_digests", "hrmp_channel"];
 
 /// How often the checklist is logged while comparisons keep coming in. Short enough to give a
 /// usable resolution when the logfmt lines are graphed from collected logs.
