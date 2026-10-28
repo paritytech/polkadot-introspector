@@ -17,7 +17,6 @@
 
 pub mod api_client;
 pub mod decode;
-pub mod dynamic;
 pub mod executor;
 pub mod shadow;
 pub mod storage;
