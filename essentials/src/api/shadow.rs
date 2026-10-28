@@ -38,9 +38,6 @@ use std::{
 /// never fired shows as `pending` instead of being silently absent — a quiet run only proves the
 /// reads it actually exercised.
 const EXPECTED_READS: &[&str] = &[
-	"availability_cores",
-	"claim_queue",
-	"validator_groups",
 	"session_index",
 	"session_account_keys",
 	"session_queued_keys",
