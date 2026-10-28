@@ -16,15 +16,12 @@
 
 use crate::{
 	api::api_client::ApiClient,
-	types::{
-		AvailabilityBitfield, CoreOccupied, DisputeStatement, DisputeStatementSet, H256, InherentData,
-		InvalidDisputeStatementKind, ValidDisputeStatementKind, ValidatorIndex,
-	},
+	types::{CoreOccupied, H256, ValidatorIndex},
 };
 use subxt::{
 	OnlineClient, PolkadotConfig,
-	dynamic::{At, Value},
-	ext::scale_value::{Composite, Primitive, ValueDef, Variant},
+	dynamic::Value,
+	ext::scale_value::{Composite, Primitive, ValueDef},
 };
 use thiserror::Error;
 
@@ -54,70 +51,6 @@ pub(crate) fn decode_validator_groups(raw_groups: &Value<u32>) -> Result<Vec<Vec
 				.collect()
 		})
 		.collect()
-}
-
-fn decode_dynamic_u32(value: &Value<u32>) -> Result<u32, DynamicError> {
-	match &value.value {
-		ValueDef::Primitive(Primitive::U128(v)) => u32::try_from(*v).map_err(|_| {
-			DynamicError::DecodeDynamicError(format!("u32 value (got {} which overflows u32)", v), value.value.clone())
-		}),
-		ValueDef::Composite(Composite::Unnamed(inner)) if !inner.is_empty() => decode_dynamic_u32(&inner[0]),
-		other => Err(DynamicError::DecodeDynamicError("u32-like value".to_string(), other.clone())),
-	}
-}
-
-fn decode_h256(value: &Value<u32>) -> Result<H256, DynamicError> {
-	match &value.value {
-		ValueDef::Composite(Composite::Unnamed(bytes)) if bytes.len() == 32 => decode_h256_from_bytes(bytes),
-		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_h256(&inner[0]),
-		other => Err(DynamicError::DecodeDynamicError("H256 (32-byte composite)".to_string(), other.clone())),
-	}
-}
-
-fn decode_byte_slice(bytes: &[Value<u32>]) -> Result<Vec<u8>, DynamicError> {
-	bytes
-		.iter()
-		.enumerate()
-		.map(|(i, b)| match &b.value {
-			ValueDef::Primitive(Primitive::U128(v)) => u8::try_from(*v).map_err(|_| {
-				DynamicError::DecodeDynamicError(
-					format!("u8 at index {} (got {} which overflows u8)", i, v),
-					b.value.clone(),
-				)
-			}),
-			other => Err(DynamicError::DecodeDynamicError(format!("u8 at index {}", i), other.clone())),
-		})
-		.collect()
-}
-
-fn decode_h256_from_bytes(bytes: &[Value<u32>]) -> Result<H256, DynamicError> {
-	let decoded = decode_byte_slice(bytes)?;
-	let arr: [u8; 32] = decoded.try_into().map_err(|v: Vec<u8>| {
-		DynamicError::DecodeDynamicError(
-			format!("32 bytes (got {})", v.len()),
-			ValueDef::Composite(Composite::Unnamed(bytes.to_vec())),
-		)
-	})?;
-	Ok(H256::from(arr))
-}
-
-fn find_named_field<'a>(
-	fields: &'a [(String, Value<u32>)],
-	name: &str,
-	context: &Composite<u32>,
-) -> Result<&'a Value<u32>, DynamicError> {
-	fields
-		.iter()
-		.find_map(|(field, value)| if field == name { Some(value) } else { None })
-		.ok_or_else(|| {
-			DynamicError::DecodeDynamicError(format!("field '{}'", name), ValueDef::Composite(context.clone()))
-		})
-}
-
-fn variant_inner_value<'a>(variant: &'a Variant<u32>, context: &str) -> Result<&'a Value<u32>, DynamicError> {
-	variant.values.values().next().ok_or_else(|| {
-		DynamicError::DecodeDynamicError(format!("inner value for {}", context), ValueDef::Variant(variant.clone()))
-	})
 }
 
 fn decode_unnamed_composite(value: &Value<u32>) -> Result<&Vec<Value<u32>>, DynamicError> {
@@ -157,177 +90,6 @@ pub(crate) fn decode_availability_cores(raw: &Value<u32>) -> Result<Vec<CoreOccu
 			other => Err(DynamicError::DecodeDynamicError("variant for CoreState".to_string(), other.clone())),
 		})
 		.collect()
-}
-
-pub(crate) fn decode_inherent_data(raw: &Composite<u32>) -> Result<InherentData, DynamicError> {
-	let data = match raw {
-		Composite::Named(fields) => find_named_field(fields, "data", raw)?,
-		Composite::Unnamed(fields) if !fields.is_empty() => &fields[0],
-		_ =>
-			return Err(DynamicError::DecodeDynamicError(
-				"composite with inherent data".to_string(),
-				ValueDef::Composite(raw.clone()),
-			)),
-	};
-
-	let raw_bitfields = data
-		.at("bitfields")
-		.ok_or_else(|| DynamicError::DecodeDynamicError("bitfields field".to_string(), data.value.clone()))?;
-	let bitfields: Result<Vec<_>, _> = decode_unnamed_composite(raw_bitfields)?
-		.iter()
-		.map(|raw_signed| {
-			let payload = raw_signed.at("payload").ok_or_else(|| {
-				DynamicError::DecodeDynamicError("payload field in bitfield".to_string(), raw_signed.value.clone())
-			})?;
-			decode_availability_bitfield(payload)
-		})
-		.collect();
-
-	let raw_disputes = data
-		.at("disputes")
-		.ok_or_else(|| DynamicError::DecodeDynamicError("disputes field".to_string(), data.value.clone()))?;
-	let disputes: Result<Vec<_>, _> = decode_unnamed_composite(raw_disputes)?
-		.iter()
-		.map(decode_dispute_statement_set)
-		.collect();
-
-	Ok(InherentData { bitfields: bitfields?, disputes: disputes? })
-}
-
-fn decode_availability_bitfield(value: &Value<u32>) -> Result<AvailabilityBitfield, DynamicError> {
-	match &value.value {
-		ValueDef::BitSequence(bits) => Ok(bits.iter().collect()),
-		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_availability_bitfield(&inner[0]),
-		ValueDef::Composite(Composite::Unnamed(bits)) => {
-			let bools: Result<Vec<bool>, _> = bits
-				.iter()
-				.map(|b| match &b.value {
-					ValueDef::Primitive(Primitive::Bool(v)) => Ok(*v),
-					ValueDef::Primitive(Primitive::U128(v)) => Ok(*v != 0),
-					other => Err(DynamicError::DecodeDynamicError("bool in bitfield".to_string(), other.clone())),
-				})
-				.collect();
-			Ok(bools?.into_iter().collect())
-		},
-		other => Err(DynamicError::DecodeDynamicError("availability bitfield".to_string(), other.clone())),
-	}
-}
-
-fn decode_dispute_statement_set(value: &Value<u32>) -> Result<DisputeStatementSet, DynamicError> {
-	let raw_candidate_hash = value
-		.at("candidate_hash")
-		.ok_or_else(|| DynamicError::DecodeDynamicError("candidate_hash field".to_string(), value.value.clone()))?;
-	let candidate_hash = decode_candidate_hash(raw_candidate_hash)?;
-
-	let raw_session = value
-		.at("session")
-		.ok_or_else(|| DynamicError::DecodeDynamicError("session field".to_string(), value.value.clone()))?;
-	let session = decode_dynamic_u32(raw_session)?;
-
-	let raw_statements = value
-		.at("statements")
-		.ok_or_else(|| DynamicError::DecodeDynamicError("statements field".to_string(), value.value.clone()))?;
-	let statements_vec = decode_unnamed_composite(raw_statements)?;
-	let mut statements = Vec::with_capacity(statements_vec.len());
-	for raw_stmt in statements_vec {
-		let tuple = decode_unnamed_composite(raw_stmt)?;
-		if tuple.len() < 3 {
-			return Err(DynamicError::DecodeDynamicError(
-				"statement tuple with 3 elements".to_string(),
-				raw_stmt.value.clone(),
-			));
-		}
-		let statement = decode_dispute_statement(&tuple[0])?;
-		let validator_index = ValidatorIndex(decode_dynamic_u32(&tuple[1])?);
-		statements.push((statement, validator_index));
-	}
-
-	Ok(DisputeStatementSet { candidate_hash, session, statements })
-}
-
-fn decode_dispute_statement(value: &Value<u32>) -> Result<DisputeStatement, DynamicError> {
-	match &value.value {
-		ValueDef::Variant(variant) => match variant.name.as_str() {
-			"Valid" => Ok(DisputeStatement::Valid(decode_valid_dispute_statement_kind(variant)?)),
-			"Invalid" => Ok(DisputeStatement::Invalid(decode_invalid_dispute_statement_kind(variant)?)),
-			other => Err(DynamicError::DecodeDynamicError(
-				format!("Valid or Invalid dispute statement, got '{}'", other),
-				value.value.clone(),
-			)),
-		},
-		other => Err(DynamicError::DecodeDynamicError("variant for DisputeStatement".to_string(), other.clone())),
-	}
-}
-
-fn decode_valid_dispute_statement_kind(variant: &Variant<u32>) -> Result<ValidDisputeStatementKind, DynamicError> {
-	let inner = variant_inner_value(variant, "ValidDisputeStatementKind")?;
-	match &inner.value {
-		ValueDef::Variant(inner_variant) => match inner_variant.name.as_str() {
-			"Explicit" => Ok(ValidDisputeStatementKind::Explicit),
-			"BackingSeconded" => {
-				let hash_val = variant_inner_value(inner_variant, "BackingSeconded")?;
-				Ok(ValidDisputeStatementKind::BackingSeconded(decode_h256(hash_val)?))
-			},
-			"BackingValid" => {
-				let hash_val = variant_inner_value(inner_variant, "BackingValid")?;
-				Ok(ValidDisputeStatementKind::BackingValid(decode_h256(hash_val)?))
-			},
-			"ApprovalChecking" => Ok(ValidDisputeStatementKind::ApprovalChecking),
-			"ApprovalCheckingMultipleCandidates" => {
-				let candidates_val = variant_inner_value(inner_variant, "ApprovalCheckingMultipleCandidates")?;
-				let candidates_vec = decode_unnamed_composite(candidates_val)?;
-				let candidates: Result<Vec<_>, _> = candidates_vec.iter().map(decode_candidate_hash).collect();
-				Ok(ValidDisputeStatementKind::ApprovalCheckingMultipleCandidates(candidates?))
-			},
-			other => Err(DynamicError::DecodeDynamicError(
-				format!("known ValidDisputeStatementKind, got '{}'", other),
-				inner.value.clone(),
-			)),
-		},
-		_ => Err(DynamicError::DecodeDynamicError(
-			"variant for ValidDisputeStatementKind".to_string(),
-			inner.value.clone(),
-		)),
-	}
-}
-
-fn decode_invalid_dispute_statement_kind(variant: &Variant<u32>) -> Result<InvalidDisputeStatementKind, DynamicError> {
-	let inner = variant_inner_value(variant, "InvalidDisputeStatementKind")?;
-	match &inner.value {
-		ValueDef::Variant(inner_variant) => match inner_variant.name.as_str() {
-			"Explicit" => Ok(InvalidDisputeStatementKind::Explicit),
-			other => Err(DynamicError::DecodeDynamicError(
-				format!("known InvalidDisputeStatementKind, got '{}'", other),
-				inner.value.clone(),
-			)),
-		},
-		_ => Err(DynamicError::DecodeDynamicError(
-			"variant for InvalidDisputeStatementKind".to_string(),
-			inner.value.clone(),
-		)),
-	}
-}
-
-fn decode_candidate_hash(value: &Value<u32>) -> Result<H256, DynamicError> {
-	match &value.value {
-		ValueDef::Composite(Composite::Unnamed(inner)) if inner.len() == 1 => decode_h256(&inner[0]),
-		ValueDef::Composite(Composite::Named(fields)) => {
-			let hash_val = fields
-				.iter()
-				.find_map(|(name, val)| if name == "0" { Some(val) } else { None })
-				.ok_or_else(|| {
-					DynamicError::DecodeDynamicError(
-						"field '0' in named CandidateHash composite".to_string(),
-						value.value.clone(),
-					)
-				})?;
-			decode_h256(hash_val)
-		},
-		other => Err(DynamicError::DecodeDynamicError(
-			"CandidateHash (unnamed 1-tuple or named composite with field '0')".to_string(),
-			other.clone(),
-		)),
-	}
 }
 
 pub async fn fetch_dynamic_storage(
