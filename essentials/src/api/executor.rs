@@ -52,7 +52,6 @@ pub enum Request {
 	GetHead(Option<H256>),
 	GetBlockNumber(Option<H256>),
 	GetBlockHash(Option<BlockNumber>),
-	GetEvents(H256),
 	GetCandidateEvents(H256),
 	GetDisputes(H256),
 	ExtractParaInherent(Option<H256>),
@@ -84,8 +83,6 @@ enum Response {
 	BlockNumber(BlockNumber),
 	/// A block hash.
 	MaybeBlockHash(Option<H256>),
-	/// Block events
-	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
 	/// Candidate (backed/included/timed-out) events for a block, decoded without metadata.
 	CandidateEvents(Vec<SubxtCandidateEvent>),
 	/// Recent disputes for a block, decoded without metadata.
@@ -231,7 +228,6 @@ impl RequestExecutorBackend {
 			GetBlockNumber(maybe_hash) => BlockNumber(client.get_block_number(maybe_hash).await?),
 			GetBlockHash(maybe_block_number) => MaybeBlockHash(client.legacy_get_block_hash(maybe_block_number).await?),
 			GetChainName => ChainName(client.legacy_get_chain_name().await?),
-			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
 			GetCandidateEvents(hash) => CandidateEvents(client.get_candidate_events(hash).await?),
 			GetDisputes(hash) => Disputes(client.get_disputes(hash).await?),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
@@ -286,9 +282,6 @@ impl RequestExecutorNodes for &str {
 #[derive(Clone)]
 pub struct RequestExecutor {
 	clients: HashMap<String, (PrioritySender<ExecutorMessage>, PolkadotHasher)>,
-	/// Whether reads are shadow-decoded through the metadata-free path and compared. See
-	/// [`crate::api::shadow`].
-	shadow: bool,
 }
 
 macro_rules! wrap_backend_call {
@@ -350,16 +343,11 @@ impl RequestExecutor {
 			});
 		}
 
-		Ok(RequestExecutor { clients, shadow })
+		Ok(RequestExecutor { clients })
 	}
 
 	pub fn hasher(&self, url: &str) -> Option<PolkadotHasher> {
 		self.clients.get(url).map(|(_, hasher)| *hasher)
-	}
-
-	/// Whether reads should be shadow-decoded through the metadata-free path and compared.
-	pub fn shadow_enabled(&self) -> bool {
-		self.shadow
 	}
 
 	/// Closes all RPC clients
@@ -403,14 +391,6 @@ impl RequestExecutor {
 
 	pub async fn get_chain_name(&mut self, url: &str) -> color_eyre::Result<String, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetChainName, ChainName)
-	}
-
-	pub async fn get_events(
-		&mut self,
-		url: &str,
-		hash: H256,
-	) -> color_eyre::Result<Option<subxt::events::Events<PolkadotConfig>>, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetEvents, MaybeEvents, hash)
 	}
 
 	pub async fn get_candidate_events(

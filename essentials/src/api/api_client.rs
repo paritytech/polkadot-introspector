@@ -56,7 +56,6 @@ use subxt::{
 	blocks::{Block, BlockRef, BlocksClient},
 	client::OnlineClientT,
 	dynamic::Value,
-	events::{Events, EventsClient},
 	lightclient::LightClient,
 	runtime_api::{RuntimeApi, RuntimeApiClient},
 	storage::StorageClient,
@@ -98,10 +97,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	fn blocks(&self) -> BlocksClient<PolkadotConfig, T> {
 		self.client.blocks()
-	}
-
-	fn events(&self) -> EventsClient<PolkadotConfig, T> {
-		self.client.events()
 	}
 
 	fn runtime_api(&self) -> RuntimeApiClient<PolkadotConfig, T> {
@@ -301,10 +296,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
 		self.storage_via_rpc(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
 			.await
-	}
-
-	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
-		self.events().at(hash).await
 	}
 
 	/// Reads candidate (backed/included/timed-out) events for a block through the
