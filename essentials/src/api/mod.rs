@@ -80,8 +80,13 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{api::api_client::ApiClientMode, init, storage::StorageEntry, types::H256, utils::RetryOptions};
-	use subxt::config::Hasher;
+	use crate::{
+		api::api_client::ApiClientMode,
+		init,
+		storage::StorageEntry,
+		types::{H256, hash_of, header_hash},
+		utils::RetryOptions,
+	};
 
 	fn rpc_node_url() -> &'static str {
 		const RPC_NODE_URL: &str = "wss://rpc.polkadot.io:443";
@@ -103,10 +108,9 @@ mod tests {
 	#[tokio::test]
 	async fn basic_storage_test() {
 		let executor = request_executor().await;
-		let hasher = executor.hasher(rpc_node_url()).unwrap();
 		let api = ApiService::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, executor);
 		let storage = api.storage();
-		let key = hasher.hash_of(&100);
+		let key = hash_of(&100u32);
 		storage
 			.storage_write(key, StorageEntry::new_onchain(1.into(), "some data"))
 			.await
@@ -120,14 +124,10 @@ mod tests {
 		let api =
 			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 10 }, request_executor().await);
 		let mut subxt = api.executor();
-		let hasher = subxt.hasher(rpc_node_url()).unwrap();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
-		let timestamp = subxt.get_block_timestamp(rpc_node_url(), hasher.hash_of(&head)).await.unwrap();
-		let _block = subxt
-			.get_block_number(rpc_node_url(), Some(hasher.hash_of(&head)))
-			.await
-			.unwrap();
+		let timestamp = subxt.get_block_timestamp(rpc_node_url(), header_hash(&head)).await.unwrap();
+		let _block = subxt.get_block_number(rpc_node_url(), Some(header_hash(&head))).await.unwrap();
 		assert!(timestamp > 0);
 	}
 
@@ -148,10 +148,9 @@ mod tests {
 		let api =
 			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor().await);
 		let mut subxt = api.executor();
-		let hasher = subxt.hasher(rpc_node_url()).unwrap();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
-		let cores = subxt.get_occupied_cores(rpc_node_url(), hasher.hash_of(&head)).await;
+		let cores = subxt.get_occupied_cores(rpc_node_url(), header_hash(&head)).await;
 		assert!(cores.is_ok());
 	}
 
@@ -160,10 +159,9 @@ mod tests {
 		let api =
 			ApiService::<H256>::new_with_storage(RecordsStorageConfig { max_blocks: 1 }, request_executor().await);
 		let mut subxt = api.executor();
-		let hasher = subxt.hasher(rpc_node_url()).unwrap();
 
 		let head = subxt.get_block_head(rpc_node_url(), None).await.unwrap().unwrap();
-		let groups = subxt.get_backing_groups(rpc_node_url(), hasher.hash_of(&head)).await;
+		let groups = subxt.get_backing_groups(rpc_node_url(), header_hash(&head)).await;
 
 		assert!(groups.is_ok());
 	}
