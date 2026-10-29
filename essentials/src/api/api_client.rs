@@ -25,10 +25,6 @@ use crate::{
 			decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
 			para_session_account_keys_key, queued_keys_key, session_key_owner_key, timestamp_now_key,
 		},
-		dynamic::{
-			decode_availability_cores as decode_availability_cores_dynamic,
-			decode_validator_groups as decode_validator_groups_dynamic,
-		},
 		shadow,
 	},
 	chain_events::SubxtCandidateEvent,
@@ -55,9 +51,7 @@ use subxt::{
 	},
 	blocks::BlockRef,
 	client::OnlineClientT,
-	dynamic::Value,
 	lightclient::LightClient,
-	runtime_api::{RuntimeApi, RuntimeApiClient},
 	storage::StorageClient,
 	utils::fetch_chainspec_from_rpc_node,
 };
@@ -93,17 +87,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	fn storage(&self) -> StorageClient<PolkadotConfig, T> {
 		self.client.storage()
-	}
-
-	fn runtime_api(&self) -> RuntimeApiClient<PolkadotConfig, T> {
-		self.client.runtime_api()
-	}
-
-	async fn runtime_api_at(&self, maybe_hash: Option<H256>) -> Result<RuntimeApi<PolkadotConfig, T>, subxt::Error> {
-		match maybe_hash {
-			Some(hash) => Ok(self.runtime_api().at(hash)),
-			None => self.runtime_api().at_latest().await,
-		}
 	}
 
 	/// Fetches a header via `chain_getHeader` — the metadata-free counterpart of the blocks API.
@@ -368,61 +351,21 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
-		let metadata_free = self
-			.state_call_decoded(hash, "ParachainHost_availability_cores", decode_availability_cores)
-			.await?;
-
-		if self.shadow {
-			let addr = subxt::runtime_api::dynamic("ParachainHost", "availability_cores", Vec::<Value<()>>::new());
-			let value = self.runtime_api_at(Some(hash)).await?.call(addr).await?.to_value()?;
-			let cores = decode_availability_cores_dynamic(&value)
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))?;
-			shadow::compare(hash, "availability_cores", &cores, &metadata_free);
-		}
-
-		Ok(metadata_free)
+		self.state_call_decoded(hash, "ParachainHost_availability_cores", decode_availability_cores)
+			.await
 	}
 
 	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
-		let metadata_free = self
-			.state_call_decoded(hash, "ParachainHost_claim_queue", decode_claim_queue)
-			.await?;
-
-		if self.shadow {
-			let addr = polkadot::apis().parachain_host().claim_queue();
-			let queue: ClaimQueue = self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
-				queue
-					.iter()
-					.map(|(core, ids)| {
-						let core = core.0;
-						let ids = ids.iter().map(|id| id.0).collect::<Vec<_>>();
-						(core, ids)
-					})
-					.collect::<Vec<_>>()
-			})?;
-			shadow::compare(hash, "claim_queue", &queue, &metadata_free);
-		}
-
-		Ok(metadata_free)
+		self.state_call_decoded(hash, "ParachainHost_claim_queue", decode_claim_queue)
+			.await
 	}
 
 	pub async fn get_backing_groups(&self, hash: H256) -> Result<Vec<Vec<ValidatorIndex>>, subxt::Error> {
-		let metadata_free = self
+		let groups = self
 			.state_call_decoded(hash, "ParachainHost_validator_groups", decode_validator_groups)
 			.await?;
 
-		if self.shadow {
-			let value = self
-				.fetch_dynamic_storage(Some(hash), "ParaScheduler", "ValidatorGroups")
-				.await?
-				.ok_or_else(|| subxt::Error::Other("ParaScheduler.ValidatorGroups not found".to_string()))?;
-			let groups = decode_validator_groups_dynamic(&value)
-				.map_err(|e| subxt::Error::Other(format!("Failed to decode validator groups: {e}")))?;
-			let old: Vec<Vec<u32>> = groups.iter().map(|group| group.iter().map(|idx| idx.0).collect()).collect();
-			shadow::compare(hash, "validator_groups", &old, &metadata_free);
-		}
-
-		Ok(metadata_free
+		Ok(groups
 			.into_iter()
 			.map(|group| group.into_iter().map(ValidatorIndex).collect())
 			.collect())
@@ -524,22 +467,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				)
 			})
 			.collect())
-	}
-
-	pub async fn fetch_dynamic_storage(
-		&self,
-		maybe_hash: Option<H256>,
-		pallet_name: &str,
-		entry_name: &str,
-	) -> Result<Option<Value<u32>>, subxt::Error> {
-		let storage = match maybe_hash {
-			Some(hash) => self.storage().at(hash),
-			None => self.storage().at_latest().await?,
-		};
-		match storage.fetch(&subxt::dynamic::storage(pallet_name, entry_name, vec![])).await? {
-			Some(v) => Ok(Some(v.to_value()?)),
-			None => Ok(None),
-		}
 	}
 
 	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, subxt::Error> {

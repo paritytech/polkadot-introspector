@@ -18,7 +18,6 @@ use crate::{
 	api::{
 		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
 		decode::DecodedDispute,
-		dynamic,
 	},
 	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
@@ -127,8 +126,6 @@ pub enum RequestExecutorError {
 	SubxtError(String),
 	#[error("subxt retriable error: {0}")]
 	SubxtRetriableError(String),
-	#[error("dynamic error: {0}")]
-	DynamicError(#[from] dynamic::DynamicError),
 	#[error("subxt connection timeout")]
 	Timeout,
 	#[error("Send failed: {0}")]
