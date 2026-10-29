@@ -4458,7 +4458,6 @@ dependencies = [
  "polkadot-introspector-priority-channel",
  "rasciigraph",
  "substrate-prometheus-endpoint",
- "subxt",
  "tokio",
 ]
 
@@ -4468,6 +4467,7 @@ version = "0.2.52"
 dependencies = [
  "async-trait",
  "bitvec",
+ "bs58",
  "clap",
  "color-eyre",
  "env_logger 0.11.10",
@@ -4478,6 +4478,7 @@ dependencies = [
  "log",
  "parity-scale-codec",
  "polkadot-introspector-priority-channel",
+ "primitive-types 0.13.1",
  "rand",
  "serde",
  "serde_bytes",
@@ -4581,7 +4582,6 @@ dependencies = [
  "serde_urlencoded",
  "strum",
  "substrate-prometheus-endpoint",
- "subxt",
  "thiserror 2.0.12",
  "time",
  "tokio",

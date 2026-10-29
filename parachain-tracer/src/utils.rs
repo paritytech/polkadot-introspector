@@ -69,7 +69,6 @@ pub(crate) fn extract_validator_address(
 #[cfg(test)]
 mod test_extract_validator_address {
 	use super::*;
-	use subxt::utils::AccountId32;
 
 	#[test]
 	fn test_returns_a_placeholder_if_no_session_keys() {
@@ -108,7 +107,6 @@ pub(crate) fn extract_validator_addresses(
 #[cfg(test)]
 mod test_extract_validator_addresses {
 	use super::*;
-	use subxt::utils::AccountId32;
 
 	#[test]
 	fn test_returns_identities() {
