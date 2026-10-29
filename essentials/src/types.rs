@@ -71,7 +71,7 @@ pub enum DisputeStatement {
 }
 
 /// `ValidDisputeStatementKind`: variant indices mirror the runtime. The hashes are kept because a
-/// reader must consume them to advance, and they make comparison to metadata decoding precise.
+/// reader must consume them to advance.
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub enum ValidDisputeStatementKind {
 	#[codec(index = 0)]

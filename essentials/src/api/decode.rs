@@ -996,19 +996,7 @@ mod tests {
 		out
 	}
 
-	use crate::{
-		metadata::{
-			polkadot::runtime_types::{
-				polkadot_core_primitives::CandidateHash,
-				polkadot_primitives::vstaging::InherentData as RuntimeInherentData,
-			},
-			polkadot_primitives::{
-				DisputeStatement as RuntimeDisputeStatement, DisputeStatementSet as RuntimeDisputeStatementSet,
-				ValidatorIndex as RuntimeValidatorIndex, signed::UncheckedSigned, validator_app::Signature,
-			},
-		},
-		types::{InvalidDisputeStatementKind, ValidDisputeStatementKind},
-	};
+	use crate::types::{InvalidDisputeStatementKind, ValidDisputeStatementKind};
 	use subxt::config::substrate::{Digest, DigestItem};
 
 	// One `BackedCandidate` with a non-trivial commitments section and one explicit vote.
@@ -1052,57 +1040,10 @@ mod tests {
 		]
 	}
 
-	// A full inherent built through the runtime types, so its encoding is the layout we must read.
-	// Backed candidates are decoded from the hand-built bytes above so the descriptor window is also
-	// exercised, and the header carries digest logs so skipping it is not a fixed-size step.
-	fn runtime_inherent() -> RuntimeInherentData<Header> {
-		let signed_bitfield = |bits: &[bool], index| UncheckedSigned {
-			payload: crate::metadata::polkadot_primitives::AvailabilityBitfield(bits.iter().copied().collect()),
-			validator_index: RuntimeValidatorIndex(index),
-			signature: Signature([0x11; 64]),
-			__ignore: Default::default(),
-		};
-		let mut backed = Compact(1u32).encode();
-		backed.extend(backed_candidate());
-		RuntimeInherentData {
-			bitfields: vec![signed_bitfield(&[true, false, true, true], 5), signed_bitfield(&[false, false, true], 9)],
-			backed_candidates: Decode::decode(&mut &backed[..]).unwrap(),
-			disputes: dispute_sets()
-				.into_iter()
-				.map(|set| RuntimeDisputeStatementSet {
-					candidate_hash: CandidateHash(set.candidate_hash),
-					session: set.session,
-					// Our statement types share the runtime format, so map them by encode -> decode
-					statements: set
-						.statements
-						.into_iter()
-						.map(|(s, i)| {
-							(
-								Decode::decode(&mut &s.encode()[..]).unwrap(),
-								RuntimeValidatorIndex(i.0),
-								Signature([0x44; 64]),
-							)
-						})
-						.collect(),
-				})
-				.collect(),
-			parent_header: Header {
-				parent_hash: H256::from([0x55; 32]),
-				number: 1_000_000,
-				state_root: H256::from([0x66; 32]),
-				extrinsics_root: H256::from([0x77; 32]),
-				digest: Digest {
-					logs: vec![
-						DigestItem::PreRuntime(*b"BABE", vec![1, 2, 3]),
-						DigestItem::Seal(*b"BABE", vec![0x88; 64]),
-					],
-				},
-			},
-		}
-	}
-
-	// The encoded body of [`runtime_inherent`] with the offset where each section starts, so negative
-	// tests can corrupt a known spot.
+	// The encoded body of a `ParachainsInherentData` with the offset where each section starts, so
+	// negative tests can corrupt a known spot. Backed candidates are the hand-built bytes above so the
+	// descriptor window is also exercised, and the header carries digest logs so skipping it is not a
+	// fixed-size step.
 	struct Sections {
 		body: Vec<u8>,
 		backed: usize,
@@ -1111,11 +1052,44 @@ mod tests {
 	}
 
 	fn sections() -> Sections {
-		let inherent = runtime_inherent();
-		let backed = inherent.bitfields.encode().len();
-		let disputes = backed + inherent.backed_candidates.encode().len();
-		let parent_header = disputes + inherent.disputes.encode().len();
-		Sections { body: inherent.encode(), backed, disputes, parent_header }
+		let mut body = Compact(2u32).encode();
+		for (bits, index) in [(&[true, false, true, true][..], 5u32), (&[false, false, true][..], 9)] {
+			body.extend(availability_bitfield(bits).encode());
+			body.extend(index.encode());
+			body.extend([0x11u8; 64]);
+		}
+
+		let backed = body.len();
+		body.extend(Compact(1u32).encode());
+		body.extend(backed_candidate());
+
+		let disputes = body.len();
+		let sets = dispute_sets();
+		body.extend(Compact(sets.len() as u32).encode());
+		for set in sets {
+			body.extend(set.candidate_hash.encode());
+			body.extend(set.session.encode());
+			body.extend(Compact(set.statements.len() as u32).encode());
+			for (statement, index) in set.statements {
+				body.extend(statement.encode());
+				body.extend(index.encode());
+				body.extend([0x44u8; 64]);
+			}
+		}
+
+		let parent_header = body.len();
+		let header = Header {
+			parent_hash: H256::from([0x55; 32]),
+			number: 1_000_000,
+			state_root: H256::from([0x66; 32]),
+			extrinsics_root: H256::from([0x77; 32]),
+			digest: Digest {
+				logs: vec![DigestItem::PreRuntime(*b"BABE", vec![1, 2, 3]), DigestItem::Seal(*b"BABE", vec![0x88; 64])],
+			},
+		};
+		body.extend(header.encode());
+
+		Sections { body, backed, disputes, parent_header }
 	}
 
 	// Decodes `body` wrapped into an extrinsic and returns the error it must fail with.
@@ -1124,9 +1098,8 @@ mod tests {
 	}
 
 	#[test]
-	fn decodes_parainherent_like_runtime_encoding() {
-		let inherent = runtime_inherent();
-		let decoded = decode_parainherent(&wrap_parainherent(inherent.encode())).unwrap();
+	fn decodes_parainherent() {
+		let decoded = decode_parainherent(&wrap_parainherent(sections().body)).unwrap();
 
 		let bitfields =
 			vec![availability_bitfield(&[true, false, true, true]), availability_bitfield(&[false, false, true])];
@@ -1188,26 +1161,6 @@ mod tests {
 		let Sections { mut body, .. } = sections();
 		body.pop(); // cuts into the seal of the header's digest
 		assert!(decode_error(body).starts_with("parainherent: cannot skip parent header"));
-	}
-
-	#[test]
-	fn dispute_statement_matches_runtime_encoding() {
-		let statements = [
-			DisputeStatement::Valid(ValidDisputeStatementKind::Explicit),
-			DisputeStatement::Valid(ValidDisputeStatementKind::BackingSeconded(H256::from([0x01; 32]))),
-			DisputeStatement::Valid(ValidDisputeStatementKind::BackingValid(H256::from([0x02; 32]))),
-			DisputeStatement::Valid(ValidDisputeStatementKind::ApprovalChecking),
-			DisputeStatement::Valid(ValidDisputeStatementKind::ApprovalCheckingMultipleCandidates(vec![
-				H256::from([0x03; 32]),
-				H256::from([0x04; 32]),
-			])),
-			DisputeStatement::Invalid(InvalidDisputeStatementKind::Explicit),
-		];
-		for statement in statements {
-			let encoded = statement.encode();
-			let runtime = RuntimeDisputeStatement::decode_all(&mut &encoded[..]).unwrap();
-			assert_eq!(runtime.encode(), encoded);
-		}
 	}
 
 	#[test]
