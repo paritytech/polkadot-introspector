@@ -11,6 +11,7 @@ publish = true
 sp-core-hashing = "16.0"
 async-trait = { workspace = true }
 bitvec = { workspace = true }
+bs58 = { workspace = true }
 clap = { workspace = true }
 
 parity-scale-codec = { workspace = true }
@@ -22,6 +23,7 @@ hex = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 polkadot-introspector-priority-channel = { workspace = true }
+primitive-types = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
