@@ -105,15 +105,11 @@ pub enum ParachainBlockState {
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		parachain_block_info::BlockAvailability,
-		test_utils::{create_hasher, create_para_block_info},
-	};
+	use crate::{parachain_block_info::BlockAvailability, test_utils::create_para_block_info};
 
 	#[tokio::test]
 	async fn test_is_bitfield_propagation_slow() {
-		let hasher = create_hasher().await;
-		let mut info = create_para_block_info(100, hasher);
+		let mut info = create_para_block_info(100);
 		assert!(!info.is_bitfield_propagation_slow());
 
 		info.set_availability(BlockAvailability::new(120, 200));

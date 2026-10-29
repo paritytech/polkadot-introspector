@@ -25,14 +25,13 @@ use crate::{
 	chain_events::{SubxtCandidateEvent, SubxtCandidateEventType},
 	types::{
 		AccountId32, AvailabilityBitfield, ClaimQueue, CoreOccupied, DisputeStatement, DisputeStatementSet, H256,
-		Header, InherentData, PolkadotHash, SubxtHrmpChannel, ValidatorIndex,
+		Header, InherentData, PolkadotHash, SubxtHrmpChannel, ValidatorIndex, hash_of,
 	},
 };
 use bitvec::{order::Lsb0, vec::BitVec};
 use color_eyre::{Result, eyre::eyre};
 use parity_scale_codec::{Compact, Decode, DecodeAll, Encode};
 use sp_core_hashing::{twox_64, twox_128};
-use subxt::config::Hasher;
 
 /// SCALE-encoded size of a `CandidateDescriptor`. Stable across descriptor versions: V1's fields
 /// are re-interpreted, never resized.
@@ -72,10 +71,7 @@ enum RawCandidateEvent {
 /// candidate events the tools track. Codec drives the traversal (vec length, variant tags, the
 /// variable-length `HeadData`); `decode_all` fails loud on any trailing bytes or unknown variant,
 /// and the candidate hash is `blake2_256` of the re-encoded receipt, as the runtime computes it.
-pub fn decode_candidate_events<H: Hasher<Output = PolkadotHash>>(
-	bytes: &[u8],
-	hasher: H,
-) -> Result<Vec<SubxtCandidateEvent>> {
+pub fn decode_candidate_events(bytes: &[u8]) -> Result<Vec<SubxtCandidateEvent>> {
 	let raw = Vec::<RawCandidateEvent>::decode_all(&mut &bytes[..])
 		.map_err(|e| eyre!("candidate_events: cannot decode: {e}"))?;
 
@@ -90,7 +86,7 @@ pub fn decode_candidate_events<H: Hasher<Output = PolkadotHash>>(
 				RawCandidateEvent::TimedOut(receipt, _head, core) => (receipt, SubxtCandidateEventType::TimedOut, core),
 			};
 			SubxtCandidateEvent {
-				candidate_hash: hasher.hash(&receipt.encode()),
+				candidate_hash: hash_of(&receipt),
 				relay_parent: H256::from(receipt.relay_parent),
 				parachain_id: receipt.para_id,
 				event_type,
@@ -509,8 +505,8 @@ pub fn decode_parainherent(extrinsic: &[u8]) -> Result<InherentData> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::types::blake2_256_hash;
 	use parity_scale_codec::Compact;
-	use subxt::config::substrate::BlakeTwo256;
 
 	// Builds one SCALE-encoded `CandidateEvent` with the given variant, para id, relay parent and
 	// core index, mirroring `(CandidateReceipt, HeadData, CoreIndex[, GroupIndex])`.
@@ -538,19 +534,19 @@ mod tests {
 		blob.extend(backed);
 		blob.extend(timed_out);
 
-		let events = decode_candidate_events(&blob, BlakeTwo256).unwrap();
+		let events = decode_candidate_events(&blob).unwrap();
 		assert_eq!(events.len(), 2);
 
 		assert_eq!(events[0].parachain_id, 1000);
 		assert_eq!(events[0].relay_parent, H256::from([0xAB; 32]));
 		assert_eq!(events[0].core_idx, 5);
 		assert_eq!(events[0].event_type, SubxtCandidateEventType::Backed);
-		assert_eq!(events[0].candidate_hash, BlakeTwo256.hash(&receipt0));
+		assert_eq!(events[0].candidate_hash, blake2_256_hash(&receipt0));
 
 		assert_eq!(events[1].parachain_id, 2000);
 		assert_eq!(events[1].core_idx, 9);
 		assert_eq!(events[1].event_type, SubxtCandidateEventType::TimedOut);
-		assert_eq!(events[1].candidate_hash, BlakeTwo256.hash(&receipt1));
+		assert_eq!(events[1].candidate_hash, blake2_256_hash(&receipt1));
 	}
 
 	#[test]
@@ -559,14 +555,14 @@ mod tests {
 		let mut blob = Compact(1u32).encode();
 		blob.extend(backed);
 		blob.push(0xFF); // one byte too many
-		assert!(decode_candidate_events(&blob, BlakeTwo256).is_err());
+		assert!(decode_candidate_events(&blob).is_err());
 	}
 
 	#[test]
 	fn rejects_truncated_receipt() {
 		let mut blob = Compact(1u32).encode();
 		blob.push(0); // variant, then nothing
-		assert!(decode_candidate_events(&blob, BlakeTwo256).is_err());
+		assert!(decode_candidate_events(&blob).is_err());
 	}
 
 	#[test]
@@ -575,7 +571,7 @@ mod tests {
 		bogus[0] = 7; // unknown CandidateEvent variant
 		let mut blob = Compact(1u32).encode();
 		blob.extend(bogus);
-		assert!(decode_candidate_events(&blob, BlakeTwo256).is_err());
+		assert!(decode_candidate_events(&blob).is_err());
 	}
 
 	// SCALE-encodes a `BitVec<u8, Lsb0>` over the given set-bit indices: compact bit count then the
@@ -996,8 +992,7 @@ mod tests {
 		out
 	}
 
-	use crate::types::{InvalidDisputeStatementKind, ValidDisputeStatementKind};
-	use subxt::config::substrate::{Digest, DigestItem};
+	use crate::types::{Digest, DigestItem, InvalidDisputeStatementKind, ValidDisputeStatementKind};
 
 	// One `BackedCandidate` with a non-trivial commitments section and one explicit vote.
 	fn backed_candidate() -> Vec<u8> {
