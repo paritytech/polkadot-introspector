@@ -15,7 +15,6 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::metadata::polkadot::runtime_types::polkadot_runtime_parachains::hrmp::HrmpChannel;
 use bitvec::{order::Lsb0, vec::BitVec};
 use parity_scale_codec::{Decode, Encode};
 use std::collections::BTreeMap;
@@ -105,27 +104,6 @@ pub struct SubxtHrmpChannel {
 	pub mqc_head: Option<H256>,
 	pub sender_deposit: u128,
 	pub recipient_deposit: u128,
-}
-
-impl From<&HrmpChannel> for SubxtHrmpChannel {
-	fn from(channel: &HrmpChannel) -> Self {
-		SubxtHrmpChannel {
-			max_capacity: channel.max_capacity,
-			max_total_size: channel.max_total_size,
-			max_message_size: channel.max_message_size,
-			msg_count: channel.msg_count,
-			total_size: channel.total_size,
-			mqc_head: channel.mqc_head,
-			sender_deposit: channel.sender_deposit,
-			recipient_deposit: channel.recipient_deposit,
-		}
-	}
-}
-
-impl From<HrmpChannel> for SubxtHrmpChannel {
-	fn from(channel: HrmpChannel) -> Self {
-		Self::from(&channel)
-	}
 }
 
 // TODO: Take it from runtime types v5

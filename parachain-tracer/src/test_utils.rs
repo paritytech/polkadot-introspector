@@ -105,7 +105,7 @@ pub fn create_inherent_data() -> InherentData {
 
 pub async fn create_executor() -> executor::RequestExecutor {
 	let shutdown_tx = init::init_shutdown();
-	executor::RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx, false)
+	executor::RequestExecutor::build(rpc_node_url(), ApiClientMode::RPC, &RetryOptions::default(), &shutdown_tx)
 		.await
 		.unwrap()
 }
