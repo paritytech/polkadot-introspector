@@ -15,9 +15,6 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-// `subxt::Error` is large; this goes away together with subxt.
-#![allow(clippy::result_large_err)]
-
 use crate::{
 	api::decode::{
 		DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
@@ -30,51 +27,72 @@ use crate::{
 	chain_events::SubxtCandidateEvent,
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, QueuedKeys, Slot,
-		SubxtHrmpChannel, Timestamp, ValidatorIndex,
+		SubxtHrmpChannel, Timestamp, ValidatorIndex, header_hash,
 	},
 };
 use clap::ValueEnum;
-use futures::StreamExt;
-use parity_scale_codec::{Decode, Encode};
-use std::collections::BTreeMap;
-use subxt::{
-	OnlineClient, PolkadotConfig,
-	backend::{
-		StreamOf,
-		legacy::{LegacyRpcMethods, rpc_methods::NumberOrHex},
-		rpc::RpcClient,
+use futures::{Stream, StreamExt, stream, stream::BoxStream};
+use jsonrpsee::{
+	core::{
+		client::{ClientT, SubscriptionClientT},
+		params::ArrayParams,
+		traits::ToRpcParams,
 	},
-	blocks::BlockRef,
-	client::OnlineClientT,
-	lightclient::LightClient,
-	utils::fetch_chainspec_from_rpc_node,
+	rpc_params,
+	ws_client::{WsClient, WsClientBuilder},
 };
+use serde::de::DeserializeOwned;
+use std::{
+	collections::BTreeMap,
+	fmt,
+	pin::Pin,
+	sync::{Arc, Mutex},
+	task::{Context, Poll},
+	time::Duration,
+};
+use subxt_lightclient::{LightClient, LightClientRpc, LightClientRpcError};
 use thiserror::Error;
 
-/// A live stream of `(header, block hash)` pairs from a chain-head subscription.
-pub type HeaderStream = StreamOf<Result<(Header, H256), ClientError>>;
+/// A stream of `(header, block hash)` pairs.
+pub struct HeaderStream(BoxStream<'static, Result<(Header, H256), ClientError>>);
+
+impl Stream for HeaderStream {
+	type Item = Result<(Header, H256), ClientError>;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		self.0.poll_next_unpin(cx)
+	}
+}
+
+impl fmt::Debug for HeaderStream {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("HeaderStream")
+	}
+}
 
 /// Error from the RPC client: transport failures, undecodable responses, or missing data.
 #[derive(Debug, Error)]
 pub enum ClientError {
 	#[error("RPC error: {0}")]
-	Rpc(#[from] subxt::Error),
+	Rpc(#[from] jsonrpsee::core::ClientError),
+	#[error("Light client error: {0}")]
+	Light(#[from] LightClientRpcError),
 	#[error("{0}")]
 	Other(String),
 }
 
-impl From<subxt::ext::subxt_rpcs::Error> for ClientError {
-	fn from(err: subxt::ext::subxt_rpcs::Error) -> Self {
-		Self::Rpc(err.into())
-	}
+/// The `chain_getBlock` response.
+#[derive(serde_derive::Deserialize)]
+struct SignedBlock {
+	block: BlockBody,
 }
 
-/// Converts a transport header into the owned one through its SCALE encoding.
-fn into_header(header: impl Encode) -> Result<Header, ClientError> {
-	Header::decode(&mut &header.encode()[..]).map_err(|e| ClientError::Other(format!("Cannot decode header: {e}")))
+#[derive(serde_derive::Deserialize)]
+struct BlockBody {
+	extrinsics: Vec<String>,
 }
 
-/// How to subscribe to subxt blocks
+/// How to talk to the chain: a full node over websocket, or an embedded smoldot light client.
 #[derive(strum::Display, Debug, Clone, Copy, ValueEnum, Default)]
 pub enum ApiClientMode {
 	#[default]
@@ -83,24 +101,71 @@ pub enum ApiClientMode {
 }
 
 #[derive(Clone)]
-pub struct ApiClient<T>
-where
-	T: OnlineClientT<PolkadotConfig>,
-{
-	client: T,
-	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
-	hasher: <PolkadotConfig as subxt::Config>::Hasher,
+enum Transport {
+	Ws(Arc<WsClient>),
+	Light(LightClientRpc),
 }
 
-impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
+impl Transport {
+	async fn request<T: DeserializeOwned>(&self, method: &str, params: ArrayParams) -> Result<T, ClientError> {
+		match self {
+			Self::Ws(client) => Ok(client.request(method, params).await?),
+			Self::Light(client) => {
+				let params = params.to_rpc_params().map_err(|e| ClientError::Other(e.to_string()))?;
+				let raw = client.request(method.to_string(), params).await?;
+				serde_json::from_str(raw.get())
+					.map_err(|e| ClientError::Other(format!("invalid {method} response: {e}")))
+			},
+		}
+	}
+
+	async fn subscribe<T: DeserializeOwned + Send + 'static>(
+		&self,
+		method: &str,
+		unsubscribe: &str,
+		params: ArrayParams,
+	) -> Result<BoxStream<'static, Result<T, ClientError>>, ClientError> {
+		match self {
+			Self::Ws(client) => {
+				let subscription = client.subscribe(method, params, unsubscribe).await?;
+				Ok(subscription
+					.map(|item| item.map_err(|e| jsonrpsee::core::ClientError::ParseError(e).into()))
+					.boxed())
+			},
+			Self::Light(client) => {
+				let params = params.to_rpc_params().map_err(|e| ClientError::Other(e.to_string()))?;
+				let subscription = client.subscribe(method.to_string(), params, unsubscribe.to_string()).await?;
+				Ok(subscription
+					.map(|item| {
+						let raw = item.map_err(|e| ClientError::Light(LightClientRpcError::JsonRpcError(e)))?;
+						serde_json::from_str(raw.get()).map_err(|e| ClientError::Other(e.to_string()))
+					})
+					.boxed())
+			},
+		}
+	}
+}
+
+#[derive(Clone)]
+pub struct ApiClient {
+	client: Transport,
+}
+
+impl ApiClient {
+	/// Requests an optional hex-encoded result.
+	async fn request_hex(&self, method: &str, params: ArrayParams) -> Result<Option<Vec<u8>>, ClientError> {
+		let hex: Option<String> = self.client.request(method, params).await?;
+		hex.map(|raw| {
+			hex::decode(raw.trim_start_matches("0x"))
+				.map_err(|e| ClientError::Other(format!("invalid hex from {method}: {e}")))
+		})
+		.transpose()
+	}
+
 	/// Fetches a header via `chain_getHeader`, returning `None` when the node has no header for the
 	/// hash (e.g. a pruned block in historical mode).
 	async fn maybe_header_via_rpc(&self, hash: H256) -> Result<Option<Header>, ClientError> {
-		self.legacy_rpc_methods
-			.chain_get_header(Some(hash))
-			.await?
-			.map(into_header)
-			.transpose()
+		self.client.request("chain_getHeader", rpc_params![hash]).await
 	}
 
 	/// Fetches a header via `chain_getHeader`, failing when the node has none for the hash.
@@ -114,7 +179,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	async fn resolve_hash(&self, maybe_hash: Option<H256>) -> Result<H256, ClientError> {
 		match maybe_hash {
 			Some(hash) => Ok(hash),
-			None => Ok(self.legacy_rpc_methods.chain_get_finalized_head().await?),
+			None => Ok(self.client.request("chain_getFinalizedHead", rpc_params![]).await?),
 		}
 	}
 
@@ -133,8 +198,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		read: &str,
 		decode: impl Fn(&[u8]) -> color_eyre::Result<R>,
 	) -> Result<Option<R>, ClientError> {
-		self.legacy_rpc_methods
-			.state_get_storage(key, Some(hash))
+		self.request_hex("state_getStorage", rpc_params![format!("0x{}", hex::encode(key)), hash])
 			.await?
 			.map(|bytes| decode(&bytes))
 			.transpose()
@@ -148,12 +212,15 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		method: &str,
 		decode: impl Fn(&[u8]) -> color_eyre::Result<R>,
 	) -> Result<R, ClientError> {
-		let bytes = self.legacy_rpc_methods.state_call(method, None, Some(hash)).await?;
+		let bytes = self
+			.request_hex("state_call", rpc_params![method, "0x", hash])
+			.await?
+			.ok_or_else(|| ClientError::Other(format!("empty response from {method}")))?;
 		decode(&bytes).map_err(|e| ClientError::Other(format!("Failed to decode {method}: {e}")))
 	}
 
 	async fn get_hrmp_egress_channels_index(
-		client: ApiClient<T>,
+		client: ApiClient,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<u32>, ClientError> {
@@ -165,7 +232,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	async fn get_hrmp_channel_digests(
-		client: ApiClient<T>,
+		client: ApiClient,
 		block_hash: H256,
 		para_id: u32,
 	) -> Result<Vec<(u32, Vec<u32>)>, ClientError> {
@@ -177,7 +244,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	async fn get_hrmp_channels(
-		client: ApiClient<T>,
+		client: ApiClient,
 		block_hash: H256,
 		sender: u32,
 		recipient: u32,
@@ -229,7 +296,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 }
 
-impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
+impl ApiClient {
 	pub async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Option<Header>, ClientError> {
 		match maybe_hash {
 			Some(hash) => self.maybe_header_via_rpc(hash).await,
@@ -374,17 +441,19 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 	pub async fn extract_parainherent(&self, maybe_hash: Option<H256>) -> Result<InherentData, ClientError> {
 		let hash = self.resolve_hash(maybe_hash).await?;
-		let details = self
-			.legacy_rpc_methods
-			.chain_get_block(Some(hash))
+		let block: SignedBlock = self
+			.client
+			.request::<Option<_>>("chain_getBlock", rpc_params![hash])
 			.await?
 			.ok_or_else(|| ClientError::Other(format!("block {hash:?} not found via chain_getBlock")))?;
-		let para_inherent = details
+		let para_inherent = block
 			.block
 			.extrinsics
 			.get(1)
 			.ok_or_else(|| ClientError::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
-		decode_parainherent(&para_inherent.0)
+		let para_inherent = hex::decode(para_inherent.trim_start_matches("0x"))
+			.map_err(|e| ClientError::Other(format!("invalid ParaInherent extrinsic hex: {e}")))?;
+		decode_parainherent(&para_inherent)
 			.map_err(|e| ClientError::Other(format!("Failed to decode ParaInherent: {e}")))
 	}
 
@@ -393,60 +462,115 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		&self,
 		maybe_block_number: Option<BlockNumber>,
 	) -> Result<Option<H256>, ClientError> {
-		let maybe_block_number = maybe_block_number.map(|v| NumberOrHex::Number(v.into()));
-		Ok(self.legacy_rpc_methods.chain_get_block_hash(maybe_block_number).await?)
+		Ok(match maybe_block_number {
+			Some(number) => self.client.request("chain_getBlockHash", rpc_params![number]).await?,
+			None => self.client.request("chain_getBlockHash", rpc_params![]).await?,
+		})
 	}
 
 	pub async fn legacy_get_chain_name(&self) -> Result<String, ClientError> {
-		Ok(self.legacy_rpc_methods.system_chain().await?)
+		self.client.request("system_chain", rpc_params![]).await
 	}
 
 	pub async fn stream_best_block_headers(&self) -> Result<HeaderStream, ClientError> {
-		Ok(Self::header_stream(self.client.backend().stream_best_block_headers(self.hasher).await?))
+		self.subscribe_headers("chain_subscribeNewHeads", "chain_unsubscribeNewHeads")
+			.await
 	}
 
+	/// Finalized headers, with blocks skipped by finality jumps filled in.
 	pub async fn stream_finalized_block_headers(&self) -> Result<HeaderStream, ClientError> {
-		Ok(Self::header_stream(self.client.backend().stream_finalized_block_headers(self.hasher).await?))
+		let headers = self
+			.subscribe_headers("chain_subscribeFinalizedHeads", "chain_unsubscribeFinalizedHeads")
+			.await?;
+		let client = self.clone();
+		let last_number = Arc::new(Mutex::new(None::<BlockNumber>));
+		Ok(HeaderStream(
+			headers
+				.then(move |item| {
+					let client = client.clone();
+					let last_number = last_number.clone();
+					async move {
+						let Ok((header, _)) = &item else { return vec![item] };
+						let from = last_number.lock().unwrap().map_or(header.number, |n| n + 1);
+						// Walk back via `parent_hash`; on failure the next header retries the gap.
+						let mut gap = Vec::new();
+						let (mut hash, mut number) = (header.parent_hash, header.number);
+						while number > from {
+							number -= 1;
+							match client.header_via_rpc(hash).await {
+								Ok(parent) => {
+									gap.push(Ok((parent.clone(), hash)));
+									hash = parent.parent_hash;
+								},
+								Err(e) => return vec![Err(e)],
+							}
+						}
+						let mut items: Vec<_> = gap.into_iter().rev().collect();
+						*last_number.lock().unwrap() = Some(header.number);
+						items.push(item);
+						items
+					}
+				})
+				.flat_map(stream::iter)
+				.boxed(),
+		))
 	}
 
-	fn header_stream<H: Encode + 'static>(stream: StreamOf<Result<(H, BlockRef<H256>), subxt::Error>>) -> HeaderStream {
-		StreamOf::new(Box::pin(stream.map(|item| {
-			let (header, block_ref) = item?;
-			Ok((into_header(header)?, block_ref.hash()))
-		})))
+	async fn subscribe_headers(&self, method: &str, unsubscribe: &str) -> Result<HeaderStream, ClientError> {
+		let subscription = self.client.subscribe::<Header>(method, unsubscribe, rpc_params![]).await?;
+		Ok(HeaderStream(
+			subscription
+				.map(|item| {
+					let header = item?;
+					let hash = header_hash(&header);
+					Ok((header, hash))
+				})
+				.boxed(),
+		))
 	}
 }
 
-pub async fn build_online_client(
-	url: &str,
-	mode: ApiClientMode,
-) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, String> {
-	let (client, rpc_client) = match mode {
-		ApiClientMode::RPC => {
-			let rpc_client = RpcClient::from_url(url)
-				.await
-				.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
-			let client = OnlineClient::from_rpc_client(rpc_client.clone())
-				.await
-				.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
-			(client, rpc_client)
-		},
+/// How long to wait for each finalized head before starting the light client.
+const LIGHT_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Builds a client for `url`. In light mode the chain spec is fetched from the node at `url`
+/// and the chain is then followed by an embedded smoldot instead.
+pub async fn build_online_client(url: &str, mode: ApiClientMode) -> Result<ApiClient, String> {
+	let ws = WsClientBuilder::default()
+		.max_buffer_capacity_per_subscription(4096)
+		.build(url)
+		.await
+		.map_err(|e| format!("Cannot construct RPC client: {e}"))?;
+	let client = match mode {
+		ApiClientMode::RPC => Transport::Ws(Arc::new(ws)),
 		ApiClientMode::Light => {
-			let chainspec = fetch_chainspec_from_rpc_node(url)
+			let chainspec: Box<serde_json::value::RawValue> = ws
+				.request("sync_state_genSyncSpec", rpc_params![true])
 				.await
 				.map_err(|e| format!("Cannot fetch chainspec: {e}"))?;
-			let (_client, rpc_client) =
-				LightClient::relay_chain(chainspec.get()).map_err(|e| format!("Cannot construct LightClient: {e}"))?;
-			let client = OnlineClient::from_rpc_client(rpc_client.clone())
+			// Skip two finalized heads so smoldot doesn't start from the chain spec's block.
+			let mut heads = ws
+				.subscribe::<Box<serde_json::value::RawValue>, _>(
+					"chain_subscribeFinalizedHeads",
+					rpc_params![],
+					"chain_unsubscribeFinalizedHeads",
+				)
 				.await
-				.map_err(|e| format!("Cannot construct OnlineClient from rpc client: {e}"))?;
-			(client, rpc_client.into())
+				.map_err(|e| format!("Cannot subscribe to finalized heads: {e}"))?;
+			for _ in 0..2 {
+				match tokio::time::timeout(LIGHT_BOOTSTRAP_TIMEOUT, heads.next()).await {
+					Ok(Some(Ok(_))) => {},
+					Ok(Some(Err(e))) => return Err(format!("Finalized heads subscription failed: {e}")),
+					Ok(None) => return Err("Finalized heads subscription closed during light client bootstrap".into()),
+					Err(_) => return Err("Timed out waiting for finalized heads during light client bootstrap".into()),
+				}
+			}
+			let (_client, rpc) =
+				LightClient::relay_chain(chainspec.get()).map_err(|e| format!("Cannot construct LightClient: {e}"))?;
+			Transport::Light(rpc)
 		},
 	};
-	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
-	let hasher = client.hasher();
-
-	Ok(ApiClient { client, legacy_rpc_methods, hasher })
+	Ok(ApiClient { client })
 }
 
 async fn join_requests<I, T>(fut: I) -> Result<Vec<T>, ClientError>

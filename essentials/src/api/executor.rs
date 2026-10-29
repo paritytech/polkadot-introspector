@@ -33,7 +33,7 @@ use polkadot_introspector_priority_channel::{
 	Receiver as PriorityReceiver, SendError as PrioritySendError, Sender as PrioritySender, channel,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
-use subxt::{OnlineClient, PolkadotConfig};
+use subxt_lightclient::LightClientRpcError;
 use thiserror::Error;
 use tokio::sync::{
 	broadcast::Sender as BroadcastSender,
@@ -122,11 +122,13 @@ pub enum RequestExecutorError {
 	ClientBuildFailed(String),
 	#[error("Client for url {0} not found")]
 	ClientNotFound(String),
-	#[error("subxt error: {0}")]
-	SubxtError(String),
-	#[error("subxt retriable error: {0}")]
-	SubxtRetriableError(String),
-	#[error("subxt connection timeout")]
+	#[error("client error: {0}")]
+	ClientError(String),
+	#[error("retriable client error: {0}")]
+	RetriableError(String),
+	#[error("connection lost: {0}")]
+	ConnectionLost(String),
+	#[error("client connection timeout")]
 	Timeout,
 	#[error("Send failed: {0}")]
 	PrioritySendError(#[from] PrioritySendError),
@@ -138,21 +140,37 @@ pub enum RequestExecutorError {
 
 impl From<ClientError> for RequestExecutorError {
 	fn from(err: ClientError) -> Self {
-		match err {
-			ClientError::Rpc(subxt::Error::Io(_) | subxt::Error::Rpc(_)) => Self::SubxtRetriableError(err.to_string()),
-			_ => Self::SubxtError(err.to_string()),
+		// A closed connection needs a reconnect; RPC errors and timeouts are retriable.
+		match &err {
+			ClientError::Rpc(
+				jsonrpsee::core::ClientError::Transport(_) | jsonrpsee::core::ClientError::RestartNeeded(_),
+			) => Self::ConnectionLost(err.to_string()),
+			ClientError::Rpc(jsonrpsee::core::ClientError::RequestTimeout | jsonrpsee::core::ClientError::Call(_)) =>
+				Self::RetriableError(err.to_string()),
+			// Reconnecting is not supported in light mode, so a dropped background task is fatal.
+			ClientError::Light(LightClientRpcError::JsonRpcError(_) | LightClientRpcError::SmoldotError(_)) =>
+				Self::RetriableError(err.to_string()),
+			ClientError::Light(LightClientRpcError::BackgroundTaskDropped) =>
+				Self::ClientError("light client background task was dropped; reconnecting is not supported".into()),
+			_ => Self::ClientError(err.to_string()),
 		}
 	}
 }
 
 impl RequestExecutorError {
 	pub fn should_retry(&self) -> bool {
-		matches!(self, Self::SubxtRetriableError(_))
+		matches!(self, Self::RetriableError(_) | Self::ConnectionLost(_))
+	}
+
+	fn needs_reconnect(&self) -> bool {
+		matches!(self, Self::ConnectionLost(_))
 	}
 }
 
 struct RequestExecutorBackend {
-	client: ApiClient<OnlineClient<PolkadotConfig>>,
+	url: String,
+	mode: ApiClientMode,
+	client: ApiClient,
 	retry: RetryOptions,
 }
 
@@ -160,14 +178,22 @@ impl RequestExecutorBackend {
 	async fn build(
 		retry: RetryOptions,
 		url: String,
-		api_client_mode: ApiClientMode,
+		mode: ApiClientMode,
 	) -> color_eyre::Result<Self, RequestExecutorError> {
-		let client = build_online_client(&url, api_client_mode).await.map_err(|err| {
+		let client = build_online_client(&url, mode).await.map_err(|err| {
 			error!("[{}] RpcClient error: {:?}", url, err);
 			RequestExecutorError::ClientBuildFailed(url.clone())
 		})?;
 
-		Ok(RequestExecutorBackend { client, retry })
+		Ok(RequestExecutorBackend { url, mode, client, retry })
+	}
+
+	/// On failure the old client is kept and the next retry tries again.
+	async fn reconnect(&mut self) {
+		match build_online_client(&self.url, self.mode).await {
+			Ok(client) => self.client = client,
+			Err(err) => error!("[{}] Reconnect failed: {:?}", self.url, err),
+		}
 	}
 
 	async fn run(&mut self, from_frontend: PriorityReceiver<ExecutorMessage>) -> color_eyre::Result<()> {
@@ -201,6 +227,9 @@ impl RequestExecutorBackend {
 					}
 					if (retry.sleep().await).is_err() {
 						return Err(RequestExecutorError::Timeout)
+					}
+					if e.needs_reconnect() {
+						self.reconnect().await;
 					}
 				},
 			}
@@ -502,5 +531,34 @@ impl RequestExecutor {
 		key: [u8; 32],
 	) -> color_eyre::Result<Option<AccountId32>, RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeKeyOwner, BabeKeyOwner, hash, key)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use jsonrpsee::{core::ClientError as RpcError, types::ErrorObject};
+	use std::sync::Arc;
+
+	#[test]
+	fn client_errors_are_classified() {
+		let ws = |e: RpcError| RequestExecutorError::from(ClientError::Rpc(e));
+		assert!(matches!(ws(RpcError::Transport("closed".into())), RequestExecutorError::ConnectionLost(_)));
+		assert!(matches!(
+			ws(RpcError::RestartNeeded(Arc::new(RpcError::RequestTimeout))),
+			RequestExecutorError::ConnectionLost(_)
+		));
+		assert!(matches!(ws(RpcError::RequestTimeout), RequestExecutorError::RetriableError(_)));
+		assert!(matches!(
+			ws(RpcError::Call(ErrorObject::owned(1, "boom", None::<()>))),
+			RequestExecutorError::RetriableError(_)
+		));
+		assert!(matches!(ClientError::Other("bad data".into()).into(), RequestExecutorError::ClientError(_)));
+
+		let light = |e: LightClientRpcError| RequestExecutorError::from(ClientError::Light(e));
+		let smoldot = light(LightClientRpcError::SmoldotError("boom".into()));
+		assert!(matches!(smoldot, RequestExecutorError::RetriableError(_)));
+		let dropped = light(LightClientRpcError::BackgroundTaskDropped);
+		assert!(matches!(dropped, RequestExecutorError::ClientError(_)) && !dropped.should_retry());
 	}
 }

@@ -39,6 +39,7 @@ futures = "0.3.31"
 futures-util = "0.3.27"
 hex = "0.4.3"
 itertools = "0.13.0"
+jsonrpsee = { version = "0.24.7", default-features = false, features = ["ws-client"] }
 log = "0.4.29"
 mockall = "0.14.0"
 parity-db = "0.4.13"
@@ -57,12 +58,8 @@ serde_urlencoded = "0.7.1"
 snap = "1.1.1"
 ss58-registry = { version = "1.51.0", default-features = false }
 strum = { version = "0.25.0", features = ["derive"] }
-subxt = { version = "0.44.3", default-features = false, features = [
-    "jsonrpsee",
-    "native",
-    "unstable-light-client",
-] }
 base64 = "0.22.1"
+subxt-lightclient = "0.44.3"
 thiserror = "2.0.12"
 time = { version = "0.3.47", features = ["formatting"] }
 tokio = { version = "1.45.1", features = [

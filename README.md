@@ -4,7 +4,7 @@
 
 The Polkadot Introspector is a collection of tools for monitoring and introspection of Polkadot or other substrate-based blockchains.
 
-The tools utilize data sources such as [subxt](https://github.com/paritytech/subxt/) or [substrate-telemetry](https://github.com/paritytech/substrate-telemetry/) to generate output. Depending on the tool used, the data source and output may differ. For examples of how this data can be visualized in Grafana, please see the section about [Grafana dashboards](grafana/README.md).
+The tools utilize data sources such as the node's JSON-RPC (over [jsonrpsee](https://github.com/paritytech/jsonrpsee/)) or [substrate-telemetry](https://github.com/paritytech/substrate-telemetry/) to generate output. Depending on the tool used, the data source and output may differ. For examples of how this data can be visualized in Grafana, please see the section about [Grafana dashboards](grafana/README.md).
 
 ## Tools available
 
