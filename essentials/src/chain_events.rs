@@ -15,18 +15,9 @@
 // along with polkadot-introspector.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-use crate::{
-	api::dynamic::decode_candidate_event,
-	metadata::polkadot::{
-		para_inclusion::events::{CandidateBacked, CandidateIncluded, CandidateTimedOut},
-		paras_disputes::events::{DisputeConcluded, DisputeInitiated},
-	},
-	types::{H256, Header, PolkadotHash, PolkadotHasher},
-};
-use color_eyre::{Result, eyre::eyre};
+use crate::types::{H256, Header, PolkadotHash};
 use parity_scale_codec::{Decode, Encode};
 use serde::Serialize;
-use subxt::{PolkadotConfig, config::Hasher};
 
 #[derive(Debug)]
 pub enum ChainEvent {
@@ -86,112 +77,4 @@ pub enum SubxtDisputeResult {
 	Invalid,
 	/// Dispute has been timed out
 	TimedOut,
-}
-
-pub async fn decode_chain_event(
-	block_hash: PolkadotHash,
-	event: subxt::events::EventDetails<PolkadotConfig>,
-	hasher: PolkadotHasher,
-) -> Result<Option<ChainEvent>> {
-	if is_specific_event::<DisputeInitiated, PolkadotConfig>(&event) {
-		let decoded = decode_to_specific_event::<DisputeInitiated, PolkadotConfig>(&event)?;
-		return Ok(Some(ChainEvent::DisputeInitiated(SubxtDispute {
-			relay_parent_block: block_hash,
-			candidate_hash: decoded.0.0,
-		})))
-	}
-
-	if is_specific_event::<DisputeConcluded, PolkadotConfig>(&event) {
-		use crate::metadata::polkadot::runtime_types::polkadot_runtime_parachains::disputes;
-		let decoded = decode_to_specific_event::<DisputeConcluded, PolkadotConfig>(&event)?;
-		let outcome = match decoded.1 {
-			disputes::DisputeResult::Valid => SubxtDisputeResult::Valid,
-			disputes::DisputeResult::Invalid => SubxtDisputeResult::Invalid,
-		};
-		return Ok(Some(ChainEvent::DisputeConcluded(
-			SubxtDispute { relay_parent_block: block_hash, candidate_hash: decoded.0.0 },
-			outcome,
-		)))
-	}
-
-	if is_specific_event::<CandidateBacked, PolkadotConfig>(&event) {
-		return Ok(Some(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
-			&event,
-			SubxtCandidateEventType::Backed,
-			hasher,
-		)?))))
-	}
-
-	if is_specific_event::<CandidateIncluded, PolkadotConfig>(&event) {
-		return Ok(Some(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
-			&event,
-			SubxtCandidateEventType::Included,
-			hasher,
-		)?))))
-	}
-
-	if is_specific_event::<CandidateTimedOut, PolkadotConfig>(&event) {
-		return Ok(Some(ChainEvent::CandidateChanged(Box::new(decode_candidate_changed(
-			&event,
-			SubxtCandidateEventType::TimedOut,
-			hasher,
-		)?))))
-	}
-
-	Ok(None)
-}
-
-fn is_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
-	raw_event: &subxt::events::EventDetails<C>,
-) -> bool {
-	E::is_event(raw_event.pallet_name(), raw_event.variant_name())
-}
-
-fn decode_to_specific_event<E: subxt::events::StaticEvent, C: subxt::Config>(
-	raw_event: &subxt::events::EventDetails<C>,
-) -> color_eyre::Result<E> {
-	raw_event
-		.as_event()
-		.map_err(|e| {
-			eyre!(
-				"cannot decode event pallet {}, variant {}: {:?}",
-				raw_event.pallet_name(),
-				raw_event.variant_name(),
-				e
-			)
-		})
-		.and_then(|maybe_event| {
-			maybe_event.ok_or_else(|| {
-				eyre!(
-					"cannot decode event pallet {}, variant {}: no event found",
-					raw_event.pallet_name(),
-					raw_event.variant_name(),
-				)
-			})
-		})
-}
-
-// SCALE-encoded size of CandidateReceipt: CandidateDescriptor (292 bytes) + commitments_hash (32 bytes).
-// Hashing raw bytes makes us independent of receipt version since the byte layout is stable.
-const CANDIDATE_RECEIPT_SIZE: usize = 324;
-
-fn hash_candidate_receipt(bytes: &[u8], hasher: PolkadotHasher) -> Result<PolkadotHash> {
-	if bytes.len() < CANDIDATE_RECEIPT_SIZE {
-		return Err(eyre!(
-			"event field_bytes too short ({} < {}), cannot compute candidate hash",
-			bytes.len(),
-			CANDIDATE_RECEIPT_SIZE
-		))
-	}
-	Ok(hasher.hash(&bytes[..CANDIDATE_RECEIPT_SIZE]))
-}
-
-fn decode_candidate_changed(
-	event: &subxt::events::EventDetails<PolkadotConfig>,
-	event_type: SubxtCandidateEventType,
-	hasher: PolkadotHasher,
-) -> Result<SubxtCandidateEvent> {
-	let (para_id, relay_parent, core_idx) = decode_candidate_event(&event.field_values()?)?;
-	let candidate_hash = hash_candidate_receipt(event.field_bytes(), hasher)?;
-	Ok(SubxtCandidateEvent { candidate_hash, relay_parent, parachain_id: para_id, event_type, core_idx })
 }
