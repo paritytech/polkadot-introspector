@@ -16,7 +16,7 @@
 //
 
 use bitvec::{order::Lsb0, vec::BitVec};
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::{Decode, DecodeAll, Encode};
 pub use primitive_types::{H256, U256};
 use std::{collections::BTreeMap, fmt};
 
@@ -122,6 +122,56 @@ pub enum DigestItem {
 	Other(Vec<u8>),
 	#[codec(index = 8)]
 	RuntimeEnvironmentUpdated,
+}
+
+impl<'de> serde::Deserialize<'de> for Header {
+	/// Parses a JSON-RPC header.
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		use serde::de::Error;
+
+		#[derive(serde_derive::Deserialize)]
+		#[serde(rename_all = "camelCase")]
+		struct RawHeader {
+			parent_hash: H256,
+			number: RawNumber,
+			state_root: H256,
+			extrinsics_root: H256,
+			digest: RawDigest,
+		}
+		/// Hex string or integer.
+		#[derive(serde_derive::Deserialize)]
+		#[serde(untagged)]
+		enum RawNumber {
+			Hex(String),
+			Int(u32),
+		}
+		#[derive(serde_derive::Deserialize)]
+		struct RawDigest {
+			logs: Vec<String>,
+		}
+
+		let raw = RawHeader::deserialize(deserializer)?;
+		let number = match raw.number {
+			RawNumber::Hex(hex) => u32::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(Error::custom)?,
+			RawNumber::Int(number) => number,
+		};
+		let logs = raw
+			.digest
+			.logs
+			.iter()
+			.map(|log| {
+				let bytes = hex::decode(log.trim_start_matches("0x")).map_err(Error::custom)?;
+				DigestItem::decode_all(&mut &bytes[..]).map_err(Error::custom)
+			})
+			.collect::<Result<_, _>>()?;
+		Ok(Header {
+			parent_hash: raw.parent_hash,
+			number,
+			state_root: raw.state_root,
+			extrinsics_root: raw.extrinsics_root,
+			digest: Digest { logs },
+		})
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
