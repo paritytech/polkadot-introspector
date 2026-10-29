@@ -16,22 +16,15 @@
 //
 
 use crate::{
-	api::{
-		decode::{
-			DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
-			decode_availability_cores, decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes,
-			decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids, decode_parainherent,
-			decode_queued_authority_discovery_keys, decode_session_index, decode_slot, decode_timestamp,
-			decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
-			para_session_account_keys_key, queued_keys_key, session_key_owner_key, timestamp_now_key,
-		},
-		shadow,
+	api::decode::{
+		DecodedBabeEpoch, DecodedDispute, babe_current_slot_key, decode_account_id, decode_account_keys,
+		decode_availability_cores, decode_babe_epoch, decode_candidate_events, decode_claim_queue, decode_disputes,
+		decode_hrmp_channel, decode_hrmp_channel_digests, decode_para_ids, decode_parainherent,
+		decode_queued_authority_discovery_keys, decode_session_index, decode_slot, decode_timestamp,
+		decode_validator_groups, hrmp_channel_digests_key, hrmp_channels_key, hrmp_egress_channels_index_key,
+		para_session_account_keys_key, queued_keys_key, session_key_owner_key, timestamp_now_key,
 	},
 	chain_events::SubxtCandidateEvent,
-	metadata::polkadot::{
-		self,
-		runtime_types::polkadot_parachain_primitives::primitives::{HrmpChannelId, Id},
-	},
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InherentData, PolkadotHasher, QueuedKeys,
 		Slot, SubxtHrmpChannel, Timestamp, ValidatorIndex,
@@ -49,7 +42,6 @@ use subxt::{
 	blocks::BlockRef,
 	client::OnlineClientT,
 	lightclient::LightClient,
-	storage::StorageClient,
 	utils::fetch_chainspec_from_rpc_node,
 };
 
@@ -71,19 +63,11 @@ where
 	client: T,
 	legacy_rpc_methods: LegacyRpcMethods<PolkadotConfig>,
 	hasher: PolkadotHasher,
-	/// When set, each migrated read is also decoded through the metadata-free path and the two
-	/// results are compared, aborting on any mismatch. The comparison harness itself lands with
-	/// the first migrated read.
-	shadow: bool,
 }
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub fn hasher(&self) -> PolkadotHasher {
 		self.hasher
-	}
-
-	fn storage(&self) -> StorageClient<PolkadotConfig, T> {
-		self.client.storage()
 	}
 
 	/// Fetches a header via `chain_getHeader` — the metadata-free counterpart of the blocks API.
@@ -142,26 +126,10 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		para_id: u32,
 	) -> Result<Vec<u32>, subxt::Error> {
 		let key = hrmp_egress_channels_index_key(para_id);
-		let metadata_free = client
+		Ok(client
 			.storage_via_rpc(block_hash, &key, "HrmpEgressChannelsIndex", decode_para_ids)
 			.await?
-			.unwrap_or_default();
-
-		if client.shadow {
-			let addr = polkadot::storage().hrmp().hrmp_egress_channels_index(Id(para_id));
-			let index: Vec<u32> = client
-				.storage()
-				.at(block_hash)
-				.fetch(&addr)
-				.await?
-				.unwrap_or_default()
-				.iter()
-				.map(|id| id.0)
-				.collect();
-			shadow::compare(block_hash, "hrmp_egress_channels_index", &index, &metadata_free);
-		}
-
-		Ok(metadata_free)
+			.unwrap_or_default())
 	}
 
 	async fn get_hrmp_channel_digests(
@@ -170,26 +138,10 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		para_id: u32,
 	) -> Result<Vec<(u32, Vec<u32>)>, subxt::Error> {
 		let key = hrmp_channel_digests_key(para_id);
-		let metadata_free = client
+		Ok(client
 			.storage_via_rpc(block_hash, &key, "HrmpChannelDigests", decode_hrmp_channel_digests)
 			.await?
-			.unwrap_or_default();
-
-		if client.shadow {
-			let addr = polkadot::storage().hrmp().hrmp_channel_digests(Id(para_id));
-			let digests: Vec<(u32, Vec<u32>)> = client
-				.storage()
-				.at(block_hash)
-				.fetch(&addr)
-				.await?
-				.unwrap_or_default()
-				.into_iter()
-				.map(|v| (v.0, v.1.into_iter().map(|v| v.0).collect()))
-				.collect();
-			shadow::compare(block_hash, "hrmp_channel_digests", &digests, &metadata_free);
-		}
-
-		Ok(metadata_free)
+			.unwrap_or_default())
 	}
 
 	async fn get_hrmp_channels(
@@ -199,19 +151,11 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		recipient: u32,
 	) -> Result<Option<(u32, u32, SubxtHrmpChannel)>, subxt::Error> {
 		let key = hrmp_channels_key(sender, recipient);
-		let metadata_free = client
+		let channel = client
 			.storage_via_rpc(block_hash, &key, "HrmpChannels", decode_hrmp_channel)
 			.await?;
 
-		if client.shadow {
-			let id = HrmpChannelId { sender: Id(sender), recipient: Id(recipient) };
-			let addr = polkadot::storage().hrmp().hrmp_channels(id);
-			let channel = client.storage().at(block_hash).fetch(&addr).await?;
-			let old = channel.as_ref().map(SubxtHrmpChannel::from);
-			shadow::compare(block_hash, "hrmp_channel", &old, &metadata_free);
-		}
-
-		Ok(metadata_free.map(|channel| (sender, recipient, channel)))
+		Ok(channel.map(|channel| (sender, recipient, channel)))
 	}
 
 	async fn get_inbound_hrmp_channel_pairs(
@@ -435,7 +379,6 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 pub async fn build_online_client(
 	url: &str,
 	mode: ApiClientMode,
-	shadow: bool,
 ) -> Result<ApiClient<OnlineClient<PolkadotConfig>>, String> {
 	let (client, rpc_client) = match mode {
 		ApiClientMode::RPC => {
@@ -462,7 +405,7 @@ pub async fn build_online_client(
 	let legacy_rpc_methods = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client);
 	let hasher = client.hasher();
 
-	Ok(ApiClient { client, legacy_rpc_methods, hasher, shadow })
+	Ok(ApiClient { client, legacy_rpc_methods, hasher })
 }
 
 async fn join_requests<I, T>(fut: I) -> Result<Vec<T>, subxt::Error>
