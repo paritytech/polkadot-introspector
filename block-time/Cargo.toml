@@ -19,5 +19,4 @@ polkadot-introspector-essentials = { workspace = true }
 polkadot-introspector-priority-channel = { workspace = true }
 prometheus-endpoint = { workspace = true }
 rasciigraph = { workspace = true }
-subxt = { workspace = true }
 tokio = { workspace = true }
