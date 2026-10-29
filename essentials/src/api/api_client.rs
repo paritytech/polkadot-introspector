@@ -26,7 +26,7 @@ use crate::{
 			para_session_account_keys_key, queued_keys_key, session_key_owner_key, timestamp_now_key,
 		},
 		dynamic::{
-			decode_availability_cores as decode_availability_cores_dynamic, decode_inherent_data,
+			decode_availability_cores as decode_availability_cores_dynamic,
 			decode_validator_groups as decode_validator_groups_dynamic,
 		},
 		shadow,
@@ -53,7 +53,7 @@ use subxt::{
 		legacy::{LegacyRpcMethods, rpc_methods::NumberOrHex},
 		rpc::RpcClient,
 	},
-	blocks::{Block, BlockRef, BlocksClient},
+	blocks::BlockRef,
 	client::OnlineClientT,
 	dynamic::Value,
 	lightclient::LightClient,
@@ -95,19 +95,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.client.storage()
 	}
 
-	fn blocks(&self) -> BlocksClient<PolkadotConfig, T> {
-		self.client.blocks()
-	}
-
 	fn runtime_api(&self) -> RuntimeApiClient<PolkadotConfig, T> {
 		self.client.runtime_api()
-	}
-
-	async fn block_at(&self, maybe_hash: Option<H256>) -> Result<Block<PolkadotConfig, T>, subxt::Error> {
-		match maybe_hash {
-			Some(hash) => self.blocks().at(hash).await,
-			None => self.blocks().at_latest().await,
-		}
 	}
 
 	async fn runtime_api_at(&self, maybe_hash: Option<H256>) -> Result<RuntimeApi<PolkadotConfig, T>, subxt::Error> {
@@ -565,29 +554,8 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.extrinsics
 			.get(1)
 			.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
-		let metadata_free = decode_parainherent(&para_inherent.0)
-			.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent: {e}")))?;
-
-		if self.shadow {
-			// do nth(1) instead of take(2).last(), this allows us to clearly return an error instead of panicking.
-			let ex = self
-				.block_at(Some(hash))
-				.await?
-				.extrinsics()
-				.await?
-				.iter()
-				.nth(1)
-				.ok_or_else(|| "`ParaInherent` extrinsic missing at index #1".to_string())?;
-			let inherent = ex
-				.field_values()
-				.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
-				.and_then(|v| decode_inherent_data(&v).map_err(|e| format!("Failed to decode ParaInherent: {e}")))
-				.map_err(subxt::Error::Other)?;
-			shadow::compare(hash, "parainherent_bitfields", &inherent.bitfields, &metadata_free.bitfields);
-			shadow::compare(hash, "parainherent_disputes", &inherent.disputes, &metadata_free.disputes);
-		}
-
-		Ok(metadata_free)
+		decode_parainherent(&para_inherent.0)
+			.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent: {e}")))
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes
