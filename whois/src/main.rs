@@ -238,7 +238,7 @@ impl Whois {
 						.ok_or(WhoisError::InvalidAuthorityDiscovery(authority_discovery));
 					account.map(|(account, _)| {
 						let validator_index = para_session_account_keys.iter().position(|x| account == x);
-						(account.clone(), validator_index)
+						(*account, validator_index)
 					})
 				})
 				.collect::<Result<Vec<_>, _>>()?,
@@ -258,7 +258,7 @@ impl Whois {
 
 						account_for_key.map(|(account, _)| {
 							let validator_index = para_session_account_keys.iter().position(|x| account == x);
-							(account.clone(), validator_index)
+							(*account, validator_index)
 						})
 					})
 				})
