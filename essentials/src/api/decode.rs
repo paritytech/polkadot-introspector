@@ -116,6 +116,30 @@ pub struct DecodedDispute {
 	pub concluded_at: Option<u32>,
 }
 
+impl DecodedDispute {
+	/// Whether the votes for the candidate reached the supermajority, i.e. it concluded valid.
+	pub fn concluded_for(&self) -> bool {
+		self.reached_supermajority(&self.validators_for)
+	}
+
+	/// Whether the votes against the candidate reached the supermajority, i.e. it concluded invalid.
+	pub fn concluded_against(&self) -> bool {
+		self.reached_supermajority(&self.validators_against)
+	}
+
+	/// An empty validator set concludes nothing, although its threshold of 0 is trivially reached.
+	fn reached_supermajority(&self, votes: &[u32]) -> bool {
+		self.validator_count > 0 && votes.len() >= supermajority_threshold(self.validator_count) as usize
+	}
+}
+
+/// The number of votes a side needs to conclude a dispute among `n` validators, as
+/// `supermajority_threshold` in `polkadot-primitives`:
+/// <https://github.com/paritytech/polkadot-sdk/blob/polkadot-stable2412/polkadot/primitives/src/v8/mod.rs>
+pub fn supermajority_threshold(n: u32) -> u32 {
+	n - n.saturating_sub(1) / 3
+}
+
 /// One element of the `ParachainHost_disputes` result: `SessionIndex ++ CandidateHash ++
 /// DisputeState`, where `DisputeState` is `validators_for ++ validators_against ++ start ++
 /// concluded_at` — the two bitsets come first, so their variable length is consumed before the
@@ -136,18 +160,29 @@ struct RawDispute {
 pub fn decode_disputes(bytes: &[u8]) -> Result<Vec<DecodedDispute>> {
 	let raw = Vec::<RawDispute>::decode_all(&mut &bytes[..]).map_err(|e| eyre!("disputes: cannot decode: {e}"))?;
 
-	Ok(raw
-		.into_iter()
-		.map(|dispute| DecodedDispute {
-			session: dispute.session,
-			candidate_hash: H256::from(dispute.candidate_hash),
-			validators_for: dispute.validators_for.iter_ones().map(|i| i as u32).collect(),
-			validators_against: dispute.validators_against.iter_ones().map(|i| i as u32).collect(),
-			validator_count: dispute.validators_for.len().max(dispute.validators_against.len()) as u32,
-			start: dispute.start,
-			concluded_at: dispute.concluded_at,
+	raw.into_iter()
+		.map(|dispute| {
+			// The pallet sizes both bitsets to the session's validator set, so differing lengths mean
+			// the layout was misread.
+			if dispute.validators_for.len() != dispute.validators_against.len() {
+				return Err(eyre!(
+					"disputes: bitset lengths differ for candidate {:?}: for {}, against {}",
+					H256::from(dispute.candidate_hash),
+					dispute.validators_for.len(),
+					dispute.validators_against.len()
+				));
+			}
+			Ok(DecodedDispute {
+				session: dispute.session,
+				candidate_hash: H256::from(dispute.candidate_hash),
+				validators_for: dispute.validators_for.iter_ones().map(|i| i as u32).collect(),
+				validators_against: dispute.validators_against.iter_ones().map(|i| i as u32).collect(),
+				validator_count: dispute.validators_for.len() as u32,
+				start: dispute.start,
+				concluded_at: dispute.concluded_at,
+			})
 		})
-		.collect())
+		.collect()
 }
 
 /// `polkadot_primitives::ScheduledCore`. Only decoded to advance the cursor; fields go unread.
@@ -657,6 +692,59 @@ mod tests {
 		blob.extend([0u8; 32]); // candidate_hash
 		blob.extend(Compact(64u32).encode()); // claims 64 bits, but no payload bytes follow
 		assert!(decode_disputes(&blob).is_err());
+	}
+
+	#[test]
+	fn rejects_disputes_bitset_length_mismatch() {
+		let mut out = 1u32.encode();
+		out.extend([0u8; 32]);
+		out.extend(encode_bitset(&[0], 8));
+		out.extend(encode_bitset(&[1], 16));
+		out.extend(1u32.encode());
+		out.extend(None::<u32>.encode());
+		let mut blob = Compact(1u32).encode();
+		blob.extend(out);
+		assert!(decode_disputes(&blob).is_err());
+	}
+
+	#[test]
+	fn supermajority_threshold_values() {
+		let thresholds: Vec<u32> = [0, 1, 2, 3, 4, 6, 9, 10, 100]
+			.into_iter()
+			.map(supermajority_threshold)
+			.collect();
+		assert_eq!(thresholds, vec![0, 1, 2, 3, 3, 5, 7, 7, 67]);
+	}
+
+	fn tallied(validator_count: u32, votes_for: u32, votes_against: u32) -> DecodedDispute {
+		DecodedDispute {
+			session: 1,
+			candidate_hash: H256::zero(),
+			validators_for: (0..votes_for).collect(),
+			validators_against: (0..votes_against).collect(),
+			validator_count,
+			start: 1,
+			concluded_at: None,
+		}
+	}
+
+	#[test]
+	fn concludes_at_the_supermajority_threshold() {
+		// 9 validators need 7 votes.
+		let below = tallied(9, 6, 6);
+		assert!(!below.concluded_for() && !below.concluded_against());
+		let valid = tallied(9, 7, 2);
+		assert!(valid.concluded_for() && !valid.concluded_against());
+		let invalid = tallied(9, 2, 7);
+		assert!(!invalid.concluded_for() && invalid.concluded_against());
+		let both = tallied(9, 7, 7);
+		assert!(both.concluded_for() && both.concluded_against());
+	}
+
+	#[test]
+	fn empty_validator_set_concludes_nothing() {
+		let empty = tallied(0, 0, 0);
+		assert!(!empty.concluded_for() && !empty.concluded_against());
 	}
 
 	// Encodes a `ScheduledCore { para_id, collator: None }`.

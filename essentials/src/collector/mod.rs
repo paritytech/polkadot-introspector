@@ -389,20 +389,25 @@ impl Collector {
 		chain_events: &[ChainEvent],
 		disputes: &[DecodedDispute],
 	) -> color_eyre::Result<()> {
-		let block_events = self
-			.executor
-			.get_events(self.endpoint.as_str(), hash)
-			.await?
-			.ok_or_else(|| eyre!("No System.Events for block {hash:?} to shadow against"))?;
+		let block_events = self.executor.get_events(self.endpoint.as_str(), hash).await?;
 		let mut scraped = Vec::new();
+		let mut skipped_events = 0u32;
 		for block_event in block_events.iter() {
 			match block_event {
 				Ok(event) =>
 					if let Some(chain_event) = decode_chain_event(hash, event, self.hasher).await? {
 						scraped.push(chain_event);
 					},
-				Err(e) => warn!("Failed to decode block event at {hash:?}, skipping: {e}"),
+				Err(e) => {
+					warn!("Failed to decode block event at {hash:?}, skipping: {e}");
+					skipped_events += 1;
+				},
 			}
+		}
+		// A skipped event that the runtime calls did report ends in a decoder-mismatch abort below,
+		// so this is the hint at the real cause.
+		if skipped_events > 0 {
+			error!("Skipped {skipped_events} undecoded events in block {hash:?}");
 		}
 
 		shadow::compare_set(
@@ -413,19 +418,9 @@ impl Collector {
 			|event| (event.candidate_hash, event.event_type),
 		);
 
-		// A second conclusion in a later block than the recorded `concluded_at` cannot be expressed by
-		// the runtime call, so such candidates are excluded from the scraped side. A real one means both
-		// sides have reached the threshold by this block. A double conclusion within one block is
-		// reproduced by `disputes_to_chain_events` and compared normally.
-		let concluded_twice: BTreeSet<H256> = disputes
-			.iter()
-			.filter(|dispute| dispute.concluded_at.is_some_and(|at| at < block_number))
-			.filter(|dispute| {
-				let threshold = supermajority_threshold(dispute.validator_count) as usize;
-				dispute.validators_for.len() >= threshold && dispute.validators_against.len() >= threshold
-			})
-			.map(|dispute| dispute.candidate_hash)
-			.collect();
+		// The runtime call keeps only the first `concluded_at`, so it cannot express a second
+		// conclusion in a later block. Such candidates are excluded from the scraped side.
+		let concluded_twice = concluded_earlier_both_ways(block_number, disputes);
 		let scraped_concluded: Vec<ConcludedDispute> = concluded_disputes(&scraped)
 			.into_iter()
 			.filter(|dispute| !concluded_twice.contains(&dispute.candidate_hash))
@@ -1369,11 +1364,16 @@ fn concluded_disputes(chain_events: &[ChainEvent]) -> Vec<ConcludedDispute> {
 		.collect()
 }
 
-/// The number of votes a side needs to conclude a dispute among `n` validators, as
-/// `supermajority_threshold` in `polkadot-primitives`:
-/// <https://github.com/paritytech/polkadot-sdk/blob/polkadot-stable2412/polkadot/primitives/src/v8/mod.rs>
-fn supermajority_threshold(n: u32) -> u32 {
-	n - n.saturating_sub(1) / 3
+/// Candidates whose dispute first concluded before `block_number` and has since reached the
+/// supermajority on both sides, so a `DisputeConcluded` event in this block may be their second one.
+/// A double conclusion within one block is reproduced by `disputes_to_chain_events` instead.
+fn concluded_earlier_both_ways(block_number: u32, disputes: &[DecodedDispute]) -> BTreeSet<H256> {
+	disputes
+		.iter()
+		.filter(|dispute| dispute.concluded_at.is_some_and(|at| at < block_number))
+		.filter(|dispute| dispute.concluded_for() && dispute.concluded_against())
+		.map(|dispute| dispute.candidate_hash)
+		.collect()
 }
 
 /// Turns the disputes returned by `ParachainHost_disputes` into the events for this block:
@@ -1397,16 +1397,8 @@ fn disputes_to_chain_events(hash: H256, block_number: u32, disputes: &[DecodedDi
 		.iter()
 		.filter(|disputed| disputed.concluded_at == Some(block_number))
 		.flat_map(move |disputed| {
-			if disputed.validator_count == 0 {
-				error!(
-					"Dispute {:?} concluded at block {hash:?} with validator_count 0, skipping",
-					disputed.candidate_hash
-				);
-				return Vec::new();
-			}
-			let threshold = supermajority_threshold(disputed.validator_count) as usize;
-			let valid = disputed.validators_for.len() >= threshold;
-			let invalid = disputed.validators_against.len() >= threshold;
+			let valid = disputed.concluded_for();
+			let invalid = disputed.concluded_against();
 			if valid && invalid {
 				warn!(
 					"Dispute {:?} reached a supermajority on both sides at block {hash:?}, emitting both conclusions",
@@ -1415,7 +1407,7 @@ fn disputes_to_chain_events(hash: H256, block_number: u32, disputes: &[DecodedDi
 			} else if !valid && !invalid {
 				error!(
 					"Dispute {:?} concluded at block {hash:?} without a supermajority on either side \
-					(for {}, against {}, threshold {threshold}, validator_count {}), decoder defect, skipping",
+					(for {}, against {}, validator_count {}), decoder defect, skipping",
 					disputed.candidate_hash,
 					disputed.validators_for.len(),
 					disputed.validators_against.len(),
@@ -1475,15 +1467,6 @@ mod tests {
 
 	fn concluded(id: u8, outcome: SubxtDisputeResult) -> ConcludedDispute {
 		ConcludedDispute { candidate_hash: H256::from([id; 32]), outcome }
-	}
-
-	#[test]
-	fn supermajority_threshold_values() {
-		let thresholds: Vec<u32> = [0, 1, 2, 3, 4, 6, 9, 10, 100]
-			.into_iter()
-			.map(supermajority_threshold)
-			.collect();
-		assert_eq!(thresholds, vec![0, 1, 2, 3, 3, 5, 7, 7, 67]);
 	}
 
 	#[test]
@@ -1573,5 +1556,20 @@ mod tests {
 		let mut empty = dispute(1, 90, Some(BLOCK), 0, 0);
 		empty.validator_count = 0;
 		assert!(events_in_block(&[empty]).is_empty());
+	}
+
+	#[test]
+	fn excludes_only_earlier_conclusions_on_both_sides() {
+		let disputes = [
+			// First concluded earlier, both sides now at the threshold: may conclude again here.
+			dispute(1, 90, Some(BLOCK - 1), THRESHOLD, THRESHOLD),
+			// Concluded earlier on one side only.
+			dispute(2, 90, Some(BLOCK - 1), THRESHOLD, BELOW),
+			// Both sides in this very block, handled by `disputes_to_chain_events`.
+			dispute(3, 90, Some(BLOCK), THRESHOLD, THRESHOLD),
+			// Not concluded.
+			dispute(4, 90, None, BELOW, BELOW),
+		];
+		assert_eq!(concluded_earlier_both_ways(BLOCK, &disputes), BTreeSet::from([H256::from([1; 32])]));
 	}
 }
