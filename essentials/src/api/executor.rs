@@ -85,7 +85,7 @@ enum Response {
 	/// A block hash.
 	MaybeBlockHash(Option<H256>),
 	/// Block events
-	MaybeEvents(Option<subxt::events::Events<PolkadotConfig>>),
+	Events(subxt::events::Events<PolkadotConfig>),
 	/// Candidate (backed/included/timed-out) events for a block, decoded without metadata.
 	CandidateEvents(Vec<SubxtCandidateEvent>),
 	/// Recent disputes for a block, decoded without metadata.
@@ -231,7 +231,7 @@ impl RequestExecutorBackend {
 			GetBlockNumber(maybe_hash) => BlockNumber(client.get_block_number(maybe_hash).await?),
 			GetBlockHash(maybe_block_number) => MaybeBlockHash(client.legacy_get_block_hash(maybe_block_number).await?),
 			GetChainName => ChainName(client.legacy_get_chain_name().await?),
-			GetEvents(hash) => MaybeEvents(Some(client.get_events(hash).await?)),
+			GetEvents(hash) => Events(client.get_events(hash).await?),
 			GetCandidateEvents(hash) => CandidateEvents(client.get_candidate_events(hash).await?),
 			GetDisputes(hash) => Disputes(client.get_disputes(hash).await?),
 			ExtractParaInherent(maybe_hash) => ParaInherentData(client.extract_parainherent(maybe_hash).await?),
@@ -409,8 +409,8 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Option<subxt::events::Events<PolkadotConfig>>, RequestExecutorError> {
-		wrap_backend_call!(self, url, GetEvents, MaybeEvents, hash)
+	) -> color_eyre::Result<subxt::events::Events<PolkadotConfig>, RequestExecutorError> {
+		wrap_backend_call!(self, url, GetEvents, Events, hash)
 	}
 
 	pub async fn get_candidate_events(
