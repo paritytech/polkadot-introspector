@@ -417,29 +417,29 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
-		let metadata_free = self
+		let cores = self
 			.state_call_decoded(hash, "ParachainHost_availability_cores", decode_availability_cores)
 			.await?;
 
 		if self.shadow {
 			let addr = subxt::runtime_api::dynamic("ParachainHost", "availability_cores", Vec::<Value<()>>::new());
 			let value = self.runtime_api_at(Some(hash)).await?.call(addr).await?.to_value()?;
-			let cores = decode_availability_cores_dynamic(&value)
+			let shadow_cores = decode_availability_cores_dynamic(&value)
 				.map_err(|e| subxt::Error::Other(format!("Failed to decode availability_cores: {e}")))?;
-			shadow::compare(hash, "availability_cores", &cores, &metadata_free);
+			shadow::compare(hash, "availability_cores", &shadow_cores, &cores);
 		}
 
-		Ok(metadata_free)
+		Ok(cores)
 	}
 
 	pub async fn get_claim_queue(&self, hash: H256) -> Result<ClaimQueue, subxt::Error> {
-		let metadata_free = self
+		let queue = self
 			.state_call_decoded(hash, "ParachainHost_claim_queue", decode_claim_queue)
 			.await?;
 
 		if self.shadow {
 			let addr = polkadot::apis().parachain_host().claim_queue();
-			let queue: ClaimQueue = self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
+			let shadow_queue: ClaimQueue = self.runtime_api_at(Some(hash)).await?.call(addr).await.map(|queue| {
 				queue
 					.iter()
 					.map(|(core, ids)| {
@@ -449,14 +449,14 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 					})
 					.collect::<Vec<_>>()
 			})?;
-			shadow::compare(hash, "claim_queue", &queue, &metadata_free);
+			shadow::compare(hash, "claim_queue", &shadow_queue, &queue);
 		}
 
-		Ok(metadata_free)
+		Ok(queue)
 	}
 
 	pub async fn get_backing_groups(&self, hash: H256) -> Result<Vec<Vec<ValidatorIndex>>, subxt::Error> {
-		let metadata_free = self
+		let groups = self
 			.state_call_decoded(hash, "ParachainHost_validator_groups", decode_validator_groups)
 			.await?;
 
@@ -465,13 +465,16 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				.fetch_dynamic_storage(Some(hash), "ParaScheduler", "ValidatorGroups")
 				.await?
 				.ok_or_else(|| subxt::Error::Other("ParaScheduler.ValidatorGroups not found".to_string()))?;
-			let groups = decode_validator_groups_dynamic(&value)
+			let shadow_groups = decode_validator_groups_dynamic(&value)
 				.map_err(|e| subxt::Error::Other(format!("Failed to decode validator groups: {e}")))?;
-			let old: Vec<Vec<u32>> = groups.iter().map(|group| group.iter().map(|idx| idx.0).collect()).collect();
-			shadow::compare(hash, "validator_groups", &old, &metadata_free);
+			let old: Vec<Vec<u32>> = shadow_groups
+				.iter()
+				.map(|group| group.iter().map(|idx| idx.0).collect())
+				.collect();
+			shadow::compare(hash, "validator_groups", &old, &groups);
 		}
 
-		Ok(metadata_free
+		Ok(groups
 			.into_iter()
 			.map(|group| group.into_iter().map(ValidatorIndex).collect())
 			.collect())
