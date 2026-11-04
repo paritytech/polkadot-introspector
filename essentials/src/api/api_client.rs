@@ -297,25 +297,25 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error> {
-		let (hash, metadata_free) = self.resolve_header(maybe_hash).await?;
+		let (hash, header) = self.resolve_header(maybe_hash).await?;
 
 		if self.shadow {
 			let block = self.block_at(Some(hash)).await?;
-			shadow::compare(hash, "block_header", block.header(), &metadata_free);
+			shadow::compare(hash, "block_header", block.header(), &header);
 		}
 
-		Ok(metadata_free)
+		Ok(header)
 	}
 
 	pub async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error> {
-		let (hash, metadata_free) = self.resolve_header(maybe_hash).await?;
+		let (hash, header) = self.resolve_header(maybe_hash).await?;
 
 		if self.shadow {
 			let number = self.block_at(Some(hash)).await?.number();
-			shadow::compare(hash, "block_number", &number, &metadata_free.number);
+			shadow::compare(hash, "block_number", &number, &header.number);
 		}
 
-		Ok(metadata_free.number)
+		Ok(header.number)
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
