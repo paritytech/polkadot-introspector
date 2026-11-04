@@ -356,24 +356,24 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 		self.state_call_decoded(hash, "BabeApi_current_epoch", decode_babe_epoch).await
 	}
 
-	pub async fn get_babe_randomness(&self, hash: H256) -> Result<Option<[u8; 32]>, subxt::Error> {
-		let metadata_free = Some(self.babe_current_epoch(hash).await?.randomness);
+	pub async fn get_babe_randomness(&self, hash: H256) -> Result<[u8; 32], subxt::Error> {
+		let randomness = self.babe_current_epoch(hash).await?.randomness;
 
 		if self.shadow {
 			let addr = polkadot::storage().babe().randomness();
-			let randomness = self.storage().at(hash).fetch(&addr).await?;
-			shadow::compare(hash, "babe_randomness", &randomness, &metadata_free);
+			let shadow_randomness = self.storage().at(hash).fetch(&addr).await?;
+			shadow::compare(hash, "babe_randomness", &shadow_randomness, &Some(randomness));
 		}
 
-		Ok(metadata_free)
+		Ok(randomness)
 	}
 
 	pub async fn get_babe_authorities(&self, hash: H256) -> Result<Vec<([u8; 32], u64)>, subxt::Error> {
-		let metadata_free = self.babe_current_epoch(hash).await?.authorities;
+		let authorities = self.babe_current_epoch(hash).await?.authorities;
 
 		if self.shadow {
 			let addr = polkadot::storage().babe().authorities();
-			let authorities = self
+			let shadow_authorities = self
 				.storage()
 				.at(hash)
 				.fetch(&addr)
@@ -383,10 +383,10 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				// `app::Public` wraps the 32 raw key bytes.
 				.map(|(public, weight)| (public.0, weight))
 				.collect::<Vec<_>>();
-			shadow::compare(hash, "babe_authorities", &authorities, &metadata_free);
+			shadow::compare(hash, "babe_authorities", &shadow_authorities, &authorities);
 		}
 
-		Ok(metadata_free)
+		Ok(authorities)
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
@@ -475,17 +475,17 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_session_index(&self, hash: H256) -> Result<u32, subxt::Error> {
-		let metadata_free = self
+		let index = self
 			.state_call_decoded(hash, "ParachainHost_session_index_for_child", decode_session_index)
 			.await?;
 
 		if self.shadow {
 			let addr = polkadot::storage().session().current_index();
-			let index = self.storage().at(hash).fetch(&addr).await?;
-			shadow::compare(hash, "session_index", &index.unwrap_or_default(), &metadata_free);
+			let shadow_index = self.storage().at(hash).fetch(&addr).await?;
+			shadow::compare(hash, "session_index", &shadow_index.unwrap_or_default(), &index);
 		}
 
-		Ok(metadata_free)
+		Ok(index)
 	}
 
 	pub async fn get_session_index_now(&self) -> Result<u32, subxt::Error> {
@@ -500,34 +500,34 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	) -> Result<Option<Vec<AccountId32>>, subxt::Error> {
 		let hash = self.resolve_hash(maybe_hash).await?;
 		let key = para_session_account_keys_key(session_index);
-		let metadata_free = self.storage_via_rpc(hash, &key, "account_keys", decode_account_keys).await?;
+		let account_keys = self.storage_via_rpc(hash, &key, "account_keys", decode_account_keys).await?;
 
 		if self.shadow {
 			let addr = polkadot::storage().para_session_info().account_keys(session_index);
-			let keys = self.storage().at(hash).fetch(&addr).await?;
-			shadow::compare(hash, "session_account_keys", &keys, &metadata_free);
+			let shadow_keys = self.storage().at(hash).fetch(&addr).await?;
+			shadow::compare(hash, "session_account_keys", &shadow_keys, &account_keys);
 		}
 
-		Ok(metadata_free)
+		Ok(account_keys)
 	}
 
 	pub async fn get_session_queued_keys(&self, maybe_hash: Option<H256>) -> Result<Option<QueuedKeys>, subxt::Error> {
 		let hash = self.resolve_hash(maybe_hash).await?;
-		let metadata_free = self
+		let queued_keys = self
 			.storage_via_rpc(hash, &queued_keys_key(), "Session.QueuedKeys", decode_queued_authority_discovery_keys)
 			.await?;
 
 		if self.shadow {
 			let addr = polkadot::storage().session().queued_keys();
-			let queued = self.storage().at(hash).fetch(&addr).await?.map(|keys| {
+			let shadow_queued_keys = self.storage().at(hash).fetch(&addr).await?.map(|keys| {
 				keys.into_iter()
 					.map(|(account, keys)| (account, keys.authority_discovery.0))
 					.collect::<QueuedKeys>()
 			});
-			shadow::compare(hash, "session_queued_keys", &queued, &metadata_free);
+			shadow::compare(hash, "session_queued_keys", &shadow_queued_keys, &queued_keys);
 		}
 
-		Ok(metadata_free)
+		Ok(queued_keys)
 	}
 
 	pub async fn get_inbound_outbound_hrmp_channels(
