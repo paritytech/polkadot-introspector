@@ -600,7 +600,7 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 			.extrinsics
 			.get(1)
 			.ok_or_else(|| subxt::Error::Other("`ParaInherent` extrinsic missing at index #1".to_string()))?;
-		let metadata_free = decode_parainherent(&para_inherent.0)
+		let inherent = decode_parainherent(&para_inherent.0)
 			.map_err(|e| subxt::Error::Other(format!("Failed to decode ParaInherent: {e}")))?;
 
 		if self.shadow {
@@ -613,16 +613,16 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 				.iter()
 				.nth(1)
 				.ok_or_else(|| "`ParaInherent` extrinsic missing at index #1".to_string())?;
-			let inherent = ex
+			let shadow_inherent = ex
 				.field_values()
 				.map_err(|e| format!("Failed to get ParaInherent field values: {e}"))
 				.and_then(|v| decode_inherent_data(&v).map_err(|e| format!("Failed to decode ParaInherent: {e}")))
 				.map_err(subxt::Error::Other)?;
-			shadow::compare(hash, "parainherent_bitfields", &inherent.bitfields, &metadata_free.bitfields);
-			shadow::compare(hash, "parainherent_disputes", &inherent.disputes, &metadata_free.disputes);
+			shadow::compare(hash, "parainherent_bitfields", &shadow_inherent.bitfields, &inherent.bitfields);
+			shadow::compare(hash, "parainherent_disputes", &shadow_inherent.disputes, &inherent.disputes);
 		}
 
-		Ok(metadata_free)
+		Ok(inherent)
 	}
 
 	// We need it only for the historical mode to convert block numbers into their hashes
