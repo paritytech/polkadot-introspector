@@ -319,17 +319,17 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
-		let metadata_free = self
+		let timestamp = self
 			.storage_via_rpc(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
 			.await?;
 
 		if self.shadow {
 			let addr = polkadot::storage().timestamp().now();
-			let timestamp = self.storage().at(hash).fetch(&addr).await?;
-			shadow::compare(hash, "block_timestamp", &timestamp, &metadata_free);
+			let shadow_timestamp = self.storage().at(hash).fetch(&addr).await?;
+			shadow::compare(hash, "block_timestamp", &shadow_timestamp, &timestamp);
 		}
 
-		Ok(metadata_free)
+		Ok(timestamp)
 	}
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
@@ -390,30 +390,30 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	}
 
 	pub async fn get_babe_current_slot(&self, hash: H256) -> Result<Option<Slot>, subxt::Error> {
-		let metadata_free = self
+		let slot = self
 			.storage_via_rpc(hash, &babe_current_slot_key(), "Babe.CurrentSlot", decode_slot)
 			.await?;
 
 		if self.shadow {
 			let addr = polkadot::storage().babe().current_slot();
-			let slot = self.storage().at(hash).fetch(&addr).await?.map(|slot| slot.0);
-			shadow::compare(hash, "babe_current_slot", &slot, &metadata_free);
+			let shadow_slot = self.storage().at(hash).fetch(&addr).await?.map(|slot| slot.0);
+			shadow::compare(hash, "babe_current_slot", &shadow_slot, &slot);
 		}
 
-		Ok(metadata_free)
+		Ok(slot)
 	}
 
 	pub async fn get_babe_key_owner(&self, hash: H256, public: &[u8]) -> Result<Option<AccountId32>, subxt::Error> {
 		let key = session_key_owner_key(*b"babe", public);
-		let metadata_free = self.storage_via_rpc(hash, &key, "Session.KeyOwner", decode_account_id).await?;
+		let owner = self.storage_via_rpc(hash, &key, "Session.KeyOwner", decode_account_id).await?;
 
 		if self.shadow {
 			let addr = polkadot::storage().session().key_owner((KeyTypeId(*b"babe"), public.to_vec()));
-			let owner = self.storage().at(hash).fetch(&addr).await?;
-			shadow::compare(hash, "session_key_owner", &owner, &metadata_free);
+			let shadow_owner = self.storage().at(hash).fetch(&addr).await?;
+			shadow::compare(hash, "session_key_owner", &shadow_owner, &owner);
 		}
 
-		Ok(metadata_free)
+		Ok(owner)
 	}
 
 	pub async fn get_occupied_cores(&self, hash: H256) -> Result<Vec<CoreOccupied>, subxt::Error> {
