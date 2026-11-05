@@ -20,19 +20,6 @@ use polkadot_introspector_essentials::{
 		candidate_record::{CandidateInclusionRecord, CandidateRecord},
 	},
 	init,
-	metadata::{
-		polkadot::{
-			preimage::calls::types::request_preimage::Hash,
-			runtime_types::{
-				bounded_collections::bounded_vec::BoundedVec,
-				polkadot_parachain_primitives::primitives::{HeadData, Id, ValidationCodeHash},
-			},
-		},
-		polkadot_primitives::CandidateCommitments,
-		polkadot_staging_primitives::{
-			BackedCandidate, CandidateDescriptorV2, CommittedCandidateReceiptV2, InternalVersion,
-		},
-	},
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{
 		AvailabilityBitfield, DisputeStatement, DisputeStatementSet, H256, InherentData, InvalidDisputeStatementKind,
@@ -41,7 +28,7 @@ use polkadot_introspector_essentials::{
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
-use subxt::{config::Hasher, utils::bits::DecodedBits};
+use subxt::config::Hasher;
 
 pub fn rpc_node_url() -> &'static str {
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
@@ -51,37 +38,6 @@ pub fn rpc_node_url() -> &'static str {
 	}
 
 	RPC_NODE_URL
-}
-
-pub fn create_backed_candidate(para_id: u32) -> BackedCandidate<H256> {
-	BackedCandidate {
-		candidate: CommittedCandidateReceiptV2 {
-			descriptor: CandidateDescriptorV2 {
-				para_id: Id(para_id),
-				relay_parent: H256::random(),
-				version: InternalVersion(0),
-				core_index: 0,
-				session_index: 1,
-				reserved1: Default::default(),
-				persisted_validation_data_hash: Hash::zero(),
-				pov_hash: Hash::zero(),
-				erasure_root: Hash::zero(),
-				reserved2: [0; 64],
-				para_head: Hash::zero(),
-				validation_code_hash: ValidationCodeHash(Default::default()),
-			},
-			commitments: CandidateCommitments {
-				upward_messages: BoundedVec(Default::default()),
-				horizontal_messages: BoundedVec(Default::default()),
-				new_validation_code: Default::default(),
-				head_data: HeadData(Default::default()),
-				processed_downward_messages: Default::default(),
-				hrmp_watermark: Default::default(),
-			},
-		},
-		validity_votes: Default::default(),
-		validator_indices: DecodedBits::from_iter([true]),
-	}
 }
 
 pub fn create_dispute_statement_set() -> DisputeStatementSet {
@@ -144,15 +100,12 @@ pub fn create_candidate_record(
 	}
 }
 
-pub fn candidate_hash(candidate: &BackedCandidate<H256>, hasher: PolkadotHasher) -> H256 {
-	let commitments_hash = hasher.hash_of(&candidate.candidate.commitments);
-	hasher.hash_of(&(&candidate.candidate.descriptor, commitments_hash))
+pub fn candidate_hash(para_id: u32, hasher: PolkadotHasher) -> H256 {
+	hasher.hash_of(&(para_id, H256::random()))
 }
 
 pub fn create_para_block_info(para_id: u32, hasher: PolkadotHasher) -> ParachainBlockInfo {
-	let candidate = create_backed_candidate(para_id);
-	let hash = candidate_hash(&candidate, hasher);
-	ParachainBlockInfo::new(hash, 0)
+	ParachainBlockInfo::new(candidate_hash(para_id, hasher), 0)
 }
 
 pub async fn storage_write<T: Encode>(
