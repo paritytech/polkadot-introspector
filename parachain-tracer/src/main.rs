@@ -35,7 +35,7 @@ use futures::{StreamExt, future, stream::FuturesUnordered};
 use itertools::Itertools;
 use log::{error, info};
 use polkadot_introspector_essentials::{
-	api::{api_client::ApiClientMode, executor::RequestExecutor, shadow},
+	api::{api_client::ApiClientMode, executor::RequestExecutor},
 	chain_head_subscription::ChainHeadSubscription,
 	chain_subscription::ChainSubscriptionEvent,
 	collector::{self, Collector, CollectorOptions, CollectorStorageApi, CollectorUpdateEvent, TerminationReason},
@@ -102,10 +102,6 @@ pub(crate) struct ParachainTracerOptions {
 	/// Defines client to communicate with rpc node.
 	#[clap(long = "client", default_value_t, value_enum)]
 	pub api_client_mode: ApiClientMode,
-	/// Shadow-decode each migrated read through the metadata-free path and abort on any mismatch.
-	/// Temporary aid for removing the metadata dependency; doubles RPC load, on by default.
-	#[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
-	pub shadow_decode_without_metadata: bool,
 	/// Run in historical mode to trace parachains between specific blocks instead of following live chain progress
 	#[clap(name = "historical", long, requires = "from", requires = "to", conflicts_with = "subscribe_mode")]
 	is_historical: bool,
@@ -519,14 +515,8 @@ async fn main() -> color_eyre::Result<()> {
 
 	let tracer = ParachainTracer::new(opts.clone(), metrics)?;
 	let shutdown_tx = init::init_shutdown();
-	let mut executor = RequestExecutor::build(
-		opts.node.clone(),
-		opts.api_client_mode,
-		&opts.retry,
-		&shutdown_tx,
-		opts.shadow_decode_without_metadata,
-	)
-	.await?;
+	let mut executor =
+		RequestExecutor::build(opts.node.clone(), opts.api_client_mode, &opts.retry, &shutdown_tx).await?;
 
 	let mut sub: Box<dyn EventStream<Event = ChainSubscriptionEvent>> = if opts.is_historical {
 		let (from, to) = historical_bounds(&opts)?;
@@ -541,10 +531,6 @@ async fn main() -> color_eyre::Result<()> {
 	futures.extend(sub.run(&shutdown_tx).await?);
 	init::run(futures, &shutdown_tx).await?;
 	executor.close().await;
-
-	if opts.shadow_decode_without_metadata {
-		shadow::log_checklist();
-	}
 
 	Ok(())
 }
