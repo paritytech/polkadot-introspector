@@ -212,8 +212,7 @@ impl ParachainTracer {
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
 		let is_cli = matches!(&self.opts.mode, Some(ParachainTracerMode::Cli));
-		let hasher = api_service.executor().hasher(&self.node).expect("Hasher must be available");
-		let storage = TrackerStorage::new(0, api_service.storage(), hasher);
+		let storage = TrackerStorage::new(0, api_service.storage());
 		let metrics = self.metrics.clone();
 
 		let mut last_ts = None;
@@ -322,9 +321,8 @@ impl ParachainTracer {
 		para_id: u32,
 		api_service: CollectorStorageApi,
 	) -> tokio::task::JoinHandle<()> {
-		let hasher = api_service.executor().hasher(&self.node).expect("Hasher must be available");
 		let mut tracker = SubxtTracker::new(para_id);
-		let storage = TrackerStorage::new(para_id, api_service.storage(), hasher);
+		let storage = TrackerStorage::new(para_id, api_service.storage());
 
 		let metrics = self.metrics.clone();
 		metrics.init_counters(para_id);

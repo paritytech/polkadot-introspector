@@ -23,12 +23,11 @@ use polkadot_introspector_essentials::{
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
 	types::{
 		AvailabilityBitfield, DisputeStatement, DisputeStatementSet, H256, InherentData, InvalidDisputeStatementKind,
-		PolkadotHasher, SubxtHrmpChannel, ValidDisputeStatementKind, ValidatorIndex,
+		SubxtHrmpChannel, ValidDisputeStatementKind, ValidatorIndex, hash_of,
 	},
 	utils::RetryOptions,
 };
 use std::{collections::BTreeMap, time::Duration};
-use subxt::config::Hasher;
 
 pub fn rpc_node_url() -> &'static str {
 	const RPC_NODE_URL: &str = "wss://rococo-rpc.polkadot.io:443";
@@ -100,12 +99,12 @@ pub fn create_candidate_record(
 	}
 }
 
-pub fn candidate_hash(para_id: u32, hasher: PolkadotHasher) -> H256 {
-	hasher.hash_of(&(para_id, H256::random()))
+pub fn candidate_hash(para_id: u32) -> H256 {
+	hash_of(&(para_id, H256::random()))
 }
 
-pub fn create_para_block_info(para_id: u32, hasher: PolkadotHasher) -> ParachainBlockInfo {
-	ParachainBlockInfo::new(candidate_hash(para_id, hasher), 0)
+pub fn create_para_block_info(para_id: u32) -> ParachainBlockInfo {
+	ParachainBlockInfo::new(candidate_hash(para_id), 0)
 }
 
 pub async fn storage_write<T: Encode>(
@@ -121,9 +120,4 @@ pub async fn storage_write<T: Encode>(
 			StorageEntry::new_onchain(RecordTime::with_ts(0, Duration::from_secs(0)), entry),
 		)
 		.await
-}
-
-pub async fn create_hasher() -> PolkadotHasher {
-	let executor = create_executor().await;
-	executor.hasher(rpc_node_url()).unwrap()
 }
