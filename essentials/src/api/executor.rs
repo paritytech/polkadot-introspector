@@ -111,7 +111,7 @@ enum Response {
 	/// Chain name
 	ChainName(String),
 	/// Babe randomness
-	BabeRandomness(Option<[u8; 32]>),
+	BabeRandomness([u8; 32]),
 	/// Babe authorithies
 	BabeAuthorithies(Vec<([u8; 32], u64)>),
 	/// Babe current slot
@@ -238,11 +238,11 @@ impl RequestExecutorBackend {
 			GetClaimQueue(hash) => ClaimQueue(client.get_claim_queue(hash).await?),
 			GetOccupiedCores(hash) => OccupiedCores(client.get_occupied_cores(hash).await?),
 			GetBackingGroups(hash) => BackingGroups(client.get_backing_groups(hash).await?),
-			GetSessionIndex(hash) => SessionIndex(client.get_session_index(hash).await?.unwrap_or_default()),
+			GetSessionIndex(hash) => SessionIndex(client.get_session_index(hash).await?),
 			GetSessionAccountKeys(session_index, maybe_hash) =>
 				SessionAccountKeys(client.get_session_account_keys(session_index, maybe_hash).await?),
 			GetSessionQueuedKeys(at) => SessionQueuedKeys(client.get_session_queued_keys(at).await?),
-			GetSessionIndexNow => SessionIndex(client.get_session_index_now().await?.unwrap_or_default()),
+			GetSessionIndexNow => SessionIndex(client.get_session_index_now().await?),
 			GetInboundOutBoundHrmpChannels(hash, para_ids) =>
 				InboundOutBoundHrmpChannels(client.get_inbound_outbound_hrmp_channels(hash, para_ids).await?),
 			GetBestBlockSubscription => ChainSubscription(client.stream_best_block_headers().await?),
@@ -516,7 +516,7 @@ impl RequestExecutor {
 		&mut self,
 		url: &str,
 		hash: H256,
-	) -> color_eyre::Result<Option<[u8; 32]>, RequestExecutorError> {
+	) -> color_eyre::Result<[u8; 32], RequestExecutorError> {
 		wrap_backend_call!(self, url, GetBabeRandomness, BabeRandomness, hash)
 	}
 
