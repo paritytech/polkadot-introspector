@@ -39,9 +39,6 @@ use std::{
 /// never fired shows as `pending` instead of being silently absent — a quiet run only proves the
 /// reads it actually exercised.
 const EXPECTED_READS: &[&str] = &[
-	"block_header",
-	"block_number",
-	"block_timestamp",
 	"candidate_events",
 	"disputes_initiated",
 	"disputes_concluded",
@@ -174,8 +171,8 @@ mod tests {
 		counts[0] = 3;
 		let out = render_checklist(&counts);
 		assert!(out.starts_with(&format!("shadow-decode checklist: 1/{} reads exercised", EXPECTED_READS.len())));
-		assert!(out.contains("ok      block_header (3)"));
-		assert!(out.contains("pending block_number"));
+		assert!(out.contains(&format!("ok      {} (3)", EXPECTED_READS[0])));
+		assert!(out.contains(&format!("pending {}", EXPECTED_READS[1])));
 	}
 
 	#[test]
@@ -184,8 +181,8 @@ mod tests {
 		counts[0] = 3;
 		let out = render_logfmt(&counts);
 		assert!(out.starts_with(&format!("shadow_checklist exercised=1 total={}", EXPECTED_READS.len())));
-		assert!(out.contains(" block_header=3"));
-		assert!(out.contains(" block_number=0"));
+		assert!(out.contains(&format!(" {}=3", EXPECTED_READS[0])));
+		assert!(out.contains(&format!(" {}=0", EXPECTED_READS[1])));
 		assert!(!out.contains('\n'));
 	}
 
@@ -193,14 +190,14 @@ mod tests {
 	fn marks_only_meaningful_comparisons() {
 		let block = H256::from([0u8; 32]);
 		let empty: [u32; 0] = [];
-		compare_set(block, "candidate_events", &empty, &empty, |v| *v);
-		compare(block, "block_timestamp", &1u64, &1u64);
-		compare_set(block, "disputes_initiated", &[7u32], &[7u32], |v| *v);
+		compare_set(block, "hrmp_channel_digests", &empty, &empty, |v| *v);
+		compare(block, "hrmp_channel", &1u64, &1u64);
+		compare_set(block, "hrmp_egress_channels_index", &[7u32], &[7u32], |v| *v);
 
 		let list = checklist().lock().unwrap();
 		let idx = |read: &str| EXPECTED_READS.iter().position(|&expected| expected == read).unwrap();
-		assert_eq!(list.counts[idx("candidate_events")], 0);
-		assert!(list.counts[idx("block_timestamp")] > 0);
-		assert!(list.counts[idx("disputes_initiated")] > 0);
+		assert_eq!(list.counts[idx("hrmp_channel_digests")], 0);
+		assert!(list.counts[idx("hrmp_channel")] > 0);
+		assert!(list.counts[idx("hrmp_egress_channels_index")] > 0);
 	}
 }
