@@ -26,7 +26,7 @@ use crate::{
 	chain_events::{ChainEvent, SubxtCandidateEvent, SubxtCandidateEventType, SubxtDispute, SubxtDisputeResult},
 	chain_subscription::ChainSubscriptionEvent,
 	storage::{RecordTime, RecordsStorageConfig, StorageEntry},
-	types::{AccountId32, ClaimQueue, DisputeStatement, H256, Header, InherentData, PolkadotHasher, Timestamp},
+	types::{AccountId32, ClaimQueue, DisputeStatement, H256, Header, InherentData, Timestamp, U256, blake2_256_hash},
 };
 use candidate_record::{CandidateDisputed, CandidateInclusionRecord, CandidateRecord, DisputeResult};
 use clap::{Parser, ValueEnum};
@@ -46,7 +46,6 @@ use std::{
 	net::SocketAddr,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use subxt::config::{Hasher, polkadot::U256};
 use thiserror::Error;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use ws::{WebSocketEventType, WebSocketListener, WebSocketListenerConfig, WebSocketUpdateEvent};
@@ -238,7 +237,6 @@ pub struct Collector {
 	subscribe_mode: CollectorSubscribeMode,
 	hrmp_channels: bool,
 	max_parachain_stall: u32,
-	hasher: PolkadotHasher,
 }
 
 impl Collector {
@@ -256,7 +254,6 @@ impl Collector {
 			None
 		};
 		let executor = api.executor();
-		let hasher = executor.hasher(endpoint).expect("hasher should be available");
 		Self {
 			api,
 			ws_listener,
@@ -269,7 +266,6 @@ impl Collector {
 			subscribe_mode: opts.subscribe_mode,
 			hrmp_channels: opts.hrmp_channels,
 			max_parachain_stall: opts.max_parachain_stall,
-			hasher,
 		}
 	}
 
@@ -663,7 +659,7 @@ impl Collector {
 		)
 		.await?;
 		let cur_session = self.executor.get_session_index(self.endpoint.as_str(), block_hash).await?;
-		let cur_session_hash = self.hasher.hash(&cur_session.to_be_bytes()[..]);
+		let cur_session_hash = blake2_256_hash(&cur_session.to_be_bytes()[..]);
 		let maybe_existing_session = self
 			.storage_read_prefixed(CollectorPrefixType::AccountKeys, cur_session_hash)
 			.await;
@@ -684,7 +680,7 @@ impl Collector {
 			// Remove old session with the index `cur_session - 2` ignoring possible errors
 			if cur_session > 1 {
 				let prev_session = cur_session.saturating_sub(2);
-				let prev_session_hash = self.hasher.hash(&prev_session.to_be_bytes()[..]);
+				let prev_session_hash = blake2_256_hash(&prev_session.to_be_bytes()[..]);
 
 				let _ = self
 					.storage_delete_prefixed(CollectorPrefixType::AccountKeys, prev_session_hash)

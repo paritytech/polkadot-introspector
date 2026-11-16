@@ -27,7 +27,9 @@ use polkadot_introspector_essentials::{
 	chain_subscription::ChainSubscriptionEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	consumer::{EventConsumerInit, EventStream},
-	init, utils,
+	init,
+	types::header_hash,
+	utils,
 };
 use polkadot_introspector_priority_channel::{Receiver, Sender, channel};
 use prometheus_endpoint::{HistogramVec, Registry};
@@ -36,7 +38,6 @@ use std::{
 	io::{Write, stdout},
 	net::ToSocketAddrs,
 };
-use subxt::config::Hasher;
 use tokio::select;
 
 #[derive(Clone, Debug, Parser)]
@@ -331,8 +332,7 @@ async fn populate_view(
 
 	for _ in 0..blocks_to_fetch {
 		if let Ok(Some(header)) = executor.get_block_head(url, parent_hash).await {
-			let hasher = executor.hasher(url).unwrap();
-			let ts = executor.get_block_timestamp(url, hasher.hash_of(&header)).await.unwrap();
+			let ts = executor.get_block_timestamp(url, header_hash(&header)).await.unwrap();
 
 			if prev_ts != 0 {
 				block_times.push(prev_ts.saturating_sub(ts));
