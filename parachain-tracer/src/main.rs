@@ -503,6 +503,12 @@ fn historical_bounds(opts: &ParachainTracerOptions) -> color_eyre::Result<(u32, 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
 	let opts = ParachainTracerOptions::parse();
+	if opts.is_historical && matches!(opts.api_client_mode, ApiClientMode::Light) {
+		// The light client cannot serve `chain_getBlockHash` for historical block numbers.
+		ParachainTracerOptions::command()
+			.error(ErrorKind::ArgumentConflict, "`--historical` cannot be used with `--client light`")
+			.exit();
+	}
 	init::init_cli(&opts.verbose)?;
 
 	let metrics = if let Some(ParachainTracerMode::Prometheus(ref prometheus_opts)) = opts.mode {
