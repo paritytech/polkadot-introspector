@@ -291,39 +291,16 @@ impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 
 impl<T: OnlineClientT<PolkadotConfig>> ApiClient<T> {
 	pub async fn get_head(&self, maybe_hash: Option<H256>) -> Result<Header, subxt::Error> {
-		let (hash, header) = self.resolve_header(maybe_hash).await?;
-
-		if self.shadow {
-			let block = self.block_at(Some(hash)).await?;
-			shadow::compare(hash, "block_header", block.header(), &header);
-		}
-
-		Ok(header)
+		Ok(self.resolve_header(maybe_hash).await?.1)
 	}
 
 	pub async fn get_block_number(&self, maybe_hash: Option<H256>) -> Result<BlockNumber, subxt::Error> {
-		let (hash, header) = self.resolve_header(maybe_hash).await?;
-
-		if self.shadow {
-			let number = self.block_at(Some(hash)).await?.number();
-			shadow::compare(hash, "block_number", &number, &header.number);
-		}
-
-		Ok(header.number)
+		Ok(self.resolve_header(maybe_hash).await?.1.number)
 	}
 
 	pub async fn get_block_ts(&self, hash: H256) -> Result<Option<Timestamp>, subxt::Error> {
-		let timestamp = self
-			.storage_via_rpc(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
-			.await?;
-
-		if self.shadow {
-			let addr = polkadot::storage().timestamp().now();
-			let shadow_timestamp = self.storage().at(hash).fetch(&addr).await?;
-			shadow::compare(hash, "block_timestamp", &shadow_timestamp, &timestamp);
-		}
-
-		Ok(timestamp)
+		self.storage_via_rpc(hash, &timestamp_now_key(), "Timestamp.Now", decode_timestamp)
+			.await
 	}
 
 	pub async fn get_events(&self, hash: H256) -> Result<Events<PolkadotConfig>, subxt::Error> {
