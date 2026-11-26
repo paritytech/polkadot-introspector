@@ -16,14 +16,14 @@
 
 use crate::{
 	api::{
-		api_client::{ApiClient, ApiClientMode, HeaderStream, build_online_client},
+		api_client::{ApiClient, ApiClientMode, ClientError, HeaderStream, build_online_client},
 		decode::DecodedDispute,
 	},
 	chain_events::SubxtCandidateEvent,
 	constants::MAX_MSG_QUEUE_SIZE,
 	types::{
 		AccountId32, BlockNumber, ClaimQueue, CoreOccupied, H256, Header, InboundOutBoundHrmpChannels, InherentData,
-		PolkadotHasher, QueuedKeys, Slot, SubxtHrmpChannel, Timestamp, ValidatorIndex,
+		QueuedKeys, Slot, SubxtHrmpChannel, Timestamp, ValidatorIndex,
 	},
 	utils::{Retry, RetryOptions},
 };
@@ -136,10 +136,10 @@ pub enum RequestExecutorError {
 	UnexpectedResponse(Request),
 }
 
-impl From<subxt::error::Error> for RequestExecutorError {
-	fn from(err: subxt::error::Error) -> Self {
+impl From<ClientError> for RequestExecutorError {
+	fn from(err: ClientError) -> Self {
 		match err {
-			subxt::Error::Io(_) | subxt::Error::Rpc(_) => Self::SubxtRetriableError(err.to_string()),
+			ClientError::Rpc(subxt::Error::Io(_) | subxt::Error::Rpc(_)) => Self::SubxtRetriableError(err.to_string()),
 			_ => Self::SubxtError(err.to_string()),
 		}
 	}
@@ -213,14 +213,7 @@ impl RequestExecutorBackend {
 		let client = &self.client;
 		let response = match request {
 			GetBlockTimestamp(hash) => Timestamp(client.get_block_ts(hash).await?.unwrap_or_default()),
-			GetHead(maybe_hash) => {
-				let head = match client.get_head(maybe_hash).await {
-					Ok(v) => Some(v),
-					Err(subxt::Error::Block(subxt::error::BlockError::NotFound(_))) => None,
-					Err(err) => return Err(err.into()),
-				};
-				MaybeHead(head)
-			},
+			GetHead(maybe_hash) => MaybeHead(client.get_head(maybe_hash).await?),
 			GetBlockNumber(maybe_hash) => BlockNumber(client.get_block_number(maybe_hash).await?),
 			GetBlockHash(maybe_block_number) => MaybeBlockHash(client.legacy_get_block_hash(maybe_block_number).await?),
 			GetChainName => ChainName(client.legacy_get_chain_name().await?),
@@ -246,10 +239,6 @@ impl RequestExecutorBackend {
 		};
 
 		Ok(response)
-	}
-
-	pub fn hasher(&self) -> PolkadotHasher {
-		self.client.hasher()
 	}
 }
 
@@ -277,12 +266,12 @@ impl RequestExecutorNodes for &str {
 
 #[derive(Clone)]
 pub struct RequestExecutor {
-	clients: HashMap<String, (PrioritySender<ExecutorMessage>, PolkadotHasher)>,
+	clients: HashMap<String, PrioritySender<ExecutorMessage>>,
 }
 
 macro_rules! wrap_backend_call {
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident) => {
-		if let Some((to_backend, _)) = $self.clients.get_mut($url) {
+		if let Some(to_backend) = $self.clients.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty;
 			to_backend.send(ExecutorMessage::Rpc(tx, Request::$request_ty)).await?;
@@ -298,7 +287,7 @@ macro_rules! wrap_backend_call {
 		}
 	};
 	($self:expr, $url:expr, $request_ty:ident, $response_ty:ident, $($arg:expr),*) => {
-		if let Some((to_backend, _)) = $self.clients.get_mut($url) {
+		if let Some(to_backend) = $self.clients.get_mut($url) {
 			let (tx, rx) = tokio::sync::oneshot::channel::<Response>();
 			let request = Request::$request_ty($($arg),*);
 			to_backend.send(ExecutorMessage::Rpc(tx, request.clone())).await?;
@@ -327,7 +316,7 @@ impl RequestExecutor {
 		for node in nodes.unique_nodes() {
 			let (to_backend, from_frontend) = channel(MAX_MSG_QUEUE_SIZE);
 			let mut backend = RequestExecutorBackend::build(retry.clone(), node.clone(), api_client_mode).await?;
-			let _ = clients.insert(node, (to_backend, backend.hasher()));
+			let _ = clients.insert(node, to_backend);
 			let shutdown_tx = shutdown_tx.clone();
 			tokio::spawn(async move {
 				if let Err(e) = backend.run(from_frontend).await {
@@ -340,13 +329,9 @@ impl RequestExecutor {
 		Ok(RequestExecutor { clients })
 	}
 
-	pub fn hasher(&self, url: &str) -> Option<PolkadotHasher> {
-		self.clients.get(url).map(|(_, hasher)| *hasher)
-	}
-
 	/// Closes all RPC clients
 	pub async fn close(&mut self) {
-		for (to_backend, _) in self.clients.values_mut() {
+		for to_backend in self.clients.values_mut() {
 			let _ = to_backend.send(ExecutorMessage::Close).await;
 		}
 	}
