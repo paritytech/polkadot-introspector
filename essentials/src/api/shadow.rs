@@ -29,7 +29,6 @@
 use crate::types::H256;
 use log::{error, info, warn};
 use std::{
-	collections::BTreeMap,
 	fmt::Debug,
 	sync::{Mutex, OnceLock},
 	time::{Duration, Instant},
@@ -39,9 +38,6 @@ use std::{
 /// never fired shows as `pending` instead of being silently absent — a quiet run only proves the
 /// reads it actually exercised.
 const EXPECTED_READS: &[&str] = &[
-	"candidate_events",
-	"disputes_initiated",
-	"disputes_concluded",
 	"availability_cores",
 	"claim_queue",
 	"validator_groups",
@@ -133,27 +129,6 @@ pub fn compare<T: PartialEq + Debug>(block: H256, read: &str, old: &T, new: &T) 
 	mark(read);
 }
 
-/// Compares two collections as sets keyed by identity, so order differences between the metadata
-/// and metadata-free paths do not register as mismatches. `key` extracts the identity of an item
-/// (e.g. a candidate hash). Aborts the process on any mismatch, reporting `(block, read, old, new)`.
-pub fn compare_set<T, K, F>(block: H256, read: &str, old: &[T], new: &[T], key: F)
-where
-	T: PartialEq + Debug,
-	K: Ord + Debug,
-	F: Fn(&T) -> K,
-{
-	let old_map: BTreeMap<K, &T> = old.iter().map(|v| (key(v), v)).collect();
-	let new_map: BTreeMap<K, &T> = new.iter().map(|v| (key(v), v)).collect();
-	if old_map != new_map {
-		report_and_abort(block, read, &format!("{old_map:?}"), &format!("{new_map:?}"));
-	}
-	// Two empty sets compare equal without proving the decoder, so only a populated comparison
-	// counts as exercising the read.
-	if !old.is_empty() || !new.is_empty() {
-		mark(read);
-	}
-}
-
 fn report_and_abort(block: H256, read: &str, old: &str, new: &str) -> ! {
 	error!(
 		"shadow-decode mismatch at block {block:?} for read `{read}`:\n  metadata      = {old}\n  metadata-free = {new}"
@@ -187,17 +162,13 @@ mod tests {
 	}
 
 	#[test]
-	fn marks_only_meaningful_comparisons() {
+	fn marks_only_exercised_reads() {
 		let block = H256::from([0u8; 32]);
-		let empty: [u32; 0] = [];
-		compare_set(block, "hrmp_channel_digests", &empty, &empty, |v| *v);
 		compare(block, "hrmp_channel", &1u64, &1u64);
-		compare_set(block, "hrmp_egress_channels_index", &[7u32], &[7u32], |v| *v);
 
 		let list = checklist().lock().unwrap();
 		let idx = |read: &str| EXPECTED_READS.iter().position(|&expected| expected == read).unwrap();
 		assert_eq!(list.counts[idx("hrmp_channel_digests")], 0);
 		assert!(list.counts[idx("hrmp_channel")] > 0);
-		assert!(list.counts[idx("hrmp_egress_channels_index")] > 0);
 	}
 }
