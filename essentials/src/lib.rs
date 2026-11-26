@@ -24,7 +24,6 @@ pub mod constants;
 pub mod consumer;
 pub mod historical_subscription;
 pub mod init;
-pub mod metadata;
 pub mod storage;
 pub mod telemetry_feed;
 pub mod telemetry_subscription;

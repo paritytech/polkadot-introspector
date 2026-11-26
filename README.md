@@ -15,6 +15,4 @@ The tools utilize data sources such as [subxt](https://github.com/paritytech/sub
 
 ## Building
 
-We utilize the latest polkadot metadata to decode block data. It is possible that we might lack some types, which are already present in test networks but not yet in polkadot. In such instances, we implement our own provisional types, which should be removed once they are included in the polkadot metadata.
-
-See also: [Updating a `Runtime`](essentials/README.md#updating-a-runtime)
+Chain data is decoded without the runtime metadata, using hand-written decoders in `essentials/src/api/decode.rs`. If a runtime changes the layout of a value we read, the decoder has to be updated.
